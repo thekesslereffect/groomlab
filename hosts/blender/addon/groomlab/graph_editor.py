@@ -319,7 +319,29 @@ class GROOMLAB_OT_graph_duplicate(_EditorOperator):
     bl_label = "Duplicate"
 
     def invoke(self, context, event):
-        bpy.ops.node.duplicate_move("INVOKE_DEFAULT")
+        from . import graph_canvas
+        if not graph_canvas.shows_here(context):
+            bpy.ops.node.duplicate_move("INVOKE_DEFAULT")
+            return {"FINISHED"}
+        return self.execute(context)
+
+    def execute(self, context):
+        # The core's (GraphEdit::duplicateNodes, every host's Ctrl+D): copies beside the nodes, each
+        # reading what its node reads; the copies picked.
+        scalp = context_groom(context)
+        names = [n.gl_name for n in selected_nodes(context)]
+        if not names:
+            return {"CANCELLED"}
+        try:
+            made = graph_tree.duplicate_nodes(scalp, names)
+        except HelperError as e:
+            return _fail(self, e)
+        tree = graph_tree.tree_of(scalp)
+        copies = [graph_tree.node_named(tree, m) for m in made]
+        for n in tree.nodes:
+            n.select = n in copies
+        if copies and copies[-1] is not None:
+            tree.nodes.active = copies[-1]
         return {"FINISHED"}
 
 
@@ -590,18 +612,21 @@ def is_folded(op_type, section):
 
 
 class GROOMLAB_OT_graph_tidy(_GraphOperator):
-    """Lay the graph out again: columns from the sources to the output"""
+    """Lay out the selected nodes by their links (none selected: the whole graph); each backdrop stays a group"""
     bl_idname = "groomlab.graph_tidy"
     bl_label = "Tidy Layout"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
+        from . import graph_arrange
+        tree = editor_tree(context)
         try:
-            graph_tree.tidy(context_groom(context))
+            if tree is not None:  # the selected nodes (fewer than two: all), as the canvas draws them
+                graph_arrange.tidy(context)
+            else:
+                graph_tree.tidy(context_groom(context))
         except HelperError as e:
             return _fail(self, e)
-        if editor_tree(context) is not None:
-            bpy.ops.node.view_all()
         return {"FINISHED"}
 
 
@@ -1098,6 +1123,14 @@ def draw_backdrop_panel(layout, context, frame):
     for text, rgb in graph_ui.backdrop_colors():
         op = row.operator("groomlab.graph_backdrop_color", text=text)
         op.frame, op.color = frame.name, json.dumps(rgb)
+    text = str(frame.get("gl_description") or "")
+    size = float(frame.get("gl_font_size") or 0)
+    op = layout.operator("groomlab.graph_backdrop_edit", text="Description and Title Size...", icon="TEXT")
+    op.frame = frame.name
+    if text:
+        wrap(layout.column(), text)
+    if size > 0:
+        layout.label(text="Title size: %g pt" % size)
     col = layout.column(align=True)
     col.separator()
     draw_backdrop_menu(col, context, frame)
@@ -1735,7 +1768,8 @@ KEYS = (("groomlab.graph_add_search", "TAB", {}), ("groomlab.graph_frame", "F", 
         ("groomlab.graph_view_node", "V", {}), ("groomlab.graph_bypass", "B", {}),
         ("groomlab.graph_duplicate", "D", {"ctrl": True}), ("groomlab.graph_group", "G", {"ctrl": True}),
         ("groomlab.graph_ungroup", "G", {"ctrl": True, "shift": True}),
-        ("groomlab.graph_detach", "X", {"ctrl": True, "shift": True}))
+        ("groomlab.graph_detach", "X", {"ctrl": True, "shift": True}), ("groomlab.graph_tidy", "L", {}),
+        ("groomlab.graph_backdrop_add", "O", {"shift": True}))
 
 
 def register():

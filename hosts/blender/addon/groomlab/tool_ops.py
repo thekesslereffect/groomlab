@@ -45,9 +45,21 @@ SHORTCUTS = (
     ("Tab", "Add a node"),
     ("Ctrl+D", "Duplicate nodes"),
     ("Ctrl+G / Ctrl+Shift+G", "Group / ungroup"),
+    ("L", "Tidy layout: the selected nodes, or all of them (backdrops kept as groups)"),
     ("B", "Bypass nodes"),
     ("Ctrl+Shift+X", "Detach nodes (the flow passes through)"),
     ("V", "View up to node"),
+    ("A", "Frame all (tap A; held, A+drag aligns)"),
+    ("Ctrl+drag a node", "Move it with everything downstream (not through portals)"),
+    ("Shift+drag a node", "Move it with everything upstream (not through portals)"),
+    ("A+drag a node", "Line up its chain: left or up upstream, right or down downstream"),
+    ("Shift+A+drag a node", "Line the selection up with it"),
+    ("Alt+A+drag a node", "Spread the selection evenly, it staying"),
+    ("Shake a node while dragging", "Take it out of its links"),
+    ("Shift+drag an output", "Move all its links to another output"),
+    ("Alt+click / double-click a link, or . with it selected", "A pin on the link"),
+    ("Alt+drag a node", "Duplicate it and drag the copy"),
+    ("Shift+O", "Backdrop round the selection"),
 )
 
 

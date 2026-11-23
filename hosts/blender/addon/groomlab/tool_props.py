@@ -849,8 +849,15 @@ class GroomLabPreferences(bpy.types.AddonPreferences):
                                 description="Once a day, while Blender's online access is on, look for a newer GroomLab "
                                             "and say so in the Groom Tools (Help > Check for Updates installs it)")
 
+    wire_style: EnumProperty(name="Wire Style", default="smooth",
+                             items=(("smooth", "Smooth", "Curves leaving the output and reaching the input level"),
+                                    ("square", "Square", "Straight runs with right angles"),
+                                    ("rounded", "Rounded", "Straight runs with rounded corners")),
+                             description="How the Graph Editor draws links (the app's and Maya's choice too)")
+
     def draw(self, context):
         self.layout.prop(self, "check_updates")
+        self.layout.prop(self, "wire_style")
         row = self.layout.row()
         row.label(text="The Graph Editor in the app's look (Blender's theme; Preferences > Themes switches back):")
         row.operator("groomlab.theme_apply", text="Use GroomLab Charcoal")

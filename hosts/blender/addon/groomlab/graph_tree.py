@@ -584,8 +584,8 @@ def _make_sockets(node, ports):
         s.link_limit = 1
         if is_param:
             s.display_shape = "DIAMOND"  # an exposed param, not a data input (Maya draws a diamond)
-    for name, port_type in outs:
-        node.outputs.new(socket_idname(port_type), name, identifier=name)
+    for name, port_type, *label in outs:  # (a pass-through output's name as shown: its label)
+        node.outputs.new(socket_idname(port_type), label[0] if label else name, identifier=name)
     node.gl_ports = signature
     return True
 
@@ -1109,8 +1109,15 @@ def backdrop_of(frame):
     x, y = get_location(frame)
     w, h = frame_size(frame)
     color = _srgb(frame.color) if frame.use_custom_color else list(BACKDROP_COLOR)
-    return {"title": frame.label or frame.name, "x": round(x, 2), "y": round(-y, 2), "w": round(w, 2),
-            "h": round(h, 2), "color": color}
+    out = {"title": frame.label or frame.name, "x": round(x, 2), "y": round(-y, 2), "w": round(w, 2),
+           "h": round(h, 2), "color": color}
+    if frame.get("gl_description"):
+        out["description"] = str(frame["gl_description"])
+    if float(frame.get("gl_font_size") or 0) > 0:
+        out["fontSize"] = float(frame["gl_font_size"])
+    if frame.get("gl_collapsed"):
+        out["collapsed"] = True
+    return out
 
 
 def backdrops_of(tree):
@@ -1120,7 +1127,8 @@ def backdrops_of(tree):
 def _same_backdrops(a, b):
     def key(items):
         return [(str(i.get("title", "")), round(float(i.get("x", 0)), 1), round(float(i.get("y", 0)), 1),
-                 round(float(i.get("w", 0)), 1), round(float(i.get("h", 0)), 1), list(i.get("color") or BACKDROP_COLOR))
+                 round(float(i.get("w", 0)), 1), round(float(i.get("h", 0)), 1), list(i.get("color") or BACKDROP_COLOR),
+                 str(i.get("description") or ""), float(i.get("fontSize") or 0), bool(i.get("collapsed")))
                 for i in items or []]
     return key(a) == key(b)
 
@@ -1135,6 +1143,9 @@ def set_frame(frame, backdrop):
     frame.use_custom_color = True
     frame.color = _linear(backdrop.get("color") or BACKDROP_COLOR)
     frame["gl_backdrop"] = True
+    frame["gl_description"] = str(backdrop.get("description") or "")
+    frame["gl_font_size"] = float(backdrop.get("fontSize") or 0)
+    frame["gl_collapsed"] = bool(backdrop.get("collapsed"))
 
 
 def frame_at(tree, at):
@@ -1401,7 +1412,7 @@ def build_tree(scalp, tree, data, rt=None):
     names = [n["name"] for n in gnodes]
     own_spec = {}
     for n in gnodes:  # Compounds and Inputs have ports and params of their own; exposed params add ports
-        if n.get("type") in ("Compound", "Script", "Input") or n.get("paramInputs"):
+        if n.get("type") in ("Compound", "Script", "Input") or n.get("paramInputs") or n.get("passThrough"):
             own_spec[n["name"]] = _call("node_spec", session=rt.session, node=n["name"])["spec"]
 
     def spec_of(name):
@@ -1482,9 +1493,10 @@ def build_tree(scalp, tree, data, rt=None):
             controls = gnode.get("paramControls")
             node.gl_controls = json.dumps(controls) if isinstance(controls, dict) and controls else ""
             ins = [(p["name"], p["type"], bool(p.get("param"))) for p in spec.get("inputs", [])]
-            outs = [(p["name"], p["type"]) for p in (spec.get("outputs") or [spec.get("output")]) if p]
+            outs = [(p["name"], p["type"]) + ((p["label"],) if p.get("label") else ())
+                    for p in (spec.get("outputs") or [spec.get("output")]) if p]
             connected = (facts.get(name) or {}).get("outputs") or []
-            outs = [(o[0], connected[i] if i < len(connected) else o[1]) for i, o in enumerate(outs)]
+            outs = [(o[0], connected[i] if i < len(connected) else o[1]) + tuple(o[2:]) for i, o in enumerate(outs)]
             _make_sockets(node, (ins, outs))
             inputs = list(gnode.get("paramInputs") or [])
             drivers = _drivers(data, name, inputs)
@@ -1497,6 +1509,10 @@ def build_tree(scalp, tree, data, rt=None):
             node.gl_is_output = data.get("output") == name
             node.gl_viewed = view == name
             node.gl_evaluation = gnode.get("evaluation") or "always"
+            passes = [p for p in gnode.get("passThrough") or [] if isinstance(p, str)]
+            node["gl_pass_through"] = json.dumps(passes) if passes else ""
+            pass_names = gnode.get("passThroughNames") if passes and isinstance(gnode.get("passThroughNames"), dict) else {}
+            node["gl_pass_names"] = json.dumps(pass_names) if pass_names else ""
             node.mute = bool(gnode.get("bypass"))
             node.use_custom_color = True
             node.color = tinted("Output" if node.gl_is_output else category_of(op_type, specs))
@@ -1544,7 +1560,7 @@ def build_tree(scalp, tree, data, rt=None):
             src, dst = made.get(c.get("from")), made.get(c.get("to"))
             if src is None or dst is None:
                 continue
-            out = src.outputs.get(c.get("output") or "") if c.get("output") else (src.outputs[0] if len(src.outputs) else None)
+            out = next((o for o in src.outputs if o.identifier == c["output"]), None) if c.get("output") else                 (src.outputs[0] if len(src.outputs) else None)
             inp = dst.inputs.get(c.get("input", ""))
             if out is None or inp is None:
                 continue
@@ -1564,6 +1580,7 @@ def build_tree(scalp, tree, data, rt=None):
         tree["gl_sig"] = signature(tree)
         tree["gl_backdrops"] = json.dumps(backdrops_of(tree))
         tree["gl_pins"] = json.dumps(tree_pins(tree, connections))
+        tree["gl_portals"] = json.dumps([p for p in data.get("portals") or [] if isinstance(p, dict)])
         tree["gl_generation"] = process.generation()
     return tree
 
@@ -2030,11 +2047,186 @@ def view_node(scalp, name):
     groom.mark(scalp, "eval")
 
 
-def tidy(scalp):
+def tidy(scalp, boxes=None, selected=()):
+    """Tidy Layout (every host's L, graph_arrange.h tidyGraph): the selected nodes (fewer than two:
+    all of them) laid out by their links, columns by the longest path in, each card level with what
+    feeds it; backdrops as groups, pins and dots carried. `boxes`: every card as the canvas draws
+    it ([{name, x, y, w, h}], graph units, y down); none: the auto layout (layoutPositions)."""
+    if boxes is None:
+        rt = groom.ensure(scalp)
+        data = _call("get_graph", session=rt.session)["graph"]
+        set_positions(scalp, auto_layout(data))
+        rebuild(scalp, replaced=True)
+        return
+    _arrange(scalp, "tidy", boxes=list(boxes), selected=list(selected), gapX=54.0, gapY=40.0, margin=24.0, header=28.0)
+
+
+# ---- Arranged by hand (the helper's arrange.cpp: graph_arrange.h, graph_portals.h) -----------------
+
+def _arrange(scalp, op, layout=True, **args):
+    """An arranging edit of the graph, one undo step (edit_graph `op`): the tree's moves go first,
+    the tree takes the graph's layout after. `layout`: nothing evaluates (only where things are
+    drawn changed)."""
     rt = groom.ensure(scalp)
-    data = _call("get_graph", session=rt.session)["graph"]
-    set_positions(scalp, auto_layout(data))
-    rebuild(scalp, replaced=True)
+    push_positions(scalp)
+    r = _call("edit_graph", session=rt.session, op=op, **args)
+    mark_replaced(scalp)
+    if layout:
+        from . import graph
+        groom.remember_graph(scalp, rt)
+        graph.refresh(scalp, rt)
+    else:
+        _edited(scalp, rt)
+    return r
+
+
+def align(scalp, mode, boxes):
+    """Align (node menu > Align, graph_arrange.h alignBoxes): row, column, left, centerX, right, top,
+    centerY, bottom, distributeX, distributeY; tidy (Tidy Selection: arrangeSelection)."""
+    return _arrange(scalp, "align", mode=mode, boxes=list(boxes))
+
+
+def place(scalp, positions=None, dots=None):
+    """Nodes ({name: [x, y]}, graph units, y down) and dots ([{portal, exit, x, y}]) moved together:
+    one layout step."""
+    return _arrange(scalp, "place", positions=positions or {}, dots=list(dots or []))
+
+
+def carried(scalp, names, mode=""):
+    """What a drag of `names` carries: mode "up" (Shift: what feeds them), "down" (Ctrl: what they
+    feed), "" (them): {"nodes", "pins", "dots": [{portal, exit}]} (graph_arrange.h)."""
+    rt = groom.ensure(scalp)
+    push_positions(scalp)
+    return _call("graph_carry", session=rt.session, names=list(names), mode=mode)
+
+
+def align_gesture(scalp, boxes, anchor, selected, mode, dx, dy):
+    """Houdini's A+drag (graph_arrange.h alignGesture): {"axis", "positions": {name: [x, y]}}."""
+    rt = groom.ensure(scalp)
+    return _call("align_gesture", session=rt.session, boxes=list(boxes), anchor=anchor, selected=list(selected),
+                 mode=mode, dx=float(dx), dy=float(dy))
+
+
+def backdrop_layout(scalp, backdrop, nodes=None):
+    """A backdrop's layout facts (graph units): the pins and dots on it, its title bar's height,
+    where its nodes start, its folded box and (given `nodes` boxes) the box grown round them."""
+    rt = groom.ensure(scalp)
+    args = {"backdrop": backdrop, "x": float(backdrop["x"]), "y": float(backdrop["y"]), "w": float(backdrop["w"]),
+            "h": float(backdrop["h"])}
+    if nodes is not None:
+        args["nodes"] = list(nodes)
+    return _call("backdrop_layout", session=rt.session, **args)
+
+
+# Portals and dots (graph_portals.h: layout only, the graph's "portals").
+
+def portals_of(tree):
+    """The graph's portals as the tree last had them: [{"name", "from", "output"?, "x", "y",
+    "links"?, "exits": [{"x", "y", "links"}]}]."""
+    try:
+        return json.loads(tree.get("gl_portals") or "[]") if tree is not None else []
+    except ValueError:
+        return []
+
+
+def teleport_link(scalp, to, input_name, exit_at, entry_at):
+    r = _arrange(scalp, "teleport_link", to=to, input=input_name, exitX=float(exit_at[0]), exitY=float(exit_at[1]),
+                 entryX=float(entry_at[0]), entryY=float(entry_at[1]))
+    return r.get("portal"), r.get("exit")
+
+
+def add_portal_exit(scalp, portal, at):
+    return _arrange(scalp, "add_portal_exit", portal=portal, x=float(at[0]), y=float(at[1])).get("exit")
+
+
+def add_portal_link(scalp, portal, exit_index, to, input_name):
+    """A link dragged out of a dot's nub into to.input: fed from the portal's source, drawn out of
+    that dot (exit None: its entry)."""
+    return _arrange(scalp, "add_portal_link", layout=False, portal=portal, exit=exit_index, to=to, input=input_name)
+
+
+def move_portal(scalp, portal, exit_index, at):
+    return _arrange(scalp, "move_portal", portal=portal, exit=exit_index, x=float(at[0]), y=float(at[1]))
+
+
+def remove_portal(scalp, portal, exit_index=None):
+    return _arrange(scalp, "remove_portal", portal=portal, exit=exit_index).get("removed")
+
+
+def rename_portal(scalp, portal, name):
+    return _arrange(scalp, "rename_portal", portal=portal, newName=name).get("name")
+
+
+def add_dot(scalp, at, src=None, output=None):
+    args = {"x": float(at[0]), "y": float(at[1])}
+    if src:
+        args.update({"from": src, "output": output or ""})
+    return _arrange(scalp, "add_dot", **args).get("name")
+
+
+def feed_dot(scalp, portal, src, output=None):
+    return _arrange(scalp, "feed_dot", layout=False, portal=portal, **{"from": src, "output": output or ""})
+
+
+def set_dot_input(scalp, portal, exit_index, into):
+    r = _arrange(scalp, "set_dot_input", layout=False, portal=portal, exit=exit_index, into=into or "")
+    return r.get("portal"), r.get("exit")
+
+
+# The graph's links and nodes (GraphEdit, every host's).
+
+def detach_group(scalp, names):
+    """A shake: the nodes out of the flow together, their own links kept (detachGroup)."""
+    return bool(_arrange(scalp, "detach_group", layout=False, names=list(names)).get("detached"))
+
+
+def duplicate_nodes(scalp, names, offset=(40.0, 60.0)):
+    """Ctrl+D or Alt+drag: copies beside the nodes, each reading what its node reads. The copies' names."""
+    r = _arrange(scalp, "duplicate_nodes", layout=False, names=list(names), dx=float(offset[0]), dy=float(offset[1]))
+    return [m["name"] for m in r.get("made") or []]
+
+
+def insert_nodes_on_link(scalp, src, dst, input_name, nodes, output=None):
+    """A chain dropped on a wire as one: src feeds its entry, dst reads its exit."""
+    return _arrange(scalp, "insert_nodes_on_link", layout=False, nodes=list(nodes), to=dst, input=input_name,
+                    output=output or "", **{"from": src})
+
+
+def move_output_links(scalp, src, output, new_src, new_output=None):
+    """Every link reading src's output reads new_src's instead where it fits. The (node, input) moved."""
+    r = _arrange(scalp, "move_output_links", layout=False, output=output or "", to=new_src,
+                 toOutput=new_output or "", **{"from": src})
+    return [(m["node"], m["input"]) for m in r.get("moved") or []]
+
+
+def pass_through(tree, name):
+    """The inputs the node hands on as outputs (thru_<input>), as the tree last had them."""
+    node = node_named(tree, name) if tree is not None else None
+    try:
+        return list(json.loads(node.get("gl_pass_through") or "[]")) if node is not None else []
+    except ValueError:
+        return []
+
+
+def pass_through_name(tree, name, input_name):
+    """A pass-through output's name as shown ("" for none: thru_<input>)."""
+    node = node_named(tree, name) if tree is not None else None
+    try:
+        return (json.loads(node.get("gl_pass_names") or "{}") if node is not None else {}).get(input_name, "")
+    except ValueError:
+        return ""
+
+
+def set_pass_through(scalp, name, input_name, on):
+    return bool(_arrange(scalp, "set_pass_through", layout=False, name=name, input=input_name, on=bool(on)).get("changed"))
+
+
+def set_pass_through_name(scalp, name, input_name, label):
+    return bool(_arrange(scalp, "set_pass_through_name", name=name, input=input_name, label=label or "").get("changed"))
+
+
+def move_pass_through(scalp, name, input_name, by):
+    return bool(_arrange(scalp, "move_pass_through", name=name, input=input_name, by=int(by)).get("changed"))
 
 
 def _edited(scalp, rt):

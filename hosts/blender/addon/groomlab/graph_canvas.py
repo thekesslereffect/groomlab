@@ -35,7 +35,8 @@ import time
 
 import bpy
 
-from . import drawn, graph_tree, uikit
+from . import drawn, graph_arrange, graph_tree, uikit
+from .helper_client import HelperError
 
 NODE_W = 176.0
 CLUMP_W = 23.0      # a Clump's header holds Clump Colors too (a Braid's, Show Tubes)
@@ -190,16 +191,42 @@ class Graph(object):
         x1, _ = v2d.view_to_region(1000.0, 0.0, clip=False)
         self.k = (x1 - self.ox) / 1000.0 * self.ui  # region pixels per graph unit (the app's px)
         self.boxes, self.by_name, self.pins, self.frames = [], {}, [], []
+        # Folded backdrops (graph_arrange.h foldedBackdrop): drawn as their title bar and a strip,
+        # their nodes, pins and dots hidden, links into or out of them meeting the strip's edges.
+        self.folded = []     # (frame, its unfolded rect in graph units: x, y down, w, h)
+        self.hidden = {}     # node name -> the folded frame hiding it
         for node in tree.nodes:
             if node.bl_idname == "NodeFrame":
-                self.frames.append((node, self._frame_rect(node)))
-            elif node.bl_idname == "NodeReroute":
-                gx, gy = graph_tree.get_location(node)
-                self.pins.append((node, self.at(gx, gy)))
+                rect = self._frame_rect(node)
+                if node.get("gl_collapsed"):
+                    gx, gy = graph_tree.get_location(node)
+                    w, h = graph_tree.frame_size(node)
+                    self.folded.append((node, (gx, -gy, w, h)))
+                    rect = self._folded_rect(node)
+                self.frames.append((node, rect))
+        for node in tree.nodes:
+            if node.bl_idname in ("NodeFrame",):
+                continue
+            fold = self._folded_holding(node)
+            if node.bl_idname == "NodeReroute":
+                if fold is None:
+                    gx, gy = graph_tree.get_location(node)
+                    self.pins.append((node, self.at(gx, gy)))
             elif graph_tree.ours(node) and not node.hide:
+                if fold is not None:
+                    self.hidden[node.name] = fold
+                    continue
                 box = self._box(node)
                 self.boxes.append(box)
                 self.by_name[node.name] = box
+        # The portals' dots (graph_portals.h), and the links drawn out of them instead of as wires.
+        self.dots = []
+        for d in graph_arrange.dots(tree):
+            if any(_inside(r, d.x, d.y) for _f, r in self.folded):
+                continue
+            self.dots.append((d, self.at(d.x, -d.y)))
+        self.teleported = {link: d for d, _at in self.dots for link in d.links}
+        self.teleported.update({link: d for d in graph_arrange.dots(tree) for link in d.links if link not in self.teleported})
 
     def at(self, gx, gy):
         return self.ox + gx * self.k, self.oy + gy * self.k
@@ -213,6 +240,36 @@ class Graph(object):
         x, top = self.at(gx, gy)
         return (x, top - h * self.k, w * self.k, h * self.k)
 
+    def _folded_rect(self, frame):
+        """A folded backdrop's title bar and strip (the core's foldedBackdrop), region pixels."""
+        gx, gy = graph_tree.get_location(frame)
+        b = graph_tree.backdrop_of(frame)
+        w = graph_arrange.folded_width(b)
+        h = graph_arrange.backdrop_header(b) + 16.0
+        x, top = self.at(gx, gy)
+        return (x, top - h * self.k, w * self.k, h * self.k)
+
+    def _folded_holding(self, node):
+        """The folded backdrop `node` lies on (a child of it, or its card's center on it), else None."""
+        if not self.folded:
+            return None
+        p = node.parent
+        while p is not None:
+            for f, _r in self.folded:
+                if f == p:
+                    return f
+            p = p.parent
+        gx, gy = graph_tree.get_location(node)
+        if node.bl_idname == "NodeReroute":
+            cx, cy = gx, -gy
+        else:
+            w, h = graph_arrange.card_size(node)
+            cx, cy = gx + w * 0.5, -gy + h * 0.5
+        for f, r in self.folded:
+            if _inside(r, cx, cy):
+                return f
+        return None
+
     def _box(self, node):
         ins = [s for s in node.inputs if s.enabled and not s.hide]
         outs = [s for s in node.outputs if s.enabled and not s.hide]
@@ -220,8 +277,7 @@ class Graph(object):
         braid = not clump and graph_tree.shows_tubes(node)
         label = graph_tree.label_of(node.gl_type)
         type_row = node.name != label and node.name != node.gl_type and len(ins) <= 1 and len(outs) <= 1
-        rows = max(len(ins), len(outs), 1) + (1 if type_row else 0)
-        w, h = NODE_W + (CLUMP_W if clump or braid else 0.0), HEADER + PAD * 2 + rows * ROW
+        w, h = graph_arrange.card_size(node)  # (the size the core lays out: Tidy, Align)
         gx, gy = graph_tree.get_location(node)
         x, top = self.at(gx, gy)
         k = self.k
@@ -288,24 +344,70 @@ class Graph(object):
         return None
 
     def frame_at(self, x, y):
-        """A backdrop whose title bar is under (x, y): it drags with its nodes."""
+        """A backdrop whose title bar is under (x, y): it drags with its nodes (folded: all of it)."""
         for frame, r in reversed(self.frames):
-            if uikit.contains((r[0], r[1] + r[3] - BACKDROP_HEADER * self.k, r[2], BACKDROP_HEADER * self.k), x, y):
+            hh = header_of(frame) * self.k
+            if uikit.contains((r[0], r[1] + r[3] - hh, r[2], hh), x, y) or (frame.get("gl_collapsed") and uikit.contains(r, x, y)):
+                return frame
+        return None
+
+    def chevron_at(self, x, y):
+        """A backdrop whose fold chevron (its title bar's right end) is under (x, y)."""
+        for frame, r in reversed(self.frames):
+            c = chevron_rect(frame, r, self.k)
+            if uikit.contains(c, x, y):
                 return frame
         return None
 
     def grip_at(self, x, y):
-        """A backdrop whose corner grip (bottom right) is under (x, y): it resizes."""
+        """A backdrop whose corner grip (bottom right) is under (x, y): it resizes (not folded)."""
         g = GRIP * self.k
         for frame, r in reversed(self.frames):
-            if uikit.contains((r[0] + r[2] - g, r[1], g, g), x, y):
+            if not frame.get("gl_collapsed") and uikit.contains((r[0] + r[2] - g, r[1], g, g), x, y):
                 return frame
         return None
+
+    def dot_at(self, x, y):
+        """(dot, on its nub) of the portal dot under (x, y), else None."""
+        reach = (graph_arrange.DOT_R + 3.0) * self.k
+        nub = graph_arrange.DOT_NUB_REACH * self.k
+        for d, (px, py) in reversed(self.dots):
+            if d.source is not None and (px + graph_arrange.DOT_NUB * self.k - x) ** 2 + (py - y) ** 2 <= nub * nub \
+                    and x > px + graph_arrange.DOT_R * 0.4 * self.k:
+                return d, True
+            if (px - x) ** 2 + (py - y) ** 2 <= reach * reach:
+                return d, False
+        return None
+
+    def dot_point(self, d, nub=False):
+        x, y = self.at(d.x, -d.y)
+        return (x + graph_arrange.DOT_NUB * self.k, y) if nub else (x, y)
+
+    def link_key(self, link):
+        """(to, input) of a link into a GroomLab node, else None."""
+        if graph_tree.ours(link.to_node) and link.to_node.gl_name:
+            return link.to_node.gl_name, link.to_socket.identifier
+        return None
+
+    def drawn_as_wire(self, link):
+        """Whether the link is drawn as a wire: not teleported (a dot draws it), not inside one folded backdrop."""
+        if self.link_key(link) in self.teleported:
+            return False
+        a, b = self.hidden.get(link.from_node.name), self.hidden.get(link.to_node.name)
+        if a is not None and a == b:
+            return False
+        if link.from_node.bl_idname == "NodeReroute" and self._folded_holding(link.from_node) is not None:
+            return False
+        if link.to_node.bl_idname == "NodeReroute" and self._folded_holding(link.to_node) is not None:
+            return False
+        return True
 
     def wire_at(self, x, y, reach=7.0):
         """The link whose wire passes within `reach` pixels of (x, y), else None."""
         best, best_d = None, reach * reach
         for link in self.tree.links:
+            if not self.drawn_as_wire(link):
+                continue
             a = self.socket_point(link.from_node, link.from_socket, True)
             b = self.socket_point(link.to_node, link.to_socket, False)
             if a is None or b is None:
@@ -323,11 +425,31 @@ class Graph(object):
             return self.at(gx, gy)
         box = self.by_name.get(node.name)
         if box is None:
+            fold = self.hidden.get(node.name)
+            if fold is not None:  # meets the folded backdrop's edge: the left for links in, the right out
+                r = next(rr for f, rr in self.frames if f == fold)
+                return (r[0] + r[2], r[1] + r[3] * 0.4) if output else (r[0], r[1] + r[3] * 0.4)
             return None
         for s, point in (box.outputs if output else box.inputs):
             if s == socket:
                 return point
         return None
+
+
+def _inside(r, x, y):
+    """(x, y) in graph units on the rect (x, y down, w, h)."""
+    return r[0] <= x <= r[0] + r[2] and r[1] <= y <= r[1] + r[3]
+
+
+def header_of(frame):
+    """A backdrop's title bar height (the core's backdropHeader: taller for a bigger title)."""
+    return graph_arrange.backdrop_header(graph_tree.backdrop_of(frame))
+
+
+def chevron_rect(frame, r, k):
+    hh = header_of(frame) * k
+    top = r[1] + r[3]
+    return (r[0] + r[2] - 26.0 * k, top - hh, 22.0 * k, hh)
 
 
 def _segment_distance2(pt, a, b):
@@ -354,23 +476,17 @@ def linkable(node):
 
 # ---- Drawing -------------------------------------------------------------------------------------
 
-def _wire_points(a, b, k, below=None):
-    """The app's wire (node_graph.cpp wirePath): a level S-curve forward; backwards, down under the
-    cards and back along under them."""
-    def cubic(p0, p1, p2, p3, n=20):
-        out = []
-        for i in range(n + 1):
-            t = i / float(n)
-            u = 1.0 - t
-            out.append((u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
-                        u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]))
-        return out
-    if b[0] >= a[0] + 30.0 * k:
-        dx = max(60.0 * k, abs(b[0] - a[0]) * 0.5)
-        return cubic(a, (a[0] + dx, a[1]), (b[0] - dx, b[1]), b)
-    y = min(a[1], b[1]) - 60.0 * k if below is None else below - 24.0 * k
-    r = 40.0 * k
-    return cubic(a, (a[0] + r, a[1]), (a[0] + r, y), (a[0], y), 10) + cubic((b[0], y), (b[0] - r, y), (b[0] - r, b[1]), b, 10)
+def _wire_points(a, b, k, below=None, through=False):
+    """A wire from the output at `a` to the input at `b` (region pixels) in the user's wire style
+    (the core's wireRoute, graph_arrange.WIRE_STYLES): forward a level S-curve or square runs;
+    backwards, down under the cards and back along under them. `through`: a piece between pins or
+    dots (no loop)."""
+    k = max(k, 1e-6)
+    # In graph units, y down (the route is the same wherever it starts; `below` is region pixels).
+    steps = graph_arrange.wire_route(graph_arrange.wire_style(), a[0] / k, -a[1] / k, b[0] / k, -b[1] / k,
+                                     None if below is None else -below / k, through)
+    pts = graph_arrange.route_points((a[0] / k, -a[1] / k), steps, 20)
+    return [(x * k, -y * k) for x, y in pts]
 
 
 def _eye(p, c, rx, color, width, pupil):
@@ -411,8 +527,13 @@ def _draw(context):
     notes = graph_editor.node_notes(scalp) if scalp is not None else {}
     times = graph_editor._node_times(scalp) if scalp is not None else {}
     for frame, r in g.frames:
-        _draw_backdrop(p, t, frame, r, k)
+        if not frame.get("gl_collapsed"):
+            _draw_backdrop(p, t, frame, r, k)
     _draw_wires(p, g, t)
+    _draw_dots(p, g, t)
+    for frame, r in g.frames:  # folded: over the links meeting its edges
+        if frame.get("gl_collapsed"):
+            _draw_backdrop(p, t, frame, r, k)
     for node, (px, py) in g.pins:
         _draw_pin(p, t, node, px, py, k)
     active = tree.nodes.active
@@ -502,15 +623,42 @@ def _draw_backdrop(p, t, frame, r, k):
     rgb = tuple(frame.color) if frame.use_custom_color else tuple(c / 255.0 for c in graph_tree.BACKDROP_COLOR)
     base = (rgb[0], rgb[1], rgb[2], 1.0)
     radius = t["radius"] * k
-    p.rect(r, with_alpha(base, 46 / 255.0), radius, with_alpha(base, 120 / 255.0), 1.5 * k)
+    folded = bool(frame.get("gl_collapsed"))
+    p.rect(r, with_alpha(base, (200 if folded else 46) / 255.0), radius, with_alpha(base, 120 / 255.0), 1.5 * k)
     top = r[1] + r[3]
-    p.band(r, with_alpha(base, 120 / 255.0), with_alpha(base, 120 / 255.0), radius, top - BACKDROP_HEADER * k, top)
-    if 14 * k >= 6:
-        p.text(frame.label or frame.name, (r[0] + 12 * k, top - BACKDROP_HEADER * k, r[2] - 24 * k, BACKDROP_HEADER * k),
-               t["textDim"], size=14, bold=True)
-    light = tuple(min(1.0, c * 1.3) for c in base[:3]) + (0.9,)
-    for d in (4.0, 8.0, 12.0):  # the corner grip
-        p.lines([(r[0] + r[2] - d * k, r[1] + 2 * k), (r[0] + r[2] - 2 * k, r[1] + d * k)], light, 1.5)
+    hh = header_of(frame) * k
+    p.band(r, with_alpha(base, 120 / 255.0), with_alpha(base, 120 / 255.0), radius, top - hh, top)
+    size = int(round(float(frame.get("gl_font_size") or 0))) or 14
+    chev = chevron_rect(frame, r, k)
+    if size * k >= 6:
+        p.text(frame.label or frame.name, (r[0] + 12 * k, top - hh, chev[0] - r[0] - 14 * k, hh),
+               t["textDim"], size=size, bold=True)
+        # The fold chevron: down open, right folded.
+        cx, cy, a = chev[0] + chev[2] * 0.5, chev[1] + chev[3] * 0.5, 4.5 * k
+        pts = [(cx - a * 0.6, cy + a), (cx + a * 0.6, cy), (cx - a * 0.6, cy - a)] if folded else \
+            [(cx - a, cy + a * 0.6), (cx, cy - a * 0.6), (cx + a, cy + a * 0.6)]
+        p.lines(pts, t["textDim"], 1.6)
+    text = str(frame.get("gl_description") or "")
+    if text and not folded and 12 * k >= 6:
+        per_line = max(8, int((r[2] / k - 24.0) / 6.5))
+        lines = []
+        for para in text.split("\n"):
+            while len(para) > per_line:
+                cut = para.rfind(" ", 0, per_line)
+                cut = per_line if cut <= 0 else cut
+                lines.append(para[:cut])
+                para = para[cut:].lstrip()
+            lines.append(para)
+        y = top - hh - 4 * k
+        for line in lines:
+            if y - 16 * k < r[1]:
+                break
+            p.text(line, (r[0] + 12 * k, y - 16 * k, r[2] - 24 * k, 16 * k), t["textDim"], size=12)
+            y -= 16 * k
+    if not folded:
+        light = tuple(min(1.0, c * 1.3) for c in base[:3]) + (0.9,)
+        for d in (4.0, 8.0, 12.0):  # the corner grip
+            p.lines([(r[0] + r[2] - d * k, r[1] + 2 * k), (r[0] + r[2] - 2 * k, r[1] + d * k)], light, 1.5)
     if frame.select:
         p.rect(r, (0, 0, 0, 0), radius, t["selected"], 2.0 * k)
 
@@ -518,7 +666,7 @@ def _draw_backdrop(p, t, frame, r, k):
 def _draw_wires(p, g, t):
     picked = _wire.get("picked")
     for link in g.tree.links:
-        if not link.is_valid or link.is_hidden or (picked is not None and link == picked):
+        if not link.is_valid or link.is_hidden or (picked is not None and link == picked) or not g.drawn_as_wire(link):
             continue
         a = g.socket_point(link.from_node, link.from_socket, True)
         b = g.socket_point(link.to_node, link.to_socket, False)
@@ -532,6 +680,62 @@ def _draw_wires(p, g, t):
         if link.is_muted:
             color = with_alpha(color, 0.45)
         p.lines(_wire_points(a, b, g.k), color, 2.0)
+
+
+def _dot_kind(g, d):
+    """The port type a dot carries (its source output's), "" for a free dot."""
+    if d.source is None:
+        return ""
+    node = graph_tree.node_named(g.tree, d.source[0])
+    if node is None:
+        return "Any"
+    out = next((o for o in node.outputs if o.identifier == d.source[1]), None) if d.source[1] else \
+        (node.outputs[0] if len(node.outputs) else None)
+    return _port_type(out) if out is not None else "Any"
+
+
+def _dot_source_point(g, d):
+    node = graph_tree.node_named(g.tree, d.source[0]) if d.source else None
+    if node is None:
+        return None
+    out = next((o for o in node.outputs if o.identifier == d.source[1]), None) if d.source[1] else \
+        (node.outputs[0] if len(node.outputs) else None)
+    return g.socket_point(node, out, True) if out is not None else None
+
+
+def _draw_dots(p, g, t):
+    """The portals (graph_portals.h): each entry's short wire from its source output, the links out
+    of each dot on to their inputs, the dots, their names (Maya's PortalItem)."""
+    k = g.k
+    for d, (x, y) in g.dots:
+        kind = _dot_kind(g, d)
+        color = _port_color(t, kind) if kind else t["textDim"]
+        wire = with_alpha(color, 220 / 255.0)
+        if d.exit is None:
+            src = _dot_source_point(g, d)
+            if src is not None:
+                p.lines(_wire_points(src, (x - graph_arrange.DOT_R * k, y), k, through=True), wire, 2.0)
+        nub = g.dot_point(d, nub=True)
+        for to, input_name in d.links:
+            node = graph_tree.node_named(g.tree, to)
+            sock = next((s for s in node.inputs if s.identifier == input_name), None) if node is not None else None
+            b = g.socket_point(node, sock, False) if sock is not None else None
+            if b is not None:
+                p.lines(_wire_points(nub, b, k, through=True), wire, 2.0)
+    for d, (x, y) in g.dots:
+        kind = _dot_kind(g, d)
+        color = _port_color(t, kind) if kind else t["textDim"]
+        r = graph_arrange.DOT_R * k
+        picked = _press.get("dot") == (d.portal, d.exit)
+        fill = tuple(c * 0.55 for c in color[:3]) + (1.0,) if d.exit is None else color
+        p.rect((x - r, y - r, 2 * r, 2 * r), fill, r, t["selected"] if picked else color, 2.5 * k)
+        if d.source is not None:
+            nx = x + graph_arrange.DOT_NUB * k
+            p.lines([(nx - 4.5 * k, y + 6 * k), (nx + 4.5 * k, y), (nx - 4.5 * k, y - 6 * k), (nx - 4.5 * k, y + 6 * k)],
+                    color, 2.0)
+        if 11 * k >= 6:
+            tw = p.text_size(d.portal, 11)
+            p.text(d.portal, (x - tw / 2.0, y + r + 3 * k, tw + 4, 18 * k), t["text"], size=11, bold=True, clip=False)
 
 
 def _draw_pin(p, t, node, x, y, k):
@@ -948,6 +1152,13 @@ class GROOMLAB_OT_graph_canvas_press(bpy.types.Operator):
             _toggle(context, tree, hit[0].node, hit[1])
             _redraw()
             return {"FINISHED"}
+        chevron = g.chevron_at(x, y)
+        if chevron is not None:  # a backdrop's fold chevron
+            _select_only(tree, [chevron])
+            graph_arrange.set_backdrop(context, chevron, collapsed=not bool(chevron.get("gl_collapsed")))
+            _push_undo("Fold Backdrop")
+            _redraw()
+            return {"FINISHED"}
         grip = g.grip_at(x, y)
         if grip is not None:
             _select_only(tree, [grip])
@@ -957,29 +1168,46 @@ class GROOMLAB_OT_graph_canvas_press(bpy.types.Operator):
         port = g.port_at(x, y)
         if port is not None:
             _start_wire(tree, g, port, x, y)
+            if event.shift and port[2] and any(l.from_socket == port[1] for l in tree.links):
+                _wire["bundle"] = True  # Shift+drag from an output: all its links to another output
             _press.update(kind="wire", start=(x, y))
             _redraw()
             context.window_manager.modal_handler_add(self)
             return {"RUNNING_MODAL"}
-        shift = event.shift
+        dot = g.dot_at(x, y)
+        if dot is not None:
+            d, nub = dot
+            if nub and _start_dot_wire(tree, g, d, x, y):  # another link of its signal, out of its nub
+                _press.update(kind="wire", start=(x, y))
+            else:
+                _press.update(kind="dot", dot=(d.portal, d.exit), start=(x, y), last=(x, y), at=(d.x, d.y), k=g.k,
+                              moved=False)
+            _redraw()
+            context.window_manager.modal_handler_add(self)
+            return {"RUNNING_MODAL"}
+        shift, ctrl, alt = event.shift, event.ctrl, event.alt
         node = g.pin_at(x, y)
         box = g.box_at(x, y) if node is None else None
         if box is not None:
             node = box.node
         if node is None:
             node = g.frame_at(x, y)
+        if node is None and alt:
+            link = g.wire_at(x, y)
+            if link is not None:  # Alt+click a link: a pin there
+                add_pin(tree, g, link, x, y)
+                _redraw()
+                return {"FINISHED"}
         if node is not None:
-            if shift:
-                node.select = not node.select
-                if node.select:
-                    tree.nodes.active = node
-            elif not node.select:
+            # Shift+click adds to the selection and Ctrl+click toggles (on release, without a move);
+            # Shift+drag carries what feeds it, Ctrl+drag what it feeds, Alt+drag a copy.
+            if not node.select and not (shift or ctrl):
                 _select_only(tree, [node])
-            else:
+            elif node.select:
                 tree.nodes.active = node
-            moving = _carried(tree)
-            _press.update(kind="move", start=(x, y), last=(x, y), node=node, moved=False, shift=shift,
-                          nodes=moving, k=g.k)
+            _press.update(kind="move", start=(x, y), last=(x, y), node=node, moved=False, shift=shift, ctrl=ctrl,
+                          alt=alt, nodes=None, dots=[], k=g.k, shake=graph_arrange.ShakeDetector(), shaken=False,
+                          left=set(), time=time.time())
         else:
             _press.update(kind="band", start=(x, y), shift=shift, before={n for n in tree.nodes if n.select})
             _band[0] = (x, y, x, y)
@@ -1018,17 +1246,41 @@ class GROOMLAB_OT_graph_canvas_press(bpy.types.Operator):
         if kind == "resize":
             return self._resize_modal(context, event, x, y)
         if event.type == "MOUSEMOVE":
-            if kind == "move":
+            if kind == "dot":
                 sx, sy = _press["start"]
                 if not _press["moved"] and math.hypot(x - sx, y - sy) < DRAG_START:
                     return {"RUNNING_MODAL"}
+                k = _press["k"]
+                portal, exit_index = _press["dot"]
+                ax, ay = _press["at"]
+                _move_dots(tree, [(portal, exit_index, ax + (x - sx) / k, ay - (y - sy) / k)])
+                _press.update(last=(x, y), moved=True)
+            elif kind == "move":
+                sx, sy = _press["start"]
+                if not _press["moved"] and math.hypot(x - sx, y - sy) < DRAG_START:
+                    return {"RUNNING_MODAL"}
+                if _press["nodes"] is None:
+                    try:
+                        _begin_move(context, tree)
+                    except HelperError as e:
+                        self.report({"ERROR"}, str(e))
+                        _press["nodes"] = _carried(tree)
                 lx, ly = _press["last"]
                 k = _press["k"]
                 dx, dy = (x - lx) / k, (y - ly) / k
                 for n in _press["nodes"]:
                     gx, gy = graph_tree.get_location(n)
                     graph_tree.set_location(n, (gx + dx, gy + dy))
-                _press.update(last=(x, y), moved=True)
+                if _press["dots"]:
+                    _press["dots"] = [(pp, e, dx0 + dx, dy0 - dy) for pp, e, dx0, dy0 in _press["dots"]]
+                    _move_dots(tree, _press["dots"])
+                now = time.time()
+                speed = math.hypot(x - lx, y - ly) / max(now - _press["time"], 1e-3)
+                _press.update(last=(x, y), moved=True, time=now)
+                _hold_on_backdrops(tree, _press, speed)
+                if not _press["shaken"] and _press["shake"].add(now, event.mouse_x, event.mouse_y):
+                    _press["shaken"] = True
+                    _shake_loose(context, tree)
             elif kind == "band":
                 sx, sy = _press["start"]
                 _band[0] = (sx, sy, x, y)
@@ -1042,11 +1294,29 @@ class GROOMLAB_OT_graph_canvas_press(bpy.types.Operator):
             _redraw()
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "RELEASE":
-            if kind == "move":
+            if kind == "dot":
                 if _press["moved"]:
-                    _push_undo("Move Nodes")
-                elif not _press["shift"]:
-                    _select_only(tree, [_press["node"]])  # a click on one of several picked: that one alone
+                    portal, exit_index = _press["dot"]
+                    d = next((dd for dd in graph_arrange.dots(tree) if (dd.portal, dd.exit) == (portal, exit_index)), None)
+                    if d is not None:
+                        try:
+                            graph_tree.move_portal(tree.gl_scalp, portal, exit_index, (d.x, d.y))
+                        except HelperError as e:
+                            self.report({"ERROR"}, str(e))
+                        _push_undo("Move Dot")
+            elif kind == "move":
+                node = _press["node"]
+                if _press["moved"]:
+                    _end_move(context, tree, x, y)
+                elif _press["shift"]:
+                    node.select = True  # Shift+click: added to the selection
+                    tree.nodes.active = node
+                elif _press["ctrl"]:
+                    node.select = not node.select  # Ctrl+click: toggled
+                    if node.select:
+                        tree.nodes.active = node
+                else:
+                    _select_only(tree, [node])  # a click on one of several picked: that one alone
             elif kind == "band":
                 sx, sy = _press["start"]
                 if math.hypot(x - sx, y - sy) < DRAG_START and not _press["shift"]:
@@ -1056,13 +1326,18 @@ class GROOMLAB_OT_graph_canvas_press(bpy.types.Operator):
             _redraw()
             return {"FINISHED"}
         if event.type in ("RIGHTMOUSE", "ESC") and event.value == "PRESS":
-            if kind == "move" and _press["moved"]:
+            if kind == "move" and _press["moved"] and _press["nodes"] is not None:
                 k = _press["k"]
                 sx, sy = _press["start"]
                 lx, ly = _press["last"]
                 for n in _press["nodes"]:
                     gx, gy = graph_tree.get_location(n)
                     graph_tree.set_location(n, (gx - (lx - sx) / k, gy - (ly - sy) / k))
+                if _press["dots"]:
+                    _move_dots(tree, [(pp, e, dx0 - (lx - sx) / k, dy0 + (ly - sy) / k) for pp, e, dx0, dy0 in _press["dots"]])
+            elif kind == "dot" and _press["moved"]:
+                portal, exit_index = _press["dot"]
+                _move_dots(tree, [(portal, exit_index, _press["at"][0], _press["at"][1])])
             elif kind == "band":
                 for n in tree.nodes:
                     n.select = n in _press["before"]
@@ -1183,11 +1458,68 @@ def _connect(tree, out_socket, in_socket):
     tree.links.new(out_socket, in_socket)  # (an input takes one wire: the one there goes)
 
 
+def _start_dot_wire(tree, g, d, x, y):
+    """A press on a dot's nub: a wire of the portal's signal (its source output), dropped on an input
+    it is drawn out of this dot. False for a dot nothing feeds."""
+    node = graph_tree.node_named(tree, d.source[0]) if d.source else None
+    if node is None:
+        return False
+    out = next((o for o in node.outputs if o.identifier == d.source[1]), None) if d.source[1] else \
+        (node.outputs[0] if len(node.outputs) else None)
+    if out is None:
+        return False
+    _wire.clear()
+    _wire.update({"from": out, "out": True, "at": g.dot_point(d, nub=True), "to": (x, y), "picked": None,
+                  "portal": (d.portal, d.exit)})
+    return True
+
+
+def _source_name(socket):
+    """(node, output) the graph names a GroomLab output by ("" its first)."""
+    node = socket.node
+    return node.gl_name, "" if len(node.outputs) and node.outputs[0] == socket else socket.identifier
+
+
 def _drop_wire(context, tree, g, x, y, moved):
     """The dragged wire let go: onto a port (or a card: its first free port it can take), wired;
     a picked-up wire dropped on the canvas goes; a new one opens the search (returns "search")."""
     picked = _wire.get("picked")
     source, out = _wire["from"], _wire["out"]
+    scalp = getattr(tree, "gl_scalp", None)
+    if _wire.get("bundle"):
+        # Shift+drag from an output: every link it feeds now read from the output it is dropped on.
+        port = g.port_at(x, y, outputs=True, inputs=False)
+        if port is not None and port[1] != source and graph_tree.ours(port[0].node):
+            src, output = _source_name(source)
+            new_src, new_output = _source_name(port[1])
+            try:
+                graph_tree.move_output_links(scalp, src, output, new_src, new_output)
+            except HelperError as e:
+                print("GroomLab:", e)
+            _push_undo("Move Links")
+        return None
+    if _wire.get("portal") and out:
+        # Out of a dot's nub onto an input: the link drawn out of that dot.
+        port = _wire_target(g, x, y)
+        if port is not None and graph_tree.ours(port[0].node):
+            portal, exit_index = _wire["portal"]
+            try:
+                graph_tree.add_portal_link(scalp, portal, exit_index, port[0].node.gl_name, port[1].identifier)
+            except HelperError as e:
+                print("GroomLab:", e)
+            _push_undo("Link from Portal")
+        return None
+    if out and moved and picked is None and graph_tree.ours(source.node):
+        dot = g.dot_at(x, y)
+        if dot is not None and dot[0].source is None and dot[0].exit is None:
+            # A wire from an output dropped on a free dot: the dot fed from it.
+            src, output = _source_name(source)
+            try:
+                graph_tree.feed_dot(scalp, dot[0].portal, src, output)
+            except HelperError as e:
+                print("GroomLab:", e)
+            _push_undo("Feed Dot")
+            return None
     target = _wire_target(g, x, y)
     if target is None:
         box = g.box_at(x, y)
@@ -1218,6 +1550,146 @@ def _drop_wire(context, tree, g, x, y, moved):
     _search.clear()
     _search.update({"at": (x, y), "link": source, "out": out, "pending": True})
     return "search"
+
+
+def _move_dots(tree, moves):
+    """Dots drawn where a drag has them ([(portal, exit, x, y)], graph units, y down): the tree's copy
+    of the portals (the graph takes them on release)."""
+    portals = graph_tree.portals_of(tree)
+    for portal, exit_index, nx, ny in moves:
+        for p in portals:
+            if p.get("name") != portal:
+                continue
+            entry = p if exit_index is None else (p.get("exits") or [None] * (exit_index + 1))[exit_index]
+            if isinstance(entry, dict):
+                entry["x"], entry["y"] = float(nx), float(ny)
+    with graph_tree.building():
+        tree["gl_portals"] = json.dumps(portals)
+
+
+def _begin_move(context, tree):
+    """A drag's first move: what it carries. Shift: the nodes and what feeds them; Ctrl: and what they
+    feed (never through a portal); Alt: copies of them, which move; else the selection (a backdrop's
+    nodes with it). The pins and dots between moved nodes go too (graph_arrange.h carriedWith)."""
+    node = _press["node"]
+    scalp = tree.gl_scalp
+    if not graph_tree.ours(node):
+        if not node.select:
+            _select_only(tree, [node])
+        _press["nodes"] = _carried(tree)
+        if node.bl_idname == "NodeFrame":  # the dots on the backdrop go with it
+            b = graph_tree.backdrop_of(node)
+            on = graph_tree.backdrop_layout(scalp, b)
+            here = {(dd.portal, dd.exit): dd for dd in graph_arrange.dots(tree)}
+            _press["dots"] = []
+            for d in on.get("dots") or []:
+                key = (d["portal"], None if d["exit"] < 0 else d["exit"])
+                if key in here:
+                    _press["dots"].append((key[0], key[1], here[key].x, here[key].y))
+        return
+    names = [n.gl_name for n in tree.nodes if graph_tree.ours(n) and n.select and n.gl_name]
+    if node.gl_name not in names:
+        names = [node.gl_name]
+        _select_only(tree, [node])
+    if _press["alt"]:
+        made = graph_tree.duplicate_nodes(scalp, names, (0.0, 0.0))
+        copies = [graph_tree.node_named(tree, m) for m in made]
+        copies = [c for c in copies if c is not None]
+        _select_only(tree, copies)
+        _press["nodes"] = copies
+        return
+    mode = "up" if _press["shift"] else ("down" if _press["ctrl"] else "")
+    carry = graph_tree.carried(scalp, names, mode)
+    moving = {graph_tree.node_named(tree, n) for n in carry.get("nodes") or []}
+    pins = set(carry.get("pins") or [])
+    moving |= {r for r in graph_tree.reroutes(tree) if graph_tree.pin_of(r) in pins}
+    if not mode:
+        moving |= set(_carried(tree))
+    moving.discard(None)
+    _press["nodes"] = [n for n in tree.nodes if n in moving]
+    here = {(dd.portal, dd.exit): dd for dd in graph_arrange.dots(tree)}
+    _press["dots"] = []
+    for d in carry.get("dots") or []:
+        key = (d["portal"], None if d["exit"] < 0 else d["exit"])
+        if key in here:
+            _press["dots"].append((key[0], key[1], here[key].x, here[key].y))
+
+
+def _hold_on_backdrops(tree, press, speed):
+    """A node dragged on its backdrop: dragged slowly past an edge the backdrop grows round it; out
+    fast it leaves (and stays out for the drag): graph_arrange.h backdropKeeps, grownBackdrop."""
+    moving = set(press["nodes"] or [])
+    for n in press["nodes"] or []:
+        frame = n.parent
+        if frame is None or frame in moving or not graph_tree.ours(n) or frame.get("gl_collapsed"):
+            continue
+        fx, fy = graph_tree.get_location(frame)
+        fw, fh = graph_tree.frame_size(frame)
+        box = graph_arrange.card_box(n)
+        cx, cy = box["x"] + box["w"] * 0.5, box["y"] + box["h"] * 0.5
+        over = fx <= cx <= fx + fw and -fy <= cy <= -fy + fh
+        inside = fx <= box["x"] and box["x"] + box["w"] <= fx + fw and -fy <= box["y"] and box["y"] + box["h"] <= -fy + fh
+        if inside:
+            continue
+        if graph_arrange.backdrop_keeps(over, speed, n.name in press["left"]):
+            x, y, w, h = graph_arrange.grown_backdrop((fx, -fy, fw, fh), [box], 24.0, header_of(frame))
+            at = graph_tree.get_location(n)
+            frame.shrink = False
+            graph_tree.set_location(frame, (x, -y))
+            frame.width, frame.height = w, h
+            graph_tree.set_location(n, at)
+        else:
+            press["left"].add(n.name)
+            at = graph_tree.get_location(n)
+            n.parent = None
+            graph_tree.set_location(n, at)
+
+
+def _shake_loose(context, tree):
+    """A shake while dragging: the dragged nodes out of their links (several: their own links kept)."""
+    names = [n.gl_name for n in _press["nodes"] or [] if graph_tree.ours(n) and n.gl_name]
+    if not names:
+        return
+    at = {n.name: graph_tree.get_location(n) for n in _press["nodes"]}
+    try:
+        graph_tree.detach_group(tree.gl_scalp, names)
+    except HelperError as e:
+        print("GroomLab:", e)
+        return
+    for n in _press["nodes"]:  # (the tree made again from the graph: where the drag has them)
+        try:
+            if n.name in at:
+                graph_tree.set_location(n, at[n.name])
+        except ReferenceError:
+            pass
+
+
+def _end_move(context, tree, x, y):
+    """A drag let go: nodes dropped on a wire go into it (a chain as one: the core's
+    insertNodesOnLink); dots carried go into the graph with the nodes (one step)."""
+    scalp = tree.gl_scalp
+    group = [n for n in _press["nodes"] or [] if graph_tree.ours(n) and n.gl_name]
+    names = {n.gl_name for n in group}
+    if group and not _press["shift"] and not _press["ctrl"] and not _press["shaken"]:
+        g = Graph(context, context.region, tree)
+        outside = [l for l in tree.links if (l.from_node in group) != (l.to_node in group)]
+        link = g.wire_at(x, y) if not outside else None
+        if link is not None and link.from_node not in group and link.to_node not in group \
+                and graph_tree.ours(link.from_node) and graph_tree.ours(link.to_node):
+            src, output = _source_name(link.from_socket)
+            try:
+                graph_tree.insert_nodes_on_link(scalp, src, link.to_node.gl_name, link.to_socket.identifier,
+                                                sorted(names), output)
+                _push_undo("Insert Nodes")
+                return
+            except HelperError as e:
+                print("GroomLab:", e)
+    if _press["dots"]:
+        try:
+            graph_tree.place(scalp, dots=[{"portal": pp, "exit": e, "x": dx, "y": dy} for pp, e, dx, dy in _press["dots"]])
+        except HelperError as e:
+            print("GroomLab:", e)
+    _push_undo("Move Nodes")
 
 
 def _links_crossing(g, path):
@@ -1254,7 +1726,18 @@ def _node_items(context):
         for item in cat.items(context):
             if isinstance(item, nodeitems_utils.NodeItem):
                 out.append((item.label, cat.name, item.nodetype, dict(item.settings or {})))
+    # Layout (every host's search): a Dot (a free one; fed from a dropped wire's output), a Backdrop,
+    # and an exit of each portal.
+    out.append(("Dot", "Layout", DOT_ITEM, {}))
+    out.append(("Backdrop", "Layout", BACKDROP_ITEM, {}))
+    tree = tree_here(context)
+    for p in graph_tree.portals_of(tree):
+        if p.get("from"):
+            out.append(("Portal: %s" % p["name"], "Portals", PORTAL_ITEM + p["name"], {}))
     return out
+
+
+DOT_ITEM, BACKDROP_ITEM, PORTAL_ITEM = "__dot__", "__backdrop__", "__portal__:"
 
 
 def _matches(items, text):
@@ -1300,6 +1783,26 @@ def _add_node(context, item, at):
     the search's wire if it came from one; one undo step."""
     tree = tree_here(context)
     _label, _cat, idname, settings = item
+    if idname in (DOT_ITEM, BACKDROP_ITEM) or idname.startswith(PORTAL_ITEM):
+        g = Graph(context, context.region, tree)
+        gx, gy = g.to_graph(*at)
+        scalp = tree.gl_scalp
+        source = _search.get("link")
+        try:
+            if idname == DOT_ITEM:
+                src = output = None
+                if source is not None and _search.get("out") and graph_tree.ours(source.node):
+                    src, output = _source_name(source)
+                graph_tree.add_dot(scalp, (gx, -gy), src, output)
+                _push_undo("Add Dot")
+            elif idname == BACKDROP_ITEM:
+                bpy.ops.groomlab.graph_backdrop_add("INVOKE_DEFAULT")
+            else:
+                graph_tree.add_portal_exit(scalp, idname[len(PORTAL_ITEM):], (gx, -gy))
+                _push_undo("Add Portal Exit")
+        except HelperError as e:
+            print("GroomLab:", e)
+        return None
     before = set(tree.nodes)
     bpy.ops.node.add_node("EXEC_DEFAULT", type=idname, use_transform=False,
                           settings=[{"name": k, "value": v} for k, v in settings.items()])
@@ -1425,6 +1928,39 @@ class GROOMLAB_MT_graph_canvas(bpy.types.Menu):
         layout.menu("GROOMLAB_MT_graph_presets", text="Presets")
 
 
+def _menu_here(tree, g, x, y):
+    """The menu of what is under a right-click besides nodes and backdrops (graph_ui.json): a portal
+    dot's, a port's (an input's Pass Through as Output; a pass-through output's Rename and Move), a
+    link's (Teleport, a pin, Delete). Its class name, what it acts on in graph_arrange.target; None."""
+    graph_arrange.target.clear()
+    dot = g.dot_at(x, y)
+    if dot is not None:
+        graph_arrange.target["dot"] = {"portal": dot[0].portal, "exit": dot[0].exit}
+        return graph_arrange.GROOMLAB_MT_graph_canvas_portal.__name__
+    port = g.port_at(x, y)
+    if port is not None and graph_tree.ours(port[0].node):
+        node, socket, out = port[0].node, port[1], port[2]
+        passes = socket.identifier[len("thru_"):] if out and socket.identifier.startswith("thru_") else ""
+        if out and not passes:
+            return None
+        _select_only(tree, [node])
+        graph_arrange.target["port"] = {"node": node.gl_name, "name": socket.identifier, "passes": passes}
+        return graph_arrange.GROOMLAB_MT_graph_canvas_port.__name__
+    if g.box_at(x, y) is not None or g.frame_at(x, y) is not None or g.pin_at(x, y) is not None:
+        return None
+    link = g.wire_at(x, y)
+    if link is not None and graph_tree.ours(link.to_node):
+        a = g.socket_point(link.from_node, link.from_socket, True)
+        b = g.socket_point(link.to_node, link.to_socket, False)
+        ax, ay = g.to_graph(*a)
+        bx, by = g.to_graph(*b)
+        graph_arrange.target["link"] = {"to": link.to_node.gl_name, "input": link.to_socket.identifier,
+                                        "exit_at": (bx - 60.0, -by), "entry_at": (ax + 40.0, -ay),
+                                        "region_at": (x, y), "tree_link": link}
+        return graph_arrange.GROOMLAB_MT_graph_canvas_link.__name__
+    return None
+
+
 class GROOMLAB_OT_graph_canvas_context(bpy.types.Operator):
     """A right press on the GroomLab graph: the node's menu, the canvas' menu, or (Ctrl) a cut"""
     bl_idname = "groomlab.graph_canvas_context"
@@ -1463,17 +1999,19 @@ class GROOMLAB_OT_graph_canvas_context(bpy.types.Operator):
             context.window_manager.modal_handler_add(self)
             return {"RUNNING_MODAL"}
         g = Graph(context, region, tree)
-        node = g.pin_at(x, y)
-        if node is None:
-            box = g.box_at(x, y)
-            node = box.node if box is not None else g.frame_at(x, y)
-        if node is not None:
-            if not node.select:
-                _select_only(tree, [node])
-            tree.nodes.active = node
-            name = GROOMLAB_MT_graph_canvas_node.__name__
-        else:
-            name = GROOMLAB_MT_graph_canvas.__name__
+        name = _menu_here(tree, g, x, y)
+        if name is None:
+            node = g.pin_at(x, y)
+            if node is None:
+                box = g.box_at(x, y)
+                node = box.node if box is not None else g.frame_at(x, y)
+            if node is not None:
+                if not node.select:
+                    _select_only(tree, [node])
+                tree.nodes.active = node
+                name = GROOMLAB_MT_graph_canvas_node.__name__
+            else:
+                name = GROOMLAB_MT_graph_canvas.__name__
         entries = drawn.menu_entries(name, context)
         if not entries:
             bpy.ops.wm.call_menu(name=name)
@@ -1547,6 +2085,10 @@ def double_click(context, g, x, y):
     tree = g.tree
     if g.toggle_at(x, y) is not None or g.port_at(x, y) is not None:
         return None
+    dot = g.dot_at(x, y)
+    if dot is not None:
+        bpy.ops.groomlab.graph_portal_rename("INVOKE_DEFAULT", portal=dot[0].portal)
+        return "rename"
     box = g.box_at(x, y)
     if box is not None:
         node = box.node
@@ -1587,14 +2129,118 @@ def add_pin(tree, g, link, x, y):
     return pin
 
 
-def frame_view(context, margin=48.0):
-    """The view fitted to the selected cards (none: all of them) as the canvas draws them, in the
-    canvas left of the params (F)."""
+class GROOMLAB_OT_graph_canvas_align_key(bpy.types.Operator):
+    """A held: drag from a node to line things up with it (Houdini's: A its chain, Shift+A the
+    selection, Alt+A the selection spread evenly); A tapped frames the whole graph"""
+    bl_idname = "groomlab.graph_canvas_align_key"
+    bl_label = "Align Gesture"
+    bl_options = {"INTERNAL"}
+
+    @classmethod
+    def poll(cls, context):
+        return shows_here(context)
+
+    def invoke(self, context, event):
+        if over_panel(context.region, event.mouse_region_x, context.preferences.system.ui_scale):
+            return {"PASS_THROUGH"}
+        self.key = event.type
+        self.mode = "selected" if event.shift else ("distribute" if event.alt else "chain")
+        self.drag = None
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def _restore(self, tree):
+        for n in tree.nodes:
+            at = self.drag["was"].get(n.name)
+            if at is not None:
+                graph_tree.set_location(n, at)
+
+    def modal(self, context, event):
+        tree = tree_here(context)
+        if tree is None:
+            return {"CANCELLED"}
+        x, y = event.mouse_region_x, event.mouse_region_y
+        if event.type == "LEFTMOUSE" and event.value == "PRESS" and self.drag is None:
+            g = Graph(context, context.region, tree)
+            box = g.box_at(x, y)
+            if box is None:
+                return {"RUNNING_MODAL"}
+            self.drag = {"anchor": box.node.gl_name, "start": (x, y), "k": g.k, "positions": {},
+                         "was": {n.name: graph_tree.get_location(n) for n in tree.nodes if graph_tree.ours(n)},
+                         "boxes": graph_arrange.card_boxes(tree), "selected": graph_arrange.selected_names(tree)}
+            return {"RUNNING_MODAL"}
+        if event.type == "MOUSEMOVE" and self.drag is not None and "was" in self.drag and "done" not in self.drag:
+            sx, sy = self.drag["start"]
+            k = self.drag["k"]
+            try:
+                r = graph_tree.align_gesture(tree.gl_scalp, self.drag["boxes"], self.drag["anchor"], self.drag["selected"],
+                                             self.mode, (x - sx) / k, -(y - sy) / k)
+            except HelperError as e:
+                self.report({"ERROR"}, str(e))
+                return {"RUNNING_MODAL"}
+            self._restore(tree)
+            self.drag["positions"] = r.get("positions") or {}
+            for name, (px, py) in self.drag["positions"].items():
+                node = graph_tree.node_named(tree, name)
+                if node is not None:
+                    graph_tree.set_location(node, (px, -py))
+            _redraw()
+            return {"RUNNING_MODAL"}
+        if event.type == "LEFTMOUSE" and event.value == "RELEASE" and self.drag is not None and "was" in self.drag:
+            positions = self.drag["positions"]
+            if positions:
+                self._restore(tree)
+                try:
+                    graph_tree.place(tree.gl_scalp, positions)
+                except HelperError as e:
+                    self.report({"ERROR"}, str(e))
+                _push_undo("Align")
+            self.drag = {"done": True}
+            _redraw()
+            return {"RUNNING_MODAL"}
+        if event.type == self.key and event.value == "RELEASE":
+            if self.drag is None:  # tapped: the whole graph framed
+                frame_view(context, everything=True)
+            _redraw()
+            return {"FINISHED"}
+        if event.type in ("RIGHTMOUSE", "ESC") and event.value == "PRESS":
+            if self.drag is not None and "was" in self.drag:
+                self._restore(tree)
+            _redraw()
+            return {"CANCELLED"}
+        return {"RUNNING_MODAL"}
+
+
+class GROOMLAB_OT_graph_canvas_pin_key(bpy.types.Operator):
+    """A pin on the link under the pointer (.)"""
+    bl_idname = "groomlab.graph_canvas_pin_key"
+    bl_label = "Pin Link"
+    bl_options = {"INTERNAL"}
+
+    @classmethod
+    def poll(cls, context):
+        return shows_here(context)
+
+    def invoke(self, context, event):
+        tree = tree_here(context)
+        g = Graph(context, context.region, tree)
+        x, y = event.mouse_region_x, event.mouse_region_y
+        link = g.wire_at(x, y, reach=12.0)
+        if link is None:
+            return {"PASS_THROUGH"}
+        add_pin(tree, g, link, x, y)
+        _redraw()
+        return {"FINISHED"}
+
+
+def frame_view(context, margin=48.0, everything=False):
+    """The view fitted to the selected cards (none, or `everything`: all of them) as the canvas draws
+    them, in the canvas left of the params (F)."""
     region = context.region
     tree = tree_here(context)
     g = Graph(context, region, tree)
-    rects = [b.rect for b in g.boxes if b.node.select] + [r for f, r in g.frames if f.select]
-    rects += [(px - 6, py - 6, 12, 12) for n, (px, py) in g.pins if n.select]
+    rects = [] if everything else [b.rect for b in g.boxes if b.node.select] + [r for f, r in g.frames if f.select]
+    rects += [] if everything else [(px - 6, py - 6, 12, 12) for n, (px, py) in g.pins if n.select]
     if not rects:
         rects = [b.rect for b in g.boxes] + [r for _f, r in g.frames] or [(0, 0, region.width, region.height)]
     x0 = min(r[0] for r in rects) - margin
@@ -1747,7 +2393,8 @@ def draw_header_toggle(layout, context):
 CLASSES = (GROOMLAB_GT_graph_canvas, GROOMLAB_GGT_graph_canvas, GROOMLAB_OT_graph_canvas_press,
            GROOMLAB_OT_graph_canvas_scroll, GROOMLAB_OT_graph_canvas_toggle, GROOMLAB_OT_graph_canvas_search,
            GROOMLAB_MT_graph_canvas_node, GROOMLAB_MT_graph_canvas, GROOMLAB_OT_graph_canvas_context,
-           GROOMLAB_OT_graph_canvas_double, drawn.GROOMLAB_PT_curve_popup)
+           GROOMLAB_OT_graph_canvas_double, GROOMLAB_OT_graph_canvas_align_key, GROOMLAB_OT_graph_canvas_pin_key,
+           drawn.GROOMLAB_PT_curve_popup)
 
 
 def register():
@@ -1764,6 +2411,10 @@ def register():
         _keymaps.append((km, km.keymap_items.new(GROOMLAB_OT_graph_canvas_context.bl_idname, "RIGHTMOUSE", "PRESS", any=True)))
         _keymaps.append((km, km.keymap_items.new(GROOMLAB_OT_graph_canvas_double.bl_idname, "LEFTMOUSE", "DOUBLE_CLICK",
                                                  any=True)))
+        # A held (A+drag aligns, Shift+A the selection, Alt+A spreads it; tapped frames all) and . (a pin).
+        for mods in ({}, {"shift": True}, {"alt": True}):
+            _keymaps.append((km, km.keymap_items.new(GROOMLAB_OT_graph_canvas_align_key.bl_idname, "A", "PRESS", **mods)))
+        _keymaps.append((km, km.keymap_items.new(GROOMLAB_OT_graph_canvas_pin_key.bl_idname, "PERIOD", "PRESS")))
 
 
 def unregister():

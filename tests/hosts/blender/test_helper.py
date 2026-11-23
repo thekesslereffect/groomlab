@@ -2588,6 +2588,85 @@ class AuthoringTest(HelperTestCase):
         self.call("undo")
         self.assertIn(("width", "resample", "strands"), self.links())
 
+    def test_arranged_by_hand(self):
+        """The Graph Editor arranged by hand as Maya's and the app's (arrange.cpp: graph_arrange.h,
+        graph_portals.h, GraphEdit's pass-through outputs): each edit one undo step."""
+        strands, _ = self.evaluate_hash(self.s, 0.05)
+
+        def ui(name):
+            u = self.node(name).get("ui") or {}
+            return u.get("x"), u.get("y")
+
+        def box(name, x, y):
+            return {"name": name, "x": x, "y": y, "w": 176.0, "h": 70.0}
+
+        # Align: two cards in one row, the first's center kept.
+        r = self.call("edit_graph", op="align", mode="top", boxes=[box("noise", 0, 100), box("color", 300, 40)])
+        self.assertEqual(r["undo"]["undoLabel"], "align top")
+        self.assertEqual((ui("noise")[1], ui("color")[1]), (40.0, 40.0))
+        with self.assertRaises(HelperError):
+            self.call("edit_graph", op="align", mode="sideways", boxes=[box("noise", 0, 0), box("color", 9, 9)])
+        # Tidy Layout: every node laid out by its links (L).
+        names = [n["name"] for n in self.graph()["nodes"]]
+        r = self.call("edit_graph", op="tidy", boxes=[box(n, i * 7.0, i * 3.0) for i, n in enumerate(names)], selected=[])
+        self.assertEqual(r["undo"]["undoLabel"], "tidy layout")
+        self.assertLess(ui("scatter")[0], ui("color")[0])  # sources left of what they feed
+        self.assertEqual(self.evaluate_hash(self.s, 0.05)[0], strands)  # layout only
+        # What a Shift+drag carries: the node and everything feeding it.
+        up = self.call("graph_carry", names=["color"], mode="up")
+        self.assertIn("noise", up["nodes"])
+        self.assertIn("color", up["nodes"])
+        self.assertNotIn("color", self.call("graph_carry", names=["noise"], mode="up")["nodes"])
+        # Teleport a link: a portal by its source, an exit by its input; moved, renamed, removed.
+        source = next(c for c in self.graph()["connections"] if c["to"] == "color" and c["input"] == "strands")["from"]
+        r = self.call("edit_graph", op="teleport_link", to="color", input="strands", exitX=10, exitY=20, entryX=30, entryY=40)
+        self.assertEqual((r["exit"], r["undo"]["undoLabel"]), (0, "teleport link"))
+        portal = r["portal"]
+        p = self.graph()["portals"][0]
+        self.assertEqual((p["name"], p["from"], p["exits"][0]["links"]), (portal, source, [{"to": "color", "input": "strands"}]))
+        self.call("edit_graph", op="move_portal", portal=portal, exit=0, x=55, y=66)
+        self.assertEqual((self.graph()["portals"][0]["exits"][0]["x"], self.graph()["portals"][0]["exits"][0]["y"]), (55, 66))
+        self.assertEqual(self.call("edit_graph", op="rename_portal", portal=portal, newName="Look")["name"], "Look")
+        self.assertEqual(self.call("edit_graph", op="add_portal_exit", portal="Look", x=0, y=0)["exit"], 1)
+        # A free dot: fed by a wire dropped on it, then made an exit of the portal (Input Portal).
+        dot = self.call("edit_graph", op="add_dot", x=5, y=5)["name"]
+        self.call("edit_graph", op="set_dot_input", portal=dot, into="Look")
+        self.assertEqual([p["name"] for p in self.graph()["portals"]], ["Look"])
+        self.call("edit_graph", op="remove_portal", portal="Look")
+        self.assertNotIn("portals", self.graph())
+        self.assertIn((source, "color", "strands"), self.links())  # the link stays, drawn as a wire
+        # Duplicate: copies reading what their nodes read.
+        made = self.call("edit_graph", op="duplicate_nodes", names=["color"], dx=40, dy=60)["made"]
+        copy = made[0]["name"]
+        self.assertEqual(made[0]["source"], "color")
+        self.assertIn((source, copy, "strands"), self.links())
+        self.call("undo")
+        self.assertIsNone(self.node(copy))
+        # Pass Through as Output: thru_<input>, its name as shown, off again.
+        self.call("edit_graph", op="set_pass_through", name="color", input="strands", on=True)
+        outs = [o["name"] for o in self.call("node_spec", node="color")["spec"]["outputs"]]
+        self.assertIn("thru_strands", outs)
+        self.call("edit_graph", op="set_pass_through_name", name="color", input="strands", label="Raw")
+        labels = {o["name"]: o.get("label") for o in self.call("node_spec", node="color")["spec"]["outputs"]}
+        self.assertEqual(labels["thru_strands"], "Raw")
+        self.assertFalse(self.call("edit_graph", op="move_pass_through", name="color", input="strands", by=1)["changed"])
+        self.call("edit_graph", op="set_pass_through", name="color", input="strands", on=False)
+        self.assertNotIn("passThrough", self.node("color"))
+        # A shake: two nodes out of the flow, their own link kept.
+        self.assertTrue(self.call("edit_graph", op="detach_group", names=["noise", "color"])["detached"])
+        self.assertIn(("noise", "color", "strands"), self.links())
+        self.call("undo")
+        # The align gesture (A+drag): a row across, the anchor's chain.
+        names = [n["name"] for n in self.graph()["nodes"]]
+        g = self.call("align_gesture", boxes=[box(n, i * 230.0, i * 37.0) for i, n in enumerate(names)], anchor="color",
+                      selected=[], mode="chain", dx=200, dy=0)
+        self.assertEqual(g["axis"], "row")
+        self.assertTrue(g["positions"])
+        # The core's wire and shake, which the add-on draws from its own ports (test_addon_graph checks them).
+        self.assertEqual(len(self.h.call("wire_route", style="smooth", ax=0, ay=0, bx=200, by=50)["steps"]), 1)
+        moves = [[i * 0.05, (30 if i % 2 else -30), 0] for i in range(12)]
+        self.assertTrue(self.h.call("shake_test", moves=moves)["shakes"])
+
     def test_controls_keyed_params_and_maps(self):
         strands, _ = self.evaluate_hash(self.s, 0.05)
         amplitude = self.call("get_param", node="noise", param="amplitude")["value"]

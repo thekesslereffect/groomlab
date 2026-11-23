@@ -10,7 +10,8 @@
 # It drives groomlab-helper (bin/), a separate program (Apache-2.0) it starts and talks to over
 # pipes and shared memory (docs/BLENDER.md). Nothing of the helper is loaded into Blender.
 
-from . import (actions, alphas, blender_theme, cards_view, definitions, display, graph_authoring, graph_canvas, graph_editor,
+from . import (actions, alphas, blender_theme, cards_view, definitions, display, graph_arrange, graph_authoring, graph_canvas,
+               graph_editor,
                graph_tree, graph_ui,
                handlers, icons, menu, ops, palette, photos, pipeline_ops, process, props, themes, tool_ops, tool_props, tools,
                ui,
@@ -34,6 +35,7 @@ def register():
     graph_ui.register()
     graph_editor.register()
     graph_authoring.register()
+    graph_arrange.register()
     graph_canvas.register()
     pipeline_ops.register()
     cards_view.register()
@@ -59,6 +61,7 @@ def unregister():
     palette.unregister()
     tool_ops.unregister()
     graph_canvas.unregister()
+    graph_arrange.unregister()
     graph_authoring.unregister()
     graph_editor.unregister()
     graph_ui.unregister()

@@ -64,6 +64,7 @@
 #include "groomlab/sim_cache.h"
 #endif
 
+#include "arrange.h"
 #include "authoring.h"
 #include "host_space.h"
 #include "pipeline.h"
@@ -2185,6 +2186,8 @@ json Helper::run(const std::string& cmd, const json& args) {
         // The Graph Editor's authoring (Group, exposed params, a node on a link, sliders, keyed
         // params): one undo step each on the session's stack (authoring.cpp).
         if (runGraphAuthoring(s, op, args, r)) return r;
+        // Arranged by hand (Align, Tidy, portals and dots, pass-through outputs...: arrange.cpp).
+        if (runGraphArrange(s, op, args, r)) return r;
         const std::string before = graphText(*s.groom);
         GraphEdit edit(before);
         std::map<std::string, std::string> copied;  // a duplicate's {copy: source}: its Sculpt edits copied
@@ -2347,6 +2350,15 @@ json Helper::run(const std::string& cmd, const json& args) {
                             for (const json& x : c) rgb.push_back(static_cast<int>(std::clamp(std::lround(x.get<double>()), 0L, 255L)));
                             kept["color"] = rgb;
                         }
+                        // The editors' own fields (Maya's and the app's backdrop card): its
+                        // "description", its title's "fontSize", folded ("collapsed").
+                        if (b.contains("description") && b["description"].is_string() && !b["description"].get<std::string>().empty()) {
+                            kept["description"] = b["description"];
+                        }
+                        if (b.contains("fontSize") && b["fontSize"].is_number() && b["fontSize"].get<double>() > 0.0) {
+                            kept["fontSize"] = b["fontSize"];
+                        }
+                        if (b.contains("collapsed") && b["collapsed"].is_boolean() && b["collapsed"].get<bool>()) kept["collapsed"] = true;
                         backdrops.push_back(std::move(kept));
                     }
                     if (backdrops.empty()) {
@@ -2664,6 +2676,7 @@ json Helper::run(const std::string& cmd, const json& args) {
     if (cmd == "tool_catalog") return toolCatalogJson();
     if (isPipelineCommand(cmd)) return runPipelineCommand(cmd, args, blocks, [&]() -> Session& { return session(args); });
     if (isReferenceCommand(cmd)) return runReferenceCommand(cmd, args, [&]() -> Session& { return session(args); });
+    if (isArrangeCommand(cmd)) return runArrangeCommand(cmd, args, [&]() -> Session& { return session(args); });
     if (isAuthoringCommand(cmd)) {
         if (shippedNodeDir().empty()) setShippedNodeDir(shippedNodesDir());
         return runAuthoringCommand(cmd, args, [&]() -> Session& { return session(args); });

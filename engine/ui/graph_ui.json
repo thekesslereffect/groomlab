@@ -108,7 +108,7 @@
       "graph.frameAll",
       "graph.tidy",
       {"ref": "graph/alignMenu"},
-      {"submenu": "Wire Style", "id": "wireStyle", "hosts": ["maya", "app"], "items": [{"generator": "choices", "choices": "wireStyles", "action": "graph.wireStyle"}]},
+      {"submenu": "Wire Style", "id": "wireStyle", "hosts": ["maya", "app", "blender"], "items": [{"generator": "choices", "choices": "wireStyles", "action": "graph.wireStyle"}]},
       "-",
       "graph.up",
       "graph.group",

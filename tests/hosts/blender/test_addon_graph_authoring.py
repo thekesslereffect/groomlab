@@ -451,7 +451,8 @@ class GraphAuthoringTest(unittest.TestCase):
         self.assertEqual(clump.parent, frame)
         # The backdrop menu (rename, color, delete) and the sidebar's.
         entries = ge.draw_backdrop_menu(Layout([]), bpy.context, frame)
-        self.assertEqual(texts_of(entries), [gu.label("backdrop.rename"), "Color", gu.label("backdrop.delete")])
+        self.assertEqual(texts_of(entries), [gu.label("backdrop.rename"), "Color", gu.label("backdrop.fold"),
+                                             gu.label("backdrop.delete")])
         color = next(e for e in entries if e[0] == "menu")
         self.assertEqual(texts_of(gu._submenus[color[2]][1]), ["Blue", "Green", "Purple", "Amber", "Gray"])
         self.assertEqual(bpy.ops.groomlab.graph_backdrop_color(frame=frame.name, color="[110, 80, 130]"), {"FINISHED"})

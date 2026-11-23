@@ -1233,6 +1233,156 @@ class GraphEditorTest(unittest.TestCase):
         self.assertNotIn("Compound", {n["type"] for n in nodes})
         self.assertTrue({"frizzNoise", "width"} <= {n["name"] for n in nodes})
 
+    def test_8g_canvas_arranged_by_hand(self):
+        """PR #107's Graph Editor in Blender (graph_arrange.py, the helper's arrange.cpp): the wire
+        styles and the shake are the core's (their ports checked against the helper's), Align and
+        Tidy lay out the cards as drawn, a teleported link is drawn out of its portal's dots, Pass
+        Through as Output gives the node a port, and a folded backdrop hides its nodes."""
+        import types
+        canvas = importlib.import_module(bu.MODULE + ".graph_canvas")
+        arrange = importlib.import_module(bu.MODULE + ".graph_arrange")
+        session = groom.runtime(self.head).session
+        tree = gt.rebuild(self.head)
+        view2d = types.SimpleNamespace(view_to_region=lambda x, y, clip=False: (100.0 + x, 900.0 + y))
+        region = types.SimpleNamespace(width=4000, height=2000, view2d=view2d)
+
+        def graph():
+            return canvas.Graph(bpy.context, region, tree)
+
+        def laid_out_as_graph():  # every GroomLab node where the graph has it (the pins left as they are)
+            t = gt.tree_of(self.head)
+            for gnode in helper_graph(self.head)["nodes"]:
+                node = gt.node_named(t, gnode["name"])
+                self.assertIsNotNone(node, gnode["name"])
+                x, y = gt.get_location(node)
+                self.assertAlmostEqual(x, gnode["ui"]["x"], 2)
+                self.assertAlmostEqual(-y, gnode["ui"]["y"], 2)
+
+        # The ports drawn every frame: the core's wireRoute and ShakeDetector, through the helper.
+        for style in arrange.WIRE_STYLES:
+            for a, b, below, through in (((0, 0), (300, 80), None, False), ((300, 0), (0, 40), None, False),
+                                         ((300, 0), (0, 40), 120.0, False), ((0, 0), (10, 90), None, True)):
+                args = {"style": style, "ax": a[0], "ay": a[1], "bx": b[0], "by": b[1], "through": through}
+                if below is not None:
+                    args["below"] = below
+                want = [tuple(s) for s in process.call("wire_route", **args)["steps"]]
+                got = arrange.wire_route(style, a[0], a[1], b[0], b[1], below, through)
+                self.assertEqual(len(got), len(want), style)
+                for s, w in zip(got, want):
+                    for u, v in zip(s, w):
+                        self.assertAlmostEqual(u, v, 6)
+        moves = [[i * 0.04, 40.0 * ((i // 2) % 2) - 20.0 + i * 0.5, 0.0] for i in range(40)]
+        shaker = arrange.ShakeDetector()
+        self.assertEqual([i for i, m in enumerate(moves) if shaker.add(*m)],
+                         process.call("shake_test", moves=moves)["shakes"])
+        # The cards the core lays out are the ones drawn.
+        g = graph()
+        for box in g.boxes:
+            w, h = arrange.card_size(box.node)
+            self.assertAlmostEqual(box.rect[2], w * g.k, 3)
+            self.assertAlmostEqual(box.rect[3], h * g.k, 3)
+        # Align (node menu > Align): the selected cards' tops in one row.
+        names = [n.gl_name for n in tree.nodes if gt.ours(n)][:2]
+        gt.align(self.head, "top", arrange.card_boxes(tree, set(names)))
+        tops = {n["name"]: n["ui"]["y"] for n in helper_graph(self.head)["nodes"] if n["name"] in names}
+        self.assertEqual(len(set(tops.values())), 1)
+        tree = gt.tree_of(self.head)
+        self.assertAlmostEqual(-gt.get_location(gt.node_named(tree, names[0]))[1], tops[names[0]], 3)
+        # Tidy Layout (L): every card laid out by its links.
+        gt.tidy(self.head, arrange.card_boxes(tree), [])
+        tree = gt.tree_of(self.head)
+        laid_out_as_graph()
+        # The right-click menus: a wire's (Teleport, a pin, Delete), an input's (Pass Through as Output).
+        tree = gt.tree_of(self.head)
+        g = graph()
+        link = next(l for l in tree.links if gt.ours(l.from_node) and gt.ours(l.to_node))
+        a = g.socket_point(link.from_node, link.from_socket, True)
+        b = g.socket_point(link.to_node, link.to_socket, False)
+        mid = canvas._wire_points(a, b, g.k)[10]
+        if g.wire_at(*mid) == link and g.box_at(*mid) is None:
+            self.assertEqual(canvas._menu_here(tree, g, *mid), arrange.GROOMLAB_MT_graph_canvas_link.__name__)
+            self.assertEqual(arrange.target["link"]["to"], link.to_node.gl_name)
+        self.assertEqual(canvas._menu_here(tree, g, *b), arrange.GROOMLAB_MT_graph_canvas_port.__name__)
+        self.assertEqual(arrange.target["port"], {"node": link.to_node.gl_name, "name": link.to_socket.identifier,
+                                                  "passes": ""})
+        ctx = gu.MenuContext(tree=tree)
+        for path, ids in (("graph/linkMenu", ["link.teleport", "link.pin", "link.delete"]),
+                          ("graph/portalMenu", ["portal.rename", "portal.delete"]), ("graph/portMenu", ["port.passThrough"]),
+                          ("graph/alignMenu", ["align.row", "align.tidy"])):
+            entries = gu.prepare(gu.resolve((gu.get(path) or {}).get("items") if isinstance(gu.get(path), dict)
+                                            else gu.get(path)), ctx, path)
+            shown = [e[6] for e in entries if e[0] == "op"]
+            for i in ids:
+                self.assertIn(i, shown, path)
+        # A Shift+drag carries what feeds the node; Ctrl+drag what it feeds.
+        canvas._press.clear()
+        canvas._press.update(node=link.to_node, shift=True, ctrl=False, alt=False, nodes=None, dots=[])
+        canvas._begin_move(bpy.context, tree)
+        self.assertIn(link.from_node, canvas._press["nodes"])
+        canvas._press.update(node=link.from_node, shift=False, ctrl=True, nodes=None, dots=[])
+        canvas._begin_move(bpy.context, tree)
+        self.assertIn(link.to_node, canvas._press["nodes"])
+        canvas._press.clear()
+        # Teleport a link: drawn out of its portal's dots, not as a wire; the link stays.
+        link = next(l for l in tree.links if gt.ours(l.from_node) and gt.ours(l.to_node))
+        to, into = link.to_node.gl_name, link.to_socket.identifier
+        portal, exit_index = gt.teleport_link(self.head, to, into, (0.0, 0.0), (50.0, 0.0))
+        tree = gt.tree_of(self.head)
+        self.assertEqual([p["name"] for p in gt.portals_of(tree)], [portal])
+        g = graph()
+        self.assertEqual(len(g.dots), 2)
+        link = next(l for l in tree.links if gt.ours(l.to_node) and l.to_node.gl_name == to and l.to_socket.identifier == into)
+        self.assertFalse(g.drawn_as_wire(link))
+        dot = next(d for d, _at in g.dots if d.exit == exit_index)
+        self.assertEqual(g.dot_at(*g.dot_point(dot))[0].portal, portal)
+        gt.remove_portal(self.head, portal)
+        tree = gt.tree_of(self.head)
+        self.assertEqual(gt.portals_of(tree), [])
+        laid_out_as_graph()
+        # Pass Through as Output: a thru_ port of the node's own, its links kept through a rebuild.
+        node = next(n for n in tree.nodes if gt.ours(n) and len(n.inputs) and n.inputs[0].identifier == "strands")
+        name = node.gl_name
+        self.assertTrue(gt.set_pass_through(self.head, name, "strands", True))
+        tree = gt.tree_of(self.head)
+        self.assertIn("thru_strands", [s.identifier for s in gt.node_named(tree, name).outputs])
+        self.assertEqual(gt.pass_through(tree, name), ["strands"])
+        gt.set_pass_through_name(self.head, name, "strands", "Raw")
+        tree = gt.tree_of(self.head)
+        self.assertIn("Raw", [s.name for s in gt.node_named(tree, name).outputs])
+        gt.set_pass_through(self.head, name, "strands", False)
+        tree = gt.tree_of(self.head)
+        self.assertNotIn("thru_strands", [s.identifier for s in gt.node_named(tree, name).outputs])
+        # A backdrop folded: kept in the graph with its description; its nodes hidden, drawn as a strip.
+        authoring = importlib.import_module(bu.MODULE + ".graph_authoring")
+        frame = authoring.add_backdrop(self.head, [name], "Look")
+        with gt.building():
+            frame["gl_description"] = "the hair's look"
+            frame["gl_collapsed"] = True
+        gt.push_positions(self.head, tree)
+        b = next(b for b in helper_graph(self.head)["backdrops"] if b["title"] == "Look")
+        self.assertEqual((b.get("description"), b.get("collapsed")), ("the hair's look", True))
+        g = graph()
+        self.assertNotIn(name, g.by_name)
+        self.assertIn(name, g.hidden)
+        r = dict(g.frames)[frame]
+        self.assertAlmostEqual(r[3], (arrange.backdrop_header(b) + 16.0) * g.k, 3)
+        tree = gt.rebuild(self.head)
+        frame = next(f for f in gt.frames(tree) if f.label == "Look")
+        self.assertTrue(frame.get("gl_collapsed"))
+        with gt.building():
+            tree.nodes.remove(frame)
+        gt.push_positions(self.head, tree)
+        self.assertNotIn("Look", [b["title"] for b in helper_graph(self.head).get("backdrops") or []])
+        # Duplicate (Ctrl+D): a copy reading what its node reads.
+        made = gt.duplicate_nodes(self.head, [name])
+        data = helper_graph(self.head)
+        feeds = {(c["from"], c["input"]) for c in data["connections"] if c["to"] == name}
+        self.assertEqual({(c["from"], c["input"]) for c in data["connections"] if c["to"] == made[0]}, feeds)
+        self.assertIsNotNone(gt.node_named(gt.tree_of(self.head), made[0]))
+        process.call("edit_graph", session=session, op="remove_node", name=made[0])
+        importlib.import_module(bu.MODULE + ".graph").refresh(self.head)
+        self.assertIsNone(gt.node_named(gt.tree_of(self.head), made[0]))
+
     def test_8b_preset_makes_the_maps_it_reads(self):
         # A preset reading a painted map the groom lacks (flow_with_guides' guideAreas): the map is
         # made (black, a vertex map), so the groom evaluates at once; applied again, it is kept.
