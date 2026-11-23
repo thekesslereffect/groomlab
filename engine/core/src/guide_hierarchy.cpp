@@ -88,9 +88,8 @@ FootprintTurn footprintTurn(const HierarchyGuide& parent, const Frame& rootFrame
 }
 
 // Where a plain tube's children root (GuideHierarchy::resolveFollower): around the parent's root
-// in the parent's root frame stood upright on the scalp (turned by the least rotation taking its
-// tangent, the way the parent leaves the scalp, onto the scalp's normal there), not in the frame
-// of the way it leaves. So combing a parent, however it bends at its root, reshapes its
+// in the parent's root frame stood upright on the scalp (its frame up laid across the scalp's
+// normal there), not in the frame of the way it leaves. So combing a parent, however it bends at its root, reshapes its
 // children but never slides their roots across the scalp (nor binds the strands round them again:
 // Interpolate's binding follows guide roots). For a parent leaving along the normal the two frames
 // are one: nothing moves. A child's shift onto its anchored root fades out along it as the snap
@@ -106,17 +105,29 @@ struct RootAnchor {
     }
 };
 
-RootAnchor rootAnchor(const HierarchyGuide& parent, const Frame& rootFrame) {
+RootAnchor rootAnchor(const HierarchyGuide& parent) {
     RootAnchor out;
     if (parent.tube.shaped() || !(parent.rootNormal.length() > 0.0f) || parent.points.size() < 2) return out;
+    // Its frame up as a brush first found it (anchorUp: kept in the scalp's frame and saved, so it
+    // stays to the bit however the parent is reshaped after; nothing of it is an earlier
+    // evaluation's), laid across the scalp's normal there.
     const Vec3f normal = parent.rootNormal.normalized();
-    if (rootFrame.tangent.dot(normal) < -1.0f + 1e-4f) return out;  // (straight into the scalp: no least turn)
-    const Rotation stand(rootFrame.tangent, normal);
+    const Vec3f frameUp = parent.anchorUp.length() > 0.0f ? parent.anchorUp : parent.frameUp;
+    const Vec3f up = frameUp - normal * frameUp.dot(normal);
     out.upright.tangent = normal;
-    out.upright.normal = stand(rootFrame.normal);
-    out.upright.binormal = stand(rootFrame.binormal);
+    out.upright.normal = up.length() > 1e-6f ? up.normalized() : anyPerpendicular(normal);
+    out.upright.binormal = normal.cross(out.upright.normal);
     out.active = true;
     return out;
+}
+
+// A primary about to be reshaped (setPoints, pose): its frame up as it is now, kept as the one its
+// plain tube's children root round (HierarchyGuide::anchored), once. Bound guides only (its frame
+// up in its root's scalp frame is known).
+void anchorFrameUp(HierarchyGuide& g) {
+    if (g.anchored || g.followsParent() || g.rootLocal.empty()) return;
+    g.anchored = true;
+    g.anchorUpLocal = g.frameUpLocal;
 }
 
 // A shaped tube's roll on the scalp (TubeProfile::roll): per guide point, the angle its sections
@@ -925,20 +936,9 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     // A plain tube's children rooted round its root as it stands on the scalp (rootAnchor), not as
     // it leaves it: the root's place in the parent's root frame laid in the upright one.
     if (!slice && scalp && scalp->triangleCount() > 0 && n >= 2) {
-        const RootAnchor anchor = rootAnchor(parent, frames[0]);
-        if (anchor.active && scalp->contains(parent.root)) {
-            // Worked out once for these offsets and this parent root, then kept (anchorCache).
-            const Frame onScalp = rootFrame(*scalp, parent.root);
-            auto& cache = child.anchorCache;
-            const auto bits = [](const void* a, const void* b, std::size_t n) { return std::memcmp(a, b, n) == 0; };
-            if (!cache.valid || !bits(&cache.offset, &rootOffset, sizeof(Vec3f)) || cache.parent.face != parent.root.face ||
-                !bits(&cache.parent.u, &parent.root.u, sizeof(float)) || !bits(&cache.parent.v, &parent.root.v, sizeof(float))) {
-                cache.valid = true;
-                cache.offset = rootOffset;
-                cache.parent = parent.root;
-                cache.local = onScalp.toLocal(anchor.upright.toWorld(rootOffset));
-            }
-            const Vec3f shift = parent.points[0] + onScalp.toWorld(cache.local) - child.points[0];
+        const RootAnchor anchor = rootAnchor(parent);
+        if (anchor.active) {
+            const Vec3f shift = parent.points[0] + anchor.upright.toWorld(rootOffset) - child.points[0];
             for (std::size_t i = 0; i < n; ++i) child.points[i] += shift * anchor.fade(paramAt(i, n));
         }
     }
@@ -998,7 +998,7 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
         shift = onFoot - foot.back(onFoot);
     }
     // ... and a plain tube's child's anchored root shift (rootAnchor) taken out the same way.
-    const RootAnchor anchor = n >= 2 && !slice ? rootAnchor(parent, frames[0]) : RootAnchor{};
+    const RootAnchor anchor = n >= 2 && !slice ? rootAnchor(parent) : RootAnchor{};
     if (anchor.active) {
         // (Where resolveFollower placed the root before anchoring it: the same offsets in the
         // parent's own frame, slid along its curve where the child follows it so.)
@@ -1111,7 +1111,10 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
     // What its children and its tube read of the scalp: the normal at its root (footprintTurn)
     // and, for a shaped tube, its sections' roll (TubeProfile::roll).
     if (!scalp || scalp->triangleCount() == 0) return;
-    if (scalp->contains(g.root)) g.rootNormal = scalp->normal(g.root);
+    if (scalp->contains(g.root)) {
+        g.rootNormal = scalp->normal(g.root);
+        g.anchorUp = g.anchored ? rootFrame(*scalp, g.root).toWorld(g.anchorUpLocal) : g.frameUp;  // (rootAnchor)
+    }
     if (isRootTube(g.tube, 0) && g.points.size() >= 2 && scalp->contains(g.root)) {
         // A root-first tube, or a slice of one (a tube of its hierarchy with a root shape of its own:
         // root_tubes.h addTubeLevel): its footprint is fixed on the scalp (TubeSpine::setRootOnScalp), so its
@@ -1520,7 +1523,8 @@ void GuideHierarchy::pose(GuideId id, std::vector<Vec3f> points) {
     invalidateHash();
     HierarchyGuide* g = mutableGuide(id);
     if (!g || points.size() < 2) return;
-    // Carry the frame's up vector along with the root direction.
+    // Carry the frame's up vector along with the root direction (its children's roots anchored first).
+    anchorFrameUp(*g);
     if (g->points.size() >= 2) g->frameUp = rotateBetween(g->frameUp, rootTangent(g->points), rootTangent(points));
     g->points = std::move(points);
 }
@@ -1530,6 +1534,7 @@ void GuideHierarchy::pose(GuideId id, std::vector<Vec3f> points, const Vec3f& fr
     HierarchyGuide* g = mutableGuide(id);
     if (!g || points.size() < 2) return;
     g->frameUp = frameUp;
+    g->anchored = false;  // (its frame given anew)
     g->points = std::move(points);
 }
 
@@ -1716,7 +1721,8 @@ std::vector<GuideId> GuideHierarchy::mirrorGroup(GroupId groupId, int axis, floa
         HierarchyGuide* c = mutableGuide(copy);
         c->attributes = src.attributes;
         c->pointAttributes = src.pointAttributes;
-        c->frameUp = mirrorVector(src.frameUp, axis);  // its frames, and its children, mirror too
+        c->frameUp = mirrorVector(src.frameUp, axis);
+        c->anchored = false;  // its frames, and its children, mirror too
         created.push_back(copy);
     }
     return created;
@@ -1743,6 +1749,7 @@ std::vector<GuideId> GuideHierarchy::mirrorAll(int axis, float center, bool from
         c->attributes = src.attributes;
         c->pointAttributes = src.pointAttributes;
         c->frameUp = mirrorVector(src.frameUp, axis);
+        c->anchored = false;
         created.push_back(copy);
         if (src.locked) lock(copy);
         auto kids = childrenById.find(id);
@@ -1867,6 +1874,7 @@ GuideHierarchy::MirrorShapesResult GuideHierarchy::mirrorShapes(const Mirror& mi
         t->attributes = src.attributes;
         t->pointAttributes = src.pointAttributes;
         t->frameUp = up;
+        t->anchored = false;
         t->tube = src.tube;
         t->ownSegments = src.ownSegments;
         if (!t->isChild() || t->locked) t->rootLocal.clear();  // bound to the scalp again at the next evaluate
@@ -1956,6 +1964,7 @@ void GuideHierarchy::transfer(const ScalpMapping& mapping) {
             const Vec3f n1 = target.normal.normalized();
             for (Vec3f& p : g.points) p = target.position + rotateBetween((p - oldRoot) * scale, n0, n1);
             g.frameUp = rotateBetween(g.frameUp, n0, n1);
+            g.anchored = false;  // (another scalp: its frame there as carried)
             g.root = target.root;
             // A root tube's outline carried as its guide is, its CVs set on the new scalp.
             for (StrandRoot& cv : g.rootOutline) {
@@ -1971,6 +1980,7 @@ void GuideHierarchy::transfer(const ScalpMapping& mapping) {
             const float scale = mapping.shapeScale(m);
             for (Vec3f& p : g.points) p = m.target.position + m.rotation * ((p - oldRoot) * scale);
             g.frameUp = m.rotation * g.frameUp;
+            g.anchored = false;
             g.root = m.target.root;
             for (StrandRoot& cv : g.rootOutline) {  // (each CV mapped as a root is)
                 if (!from.contains(cv)) continue;
@@ -2020,6 +2030,7 @@ void GuideHierarchy::setPoints(GuideId id, std::vector<Vec3f> points) {
     // A primary's frame carried with its root's turn (as pose carries it): a brush tipping the guide
     // over moves its tube with it, not twisted round it (frameUp kept as it is would be squared
     // onto the new root direction, which turns it the more the root tips).
+    anchorFrameUp(*g);  // (before its frame up turns: its children stay where they root)
     if (!g->followsParent() && g->points.size() >= 2 && points.size() >= 2) {
         const Vec3f from = rootTangent(g->points), to = rootTangent(points);
         const Vec3f up = g->frameUp - from * g->frameUp.dot(from);
@@ -2552,6 +2563,7 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
         h = hashCombine(h, g.rootLocal.size());
         for (const Vec3f& l : g.rootLocal) h = hashVec(h, l);
         h = hashVec(h, g.frameUpLocal);
+        if (g.anchored) h = hashVec(hashCombine(h, 0xA9C4u), g.anchorUpLocal);
     }
     return h;
 }
@@ -2620,6 +2632,7 @@ json guideToJson(const HierarchyGuide& g) {
             j["rootLocal"] = vecsToJson(g.rootLocal);
             j["frameUpLocal"] = {g.frameUpLocal.x, g.frameUpLocal.y, g.frameUpLocal.z};
         }
+        if (g.anchored) j["anchorUp"] = {g.anchorUpLocal.x, g.anchorUpLocal.y, g.anchorUpLocal.z};
     }
     return j;
 }
@@ -2703,6 +2716,11 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
     if (j.contains("frameUpLocal")) {
         const json& ul = j.at("frameUpLocal");
         g.frameUpLocal = {ul.at(0).get<float>(), ul.at(1).get<float>(), ul.at(2).get<float>()};
+    }
+    if (j.contains("anchorUp")) {
+        const json& au = j.at("anchorUp");
+        g.anchorUpLocal = {au.at(0).get<float>(), au.at(1).get<float>(), au.at(2).get<float>()};
+        g.anchored = true;
     }
     return g;
 }
@@ -3167,6 +3185,7 @@ std::vector<GuideId> GuideHierarchy::pasteGuidesJson(const std::string& text, Gr
         c->attributes = src.attributes;
         c->pointAttributes = src.pointAttributes;
         c->frameUp = src.frameUp;
+        c->anchored = false;
         c->ownSegments = src.ownSegments;
         fitLayers(*c);
         if (src.locked) lock(copy);

@@ -95,22 +95,23 @@ struct HierarchyGuide {
     // cleared by setPoints so the next evaluate re-binds.
     std::vector<Vec3f> rootLocal;
     Vec3f frameUpLocal{1, 0, 0};
+    // A primary's frame up as it was when a brush first reshaped it (setPoints, pose), in its
+    // root's scalp frame (its frameUpLocal then), saved ("anchorUp"): the frame its plain tube's
+    // children root round (guide_hierarchy.cpp rootAnchor). Reshaping it carries its frame up
+    // round with its root's turn; this stays, so its children's roots never turn on the scalp, not
+    // by a rounding. Unset (anchored false: never reshaped, or its frame set anew, as a mirror or a
+    // transfer sets it): its frame up as it is.
+    bool anchored = false;
+    Vec3f anchorUpLocal;
+    // That frame up in the world (anchorUpLocal on the scalp, else frameUp), from the last evaluate
+    // on a scalp. Not stored, not hashed.
+    Vec3f anchorUp;
     // Its frame is laid across the scalp at the next evaluate (setTube gave its tube a shape; a
     // new primary with a shaped tube is laid so when first rooted). Not stored, not hashed.
     bool layFrame = false;
     // The scalp's normal at its root, from the last evaluate on a scalp (zero before): where its
     // children root on a shaped tube's footprint (generateChildren). Not stored, not hashed.
     Vec3f rootNormal;
-    // A following child's root as last anchored round its parent's root (resolveFollower,
-    // rootAnchor): where in the parent root's scalp frame it sits, for the root offset and the
-    // parent root it was worked out from. Kept while both stay the same to the bit, so combing the
-    // parent never moves the child's root, not even by a rounding. Not stored, not hashed.
-    struct RootAnchorCache {
-        bool valid = false;
-        Vec3f offset;       // the root's offset in the parent's root section (across, across, along)
-        StrandRoot parent;  // the parent's root on the scalp
-        Vec3f local;        // the anchored root in that root's scalp frame (rootFrame)
-    } anchorCache;
     // A root-first tube's (or a slice of one's: a tube of its hierarchy taking a root shape of its
     // own) direction across the scalp at its root (ScalpMesh::acrossAt), from the last evaluate on
     // a scalp (zero before): what lays its footprint on the scalp where it draws (display.h, issue

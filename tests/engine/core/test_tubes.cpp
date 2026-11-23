@@ -1421,7 +1421,7 @@ TEST(TubeChildren, ChildrenOfASlantedTubeSpreadOverItsFootprint) {
 }
 
 TEST(TubeChildren, CombingAParentLeavesItsChildrensRootsWhereTheyAre) {
-    // A parent bent at its root (a comb dab, pose) reshapes its children, but their roots stay put
+    // A parent bent at its root (a comb dab: setPoints) reshapes its children, but their roots stay put
     // on the scalp to the bit: Interpolate binds no strand again for them (its binding follows
     // guide roots). A parent standing up or lying low alike.
     for (const float degrees : {80.0f, 25.0f}) {
@@ -1451,8 +1451,8 @@ TEST(TubeChildren, CombingAParentLeavesItsChildrensRootsWhereTheyAre) {
                 bent[i] = bent[0] + Vec3f(d.x * std::cos(turn) - d.z * std::sin(turn), d.y * std::cos(0.3f * turn) + 0.02f * i,
                                           d.x * std::sin(turn) + d.z * std::cos(turn));
             }
-            h.pose(parent, bent);
-            h.evaluateDescendants(scalp.get(), {parent});
+            h.setPoints(parent, bent);  // (as a brush's stamp sets them)
+            h.evaluate(scalp.get());
             for (std::size_t k = 0; k < ids.size(); ++k) {
                 const std::vector<Vec3f>& now = h.guide(ids[k])->points;
                 EXPECT_EQ(now.front(), before[k].front()) << degrees << " degrees, dab " << dab << ", child " << k;
