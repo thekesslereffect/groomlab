@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "size": 20.0,
+  "about": {"title": "Feathered fur", "description": "Stylized fur in soft feather-shaped tufts, one per guide (comb a guide to aim its feather): each tuft is clumped onto its guide, laid flat and trimmed by the Clump's clumpDist to a rounded point. Edit the shape node's keep expression for sharper or blunter tips.", "category": "Fur"},
+  "exposed": [
+    {"node": "feathers", "param": "strength", "name": "featherStrength"},
+    {"node": "feathers", "param": "flatness", "name": "featherFlatness"},
+    {"node": "noise", "param": "amplitude", "name": "fluff"},
+    {"node": "color", "param": "melanin", "name": "melanin"},
+    {"node": "width", "param": "width", "name": "width"}
+  ],
+  "nodes": [
+    {"name": "scalp", "type": "Scalp", "ui": {"x": 0, "y": 0}},
+    {"name": "guides", "type": "Guides", "ui": {"x": 0, "y": 180}},
+    {"name": "scatter", "type": "Scatter", "params": {"density": 220.0, "length": 1.6}, "ui": {"x": 240, "y": 0}},
+    {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
+    {"name": "feathers", "type": "Clump", "params": {"centersFrom": "inputCurves", "strength": 0.95, "profile": [[0, 0.35], [0.45, 0.85], [1, 1]], "flatness": 0.85, "flatAlong": "surface", "strengthRandom": 0.15, "distChannel": "clumpDist", "sideChannel": "clumpSide"}, "ui": {"x": 720, "y": 0}},
+    {"name": "shape", "type": "Length", "params": {"keep": {"expression": "# full length down a feather's middle, shorter toward its sides: a rounded tip\n1 - $clumpDist ^ 2", "min": 0.3, "max": 1.0}, "fraction": 1.0, "randomness": 0.08}, "ui": {"x": 960, "y": 0}},
+    {"name": "noise", "type": "Noise", "params": {"amplitude": 0.01, "frequency": 4.0}, "ui": {"x": 1200, "y": 0}},
+    {"name": "color", "type": "HairColor", "params": {"melanin": 0.45, "redness": 0.55, "melaninRandom": 0.05, "specular": 0.3, "roughness": 0.55}, "ui": {"x": 1440, "y": 0}},
+    {"name": "width", "type": "Width", "params": {"width": 0.03, "profile": [[0, 1], [0.7, 0.85], [1, 0.35]], "randomness": 0.2}, "ui": {"x": 1680, "y": 0}},
+    {"name": "resample", "type": "Resample", "params": {"segments": 6}, "ui": {"x": 1920, "y": 0}},
+    {"name": "output", "type": "Output", "ui": {"x": 2160, "y": 0}}
+  ],
+  "connections": [
+    {"from": "scalp", "to": "scatter", "input": "scalp"},
+    {"from": "scatter", "to": "interpolate", "input": "strands"},
+    {"from": "guides", "to": "interpolate", "input": "guides"},
+    {"from": "interpolate", "to": "feathers", "input": "strands"},
+    {"from": "guides", "to": "feathers", "input": "centers"},
+    {"from": "feathers", "to": "shape", "input": "strands"},
+    {"from": "shape", "to": "noise", "input": "strands"},
+    {"from": "noise", "to": "color", "input": "strands"},
+    {"from": "color", "to": "width", "input": "strands"},
+    {"from": "width", "to": "resample", "input": "strands"},
+    {"from": "resample", "to": "output", "input": "strands"}
+  ],
+  "output": "output"
+}

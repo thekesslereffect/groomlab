@@ -968,6 +968,20 @@ public:
                       "is; empty: none). Chained Clumps each want their own (lockId, then clumpId), for a Twist, Cards or "
                       "HairColor's clumpShare to follow the one it names"}
                 .writesChannel(),
+            ParamSpec{"distChannel", std::string(),
+                      "Per-strand channel receiving how far across its clump the strand is rooted: 0 at its center, 1 "
+                      "halfway to the next center and past it (along the scalp, by root). Name it (clumpDist) and a Length's keep of "
+                      "1 - $clumpDist^2 trims each clump to a rounded tip, 1 - $clumpDist to a point: fur shaped into "
+                      "feathers or tufts (empty: none)"}
+                .writesChannel()
+                .adv(),
+            ParamSpec{"sideChannel", std::string(),
+                      "Per-strand channel receiving which side of its clump the strand is rooted on, -1 to 1, 0 down its "
+                      "middle, scaled as distChannel: with guides as centers, left and right of the way its guide points; "
+                      "otherwise across the scalp's U at the center (lopsided feathers, a notch with abs(clumpSide); name "
+                      "it clumpSide, say; empty: none)"}
+                .writesChannel()
+                .adv(),
             notAnimatable({"seed", std::int64_t{0}, "Random seed for the centers it picks and the per-clump variation"}).adv(),
             {"respectParts", true, "Never clump toward a center on the other side of a part"},
             ParamSpec{"regionChannel", std::string("region"),
@@ -1123,6 +1137,9 @@ private:
         std::uint64_t regionHash = 0;
         std::vector<float> centerRegions;
         bool regionsFromStrands = false;
+        // Per center: the way across it its strands' sideChannel was measured by (a dab turning a
+        // guide places all its strands again).
+        std::vector<Vec3f> across;
     };
     // A plan of its own centers (planClumpCenters: the even centers and their ways to their random
     // spots). Kept by pickKey, so a run that reads the same picks nothing again (three passes over
@@ -1720,6 +1737,10 @@ private:
         phase.next("clump.copyStrands");
         auto out = std::make_shared<StrandSet>(*in);
         std::vector<float>* clumpIds = nullptr;
+        // Where across its clump each strand is rooted (distChannel, sideChannel).
+        const std::string distName = params().getString("distChannel"), sideName = params().getString("sideChannel");
+        std::vector<float>* distValues = nullptr;
+        std::vector<float>* sideValues = nullptr;
         std::shared_ptr<std::vector<std::uint32_t>> assigned;
         if (last) {
             // The strands left alone as the last result made them: its points, clump IDs and centers.
@@ -1728,11 +1749,15 @@ private:
                 clumpIds = out->copyStrandChannelFrom(channel, *last);
                 if (!clumpIds) return false;
             }
+            if (!distName.empty() && !(distValues = out->copyStrandChannelFrom(distName, *last))) return false;
+            if (!sideName.empty() && !(sideValues = out->copyStrandChannelFrom(sideName, *last))) return false;
             assigned = std::make_shared<std::vector<std::uint32_t>>(*made.assigned);
         } else {
             // Every point written: each strand's copied in from the input before it is clumped.
             out->overwritePositions();
             clumpIds = channel.empty() ? nullptr : &out->addStrandChannel(channel, -1.0f);
+            if (!distName.empty()) distValues = &out->addStrandChannel(distName, 0.0f);
+            if (!sideName.empty()) sideValues = &out->addStrandChannel(sideName, 0.0f);
             assigned = std::make_shared<std::vector<std::uint32_t>>(out->strandCount(), kNoCenter);
         }
 
@@ -1907,8 +1932,107 @@ private:
             }
             *changed = StrandChanges::listed(std::move(dirty));
         }
+        // Where across its clump each strand is rooted: its root's offset from its center's root along
+        // the scalp (the normal there taken out), over the clump's reach (its farthest strand's), and
+        // which side of the way the center leaves the scalp. In full each clump's reach and across
+        // are found and kept; a dab places the strands it makes again by the kept ones.
+        std::vector<float> reach;
+        std::vector<Vec3f> acrossOf;
+        if ((distValues || sideValues) && !vanes.active()) {
+            phase.next("clump.place");
+            const std::vector<Vec3f>& normalsOf = *normalsMade;
+            auto offsetOf = [&](std::size_t s, std::uint32_t c) {
+                const Vec3f q = queries ? (*queries)[s] : queryOf(s);
+                const Vec3f n = normalsOf[c].length() > 0.0f ? normalsOf[c].normalized() : Vec3f{0.0f, 1.0f, 0.0f};
+                const Vec3f d = q - roots[c];
+                return d - n * d.dot(n);
+            };
+            // The way across each center. Guides as centers (inputCurves): across the way its guide
+            // points (root to tip, laid on the scalp), so a feather's sides are its guide's left and
+            // right (a dab moving a guide makes all its strands again). Otherwise across the scalp's U
+            // there (its UV layout; none, any way along the scalp): the surface's, so a brush moving
+            // an axis strand never turns it.
+            const bool alongGuides = params().getString("centersFrom") == "inputCurves";
+            const std::vector<Vec3f>& centerCurves = *curvesMade;
+            acrossOf.assign(roots.size(), Vec3f());
+            for (std::size_t c = 0; c < roots.size(); ++c) {
+                const Vec3f n = normalsOf[c].length() > 0.0f ? normalsOf[c].normalized() : Vec3f{0.0f, 1.0f, 0.0f};
+                Vec3f u;
+                if (alongGuides && samples >= 2) {
+                    u = centerCurves[c * samples + samples - 1] - centerCurves[c * samples];
+                } else {
+                    const StrandRoot& at = used[c]->root;
+                    if (scalp && at.face >= 0 && static_cast<std::size_t>(at.face) < scalp->triangleCount()) u = scalp->uvTangent(at.face);
+                }
+                u = u - n * u.dot(n);
+                acrossOf[c] = u.length() > 1e-8f ? n.cross(u).normalized() : anyPerpendicular(n);
+            }
+            // Each clump's reach: half the way to the nearest other center (by roots), so it is the
+            // centers' alone: a thinned preview, a render and a dab all place a strand alike. With
+            // one center, its farthest strand's.
+            reach.assign(roots.size(), 0.0f);
+            if (roots.size() >= 2 && index) {
+                parallelFor(0, roots.size(), [&](std::size_t c) {
+                    std::array<std::size_t, 2> near{};
+                    std::array<float, 2> d2{};
+                    if (index->kNearest(roots[c], 2, near.data(), d2.data()) >= 2) reach[c] = 0.5f * std::sqrt(d2[1]);
+                }, 256);
+            } else if (roots.size() == 1) {
+                for (std::size_t s = 0; s < assigned->size(); ++s) {
+                    if ((*assigned)[s] == 0 && in->strandPointCount(s) > 0) reach[0] = std::max(reach[0], offsetOf(s, 0).length());
+                }
+            }
+            auto place = [&](std::size_t s) {
+                const std::uint32_t c = (*assigned)[s];
+                if (c == kNoCenter || c >= reach.size() || in->strandPointCount(s) == 0) {
+                    if (distValues) (*distValues)[s] = 0.0f;
+                    if (sideValues) (*sideValues)[s] = 0.0f;
+                    return;
+                }
+                const Vec3f d = offsetOf(s, c);
+                const float r = reach[c] > 1e-8f ? reach[c] : 1.0f;
+                if (distValues) (*distValues)[s] = std::min(1.0f, d.length() / r);
+                if (sideValues) (*sideValues)[s] = std::clamp(d.dot(acrossOf[c]) / r, -1.0f, 1.0f);
+            };
+            if (last) {
+                for (const std::uint32_t s : changed->strands) place(s);
+                // A center turned (a guide combed): its strands' sides again, every one of them.
+                if (sideValues) {
+                    if (made.across.size() != acrossOf.size()) return false;
+                    std::vector<char> turned(acrossOf.size(), 0);
+                    bool any = false;
+                    for (std::size_t c = 0; c < acrossOf.size(); ++c) {
+                        if (std::memcmp(&acrossOf[c], &made.across[c], sizeof(Vec3f)) != 0) turned[c] = any = true;
+                    }
+                    if (any) {
+                        std::vector<char> listed(assigned->size(), 0);
+                        for (const std::uint32_t s : changed->strands) listed[s] = 1;
+                        std::vector<std::uint32_t> more;
+                        for (std::size_t s = 0; s < assigned->size(); ++s) {
+                            const std::uint32_t c = (*assigned)[s];
+                            if (!listed[s] && c != kNoCenter && turned[c]) {
+                                place(s);
+                                more.push_back(static_cast<std::uint32_t>(s));
+                            }
+                        }
+                        if (!more.empty()) {
+                            std::vector<std::uint32_t> all = changed->strands;
+                            all.insert(all.end(), more.begin(), more.end());
+                            std::sort(all.begin(), all.end());
+                            *changed = StrandChanges::listed(std::move(all));
+                        }
+                    }
+                }
+            } else {
+                parallelFor(0, assigned->size(), place, 4096);
+            }
+        }
         phase.next("clump.keep");
         keep();
+        {
+            const std::lock_guard<std::mutex> lock(madeMutex_);
+            made_.across = std::move(acrossOf);
+        }
         *result = StrandsPtr(out);
         return true;
     }

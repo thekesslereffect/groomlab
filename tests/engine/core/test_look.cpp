@@ -645,6 +645,75 @@ TEST(Clump, PullsTipsOntoTheirCenter) {
     EXPECT_NEAR(maxDisplacement(*lg.eval(clump), *before), 0.0f, 1e-6f);
 }
 
+TEST(Clump, SaysWhereAcrossItsClumpEachStrandGrowsSoALengthCanShapeFeathers) {
+    // clumpDist: 0 at the center, 1 at the clump's farthest root (along the scalp); clumpSide: the
+    // same signed across the clump. A Length keeping 1 - clumpDist^2 of each strand trims every
+    // clump to a rounded tip: fur shaped into feathers.
+    LookGraph lg;
+    auto centers = std::make_shared<GuideSet>();
+    centers->add(1, test::straightCurve({0.25f, 0, 0.5f}, {0.2f, 1, 0}, 8));
+    centers->add(2, test::straightCurve({0.75f, 0, 0.5f}, {-0.2f, 1, 0}, 8));
+    lg.ext.set("centers", GuidesPtr(centers), 7);
+    const NodeId src = lg.g.addNode(op::kGuides);
+    lg.g.node(src).params().set("input", std::string("centers"));
+    const NodeId clump = lg.add(op::kClump, lg.scatter);
+    lg.g.connect(src, clump, 1);
+    lg.g.node(clump).params().set("centersFrom", std::string("inputCurves"));
+    EXPECT_EQ(lg.eval(clump)->strandChannel("clumpDist"), nullptr);  // (none unless named)
+    lg.g.node(clump).params().set("distChannel", std::string("clumpDist"));
+    lg.g.node(clump).params().set("sideChannel", std::string("clumpSide"));
+    const StrandsPtr out = lg.eval(clump);
+    const auto* dist = out->strandChannel("clumpDist");
+    const auto* side = out->strandChannel("clumpSide");
+    ASSERT_NE(dist, nullptr);
+    ASSERT_NE(side, nullptr);
+    const std::vector<int> centerOf = centerIndices(lg, clump, out);
+    std::map<int, float> least, most;
+    bool left = false, right = false;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const int c = centerOf[s];
+        const float d = (*dist)[s], sd = (*side)[s];
+        EXPECT_GE(d, 0.0f);
+        EXPECT_LE(d, 1.0f);
+        EXPECT_LE(std::abs(sd), d + 1e-5f);  // (a share of the same offset)
+        left = left || sd < -0.2f;
+        right = right || sd > 0.2f;
+        least[c] = least.count(c) ? std::min(least[c], d) : d;
+        most[c] = most.count(c) ? std::max(most[c], d) : d;
+    }
+    ASSERT_EQ(most.size(), 2u);
+    for (const auto& [c, d] : most) {
+        EXPECT_NEAR(d, 1.0f, 1e-5f) << c;  // each clump's farthest strand
+        EXPECT_LT(least[c], 0.3f) << c;    // and some near its middle
+    }
+    EXPECT_TRUE(left && right);  // both sides of the clumps
+
+    // The feather: trimmed by how far across, the middle longest.
+    const NodeId trim = lg.add(op::kLength, clump);
+    lg.g.node(trim).params().set("keep", ParamValue(MapRef{MapRef::Source::Expression, "1 - $clumpDist ^ 2"}));
+    const StrandsPtr shaped = lg.eval(trim);
+    auto lengthOf = [&](const StrandSet& set, std::size_t s) {
+        float l = 0.0f;
+        const Vec3f* p = set.strandPoints(s);
+        for (std::size_t i = 1; i < set.strandPointCount(s); ++i) l += (p[i] - p[i - 1]).length();
+        return l;
+    };
+    std::size_t middle = SIZE_MAX, edge = SIZE_MAX;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        if (middle == SIZE_MAX || (*dist)[s] < (*dist)[middle]) middle = s;
+        if (edge == SIZE_MAX || (*dist)[s] > (*dist)[edge]) edge = s;
+    }
+    EXPECT_LT(lengthOf(*shaped, edge), 0.2f * lengthOf(*out, edge) + 1e-4f);
+    EXPECT_GT(lengthOf(*shaped, middle), 0.85f * lengthOf(*out, middle));
+
+    // Empty names: no channels.
+    lg.g.node(clump).params().set("distChannel", std::string());
+    lg.g.node(clump).params().set("sideChannel", std::string());
+    const StrandsPtr bare = lg.eval(clump);
+    EXPECT_EQ(bare->strandChannel("clumpDist"), nullptr);
+    EXPECT_EQ(bare->strandChannel("clumpSide"), nullptr);
+}
+
 TEST(Clump, StrandStrengthRandomLetsEachStrandHangLooseItsOwnWay) {
     // One center; at strength 1 every tip lands on it. With strandStrengthRandom each strand's pull
     // is scaled down by its own random share: tips spread off the center, each strand the same

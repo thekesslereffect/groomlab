@@ -359,6 +359,26 @@
    "strands": 5073,
    "widths": "05cd5edd40fb596e"
   },
+  "feathered_fur": {
+   "channels": {
+    "strand.clumpDist": "eb31aed6f9b01555",
+    "strand.clumpId": "52ef520706f86d72",
+    "strand.clumpSide": "d59197236f2c61f3",
+    "strand.colorB": "e7b32b1e012d8da7",
+    "strand.colorG": "63780c1577c9a63c",
+    "strand.colorR": "e1d13a3420fd050b",
+    "strand.melanin": "7fc8039c088091c4",
+    "strand.melaninRedness": "76560ccb15cea3d8",
+    "strand.roughness": "76560ccb15cea3d8"
+   },
+   "everything": "d21e6fdc273337f6",
+   "ids": "3ec2cd84e1cd7985",
+   "points": 95991,
+   "positions": "e256fbe235b1a27f",
+   "roots": "13f596b8962eabe9",
+   "strands": 13713,
+   "widths": "fce3f80fe6c72624"
+  },
   "feathers_afterfeather": {
    "channels": {
     "point.colorB": "50c3d0f8e894ea79",
