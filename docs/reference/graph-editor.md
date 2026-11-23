@@ -276,7 +276,9 @@ The **Graph Editor** is a dockable node editor for the selected groom:
 - **Undo:** every graph edit is one undo step, layout too: a node move, a backdrop moved, resized
   or folded, a pin or portal moved, Align. Layout steps write the graph with nothing to evaluate.
 - **By hand** (graph_arrange.h, the app's too): Shift+drag a node to move it with everything
-  upstream (Shift+click without a move adds it to the selection); shake a node while dragging to
+  downstream (nodesWithDownstream), Ctrl+drag with everything upstream (nodesWithUpstream), neither
+  through a portal's exit, the pins and dots between moved nodes carried too (carriedWith;
+  Shift+click without a move adds it to the selection, Ctrl+click toggles it); shake a node while dragging to
   take it out of its links (Detach); Shift+drag from an output to pick up all its links and drop
   them on another output (GraphEdit::moveOutputLinks); Tab with a link selected adds the node into
   it; Ctrl+V pastes at the cursor; Ctrl+D's copies read what their nodes read
@@ -299,7 +301,14 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   (its entry) the portal.
 - **Pass Through as Output** (an input port's menu): the node gets a `thru_<input>` output handing
   that input on ("passThrough" on the node; links reading it read what feeds the input when the
-  graph loads: resolvePassThrough).
+  graph loads: resolvePassThrough). The output's menu > Rename Output names it as shown
+  ("passThroughNames" on the node, the spec output's "label"; GraphEdit::setPassThroughName).
+- **Round 4** (both hosts): Houdini's align gestures, A held and a node dragged from
+  (graph_arrange.h alignGesture: A its chain, Shift+A the selection, Alt+A the selection spread
+  evenly; across a row, up or down a column; live, one undo step; A tapped frames all); a
+  backdrop carries the pins and dots on it and hides them folded (layoutOnBackdrop), is drawn over
+  the links folded and as wide as its title; its card has color swatches (and any color) and a
+  title-size slider.
 - **Inside a compound:** double-click a Compound (or I) opens its graph to edit (ScopedModel: each
   edit written back with withCompoundGraph, its inputs following its Input nodes, one undo step);
   the path bar over the canvas, or U, goes back up.)

@@ -100,6 +100,7 @@
 class QComboBox;
 class QLabel;
 class QPlainTextEdit;
+class QSlider;
 class QSpinBox;
 class QLineEdit;
 class QListWidget;
@@ -193,7 +194,7 @@ public:
     int dropWire() const { return dropWire_; }
 
     // ---- The right-click menus: the host fills them (the shared definitions, graph_ui.json) ------
-    enum class MenuTarget { Canvas, Node, Backdrop, Port, Wire, Portal };
+    enum class MenuTarget { Canvas, Node, Backdrop, Port, Wire, Portal, OutputPort };
     // `menu` filled for what was right-clicked: a node (selected by then: the menu's actions act on
     // the selected node), a backdrop (selected) or the canvas; `at` the click in view coordinates.
     using MenuFiller = std::function<void(QMenu* menu, MenuTarget target, const QPointF& at)>;
@@ -303,9 +304,14 @@ public:
     void removePortal(const std::string& portal, int exit = -1);  // a portal (its links drawn again), or one exit
     void addPortalExit(const std::string& portal, const QPointF& widget);
     void setPassThrough(const std::string& node, const std::string& input, bool on);
+    // A pass-through output right-clicked (its node and the input it hands on); Rename Output:
+    // the prompt, then the document's rename ("" clears the name).
+    bool menuPortOutput(std::string* node, std::string* input) const;
+    void renamePassThrough(const std::string& node, const std::string& input);
     void setBackdropFolded(int index, bool folded);
     bool backdropFolded(int index) const;
     bool nodeHidden(const std::string& node) const;  // on a folded backdrop
+    bool pinHidden(const std::string& pin) const;    // on a folded backdrop
     // The portals' dots (tests): portal, exit (-1 the entry), scene position.
     struct PortalDot {
         std::string portal;
@@ -405,6 +411,8 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* event) override;  // a node's header: rename
     void contextMenuEvent(QContextMenuEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;  // A let go: Frame All, unless it aligned
+    void focusOutEvent(QFocusEvent* event) override;  // (A no longer held)
     void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;
     bool event(QEvent* event) override;  // a node's tooltip: its error or note
@@ -416,6 +424,7 @@ private:
     struct Port {
         std::string name, type;
         bool optional = false;
+        std::string label;  // shown instead of the name (a renamed pass-through output)
     };
     struct Node {
         std::string name, type, category;
@@ -446,6 +455,7 @@ private:
         QPointF pos;  // scene units, its center
         QColor color;
         int from = -1, output = 0;  // the signal
+        int foldedIn = -1;          // the folded backdrop hiding it
     };
     // A pin the wires run through (the graph's "pins", graph_pins.h): drawn over the wires in the
     // color of the signal it carries.
@@ -454,6 +464,7 @@ private:
         QPointF pos;  // scene units, its center
         QColor color;
         int from = -1, output = 0;  // the signal: its source node and output (as a wire's)
+        int foldedIn = -1;          // the folded backdrop hiding it
     };
     // A backdrop framing part of the graph (the graph's "backdrops", graph_io.h: Maya's Graph
     // Editor's and a preset's): drawn behind the nodes, layout only.
@@ -466,7 +477,7 @@ private:
         QString description;  // shown on its body
         int fontSize = 0;     // its title's (0: the default)
     };
-    enum class Drag { None, Pan, Zoom, Move, Wire, Camera, Band, Backdrop, BackdropResize, Pin, Portal, Bundle };
+    enum class Drag { None, Pan, Zoom, Move, Wire, Camera, Band, Backdrop, BackdropResize, Pin, Portal, Bundle, Gesture };
 
     void rebuild();      // nodes_, wires_ and backdrops_ from the document
     void autoLayout();   // positions for nodes the document gives none
@@ -490,7 +501,10 @@ private:
     QLabel *propsTitle_ = nullptr, *propsDescriptionLabel_ = nullptr, *propsFontLabel_ = nullptr, *propsInputLabel_ = nullptr;
     QLineEdit* propsName_ = nullptr;
     QPlainTextEdit* propsDescription_ = nullptr;
-    QSpinBox* propsFont_ = nullptr;
+    QSlider* propsFont_ = nullptr;
+    QLabel* propsFontValue_ = nullptr;
+    QLabel* propsColorLabel_ = nullptr;
+    QWidget* propsColors_ = nullptr;
     QComboBox* propsInput_ = nullptr;
     std::string pathOf(const std::string& name) const;  // a node of the graph shown, by its path in the groom's
     // Backdrops a move grows: their index, their rect when it began, the moved nodes on them.
@@ -573,6 +587,19 @@ private:
     // backdrops it grows, and the shake that pulls the nodes out of their links.
     std::vector<int> moving_;
     bool shiftPress_ = false;
+    bool ctrlPress_ = false;  // a Ctrl+press: a click without a move toggles the node in the selection
+    // The pins and dots a move carries (several nodes, or a backdrop's): indices into pins_ and portals_.
+    std::vector<int> movingPins_, movingPortals_;
+    void carryLayout(const std::vector<std::string>& nodes, const QRectF* backdrop = nullptr);
+    void moveCarriedLayout(const QPointF& step);
+    void commitCarriedLayout();
+    // An A+drag align gesture (Houdini's): A held, the node dragged from, the mode by the keys
+    // (chain, selected, distribute), where every node was when it began.
+    bool aHeld_ = false, aGestured_ = false;
+    int gestureAnchor_ = -1;
+    std::string gestureMode_;
+    std::map<std::string, QPointF> gestureStart_;
+    void gestureMove(const QPointF& scene);
     std::vector<Growing> growing_;
     ShakeDetector shake_;
     QElapsedTimer shakeClock_;
@@ -581,6 +608,7 @@ private:
     QPointF altPress_;
     bool altPressed_ = false;
     int menuWire_ = -1, menuPortal_ = -1, menuPortNode_ = -1, menuPortInput_ = -1;
+    int menuPortOutput_ = -1;  // a pass-through output right-clicked (menuPortNode_'s)
     mutable std::vector<std::pair<QString, QRectF>> scopeBar_;  // drawn: the path bar's segments
     int selectedPin_ = -1;
     int dragPin_ = -1;      // the pin being moved

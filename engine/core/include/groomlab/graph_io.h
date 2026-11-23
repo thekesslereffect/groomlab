@@ -49,6 +49,8 @@ struct GraphDocument {
     // as they were drawn.
     std::string passThroughJson;
     std::string passLinksJson;
+    // Their names as shown (GraphEdit::passThroughName): {node: {input: name}} ("" for none).
+    std::string passNamesJson;
 
     NodeId node(const std::string& name) const;  // throws GraphError if missing
     std::string nameOf(NodeId id) const;
@@ -57,7 +59,7 @@ struct GraphDocument {
     // included): parse a graph's JSON once and copy the document for each other evaluation of it
     // a host keeps (cards, rachis, rest pose), instead of loadGraphJson again.
     GraphDocument clone() const {
-        return {graph.clone(), nodesByName, output, positions, backdropsJson, pinsJson, portalsJson, passThroughJson, passLinksJson};
+        return {graph.clone(), nodesByName, output, positions, backdropsJson, pinsJson, portalsJson, passThroughJson, passLinksJson, passNamesJson};
     }
 };
 

@@ -98,6 +98,7 @@
     "linkMenu": ["link.teleport", "link.pin", "-", "link.delete"],
     "portalMenu": ["portal.rename", "-", "portal.removeExit", "portal.delete"],
     "portMenu": ["port.passThrough"],
+    "outputPortMenu": ["port.renameOutput"],
     "editMenu": [
       "graph.undo",
       "graph.redo",

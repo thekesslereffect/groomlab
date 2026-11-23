@@ -446,6 +446,9 @@ public:
                                 int* moved = nullptr);
     // An input's pass-through output (GraphEdit::setPassThrough) on or off, one undo step.
     std::string setPassThrough(const std::string& node, const std::string& input, bool on);
+    // Rename Output: a pass-through output's name as shown (GraphEdit::setPassThroughName; "" its
+    // own), one undo step; nothing evaluates.
+    std::string setPassThroughName(const std::string& node, const std::string& input, const std::string& label);
     // The links' portals (graph_portals.h: teleported links, layout only). Teleporting a link,
     // linking an input from a portal's exit (connected from the portal's source, as any link), an
     // exit placed, a rename and removals are each an undo step; moves are layout (beginLayout).

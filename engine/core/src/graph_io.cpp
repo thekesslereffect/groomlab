@@ -275,13 +275,18 @@ GraphDocument parse(json root) {
     // the document keeps them as drawn, for saving.
     json links = {{"nodes", json::array()}, {"connections", root.value("connections", json::array())}};
     json passes = json::object();
+    json passNames = json::object();
     for (const json& n : root.value("nodes", json::array())) {
         if (!n.is_object() || !n.contains("passThrough") || !n["passThrough"].is_array() || n["passThrough"].empty()) continue;
         links["nodes"].push_back({{"name", n.value("name", std::string())}, {"passThrough", n["passThrough"]}});
         passes[n.value("name", std::string())] = n["passThrough"];
+        if (n.contains("passThroughNames") && n["passThroughNames"].is_object() && !n["passThroughNames"].empty()) {
+            passNames[n.value("name", std::string())] = n["passThroughNames"];
+        }
     }
     if (!passes.empty()) {
         doc.passThroughJson = passes.dump();
+        if (!passNames.empty()) doc.passNamesJson = passNames.dump();
         json drawn = json::array();
         for (const json& c : links["connections"]) {
             if (c.is_object() && !GraphEdit::passThroughInput(c.value("output", std::string())).empty()) drawn.push_back(c);
@@ -380,6 +385,7 @@ std::string saveGraphJson(const GraphDocument& doc) {
     json nodes = json::array();
     json connections = json::array();
     const json passes = doc.passThroughJson.empty() ? json::object() : json::parse(doc.passThroughJson, nullptr, false);
+    const json passNames = doc.passNamesJson.empty() ? json::object() : json::parse(doc.passNamesJson, nullptr, false);
 
     for (const auto& [name, id] : doc.nodesByName) {
         const Operator& op = doc.graph.node(id);
@@ -411,6 +417,7 @@ std::string saveGraphJson(const GraphDocument& doc) {
             node["ui"] = {{"x", at->second.x}, {"y", at->second.y}};
         }
         if (passes.is_object() && passes.contains(name)) node["passThrough"] = passes[name];
+        if (passNames.is_object() && passNames.contains(name)) node["passThroughNames"] = passNames[name];
         nodes.push_back(std::move(node));
 
         const auto specs = doc.graph.inputSpecs(id);

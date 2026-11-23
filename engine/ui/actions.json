@@ -305,6 +305,7 @@
     "portal.removeExit": {"label": "Remove This Exit", "tip": "The links out of this exit drawn as wires again", "needs": ["portal.exit"], "hosts": ["maya", "app"]},
     "portal.delete": {"label": "Remove Portal", "tip": "Every link through the portal drawn as a wire again (the links stay)", "hosts": ["maya", "app"]},
     "port.passThrough": {"label": "Pass Through as Output", "tip": "Whatever comes into this input also comes out of the node as an extra output (thru_<input>), to feed the next node", "checkable": true, "hosts": ["maya", "app"]},
+    "port.renameOutput": {"label": "Rename Output...", "tip": "The name this pass-through output shows (empty: thru_<input>); links still read it as before", "hosts": ["maya", "app"]},
 
     "graph.undo": {"label": "Undo"},
     "graph.redo": {"label": "Redo"},

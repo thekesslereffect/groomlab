@@ -348,6 +348,10 @@ json specOfNode(const json& node) {
                             {"type", in.value("type", std::string("Strands"))},
                             {"passThrough", p}};
                 if (in.contains("valueKind")) out["valueKind"] = in["valueKind"];
+                if (const json names = node.value("passThroughNames", json::object()); names.is_object() && names.contains(p.get<std::string>()) &&
+                                                                                         names[p.get<std::string>()].is_string()) {
+                    out["label"] = names[p.get<std::string>()];
+                }
                 spec["outputs"].push_back(std::move(out));
                 break;
             }
@@ -1161,6 +1165,34 @@ bool GraphEdit::setPassThrough(const std::string& name, const std::string& input
         if (!n.is_object() || n.value("name", std::string()) != name) continue;
         if (inputs.empty()) n.erase("passThrough");
         else n["passThrough"] = inputs;
+        if (!on && n.contains("passThroughNames") && n["passThroughNames"].is_object()) {
+            n["passThroughNames"].erase(input);
+            if (n["passThroughNames"].empty()) n.erase("passThroughNames");
+        }
+    }
+    return true;
+}
+
+std::string GraphEdit::passThroughName(const std::string& name, const std::string& input) const {
+    const nlohmann::json& node = impl_->node(name);
+    const auto it = node.find("passThroughNames");
+    if (it == node.end() || !it->is_object() || !it->contains(input) || !(*it)[input].is_string()) return {};
+    return (*it)[input].get<std::string>();
+}
+
+bool GraphEdit::setPassThroughName(const std::string& name, const std::string& input, const std::string& label) {
+    const std::vector<std::string> inputs = passThrough(name);
+    if (std::find(inputs.begin(), inputs.end(), input) == inputs.end()) {
+        throw GraphError("node '" + name + "' does not pass '" + input + "' through");
+    }
+    if (passThroughName(name, input) == label) return false;
+    for (nlohmann::json& n : impl_->nodes()) {
+        if (!n.is_object() || n.value("name", std::string()) != name) continue;
+        nlohmann::json names = n.contains("passThroughNames") && n["passThroughNames"].is_object() ? n["passThroughNames"] : nlohmann::json::object();
+        if (label.empty()) names.erase(input);
+        else names[input] = label;
+        if (names.empty()) n.erase("passThroughNames");
+        else n["passThroughNames"] = std::move(names);
     }
     return true;
 }

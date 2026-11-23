@@ -143,6 +143,12 @@ public:
     // Turns an input's pass-through output on or off; off, the links reading it go. False when
     // nothing changed. GraphError for no such node or input.
     bool setPassThrough(const std::string& name, const std::string& input, bool on);
+    // A pass-through output's name as shown (Rename Output): the node's "passThroughNames"[input],
+    // its spec's output "label"; "" for none (shown as thru_<input>). Only how it is shown: links
+    // still read thru_<input>. Setting "" clears it. False when nothing changed. GraphError for no
+    // such node, or an input it does not pass through.
+    std::string passThroughName(const std::string& name, const std::string& input) const;
+    bool setPassThroughName(const std::string& name, const std::string& input, const std::string& label);
     // Every connection checked and made again in order (connect's checks), as when a host loads a
     // graph to edit it. Throws GraphError at the first that does not fit.
     void checkConnections();

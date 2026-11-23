@@ -101,11 +101,114 @@ TEST(GraphArrange, BackdropsGrowAroundTheirNodesAndFold) {
     EXPECT_FALSE(backdropFolded(json{{"title", "x"}}));
 }
 
-TEST(GraphArrange, ShiftDragCarriesEverythingUpstream) {
+TEST(GraphArrange, CtrlDragCarriesEverythingUpstream) {
     const GraphEdit edit(defaultGraphJson());
     EXPECT_EQ(nodesWithUpstream(edit, {"length"}),
               (std::vector<std::string>{"scalp", "guides", "scatter", "interpolate", "length"}));
     EXPECT_EQ(nodesWithUpstream(edit, {"scalp", "nope"}), std::vector<std::string>{"scalp"});
+}
+
+TEST(GraphArrange, ShiftDragCarriesEverythingDownstreamCtrlDragUpstream) {
+    const GraphEdit edit(defaultGraphJson());
+    const auto down = nodesWithDownstream(edit, {"noise"});
+    EXPECT_NE(std::find(down.begin(), down.end(), "noise"), down.end());
+    EXPECT_NE(std::find(down.begin(), down.end(), "color"), down.end());
+    EXPECT_EQ(std::find(down.begin(), down.end(), "length"), down.end());
+    EXPECT_EQ(nodesWithDownstream(edit, {"nope"}), std::vector<std::string>{});
+}
+
+TEST(GraphArrange, CarriesStopAtPortalsAndTakeTheirPinsAndDots) {
+    json g = json::parse(defaultGraphJson());
+    // Every link into noise teleported: what feeds it is no longer carried with it.
+    std::vector<std::string> inputs;
+    for (const json& c : g["connections"]) {
+        if (c["to"] == "noise") inputs.push_back(c["input"].get<std::string>());
+    }
+    ASSERT_FALSE(inputs.empty());
+    for (const std::string& in : inputs) ASSERT_TRUE(teleportLink(g, "noise", in, 0.0, 0.0, 500.0, 500.0));
+    const GraphEdit edit(g.dump());
+    const auto up = nodesWithUpstream(edit, {"color"});
+    EXPECT_NE(std::find(up.begin(), up.end(), "noise"), up.end());
+    EXPECT_EQ(std::find(up.begin(), up.end(), "length"), up.end()) << "not through the portal";
+    const auto down = nodesWithDownstream(edit, {"length"});
+    EXPECT_EQ(std::find(down.begin(), down.end(), "noise"), down.end()) << "not through the portal";
+    // The exit by noise goes with it; the entry by length does not.
+    const CarriedLayout withNoise = carriedWith(g, {"noise", "color"});
+    ASSERT_EQ(withNoise.dots.size(), 1u);
+    EXPECT_EQ(withNoise.dots[0].second, 0);
+    // A pin between two moved nodes goes with them; with one of them alone it stays.
+    std::string colorInput;
+    for (const json& c : g["connections"]) {
+        if (c["to"] == "color" && c["from"] == "noise") colorInput = c["input"].get<std::string>();
+    }
+    ASSERT_FALSE(colorInput.empty());
+    const std::string pin = addPin(g, "color", colorInput, 5.0, 5.0);
+    ASSERT_FALSE(pin.empty());
+    EXPECT_EQ(carriedWith(g, {"noise", "color"}).pins, std::vector<std::string>{pin});
+    EXPECT_TRUE(carriedWith(g, {"color"}).pins.empty());
+    // On a backdrop: the pin and the exit at (0, 0) lie on it, the entry at (500, 500) does not.
+    const CarriedLayout on = layoutOnBackdrop(g, {"", -10.0, -10.0, 40.0, 40.0});
+    EXPECT_EQ(on.pins, std::vector<std::string>{pin});
+    ASSERT_EQ(on.dots.size(), 1u);
+    EXPECT_EQ(on.dots[0].second, 0);
+}
+
+TEST(GraphArrange, AlignGesturesLineUpWithTheNodeDraggedFrom) {
+    const GraphEdit edit(defaultGraphJson());
+    const std::vector<LayoutBox> boxes = {{"length", 0, 0, 100, 40}, {"noise", 200, 100, 100, 60}, {"color", 400, -50, 100, 40}};
+    EXPECT_EQ(alignGestureAxis(5.0, 3.0), "");
+    EXPECT_EQ(alignGestureAxis(50.0, 5.0), "row");
+    EXPECT_EQ(alignGestureAxis(5.0, -50.0), "column");
+    // Shift+A: the selection level with the anchor (a row), or under it (a column).
+    auto row = alignGesture(edit, boxes, "length", {"noise", "color"}, "selected", 50.0, 5.0);
+    EXPECT_DOUBLE_EQ(row["noise"].second, -10.0);
+    EXPECT_DOUBLE_EQ(row["color"].second, 0.0);
+    EXPECT_DOUBLE_EQ(row["noise"].first, 200.0);
+    EXPECT_EQ(row.count("length"), 0u) << "the anchor stays";
+    auto column = alignGesture(edit, boxes, "length", {"noise", "color"}, "selected", 0.0, 50.0);
+    EXPECT_DOUBLE_EQ(column["noise"].first, 0.0);
+    EXPECT_DOUBLE_EQ(column["noise"].second, 100.0);
+    // Under the threshold nothing moves.
+    EXPECT_TRUE(alignGesture(edit, boxes, "length", {"noise"}, "selected", 2.0, 2.0).empty());
+    // Alt+A: spread evenly, the anchor where it is.
+    std::vector<LayoutBox> spread = boxes;
+    spread[2].x = 600.0;
+    auto even = alignGesture(edit, spread, "length", {"noise", "color"}, "distribute", 50.0, 0.0);
+    EXPECT_DOUBLE_EQ(even["noise"].first, 300.0);
+    EXPECT_DOUBLE_EQ(even["color"].first, 600.0);
+    // A: the chain upstream lined up (dragged left: a row level with the anchor; up: stacked above).
+    const std::vector<LayoutBox> chain = {{"interpolate", 0, 300, 100, 40}, {"length", 200, 0, 100, 40}, {"noise", 400, 200, 100, 40}, {"color", 600, 500, 100, 40}};
+    auto left = alignGesture(edit, chain, "color", {}, "chain", -60.0, 0.0);
+    EXPECT_DOUBLE_EQ(left["noise"].second, 500.0);
+    EXPECT_DOUBLE_EQ(left["length"].second, 500.0);
+    auto above = alignGesture(edit, chain, "noise", {}, "chain", 0.0, -60.0);
+    EXPECT_DOUBLE_EQ(above["length"].first, 400.0);
+    EXPECT_DOUBLE_EQ(above["length"].second, 200.0 - 40.0 - 40.0);
+    auto below = alignGesture(edit, chain, "noise", {}, "chain", 0.0, 60.0);
+    EXPECT_DOUBLE_EQ(below["color"].second, 280.0);
+    EXPECT_EQ(below.count("length"), 0u);
+    EXPECT_THROW(alignGesture(edit, boxes, "length", {}, "nope", 50.0, 0.0), GraphError);
+}
+
+TEST(GraphEditByHand, APassThroughOutputCanBeRenamed) {
+    GraphEdit edit(defaultGraphJson());
+    EXPECT_THROW(edit.setPassThroughName("noise", "strands", "x"), GraphError) << "not passed through";
+    ASSERT_TRUE(edit.setPassThrough("noise", "strands", true));
+    EXPECT_EQ(edit.passThroughName("noise", "strands"), "");
+    EXPECT_TRUE(edit.setPassThroughName("noise", "strands", "Before Noise"));
+    EXPECT_FALSE(edit.setPassThroughName("noise", "strands", "Before Noise"));
+    const json spec = json::parse(edit.nodeSpecJson("noise"));
+    EXPECT_EQ(spec["outputs"][1]["name"], "thru_strands") << "links still read it by name";
+    EXPECT_EQ(spec["outputs"][1]["label"], "Before Noise");
+    // Saved and loaded with the graph.
+    const GraphDocument doc = loadGraphJson(edit.toJson());
+    EXPECT_EQ(GraphEdit(saveGraphJson(doc)).passThroughName("noise", "strands"), "Before Noise");
+    // Cleared, and gone with the output.
+    EXPECT_TRUE(edit.setPassThroughName("noise", "strands", ""));
+    EXPECT_FALSE(json::parse(edit.toJson())["nodes"][5].contains("passThroughNames"));
+    edit.setPassThroughName("noise", "strands", "Again");
+    edit.setPassThrough("noise", "strands", false);
+    EXPECT_FALSE(json::parse(edit.toJson())["nodes"][5].contains("passThroughNames"));
 }
 
 TEST(GraphArrange, AQuickLeftRightShakeIsCaught) {

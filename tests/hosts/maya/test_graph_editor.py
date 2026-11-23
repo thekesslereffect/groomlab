@@ -443,6 +443,15 @@ class GraphApiTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
         self.assertGreater(cmds.getAttr(self.groom + ".outStrandCount"), 0)
         self.assertEqual(gm.GraphModel.from_groom(self.groom, self.catalog).output_of("resample", "strands"), "thru_strands")
+        # Rename Output: only how it shows (the spec's label); the link still reads thru_strands.
+        model = gm.GraphModel.from_groom(self.groom, self.catalog)
+        self.assertTrue(model.set_pass_through_name("width", "strands", "Before Width"))
+        self.assertEqual(model.pass_through_name("width", "strands"), "Before Width")
+        self.assertEqual(model.node_spec("width")["outputs"][-1].get("label"), "Before Width")
+        model.save(self.groom)
+        again = gm.GraphModel.from_groom(self.groom, self.catalog)
+        self.assertEqual(again.pass_through_name("width", "strands"), "Before Width")
+        self.assertEqual(again.output_of("resample", "strands"), "thru_strands")
 
     def test_dots_groups_shaken_and_dropped_on_a_wire(self):
         model = gm.GraphModel.from_groom(self.groom, self.catalog)

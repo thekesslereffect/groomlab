@@ -86,8 +86,16 @@ The same in Maya's Graph Editor and the standalone app:
 - **Copy and paste:** Ctrl+C and Ctrl+V paste the copied nodes where the cursor is, with the links
   between them but none to the originals' sources. **Ctrl+D** duplicates the selection beside it,
   each copy reading the same inputs as its original.
-- **Shift+drag a node** to move it together with everything upstream of it. Shift+click without
-  dragging adds the node to the selection.
+- **Shift+drag a node** to move it together with everything downstream of it; **Ctrl+drag** moves
+  it with everything upstream. Neither follows a link through a portal, so what's on the other side
+  of a portal stays put. The pins and dots between the nodes move with them. Shift+click without
+  dragging adds the node to the selection; Ctrl+click toggles it.
+- **Align gestures** (as in Houdini): hold **A** and drag from a node. Drag left or up to line up
+  the chain feeding it, right or down for the chain it feeds: dragging across puts them in a row
+  with the node, dragging up or down stacks them in a column. **Shift+A**+drag lines the selected
+  nodes up with the node you drag from; **Alt+A**+drag spreads the selection evenly, leaving that
+  node where it is. A dashed guide shows the line while you drag. Tap **A** without dragging to
+  frame the whole graph.
 - **Shake a node** while dragging it (left and right, quickly) to pull it out of its links at once,
   without letting go. What fed it then feeds what it fed, as with **Detach**. Shake several selected
   nodes and they leave the flow together, keeping the links between them.
@@ -108,7 +116,10 @@ The same in Maya's Graph Editor and the standalone app:
   or a column, by their edges or centers, or space them evenly. **Tidy Selection** lays out just
   the selected nodes by their links, where they are.
 - **Backdrops:** Shift+O, or **Backdrop** in the Tab search, frames the selected nodes. Select one
-  to edit its title, a description shown on it, and its title size. A backdrop grows while you drag
+  to edit its title, a description shown on it, its color (a swatch, or **...** for any color) and
+  its title size (a slider). Moving a backdrop moves the pins and dots on it too, and folding it
+  hides them with its nodes; a folded backdrop is drawn over the wires and is always wide enough
+  for its whole title. A backdrop grows while you drag
   a node slowly past its edge; drag the node out fast and it leaves the backdrop. Drag on a backdrop's body to
   rubber-band select the nodes on it; drag its title bar to move it. The chevron in its title bar
   (or **Fold** in its menu) folds it down to the title bar, hiding its nodes. Links into and out of
@@ -128,7 +139,8 @@ The same in Maya's Graph Editor and the standalone app:
   graph.
 - **Pass Through as Output:** right-click an input port. The node gets an extra output,
   `thru_<input>`, that hands on whatever comes into that input, so the next node can read it too.
-  The node itself isn't evaluated for it.
+  The node itself isn't evaluated for it. Right-click that output > **Rename Output...** to give it
+  a name of your own; links still read it as before.
 - **Units:** lengths are shown in cm, widths in µm, densities in strands per cm² (**...** >
   **Units**). Internally all lengths are in scene units, which GroomLab keeps in centimeters in
   Maya.

@@ -884,14 +884,37 @@ void bindGraph(py::module_& m) {
           py::arg("backdrop"), py::arg("nodes"), py::arg("margin"), py::arg("header"),
           "(x, y, w, h): a backdrop grown to hold the nodes (never shrunk).");
     m.def("folded_backdrop",
-          [](const std::tuple<double, double, double, double>& backdrop, double header) {
+          [](const std::tuple<double, double, double, double>& backdrop, double header, double minWidth, double maxWidth) {
               const auto [x, y, w, h] = backdrop;
-              const LayoutBox out = foldedBackdrop({"", x, y, w, h}, header);
+              const LayoutBox out = foldedBackdrop({"", x, y, w, h}, header, minWidth, maxWidth);
               return std::make_tuple(out.x, out.y, out.w, out.h);
           },
-          py::arg("backdrop"), py::arg("header"), "(x, y, w, h): a folded backdrop's box.");
+          py::arg("backdrop"), py::arg("header"), py::arg("min_width") = 160.0, py::arg("max_width") = 260.0,
+          "(x, y, w, h): a folded backdrop's box (min_width: at least its title's).");
     m.def("nodes_with_upstream", &nodesWithUpstream, py::arg("edit"), py::arg("names"),
-          "The nodes a Shift+drag carries: those and everything feeding them, in the graph's order.");
+          "The nodes a Ctrl+drag carries: those and everything feeding them (not through a portal), in the graph's order.");
+    m.def("nodes_with_downstream", &nodesWithDownstream, py::arg("edit"), py::arg("names"),
+          "The nodes a Shift+drag carries: those and everything they feed (not through a portal), in the graph's order.");
+    auto carried = [](const CarriedLayout& c) { return py::make_tuple(c.pins, c.dots); };
+    m.def("carried_with",
+          [carried](const std::string& graph, const std::vector<std::string>& nodes) { return carried(carriedWith(nlohmann::json::parse(graph), nodes)); },
+          py::arg("graph"), py::arg("nodes"),
+          "(pins, dots) that go with nodes moved together; a dot is (portal, exit), exit -1 its entry.");
+    m.def("layout_on_backdrop",
+          [carried](const std::string& graph, const std::tuple<double, double, double, double>& backdrop) {
+              const auto [x, y, w, h] = backdrop;
+              return carried(layoutOnBackdrop(nlohmann::json::parse(graph), {"", x, y, w, h}));
+          },
+          py::arg("graph"), py::arg("backdrop"), "(pins, dots) lying on a backdrop (x, y, w, h).");
+    m.def("align_gesture_axis", &alignGestureAxis, py::arg("dx"), py::arg("dy"), py::arg("threshold") = 12.0,
+          "An A+drag's axis so far: 'row', 'column', or '' under the threshold.");
+    m.def("align_gesture_modes", &alignGestureModes, "The A+drag gestures: chain, selected, distribute.");
+    m.def("align_gesture",
+          [boxesOf](const GraphEdit& edit, const std::vector<std::tuple<std::string, double, double, double, double>>& boxes,
+                    const std::string& anchor, const std::vector<std::string>& selected, const std::string& mode, double dx, double dy,
+                    double gap) { return alignGesture(edit, boxesOf(boxes), anchor, selected, mode, dx, dy, gap); },
+          py::arg("edit"), py::arg("boxes"), py::arg("anchor"), py::arg("selected"), py::arg("mode"), py::arg("dx"), py::arg("dy"),
+          py::arg("gap") = 40.0, "Houdini's A+drag: {name: (x, y)} for the nodes it lines up with the anchor (graph_arrange.h).");
     py::class_<ShakeDetector>(m, "ShakeDetector", "A node shaken while dragged (screen pixels, seconds): graph_arrange.h.")
         .def(py::init<int, double, double>(), py::arg("turns") = 4, py::arg("min_travel") = 18.0, py::arg("window") = 0.7)
         .def("reset", &ShakeDetector::reset)
@@ -1101,6 +1124,10 @@ void bindGraph(py::module_& m) {
         .def("pass_through", &GraphEdit::passThrough, py::arg("name"), "The inputs the node hands on as outputs (thru_<input>).")
         .def("set_pass_through", &GraphEdit::setPassThrough, py::arg("name"), py::arg("input"), py::arg("on"),
              "An input's pass-through output on or off (off: what read it reads nothing). False when nothing changed.")
+        .def("pass_through_name", &GraphEdit::passThroughName, py::arg("name"), py::arg("input"),
+             "A pass-through output's name as shown (\"\" none).")
+        .def("set_pass_through_name", &GraphEdit::setPassThroughName, py::arg("name"), py::arg("input"), py::arg("label"),
+             "Rename Output: a pass-through output's name as shown (\"\" clears it). False when nothing changed.")
         .def("layout_positions",
              [](const GraphEdit& e, double column, double row, int columnsPerBlock, double blockGap,
                 const std::optional<std::vector<std::string>>& only) {

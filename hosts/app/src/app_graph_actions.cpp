@@ -187,6 +187,13 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                               }),
                               {}, portalOn};
     b["portal.delete"] = {run([m] { m->graph_->removePortal(m->graph_->menuPortal()); }), {}, portalOn};
+    // A pass-through output's menu: Rename Output.
+    b["port.renameOutput"] = {run([m] {
+                                  std::string node, input;
+                                  if (m->graph_->menuPortOutput(&node, &input)) m->graph_->renamePassThrough(node, input);
+                              }),
+                              {},
+                              [m] { return m->document_ != nullptr && m->graph_->menuPortOutput(nullptr, nullptr); }};
     // An input port's menu: Pass Through as Output.
     b["port.passThrough"] = {[m](const json&, bool on) {
                                  std::string node, input;
@@ -622,6 +629,9 @@ void AppActions::wireGraphEditor(MainWindow& w) {
                 break;
             case NodeGraphView::MenuTarget::Port:
                 ui::fillMenu(menu, d.get("graph/portMenu"), bindings(*m), options, d);
+                break;
+            case NodeGraphView::MenuTarget::OutputPort:
+                ui::fillMenu(menu, d.get("graph/outputPortMenu"), bindings(*m), options, d);
                 break;
             case NodeGraphView::MenuTarget::Portal: {
                 int exit = -1;

@@ -633,6 +633,7 @@ class GraphModel(object):
         params = node.get("params") or {}
         exposed = tuple(node.get("paramInputs") or ())
         passes = tuple(node.get("passThrough") or ())  # its pass-through outputs (thru_<input>)
+        names = node.get("passThroughNames") if passes and isinstance(node.get("passThroughNames"), dict) else None
         if node["type"] in ("Compound", "Script"):  # ports and params from its definition
             key = (node["type"], json.dumps(params.get("definition") or {}, sort_keys=True), exposed)
             bare = {"type": node["type"], "params": {"definition": params.get("definition") or {}}}
@@ -647,13 +648,15 @@ class GraphModel(object):
             self.catalog.spec(node["type"])  # the catalog's error for an unknown type
             key = (node["type"], None, exposed)
             bare = {"type": node["type"]}
-        key = key + (passes,)
+        key = key + (passes, json.dumps(names, sort_keys=True) if names else None)
         text = GraphModel._specs.get(key)
         if text is None:
             if exposed:
                 bare["paramInputs"] = list(exposed)
             if passes:
                 bare["passThrough"] = list(passes)
+            if names:
+                bare["passThroughNames"] = dict(names)  # (its outputs' labels)
             with _core_errors():
                 text = groomlab_core.node_spec_json(json.dumps(bare))
             if len(GraphModel._specs) > 2000:
@@ -1047,6 +1050,20 @@ class GraphModel(object):
         edit = self._edit()
         with _core_errors():
             changed = edit.set_pass_through(name, input_name, bool(on))
+        if changed:
+            self._take(edit)
+        return changed
+
+    def pass_through_name(self, name, input_name):
+        """A pass-through output's name as shown (Rename Output); "" for none (thru_<input>)."""
+        return (self._node(name).get("passThroughNames") or {}).get(input_name, "")
+
+    def set_pass_through_name(self, name, input_name, label):
+        """Rename Output: a pass-through output's name as shown ("" clears it; links still read
+        thru_<input>). The core's (GraphEdit.set_pass_through_name). Whether it changed."""
+        edit = self._edit()
+        with _core_errors():
+            changed = edit.set_pass_through_name(name, input_name, label or "")
         if changed:
             self._take(edit)
         return changed

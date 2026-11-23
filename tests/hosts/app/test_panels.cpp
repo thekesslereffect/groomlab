@@ -33,6 +33,7 @@
 #include <QMenu>
 #include <QLayout>
 #include <QPushButton>
+#include <QSlider>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QCoreApplication>
@@ -3694,6 +3695,7 @@ TEST(AppPanels, GraphFFramesTheSelectedNodeAndAFramesAll) {
     view.resize(1200, 800);
     view.setDocument(doc.get());
     key(&view, QEvent::KeyPress, Qt::Key_A);
+    key(&view, QEvent::KeyRelease, Qt::Key_A);  // (tapped: Frame All on the release)
     const qreal fitScale = view.viewScale();
     const QPointF fitPan = view.viewPan();
     const std::string scatter = nodeOfType(*doc, "Scatter");
@@ -3707,6 +3709,7 @@ TEST(AppPanels, GraphFFramesTheSelectedNodeAndAFramesAll) {
         EXPECT_NEAR(center.x(), 60 + (1200 - 120) / 2.0, 40.0);
     }
     key(&view, QEvent::KeyPress, Qt::Key_A);
+    key(&view, QEvent::KeyRelease, Qt::Key_A);
     EXPECT_DOUBLE_EQ(view.viewScale(), fitScale);
     EXPECT_EQ(view.viewPan(), fitPan);
     view.selectNode({});
@@ -5081,7 +5084,7 @@ bool linked(const GroomDocument& doc, const std::string& from, const std::string
 
 }  // namespace
 
-TEST(AppPanels, GraphMovesAreUndoStepsAndShiftDragCarriesUpstream) {
+TEST(AppPanels, GraphMovesAreUndoStepsShiftDragCarriesDownstreamCtrlDragUpstream) {
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
     const std::string length = nodeOfType(*doc, "Length"), interpolate = nodeOfType(*doc, "Interpolate");
@@ -5100,13 +5103,30 @@ TEST(AppPanels, GraphMovesAreUndoStepsAndShiftDragCarriesUpstream) {
     EXPECT_EQ(doc->undo(), "");
     view.refresh();
     EXPECT_NEAR(view.nodeRect(length).x(), card.x(), 1e-3);
-    // Shift+drag: everything upstream comes along.
-    mouseMods(&view, QEvent::MouseButtonPress, grab, Qt::ShiftModifier);
-    mouseMods(&view, QEvent::MouseMove, grab + QPoint(-40, 60), Qt::ShiftModifier);
-    mouseMods(&view, QEvent::MouseButtonRelease, grab + QPoint(-40, 60), Qt::ShiftModifier);
+    // Ctrl+drag: everything upstream comes along.
+    mouseMods(&view, QEvent::MouseButtonPress, grab, Qt::ControlModifier);
+    mouseMods(&view, QEvent::MouseMove, grab + QPoint(-40, 60), Qt::ControlModifier);
+    mouseMods(&view, QEvent::MouseButtonRelease, grab + QPoint(-40, 60), Qt::ControlModifier);
     EXPECT_NEAR(view.nodeRect(length).x(), card.x() - 40, 1e-3);
     EXPECT_NEAR(view.nodeRect(interpolate).x(), up.x() - 40, 1e-3);
     EXPECT_NEAR(view.nodeRect(interpolate).y(), up.y() + 60, 1e-3);
+    // Shift+drag: everything downstream instead (interpolate stays).
+    const QRectF interpolateNow = view.nodeRect(interpolate);
+    const QPoint grab2 = view.nodeRect(length).center().toPoint();
+    mouseMods(&view, QEvent::MouseButtonPress, grab2, Qt::ShiftModifier);
+    mouseMods(&view, QEvent::MouseMove, grab2 + QPoint(50, 0), Qt::ShiftModifier);
+    mouseMods(&view, QEvent::MouseButtonRelease, grab2 + QPoint(50, 0), Qt::ShiftModifier);
+    EXPECT_EQ(view.nodeRect(interpolate), interpolateNow);
+    EXPECT_NEAR(view.nodeRect(length).x(), card.x() + 10, 1e-3);
+    // Ctrl+click without a move toggles the node in the selection.
+    view.selectNode(interpolate);
+    const QPoint toggle = view.nodeRect(length).center().toPoint();
+    mouseMods(&view, QEvent::MouseButtonPress, toggle, Qt::ControlModifier);
+    mouseMods(&view, QEvent::MouseButtonRelease, toggle, Qt::ControlModifier);
+    EXPECT_EQ(view.selectedNodes(), (std::vector<std::string>{interpolate, length}));
+    mouseMods(&view, QEvent::MouseButtonPress, toggle, Qt::ControlModifier);
+    mouseMods(&view, QEvent::MouseButtonRelease, toggle, Qt::ControlModifier);
+    EXPECT_EQ(view.selectedNodes(), std::vector<std::string>{interpolate});
     // Shift+click without a move adds to the selection.
     view.selectNode(interpolate);
     const QPoint at = view.nodeRect(length).center().toPoint();
@@ -5189,6 +5209,34 @@ TEST(AppPanels, GraphFoldsBackdropsAndPassesInputsThrough) {
     EXPECT_EQ(doc->undoText(), "Undo fold backdrop");
     view.setBackdropFolded(0, false);
     EXPECT_FALSE(view.nodeHidden(length));
+    // A pin on the backdrop moves with it and folds with it.
+    int wire = -1;
+    std::string to, input;
+    for (int i = 0; i < view.wireCount(); ++i) {
+        std::string from, output;
+        if (view.wireLink(i, &from, &output, &to, &input) && to == length) wire = i;
+    }
+    ASSERT_GE(wire, 0);
+    const QRectF frame = view.backdropRect(0);
+    view.pinWire(wire, QPointF(frame.left() + 10.0, frame.bottom() - 10.0));
+    ASSERT_EQ(view.pinIds().size(), 1u);
+    const std::string pin = view.pinIds().front();
+    const QPointF pinAt = view.pinPos(pin);
+    const QRectF bar = view.backdropTitleBar(0);
+    const QPoint grabBar(static_cast<int>(bar.left() + 20), static_cast<int>(bar.center().y()));
+    mouse(&view, QEvent::MouseButtonPress, grabBar);
+    mouse(&view, QEvent::MouseMove, grabBar + QPoint(0, 40));
+    mouse(&view, QEvent::MouseButtonRelease, grabBar + QPoint(0, 40));
+    EXPECT_NEAR(view.pinPos(pin).y(), pinAt.y() + 40 / view.viewScale(), 1e-3) << "carried with the backdrop";
+    EXPECT_EQ(doc->undoText(), "Undo move backdrop");
+    view.setBackdropFolded(0, true);
+    EXPECT_TRUE(view.pinHidden(pin));
+    // Folded, its whole title shows (a long one widens it).
+    ASSERT_EQ(doc->setBackdropTitle(0, "A rather long backdrop title for the strands"), "");
+    view.refresh();
+    EXPECT_GT(view.backdropRect(0).width(), 300.0);
+    view.setBackdropFolded(0, false);
+    EXPECT_FALSE(view.pinHidden(pin));
     // An input's menu: Pass Through as Output.
     QMenu menu;
     const QPoint in = inputAt(view, noise, portOf(*doc, noise, "inputs", "strands"));
@@ -5205,6 +5253,76 @@ TEST(AppPanels, GraphFoldsBackdropsAndPassesInputsThrough) {
     ASSERT_EQ(doc->addNode("Width", 0.0f, 900.0f, &width), "");
     EXPECT_EQ(doc->connectNodes(noise, "thru_strands", width, "strands"), "");
     EXPECT_TRUE(linked(*doc, noise, width));
+    // Its menu: Rename Output (only how it shows: the link still reads thru_strands).
+    view.refresh();
+    QMenu outMenu;
+    EXPECT_EQ(view.fillContextMenu(&outMenu, outputAt(view, noise, thru)), NodeGraphView::MenuTarget::OutputPort);
+    std::string passed;
+    ASSERT_TRUE(view.menuPortOutput(&node, &passed));
+    EXPECT_EQ(passed, "strands");
+    view.renamePassThrough(noise, "strands");
+    ASSERT_TRUE(view.promptOpen());
+    view.setPromptText(QStringLiteral("Before Noise"));
+    view.acceptPrompt();
+    EXPECT_EQ(GraphEdit(doc->graph().dump()).passThroughName(noise, "strands"), "Before Noise");
+    EXPECT_EQ(doc->undoText(), "Undo rename output " + noise + ".thru_strands");
+    EXPECT_TRUE(linked(*doc, noise, width));
+}
+
+TEST(AppPanels, GraphAlignGesturesAndBackdropCard) {
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    const std::string length = nodeOfType(*doc, "Length"), noise = nodeOfType(*doc, "Noise"), interpolate = nodeOfType(*doc, "Interpolate");
+    NodeGraphView view;
+    view.resize(1400, 900);
+    view.setDocument(doc.get());
+    // A tapped: Frame All; held, a drag from a node lines nodes up with it (Shift+A: the selection).
+    view.selectNode(noise);
+    const QRectF anchor = view.nodeRect(length);
+    const QPoint grab = anchor.center().toPoint();
+    key(&view, QEvent::KeyPress, Qt::Key_A);
+    mouseMods(&view, QEvent::MouseButtonPress, grab, Qt::ShiftModifier);
+    mouseMods(&view, QEvent::MouseMove, grab + QPoint(4, 80), Qt::ShiftModifier);
+    mouseMods(&view, QEvent::MouseButtonRelease, grab + QPoint(4, 80), Qt::ShiftModifier);
+    key(&view, QEvent::KeyRelease, Qt::Key_A);
+    EXPECT_EQ(view.nodeRect(length), anchor) << "the anchor stays";
+    EXPECT_NEAR(view.nodeRect(noise).center().x(), anchor.center().x(), 1e-3) << "a column";
+    EXPECT_EQ(doc->undoText(), "Undo align a node");
+    EXPECT_EQ(doc->undo(), "");
+    view.refresh();
+    // A alone, dragged up: the chain upstream stacked above the node, under it.
+    key(&view, QEvent::KeyPress, Qt::Key_A);
+    mouse(&view, QEvent::MouseButtonPress, grab);
+    mouse(&view, QEvent::MouseMove, grab + QPoint(0, -80));
+    mouse(&view, QEvent::MouseButtonRelease, grab + QPoint(0, -80));
+    key(&view, QEvent::KeyRelease, Qt::Key_A);
+    EXPECT_EQ(view.nodeRect(length), anchor);
+    EXPECT_NEAR(view.nodeRect(interpolate).center().x(), anchor.center().x(), 1e-3);
+    EXPECT_LT(view.nodeRect(interpolate).bottom(), anchor.top());
+    // Tapped (no drag): Frame All, nothing moved.
+    const std::string before = doc->undoText();
+    key(&view, QEvent::KeyPress, Qt::Key_A);
+    key(&view, QEvent::KeyRelease, Qt::Key_A);
+    EXPECT_EQ(doc->undoText(), before);
+    // The backdrop's card: a color swatch and the title size slider.
+    view.selectNode(length);
+    view.addBackdrop();
+    if (view.promptOpen()) view.acceptPrompt();
+    view.selectBackdrop(0);
+    ASSERT_TRUE(view.propertiesShown());
+    auto* slider = view.findChild<QSlider*>(QStringLiteral("graphBackdropTitleSize"));
+    ASSERT_NE(slider, nullptr);
+    slider->setValue(30);
+    EXPECT_EQ(doc->graph()["backdrops"][0]["fontSize"], 30);
+    EXPECT_TRUE(view.propertiesShown()) << "the card stays up";
+    QPushButton* swatch = nullptr;
+    for (QPushButton* b : view.findChildren<QPushButton*>()) {
+        if (b->property("swatch").value<QColor>().isValid() && b->toolTip() == QStringLiteral("Green")) swatch = b;
+    }
+    ASSERT_NE(swatch, nullptr);
+    swatch->click();
+    EXPECT_EQ(doc->graph()["backdrops"][0]["color"], nlohmann::json::array({70, 120, 80}));
+    EXPECT_TRUE(view.propertiesShown());
 }
 
 TEST(AppPanels, GraphEditsInsideACompoundAndShakesNodesLoose) {

@@ -592,7 +592,17 @@ class PortItem(QtWidgets.QGraphicsItem):
 
     def contextMenuEvent(self, event):
         if self.is_output:
-            event.ignore()  # (the node's menu)
+            passed = self.name[len("thru_"):] if self.name.startswith("thru_") else ""
+            if not passed:
+                event.ignore()  # (the node's menu)
+                return
+            # A pass-through output's menu (graph_ui.json's outputPortMenu): Rename Output.
+            editor, node = self.node_item.editor, self.node_item.name
+            actions = {"port.renameOutput": lambda: later(lambda: editor.rename_pass_through(node, passed))}
+            menu = QtWidgets.QMenu()
+            widgets.fill_menu(menu, definitions.get("graph/outputPortMenu"), definitions.binder(actions))
+            qt.exec_(menu, event.screenPos())
+            event.accept()
             return
         # An input's menu (graph_ui.json's portMenu): Pass Through as Output.
         editor, node, name = self.node_item.editor, self.node_item.name, self.name
@@ -638,6 +648,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
         y = HEADER_H + ROW_H / 2 + 4
         for port in spec["outputs"]:
             item = PortItem(self, port["name"], model.output_type(name, port["name"]), True, value_kind=port.get("valueKind"))
+            item.label = port.get("label") or port["name"]  # (a renamed pass-through output: its name as shown)
             item.setPos(NODE_W, y)
             self.outputs[port["name"]] = item
             y += ROW_H
@@ -811,7 +822,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
         painter.setPen(TEXT)
         for name, port in self.outputs.items():
             painter.drawText(QtCore.QRectF(NODE_W * 0.4, port.pos().y() - ROW_H / 2, NODE_W * 0.6 - 14, ROW_H),
-                             QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight, name)
+                             QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight, getattr(port, "label", name))
         small.setLetterSpacing(QtGui.QFont.AbsoluteSpacing, 0.0)
 
         # The status badges (dimmed with a bypassed card, as the design's).
@@ -978,16 +989,26 @@ class NodeItem(QtWidgets.QGraphicsItem):
                     else:
                         later(lambda: editor.set_bypass([name], not editor.model.bypassed(name)))
                     return
-        # A drag: Shift carries everything upstream (Houdini's), a shake pulls the nodes out of their
-        # links; Shift+click without a move adds the node to the selection.
-        self._press = (self.pos(), bool(event.modifiers() & QtCore.Qt.ShiftModifier))
+        # A drag: Shift carries everything downstream, Ctrl everything upstream (not through
+        # portals), a shake pulls the nodes out of their links; Shift+click without a move adds the
+        # node to the selection (Ctrl+click toggles it: Qt's own). Several nodes moved together take
+        # the pins and dots between them.
+        shift = bool(event.modifiers() & QtCore.Qt.ShiftModifier)
+        ctrl = not shift and bool(event.modifiers() & QtCore.Qt.ControlModifier)
+        self._press = (self.pos(), shift)
         self._before = [i for i in self.scene().selectedItems() if isinstance(i, NodeItem)] if self.scene() else []
         self._carry = []
         self._shaken = False
-        if self._press[1] and event.button() == QtCore.Qt.LeftButton:
-            names = self.editor.upstream_of([self.name])
-            self._carry = [(self.editor.items[n], self.editor.items[n].pos()) for n in names
-                           if n != self.name and n in self.editor.items and self.editor.items[n].isVisible()]
+        if event.button() == QtCore.Qt.LeftButton:
+            moving = [self.name]
+            if self.isSelected():
+                moving = [i.name for i in self._before if i is not self] + [self.name]
+            if shift or ctrl:
+                moving = self.editor.downstream_of(moving) if shift else self.editor.upstream_of(moving)
+                self._carry = [(self.editor.items[n], self.editor.items[n].pos()) for n in moving
+                               if n != self.name and n in self.editor.items and self.editor.items[n].isVisible()]
+            if len(moving) > 1:
+                self._carry += [(item, item.pos()) for item in self.editor.carried_layout(moving)]
         import groomlab_core
         self._shake = groomlab_core.ShakeDetector()
         self._clock = QtCore.QElapsedTimer()
@@ -999,7 +1020,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
         editor = self.editor
         moving = editor.selected_names() or [self.name]
         if getattr(self, "_carry", None):
-            moving = moving + [item.name for item, _start in self._carry]
+            moving = moving + [item.name for item, _start in self._carry if isinstance(item, NodeItem)]
         if not getattr(self, "_growing", False):
             self._growing = True
             editor.begin_grow(moving)
@@ -1309,11 +1330,17 @@ class EdgeItem(QtWidgets.QGraphicsPathItem):
         return port.scene_center()
 
     def points(self):
-        """Where it runs: its source port (or its portal exit), its pins, its input port."""
+        """Where it runs: its source port (or its portal exit), its pins, its input port; a dot or pin
+        on a folded backdrop is left out (the backdrop's edge stands for a dot)."""
         end = self._end(self.dst_item, self.dst_item.inputs[self.input_name], False)
         if self.portal_item is not None:
+            folded = getattr(self.portal_item, "folded_in", None)
+            if folded is not None:
+                r = folded.sceneBoundingRect().adjusted(2, 2, -2, -2)
+                return [QtCore.QPointF(r.right(), r.center().y()), end]
             return [self.portal_item.nub_pos(), end]
-        return [self._end(self.src_item, self.src_port, True)] + [pin.scenePos() for pin in self.pins] + [end]
+        pins = [pin.scenePos() for pin in self.pins if getattr(pin, "folded_in", None) is None]
+        return [self._end(self.src_item, self.src_port, True)] + pins + [end]
 
     def update_path(self):
         points = self.points()
@@ -1823,7 +1850,8 @@ class BackdropItem(QtWidgets.QGraphicsItem):
         self.editor, self.data = editor, data
         self._carried = []  # before setPos: its itemChange reads them
         self._resizing = None
-        self.setZValue(-20)
+        # Folded: over the links (its title always shows), under the pins and nodes.
+        self.setZValue(-0.9 if self.folded() else -20)
         self.setFlags(QtWidgets.QGraphicsItem.ItemIsMovable | QtWidgets.QGraphicsItem.ItemIsSelectable |
                       QtWidgets.QGraphicsItem.ItemSendsGeometryChanges)
         self.setPos(data["x"], data["y"])
@@ -1841,9 +1869,12 @@ class BackdropItem(QtWidgets.QGraphicsItem):
         return QtCore.QRectF(self.data["x"], self.data["y"], self.data["w"], self.data["h"])
 
     def rect(self):
-        if self.folded():  # its title bar and a strip (the core's foldedBackdrop)
+        if self.folded():  # its title bar and a strip (the core's foldedBackdrop), as wide as its title
             import groomlab_core
-            _x, _y, w, h = groomlab_core.folded_backdrop((0.0, 0.0, self.data["w"], self.data["h"]), self.header())
+            title = QtGui.QFontMetricsF(theme.font(self.data.get("fontSize") or 14, bold=True)).horizontalAdvance(
+                self.data.get("title", "Backdrop")) + 56.0
+            _x, _y, w, h = groomlab_core.folded_backdrop((0.0, 0.0, self.data["w"], self.data["h"]), self.header(),
+                                                         max(160.0, title), max(260.0, title))
             return QtCore.QRectF(0, 0, w, h)
         return QtCore.QRectF(0, 0, self.data["w"], self.data["h"])
 
@@ -1921,10 +1952,11 @@ class BackdropItem(QtWidgets.QGraphicsItem):
         if event.pos().y() > self.header():
             event.ignore()  # its body: a rubber band selects the nodes on it (the view's drag)
             return
-        # Nodes inside move with it (a folded one's hidden nodes too).
+        # Nodes inside move with it (a folded one's hidden nodes too), and its pins and dots.
         area = self.full_rect()
         self._carried = [(i, i.pos() - self.pos()) for i in self.editor.items.values()
                          if area.contains(i.sceneBoundingRect().center())]
+        self._carried += [(i, i.pos() - self.pos()) for i in self.editor.layout_on_backdrop(area)]
         super(BackdropItem, self).mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -2002,11 +2034,39 @@ class ItemProps(QtWidgets.QFrame):
         self.description = QtWidgets.QPlainTextEdit()
         self.description.setFixedHeight(theme.px(64))
         form.addRow("Description", self.description)
-        self.font_size = QtWidgets.QSpinBox()
-        self.font_size.setRange(0, 96)
-        self.font_size.setSpecialValueText("Default")
-        self.font_size.setSuffix(" pt")
-        form.addRow("Title size", self.font_size)
+        # Its color: the palette's swatches (graph_ui.json backdropColors, as the menu's Color), then any.
+        self.colors = QtWidgets.QWidget()
+        swatches = QtWidgets.QHBoxLayout(self.colors)
+        swatches.setContentsMargins(0, 0, 0, 0)
+        swatches.setSpacing(4)
+        self.swatches = []
+        for entry in definitions.get("graph/backdropColors"):
+            button = QtWidgets.QPushButton()
+            button.setFixedSize(theme.px(22), theme.px(22))
+            button.setToolTip(entry["label"])
+            button.rgb = list(entry["rgb"])
+            button.clicked.connect(lambda _=False, rgb=list(entry["rgb"]): self._color_done(rgb))
+            swatches.addWidget(button)
+            self.swatches.append(button)
+        self.custom_color = QtWidgets.QPushButton("...")
+        self.custom_color.setFixedSize(theme.px(28), theme.px(22))
+        self.custom_color.setToolTip("Any color")
+        self.custom_color.clicked.connect(self._pick_color)
+        swatches.addWidget(self.custom_color)
+        swatches.addStretch(1)
+        form.addRow("Color", self.colors)
+        # Its title size: a slider (shown live while dragged; one undo step when let go).
+        self.font_row = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(self.font_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.font_size = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.font_size.setObjectName("graphBackdropTitleSize")
+        self.font_size.setRange(8, 72)
+        self.font_value = QtWidgets.QLabel()
+        self.font_value.setMinimumWidth(theme.px(40))
+        row.addWidget(self.font_size, 1)
+        row.addWidget(self.font_value)
+        form.addRow("Title size", self.font_row)
         self.input = QtWidgets.QComboBox()
         form.addRow("Input Portal", self.input)
         self.rows = form
@@ -2016,12 +2076,13 @@ class ItemProps(QtWidgets.QFrame):
         self._pause.timeout.connect(self._description_done)
         self.name.editingFinished.connect(self._name_done)
         self.description.textChanged.connect(self._pause.start)
-        self.font_size.valueChanged.connect(self._size_done)
+        self.font_size.valueChanged.connect(self._size_changed)
+        self.font_size.sliderReleased.connect(lambda: self._size_done(self.font_size.value()))
         self.input.activated.connect(self._input_done)
         self.hide()
 
     def _show_rows(self, backdrop):
-        for widget in (self.description, self.font_size):
+        for widget in (self.description, self.font_row, self.colors):
             widget.setVisible(backdrop)
             self.rows.labelForField(widget).setVisible(backdrop)
         self.input.setVisible(not backdrop)
@@ -2043,8 +2104,14 @@ class ItemProps(QtWidgets.QFrame):
                     self.name.setText(item.data.get("title", "Backdrop"))
                 if not self.description.hasFocus():
                     self.description.setPlainText(item.data.get("description", ""))
-                if not self.font_size.hasFocus():
-                    self.font_size.setValue(int(item.data.get("fontSize") or 0))
+                if not self.font_size.isSliderDown():
+                    self.font_size.setValue(int(item.data.get("fontSize") or 14))  # (none: the default, 14 pt)
+                self.font_value.setText("%d pt" % self.font_size.value())
+                color = list(item.data.get("color") or definitions.get("graph/backdropColors")[0]["rgb"])
+                for button in self.swatches:
+                    on = list(button.rgb) == color
+                    button.setStyleSheet("QPushButton { background: rgb(%d, %d, %d); border: %dpx solid %s; border-radius: 4px; }"
+                                         % (tuple(button.rgb) + (2 if on else 1, SELECTED.name() if on else MUTED.name())))
             else:
                 self._show_rows(False)
                 self.heading.setText("Dot" if item.exit is None else "Dot (an exit of %s)" % item.portal)
@@ -2090,10 +2157,38 @@ class ItemProps(QtWidgets.QFrame):
             text = self.description.toPlainText()
             later(lambda: self.editor.set_backdrop_field(item.data, "description", text))
 
+    def _size_changed(self, value):
+        self.font_value.setText("%d pt" % value)
+        item = self.target
+        if not isinstance(item, BackdropItem):
+            return
+        if self.font_size.isSliderDown():  # shown live, set when let go
+            item.prepareGeometryChange()
+            item.data["fontSize"] = value
+            item.update()
+            self._live = True
+            return
+        self._size_done(value)
+
     def _size_done(self, value):
         item = self.target
-        if isinstance(item, BackdropItem) and value != int(item.data.get("fontSize") or 0):
+        live, self._live = getattr(self, "_live", False), False
+        if isinstance(item, BackdropItem) and (live or value != int(item.data.get("fontSize") or 0)):
             later(lambda: self.editor.set_backdrop_field(item.data, "fontSize", value))
+
+    def _color_done(self, rgb):
+        item = self.target
+        if isinstance(item, BackdropItem) and list(rgb) != list(item.data.get("color") or []):
+            later(lambda: self.editor.set_backdrop_field(item.data, "color", list(rgb)))
+
+    def _pick_color(self):
+        item = self.target
+        if not isinstance(item, BackdropItem):
+            return
+        start = QtGui.QColor(*(item.data.get("color") or definitions.get("graph/backdropColors")[0]["rgb"]))
+        color = QtWidgets.QColorDialog.getColor(start, self, "Backdrop Color")
+        if color.isValid():
+            self._color_done([color.red(), color.green(), color.blue()])
 
     def _input_done(self, row):
         item = self.target
@@ -2819,14 +2914,29 @@ class GraphView(QtWidgets.QGraphicsView):
         if event.key() == QtCore.Qt.Key_F:
             self.frame()
             return
-        if event.key() == QtCore.Qt.Key_A and not event.modifiers():
-            self.frame_all()
+        if event.key() == QtCore.Qt.Key_A and not qt.to_int(event.modifiers()) & ~qt.to_int(QtCore.Qt.ShiftModifier | QtCore.Qt.AltModifier):
+            # Held, a drag from a node aligns (Houdini's gestures); let go without one: Frame All.
+            if not event.isAutoRepeat():
+                self._a_held, self._a_gestured = True, False
             return
         if event.key() == QtCore.Qt.Key_Tab:
             cursor = self.mapFromGlobal(QtGui.QCursor.pos())
             self.scene().editor.show_search(self.mapToScene(cursor), QtGui.QCursor.pos())
             return
         super(GraphView, self).keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == QtCore.Qt.Key_A and not event.isAutoRepeat():
+            frame = getattr(self, "_a_held", False) and not getattr(self, "_a_gestured", False)
+            self._a_held = False
+            if frame:
+                self.frame_all()
+            return
+        super(GraphView, self).keyReleaseEvent(event)
+
+    def focusOutEvent(self, event):
+        self._a_held = False  # (A let go elsewhere)
+        super(GraphView, self).focusOutEvent(event)
 
     def focusNextPrevChild(self, forward):
         return False  # Tab opens the add menu instead of moving focus
@@ -2843,6 +2953,19 @@ class GraphView(QtWidgets.QGraphicsView):
             event.accept()
             return
         self._zoomed = False
+        if event.button() == QtCore.Qt.LeftButton and getattr(self, "_a_held", False):
+            # A held: a drag from a node lines nodes up with it (A alone its chain, Shift+A the
+            # selection, Alt+A the selection spread evenly).
+            at = self.mapToScene(qt.event_pos(event))
+            node = next((i for i in self.scene().items(at) if isinstance(i, NodeItem)), None)
+            if node is not None:
+                mods = event.modifiers()
+                mode = "distribute" if mods & QtCore.Qt.AltModifier else "selected" if mods & QtCore.Qt.ShiftModifier else "chain"
+                self._a_gestured = True
+                self.scene().editor.begin_align_gesture(node.name, mode, at)
+                self._gesture = True
+                event.accept()
+                return
         if (event.button() == QtCore.Qt.LeftButton and event.modifiers() & QtCore.Qt.AltModifier
                 and not event.modifiers() & QtCore.Qt.ShiftModifier):  # (Alt+Shift: the scene cuts links)
             pos = qt.event_pos(event)
@@ -2866,6 +2989,9 @@ class GraphView(QtWidgets.QGraphicsView):
 
     def mouseMoveEvent(self, event):
         self._drop_stale_drag(event.buttons())
+        if getattr(self, "_gesture", False):
+            self.scene().editor.align_gesture_to(self.mapToScene(qt.event_pos(event)), self.transform().m11())
+            return
         if self._zoom is not None:
             self.zoom_drag(qt.event_pos(event))
             return
@@ -2879,6 +3005,11 @@ class GraphView(QtWidgets.QGraphicsView):
         super(GraphView, self).mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if getattr(self, "_gesture", False) and event.button() == QtCore.Qt.LeftButton:
+            self._gesture = False
+            self.scene().editor.end_align_gesture()
+            event.accept()
+            return
         click = getattr(self, "_alt_click", None)
         if click is not None and event.button() == QtCore.Qt.LeftButton:
             # Alt+click on a link (no drag): a pin there.
@@ -3753,7 +3884,8 @@ class GraphEditor(QtWidgets.QWidget):
                         edge.portal_item = entry
                         entry.edges.append(edge)
                         edge.update_path()
-            # Folded backdrops hide their nodes (their links meet the backdrop's edges instead).
+            # Folded backdrops hide their nodes, pins and dots (their links meet the backdrop's
+            # edges instead).
             for backdrop in self._backdrop_items:
                 if not backdrop.folded():
                     continue
@@ -3762,11 +3894,20 @@ class GraphEditor(QtWidgets.QWidget):
                     if area.contains(QtCore.QRectF(item.pos(), QtCore.QSizeF(NODE_W, item.height)).center()):
                         item.folded_in = backdrop
                         item.setVisible(False)
+                for item in list(self.pin_items.values()) + list(self.portal_items):
+                    if area.contains(item.pos()):
+                        item.folded_in = backdrop
+                        item.setVisible(False)
+                        for stub in item.edges:
+                            if isinstance(stub, PortalStub):
+                                stub.setVisible(False)
             for edge in self._edges.values():
-                hidden_in = getattr(edge.src_item, "folded_in", None)
+                start = edge.portal_item if edge.portal_item is not None else edge.src_item
+                hidden_in = getattr(start, "folded_in", None)
                 if hidden_in is not None and hidden_in is getattr(edge.dst_item, "folded_in", None):
                     edge.setVisible(False)
-                elif hidden_in is not None or getattr(edge.dst_item, "folded_in", None) is not None:
+                elif (hidden_in is not None or getattr(edge.dst_item, "folded_in", None) is not None
+                      or any(getattr(p, "folded_in", None) is not None for p in edge.pins)):
                     edge.update_path()
             for name in selected:
                 if name in self.items:
@@ -4305,12 +4446,110 @@ class GraphEditor(QtWidgets.QWidget):
         return [i.name for i in self.scene.selectedItems() if isinstance(i, NodeItem)]
 
     def upstream_of(self, names):
-        """The nodes a Shift+drag of `names` carries: those and everything feeding them."""
+        """The nodes a Ctrl+drag of `names` carries: those and everything feeding them (not
+        through a portal)."""
         import groomlab_core
         try:
             return list(groomlab_core.nodes_with_upstream(self.model._query(), list(names)))
         except (RuntimeError, ValueError):
             return list(names)
+
+    def downstream_of(self, names):
+        """The nodes a Shift+drag of `names` carries: those and everything they feed (not through a
+        portal)."""
+        import groomlab_core
+        try:
+            return list(groomlab_core.nodes_with_downstream(self.model._query(), list(names)))
+        except (RuntimeError, ValueError):
+            return list(names)
+
+    def _layout_items(self, pins, dots):
+        """The PinItems and PortalItems of pin ids and (portal, exit) dots (exit -1: the entry)."""
+        items = [self.pin_items[p] for p in pins if p in getattr(self, "pin_items", {})]
+        wanted = {(portal, None if exit_index < 0 else exit_index) for portal, exit_index in dots}
+        items += [i for i in getattr(self, "portal_items", []) if (i.portal, i.exit) in wanted]
+        return items
+
+    def carried_layout(self, names):
+        """The pins and dots that go with nodes moved together (the core's carried_with)."""
+        import groomlab_core
+        try:
+            pins, dots = groomlab_core.carried_with(json.dumps(self.model.to_dict()), list(names))
+        except (RuntimeError, ValueError):
+            return []
+        return self._layout_items(pins, dots)
+
+    def layout_on_backdrop(self, area):
+        """The pins and dots lying on a backdrop's frame (moved with it, hidden when it folds)."""
+        import groomlab_core
+        try:
+            pins, dots = groomlab_core.layout_on_backdrop(json.dumps(self.model.to_dict()),
+                                                          (area.x(), area.y(), area.width(), area.height()))
+        except (RuntimeError, ValueError):
+            return []
+        return self._layout_items(pins, dots)
+
+    # -- Align gestures (Houdini's A+drag): the core's alignGesture, live, one undo step ----------
+
+    def begin_align_gesture(self, anchor, mode, at):
+        self._gesture = {"anchor": anchor, "mode": mode, "at": at,
+                         "start": {n: QtCore.QPointF(i.pos()) for n, i in self.items.items()}}
+        if mode != "chain" and anchor in self.items:
+            self.items[anchor].setSelected(True)
+        self.report({"chain": "Align: drag left or up for the chain upstream, right or down for downstream",
+                     "selected": "Align the selection: across for a row, up or down for a column",
+                     "distribute": "Spread the selection evenly: across or up and down"}[mode])
+
+    def align_gesture_to(self, at, zoom=1.0):
+        import groomlab_core
+        g = getattr(self, "_gesture", None)
+        if not g:
+            return
+        for name, start in g["start"].items():
+            item = self.items.get(name)
+            if item is not None and item.pos() != start:
+                item.setPos(start)
+        boxes = [(n, i.pos().x(), i.pos().y(), NODE_W, i.height) for n, i in self.items.items() if i.isVisible()]
+        d = (at - g["at"]) * zoom  # screen pixels decide the axis
+        try:
+            placed = groomlab_core.align_gesture(self.model._query(), boxes, g["anchor"], self.selected_names(),
+                                                 g["mode"], d.x(), d.y())
+        except (RuntimeError, ValueError):
+            return
+        for name, (x, y) in placed.items():
+            if name in self.items:
+                self.items[name].setPos(x, y)
+
+    def end_align_gesture(self):
+        g, self._gesture = getattr(self, "_gesture", None), None
+        if not g:
+            return
+        moved = [n for n, start in g["start"].items() if n in self.items and self.items[n].pos() != start]
+        if moved:
+            self._layout_dirty = True
+            self.commit_layout("align a node" if len(moved) == 1 else "align %d nodes" % len(moved))
+
+    def rename_pass_through(self, node, input_name):
+        """Rename Output: the name a pass-through output shows (empty, or thru_<input>: its own).
+        One undo step; links still read thru_<input>."""
+        current = self.model.pass_through_name(node, input_name) or "thru_" + input_name
+        text, ok = QtWidgets.QInputDialog.getText(self, "Rename Output", "Name:", text=current)
+        if not ok:
+            return
+        self.set_pass_through_name(node, input_name, text)
+
+    def set_pass_through_name(self, node, input_name, text):
+        label = (text or "").strip()
+        if label == "thru_" + input_name:
+            label = ""
+        try:
+            changed = self.model.set_pass_through_name(node, input_name, label)
+        except gm.GraphError as e:
+            self.report(str(e))
+            return
+        if changed:
+            self.rebuild()
+            self.changed()
 
     def detach_shaken(self, names, at):
         """A shake while dragged (Houdini's): the nodes out of their links, left where they were

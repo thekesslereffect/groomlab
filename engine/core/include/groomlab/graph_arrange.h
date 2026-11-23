@@ -4,7 +4,8 @@
 // How every host's node editor arranges a graph by hand (the app's node graph, Maya's Graph
 // Editor): aligning and spacing the selected nodes, laying out just the selection, backdrops that
 // grow around the nodes moved on them and fold to their title bar, the shake that pulls a node out
-// of its links, the nodes a Shift+drag carries (everything upstream), and the three wire styles.
+// of its links, the nodes a Shift or Ctrl+drag carries (downstream or upstream) with their pins and
+// dots, Houdini's A+drag align gestures, and the three wire styles.
 // Layout only: nothing here changes what the graph evaluates. Positions are the editors' scene
 // units, y growing downward, each node's (x, y) its card's top-left.
 
@@ -60,7 +61,9 @@ bool onBackdrop(const LayoutBox& backdrop, const LayoutBox& node);
 LayoutBox grownBackdrop(const LayoutBox& backdrop, const std::vector<LayoutBox>& nodes, double margin, double header);
 // A folded backdrop ("collapsed": true, as a minimized network box): drawn as its title bar and a
 // strip under it, `minWidth` to `maxWidth` wide, its nodes hidden; links into or out of them meet
-// its edges instead (the left edge for links in, the right for links out).
+// its edges instead (the left edge for links in, the right for links out). A host passes a minWidth
+// at least as wide as the backdrop's title, its chevron and margins, so the title always shows;
+// the pins and dots on it (layoutOnBackdrop) are hidden with its nodes.
 LayoutBox foldedBackdrop(const LayoutBox& backdrop, double header, double minWidth = 160.0, double maxWidth = 260.0);
 // Whether the backdrop in the graph's JSON is folded.
 bool backdropFolded(const nlohmann::json& backdrop);
@@ -72,10 +75,43 @@ bool backdropFolded(const nlohmann::json& backdrop);
 constexpr double kBackdropEscapeSpeed = 1100.0;
 bool backdropKeeps(bool overIt, double speed, bool left);
 
-// ---- Shift+drag: a node and every node upstream of it move together -------------------------
-// The nodes a Shift+drag of `names` carries: those nodes and everything feeding them (directly or
-// not), in the graph's order.
+// ---- Moving a node with what it is part of (every host's) -------------------------------------
+// The nodes a Ctrl+drag of `names` carries: those nodes and everything feeding them (directly or
+// not), in the graph's order. A link teleported through a portal (out of one of its exits,
+// graph_portals.h) is not followed: what feeds the portal stays where it is.
 std::vector<std::string> nodesWithUpstream(const GraphEdit& edit, const std::vector<std::string>& names);
+// The nodes a Shift+drag of `names` carries: those nodes and everything they feed (directly or
+// not), in the graph's order; again not through a portal's exits.
+std::vector<std::string> nodesWithDownstream(const GraphEdit& edit, const std::vector<std::string>& names);
+// The pins and dots that go with nodes moved together (several at once: a Shift or Ctrl+drag, a
+// selection, a backdrop), as nodes of their own: a pin whose source and every link through it
+// end at moved nodes, a portal's entry whose source and every link out of it do, an exit with
+// links all of which do. (A dot is (portal, exit), exit -1 its entry.)
+struct CarriedLayout {
+    std::vector<std::string> pins;
+    std::vector<std::pair<std::string, int>> dots;
+};
+CarriedLayout carriedWith(const nlohmann::json& graph, const std::vector<std::string>& nodes);
+// The pins and dots lying on a backdrop (their centers inside `backdrop`): moved with it, hidden
+// when it folds, as its nodes are.
+CarriedLayout layoutOnBackdrop(const nlohmann::json& graph, const LayoutBox& backdrop);
+
+// ---- Align gestures (Houdini's: hold A and drag from a node) -----------------------------------
+// The node dragged from is the anchor; what lines up with it depends on the keys held:
+//   chain       A+drag: the anchor's chain upstream (dragged left or up: each node's first fed
+//               input's source) or downstream (right or down: each node's first reader)
+//   selected    Shift+A+drag: the selected nodes
+//   distribute  Alt+A+drag: the selected nodes (and the anchor) spread evenly, the anchor staying
+// A drag mostly across makes a row (centers level with the anchor's), mostly up or down a column
+// (centers under the anchor's; a chain stacked `gap` apart above or below it). The axis comes
+// from the drag so far (alignGestureAxis: "row", "column", or "" while it is under `threshold`).
+// Returns the new top-left of each node it moves, by name (nothing while the axis is "").
+std::string alignGestureAxis(double dx, double dy, double threshold = 12.0);
+std::map<std::string, std::pair<double, double>> alignGesture(const GraphEdit& edit, const std::vector<LayoutBox>& boxes,
+                                                              const std::string& anchor, const std::vector<std::string>& selected,
+                                                              const std::string& mode, double dx, double dy, double gap = 40.0);
+// The gesture modes, as above.
+std::vector<std::string> alignGestureModes();
 
 // ---- Shake to disconnect ------------------------------------------------------------------------
 // A node shaken while dragged (left and right a few times, quickly) is pulled out of its links
