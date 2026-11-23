@@ -120,6 +120,12 @@ void setMapExternals(ExternalInputs& externals, const MapCatalog& maps);
 // Registers the scalp's recent motion as the external "scalpHistory" (skipped when null).
 void setScalpHistoryExternal(ExternalInputs& externals, const ScalpHistoryPtr& history);
 
+// The external SkinResponse reads the skin's squash and stretch from: the scalp as it is now, with
+// its rest pose. While the groom follows the scalp the graph evaluates on the rest pose ("scalp" is
+// the rest pose itself), so the pose comes on its own. Skipped when null or without a rest pose.
+inline constexpr const char* kScalpPoseExternal = "scalpPose";
+void setScalpPoseExternal(ExternalInputs& externals, const MeshPtr& scalp);
+
 // How many earlier frames of the scalp the graph's result reads: the most `history` any Jiggle
 // node making `output` asks for (Graph::forEachActiveUpstream: not bypassed, on a Switch's picked
 // input, inside compounds); 0 without one. Hosts sample the scalp's past only when this is > 0.

@@ -76,6 +76,10 @@ void setScalpHistoryExternal(ExternalInputs& externals, const ScalpHistoryPtr& h
     if (history) externals.set("scalpHistory", history, history->hash);
 }
 
+void setScalpPoseExternal(ExternalInputs& externals, const MeshPtr& scalp) {
+    if (scalp && scalp->hasRest()) externals.set(kScalpPoseExternal, scalp, scalp->surfaceHash());
+}
+
 int scalpHistoryFrames(const Graph& graph, NodeId output, int viewport) {
     if (!graph.hasNode(output)) return 0;
     std::int64_t frames = 0;

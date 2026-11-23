@@ -137,6 +137,7 @@ struct Case {
     bool flap = false;    // on the flap scalp (a thin flap standing on a floor) and its guides
     bool sculpt = false;  // the Sculpt node "op" given edits of the guides it is fed (sculptEdits)
     bool drive = false;   // with driver curves bound and posed (goldenDrivers)
+    bool pose = false;    // with the scalp posed (scalpPose: its top squashed, its middle stretched round), the graph at rest
 };
 
 // Every case shares scalp -> scatter -> interpolate (guides, scalp); the strands grow with
@@ -646,6 +647,10 @@ std::vector<Case> cases() {
          R"({"name": "bun", "type": "Bun", "params": {"radius": 0.12, "turns": 2.0, "rise": 0.08, "lift": 0.05}},
              {"name": "op", "type": "Braid", "params": {"region": 0.4, "width": 0.08, "end": "bound", "seed": 1}})",
          link("primaries", "bun", "guides") + "," + link("interp", "op", "strands") + "," + link("bun", "op", "braids")},
+        // The scalp's top squashed and its middle stretched round (Case::pose): the hair there lifted, laid down and parted.
+        {"SkinResponse", "op",
+         R"({"name": "op", "type": "SkinResponse", "params": {"lift": 30.0, "flatten": 15.0, "spread": 20.0, "smoothing": 0.1}})",
+         link("interp", "op", "strands"), false, 0.0, false, 0, false, false, false, true},
     };
 }
 
@@ -794,6 +799,21 @@ struct Scene {
             attached->hash = 7;
             withDrivers.set(kDriverAttachExternal, DriverAttachPtr(attached), attached->hash);
             ctx.externals = &withDrivers;
+        }
+        ExternalInputs withPose;
+        if (c.pose) {
+            // As a session following the scalp hands it: the graph on the rest pose, the pose on its own.
+            auto posed = std::make_shared<ScalpMesh>(*scalp);
+            posed->setRestPoints(scalp->points());
+            std::vector<Vec3f> points = scalp->points();
+            for (Vec3f& p : points) {
+                if (p.y > 0.4f) p.y = 0.4f + (p.y - 0.4f) * 0.6f;                        // the top squashed down
+                if (std::abs(p.y) < 0.3f) p = Vec3f(p.x * 1.25f, p.y, p.z * 1.25f);  // the middle stretched round
+            }
+            const MeshPtr pose = std::make_shared<const ScalpMesh>(posed->withPoints(std::move(points)));
+            withPose.setParent(ctx.externals);
+            withPose.set(kScalpPoseExternal, pose, pose->surfaceHash());
+            ctx.externals = &withPose;
         }
         return asStrands(doc.graph.evaluate(doc.node(c.output), ctx));
     }

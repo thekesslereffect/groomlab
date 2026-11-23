@@ -43,6 +43,22 @@ rendered independently on a farm, and always give the same result.
 - After Propagate they move the barbs only; feather shafts hold still. Put them before Propagate
   to move whole feathers.
 - Bypassing (**B**) or deleting either restores the groom exactly.
+
+### Skin response
+
+Following the scalp moves each strand with its root, but the hair doesn't react to the skin
+squashing or stretching around it. **SkinResponse** (Add Node > Motion) adds that, for creature
+fur on a bending body:
+
+- Where the skin **squashes** (an armpit, the inside of a knee), the fur rises: `lift`.
+- Where it **stretches**, the fur lies down: `flatten`.
+- Fur **leans away** from where the stretch peaks, so parts open along the outside of a bend:
+  `spread`.
+
+`range` is how much squash or stretch gives the full effect (0.3 means the skin is 30% shorter or
+longer than at rest), and `smoothing` blurs the effect over the skin so it reacts to broad bends.
+It needs a rest mesh, and does nothing at rest. Put it near the end of the graph. It also writes
+`skinSquash` and `skinStretch` channels you can color or render with.
 - Their parameters can be keyed like any other (right-click > **Set Key**, or **S** over a field),
   for example a wind that picks up or changes direction (`direction` is keyed as X, Y, Z). See
   [Animating parameters](/docs/node-graph#animating-parameters).

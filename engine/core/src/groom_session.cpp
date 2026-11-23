@@ -1508,6 +1508,9 @@ void GroomSession::fillExternals(ExternalInputs& externals) const {
     setMapExternals(externals, data_.maps);             // where each painted map lives, for Map nodes
     // The scalp's earlier frames, for Jiggle nodes (in rest space while following).
     setScalpHistoryExternal(externals, following_ ? followHistory_ : history_);
+    // The scalp as it is now, with its rest pose, for SkinResponse nodes (the skin's squash and
+    // stretch): on its own, since "scalp" is the rest pose while following.
+    setScalpPoseExternal(externals, scalp_);
 }
 
 void GroomSession::prepareFollow(std::vector<SessionMessage>& messages) {

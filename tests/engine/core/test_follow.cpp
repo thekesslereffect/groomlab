@@ -319,6 +319,53 @@ TEST(FollowScalp, ShowTubesAreCarriedWithTheHair) {
     EXPECT_LT(worst, 1e-4f);
 }
 
+TEST(FollowScalp, SkinResponseReadsTheScalpAsItIsNow) {
+    // While following, the graph runs on the rest pose; SkinResponse reads the skin's squash from
+    // the session's "scalpPose" all the same: the top of the head squashed down lifts the hair
+    // there, and leaves the hair low on the head as the same graph without it makes it.
+    std::string skinGraph = kLookGraph;
+    const std::string link = R"({"from": "width", "to": "output", "input": "strands"})";
+    skinGraph.replace(skinGraph.find(link), link.size(),
+                      R"({"from": "width", "to": "skin", "input": "strands"}, {"from": "skin", "to": "output", "input": "strands"})");
+    const std::string node = R"({"name": "output", "type": "Output"})";
+    skinGraph.replace(skinGraph.find(node), node.size(),
+                      R"({"name": "skin", "type": "SkinResponse", "params": {"smoothing": 0.0}}, )" + node);
+    GroomData with = followData(skinGraph.c_str()), without = followData(kLookGraph);
+    with.followScalp = without.followScalp = true;
+    GroomSession skin(with), plain(without);
+    // At rest: the channel there, all 0; the points as the graph without it makes them.
+    const StrandsPtr rest = skin.evaluate(1.0f, 0.0);
+    ASSERT_NE(rest->strandChannel("skinSquash"), nullptr);
+    EXPECT_EQ(rest->positions(), plain.evaluate(1.0f, 0.0)->positions());
+
+    std::vector<Vec3f> points = with.scalp->points();
+    for (Vec3f& p : points) {
+        if (p.y > 0.5f) p.y = 0.5f + (p.y - 0.5f) * 0.5f;
+    }
+    skin.updateScalpPoints(points);
+    plain.updateScalpPoints(points);
+    const StrandsPtr a = skin.evaluate(1.0f, 0.0), b = plain.evaluate(1.0f, 0.0);
+    ASSERT_TRUE(skin.following());
+    ASSERT_EQ(a->strandCount(), b->strandCount());
+    const std::vector<float>& squash = *a->strandChannel("skinSquash");
+    std::size_t lifted = 0, low = 0;
+    for (std::size_t s = 0; s < a->strandCount(); ++s) {
+        const float y = with.scalp->restPositionOr(a->roots()[s], Vec3f{}).y;
+        float moved = 0.0f;
+        for (std::size_t i = 0; i < a->strandPointCount(s); ++i) {
+            moved = std::max(moved, (a->strandPoints(s)[i] - b->strandPoints(s)[i]).length());
+        }
+        if (y < 0.3f) {
+            EXPECT_LT(moved, 1e-5f) << "strand " << s << " where the skin did not change";
+            ++low;
+        } else if (y > 0.55f && y < 0.85f && squash[s] > 0.5f && moved > 1e-3f) {
+            ++lifted;
+        }
+    }
+    EXPECT_GT(low, 50u);
+    EXPECT_GT(lifted, 20u);
+}
+
 TEST(FollowScalp, ARigidlyMovedScalpCarriesTheGroomAtRestRigidly) {
     GroomData data = followData(kLookGraph);
     const StrandsPtr rest = GroomSession(data).evaluate(1.0f, 0.0);

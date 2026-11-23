@@ -59,6 +59,31 @@ motion before Propagate).
   low `damping`) more history, about 1 / (damping x stiffness) seconds' worth.
 - **Not yet:** Unreal card exports carry no wind weights; cards take the motion as geometry.
 
+### Skin response
+
+`SkinResponse` (Add Node > Motion) makes fur react to the skin under it as the scalp deforms, the
+way an animal's coat does when it bends: where the skin squashes (an armpit, the inside of a bent
+knee, a neck turned) the strands rise toward its normal; where it stretches they lie down; and they
+lean away from where the stretch peaks, so a part opens along the outside of a bend. Following the
+scalp alone carries each strand rigidly with its root, whatever the skin does around it.
+
+| Operator | What it does | Main parameters |
+| --- | --- | --- |
+| `SkinResponse` | Reads each root's skin strain against the rest pose (`skin_strain.h`: the principal stretches of each triangle, the pose's uniform scale taken out, averaged to the vertices by area and blurred over `smoothing`), then turns each strand about its root: up by `lift` x squash, down by `flatten` x stretch (never past the normal, never below the skin), and across the skin down the stretch's slope by up to `spread`. Squash and stretch reach the full response at `range` (0.3: the skin 30% shorter or longer than at rest). `profile` shares the turn along the strand (constant: the whole strand, as its follicle turns). Writes each strand's squash and stretch, 0 to 1 of `range`, to `squashChannel` and `stretchChannel` | `strength` (mappable), `lift`, `flatten`, `spread` (degrees), `range`, `smoothing` (scene units), `profile`, `squashChannel`, `stretchChannel` |
+
+- **Where the pose comes from:** the external `scalpPose`, the scalp as it is now with its rest
+  pose (`setScalpPoseExternal`), which every host's session sets. While the groom follows the
+  scalp, the graph runs on the rest pose and the node turns the strands there; the session then
+  carries them to the scalp. Without following, it reads the posed scalp itself.
+- **Needs a rest pose:** without one the strands pass through with a note. At rest the points
+  pass through to the bit and both channels are 0; a rig scaled uniformly reads as no strain.
+- **Where to put it:** near the end of the chain, as for Wind and Jiggle: every node after it
+  evaluates again each frame the skin moves. A Collide after it keeps strands leaning into a fold
+  off the skin.
+- **Uses of the channels:** they flow to renderers as user data and to the viewport's color
+  modes, for example to show more skin where it stretches.
+- **CPU only for now:** the GPU preview hands it to the CPU.
+
 ## Simulating the guides
 
 `Simulate` (Guides, an optional collider Mesh -> Guides) is GroomLab's own hair simulation, in the

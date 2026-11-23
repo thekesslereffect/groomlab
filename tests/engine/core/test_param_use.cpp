@@ -276,6 +276,16 @@ TEST(ParamUse, EveryDeclaredParamIsReadWhereItShows) {
         frames.push_back(std::move(moved));
     }
     setScalpHistoryExternal(externals, ScalpHistory::make(1.0 / 24.0, std::move(frames)));
+    // The scalp posed, its top squashed down (SkinResponse's skin strain).
+    {
+        auto restful = std::make_shared<ScalpMesh>(*data.scalp);
+        restful->setRestPoints(data.scalp->points());
+        std::vector<Vec3f> squashed = data.scalp->points();
+        for (Vec3f& p : squashed) {
+            if (p.y > 0.4f) p.y = 0.4f + (p.y - 0.4f) * 0.6f;
+        }
+        setScalpPoseExternal(externals, std::make_shared<const ScalpMesh>(restful->withPoints(std::move(squashed))));
+    }
     // Driver curves (DriveGuides): two up out of the top, as bound and swung over.
     auto bound = std::make_shared<GuideSet>(), posed = std::make_shared<GuideSet>();
     for (int d = 0; d < 2; ++d) {

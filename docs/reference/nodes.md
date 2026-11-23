@@ -22,7 +22,8 @@ User guide: [Node graph](https://www.getgroomlab.com/docs/node-graph).
   [Buns](feathers-braids-scales.md#buns)), `Noise`, `Curl`, `Flyaway`, `Static` (charged hair puffing out), `Tangle`, `Wet` (wet hair from one slider), `Instance`, `Scales`.
 - **Convert:** `ToGuides`, `ToStrands`, `ToMesh`. **Games:** `Cards`.
 - **Color:** `HairColor`, `Bands`, `FeatherColor`, `RenderData`.
-- **Motion:** `Wind`, `Jiggle` (no simulation cache: see [Motion without a cache](motion-and-simulation.md#motion-without-a-cache)), `Simulate`
+- **Motion:** `Wind`, `Jiggle` (no simulation cache: see [Motion without a cache](motion-and-simulation.md#motion-without-a-cache)),
+  `SkinResponse` (fur rising, lying down and parting as the skin squashes and stretches: see [Skin response](motion-and-simulation.md#skin-response)), `Simulate`
   (the guides simulated, every host: see [Simulating the guides](motion-and-simulation.md#simulating-the-guides)),
   `GuideCache` (the guides posed from an Alembic cache simulated in another package, by guide ID),
   `DriveGuides` (guides attached by hand to driver curves an animator rigs follow them: each binds

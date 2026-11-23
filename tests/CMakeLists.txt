@@ -31,6 +31,7 @@ add_executable(groomlab_tests
     engine/core/test_determinism.cpp
     engine/core/test_distance_field.cpp
     engine/core/test_follow.cpp
+    engine/core/test_skin_response.cpp
     engine/core/test_display.cpp
     engine/core/test_strand_lod.cpp
     engine/core/test_expression.cpp
