@@ -150,6 +150,7 @@
       {"include": "graph/keyMenu", "needs": ["param.keyable"]},
       "-",
       {"id": "param.expose", "needs": ["param.linkable"]},
+      {"id": "param.promote", "needs": ["param.promotable"]},
       "-",
       {"ref": "graph/paintMenu", "needs": ["param.linkable", "param.mappable", "groom"]},
       "-",

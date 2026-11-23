@@ -4,6 +4,7 @@
 #include "groomlab/graph_arrange.h"
 
 #include <algorithm>
+#include <functional>
 #include <set>
 
 #include "groomlab/graph_inserts.h"
@@ -469,6 +470,329 @@ namespace groomlab {
 bool backdropKeeps(bool overIt, double speed, bool left) {
     if (left) return false;
     return overIt || speed < kBackdropEscapeSpeed;
+}
+
+}  // namespace groomlab
+
+namespace groomlab {
+
+namespace {
+
+using json = nlohmann::json;
+using Offset = std::pair<double, double>;
+
+// Boxes (only their sizes count) laid out in columns by the longest path in along `edges`
+// (index pairs, from -> to), each placed level with the mean of what feeds it where the column
+// leaves room. Only edges going up in `rank` count (a group holding both ends of a chain would
+// loop otherwise: it goes where its first node would). Top-lefts from (0, 0).
+std::vector<Offset> layeredLayout(const std::vector<LayoutBox>& units, const std::vector<std::pair<int, int>>& edges,
+                                  const std::vector<int>& rank, double gapX, double gapY) {
+    const int n = static_cast<int>(units.size());
+    std::vector<std::vector<int>> preds(n);
+    for (const auto& [a, b] : edges) {
+        if (a == b || a < 0 || b < 0 || a >= n || b >= n || rank[a] >= rank[b]) continue;
+        if (std::find(preds[b].begin(), preds[b].end(), a) == preds[b].end()) preds[b].push_back(a);
+    }
+    std::vector<int> depth(n, 0), state(n, 0);
+    std::vector<std::vector<int>> kept(n);  // the links that count (no loop's back link)
+    std::function<void(int)> visit = [&](int v) {
+        state[v] = 1;
+        for (const int p : preds[v]) {
+            if (state[p] == 1) continue;
+            if (state[p] == 0) visit(p);
+            kept[v].push_back(p);
+            depth[v] = std::max(depth[v], depth[p] + 1);
+        }
+        state[v] = 2;
+    };
+    for (int v = 0; v < n; ++v) {
+        if (state[v] == 0) visit(v);
+    }
+    const int columns = n ? *std::max_element(depth.begin(), depth.end()) + 1 : 0;
+    std::vector<Offset> out(n, {0.0, 0.0});
+    double x = 0.0;
+    for (int c = 0; c < columns; ++c) {
+        std::vector<std::pair<double, int>> column;  // (wanted center y, unit)
+        double width = 0.0;
+        for (int v = 0; v < n; ++v) {
+            if (depth[v] != c) continue;
+            width = std::max(width, units[v].w);
+            double sum = 0.0;
+            int count = 0;
+            for (const int p : kept[v]) {
+                sum += out[p].second + units[p].h * 0.5;
+                ++count;
+            }
+            column.push_back({count ? sum / count : -1e300, v});
+        }
+        std::stable_sort(column.begin(), column.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        double below = -1e300;
+        for (const auto& [want, v] : column) {
+            double top = want <= -1e299 ? 0.0 : want - units[v].h * 0.5;
+            if (below > -1e299) top = std::max(top, below + gapY);
+            out[v] = {x, top};
+            below = top + units[v].h;
+        }
+        x += width + gapX;
+    }
+    double minY = 0.0;
+    for (int v = 0; v < n; ++v) minY = v ? std::min(minY, out[v].second) : out[v].second;
+    for (Offset& o : out) o.second -= minY;
+    return out;
+}
+
+LayoutBox backdropBox(const json& b) {
+    return {b.value("title", std::string()), b.value("x", 0.0), b.value("y", 0.0), b.value("w", 0.0), b.value("h", 0.0)};
+}
+
+}  // namespace
+
+json tidyGraph(const json& graph, const std::vector<LayoutBox>& boxes, const std::vector<std::string>& selected, double gapX, double gapY,
+               double margin, double header) {
+    json out = graph;
+    std::vector<std::string> order;  // the graph's nodes with a box, in its order
+    std::map<std::string, LayoutBox> box;
+    for (const LayoutBox& b : boxes) box[b.name] = b;
+    for (const json& n : graph.value("nodes", json::array())) {
+        const std::string name = n.is_object() ? n.value("name", std::string()) : std::string();
+        if (box.count(name)) order.push_back(name);
+    }
+    std::set<std::string> tidied;
+    for (const std::string& n : selected.empty() ? order : selected) {
+        if (box.count(n)) tidied.insert(n);
+    }
+    if (tidied.empty()) return out;
+
+    // The groups: each node on the smallest backdrop holding its card's center.
+    const json noBackdrops = json::array();
+    const json& backdrops = graph.contains("backdrops") && graph["backdrops"].is_array() ? graph["backdrops"] : noBackdrops;
+    std::vector<LayoutBox> backdropBoxes;
+    for (const json& b : backdrops) backdropBoxes.push_back(b.is_object() ? backdropBox(b) : LayoutBox{});
+    const int nb = static_cast<int>(backdropBoxes.size());
+    std::map<std::string, int> holder;
+    std::vector<std::vector<std::string>> held(nb), heldTidied(nb);
+    for (const std::string& name : order) {
+        int best = -1;
+        for (int i = 0; i < nb; ++i) {
+            const LayoutBox& b = backdropBoxes[i];
+            if (b.w <= 0.0 || b.h <= 0.0 || !onBackdrop(b, box[name])) continue;
+            if (best < 0 || b.w * b.h < backdropBoxes[best].w * backdropBoxes[best].h) best = i;
+        }
+        holder[name] = best;
+        if (best >= 0) {
+            held[best].push_back(name);
+            if (tidied.count(name)) heldTidied[best].push_back(name);
+        }
+    }
+    const auto links = drawnLinks(graph);
+    // Each node's longest path in, over the whole graph (a group's rank: its first node's).
+    std::map<std::string, int> depth;
+    {
+        std::map<std::string, std::vector<std::string>> feeds;
+        for (const auto& [from, to] : links) feeds[to].push_back(from);
+        std::map<std::string, int> state;
+        std::function<int(const std::string&)> visit = [&](const std::string& v) -> int {
+            int& st = state[v];
+            if (st == 1) return 0;  // (a loop: none in a graph, but never forever)
+            if (st == 2) return depth[v];
+            st = 1;
+            int d = 0;
+            for (const std::string& p : feeds[v]) d = std::max(d, visit(p) + 1);
+            state[v] = 2;
+            return depth[v] = d;
+        };
+        for (const std::string& name : order) visit(name);
+    }
+    // Nodes laid out among themselves by their links: top-lefts from (0, 0).
+    auto layoutOf = [&](const std::vector<std::string>& names) {
+        std::vector<LayoutBox> units;
+        std::map<std::string, int> index;
+        for (const std::string& n : names) {
+            index[n] = static_cast<int>(units.size());
+            units.push_back(box[n]);
+        }
+        std::vector<std::pair<int, int>> edges;
+        for (const auto& [from, to] : links) {
+            const auto a = index.find(from), b = index.find(to);
+            if (a != index.end() && b != index.end()) edges.emplace_back(a->second, b->second);
+        }
+        std::vector<int> rank;
+        for (const std::string& n : names) rank.push_back(depth[n]);
+        const std::vector<Offset> at = layeredLayout(units, edges, rank, gapX, gapY);
+        std::map<std::string, Offset> placed;
+        for (std::size_t i = 0; i < names.size(); ++i) placed[names[i]] = at[i];
+        return placed;
+    };
+
+    std::map<std::string, Offset> moved;  // each node's new top-left
+    std::map<int, LayoutBox> newBackdrop;
+    std::set<int> carriedBackdrops;  // moved as one card: their pins and dots go with them
+    // The outer layout's cards: loose nodes and whole groups.
+    struct Card {
+        LayoutBox box;                          // where it is now (its size the laid-out one)
+        int backdrop = -1;                      // a group's backdrop
+        std::map<std::string, Offset> members;  // a group's nodes, from its top-left
+    };
+    std::vector<Card> cards;
+    std::map<std::string, int> cardOf;
+    std::set<int> grouped;
+    for (const std::string& name : order) {
+        if (!tidied.count(name)) continue;
+        const int h = holder[name];
+        if (h < 0) {
+            cardOf[name] = static_cast<int>(cards.size());
+            cards.push_back({box[name], -1, {}});
+            continue;
+        }
+        if (heldTidied[h].size() != held[h].size()) continue;  // a part of a group: below
+        if (!grouped.insert(h).second) {
+            cardOf[name] = cardOf[held[h].front()];
+            continue;
+        }
+        Card card;
+        card.backdrop = h;
+        card.box = backdropBoxes[h];
+        if (backdropFolded(backdrops[h])) {
+            for (const std::string& m : held[h]) card.members[m] = {box[m].x - card.box.x, box[m].y - card.box.y};
+        } else {
+            double w = 0.0, hgt = 0.0;
+            for (const auto& [m, at] : layoutOf(held[h])) {
+                card.members[m] = {margin + at.first, header + margin + at.second};
+                w = std::max(w, at.first + box[m].w);
+                hgt = std::max(hgt, at.second + box[m].h);
+            }
+            card.box.w = w + margin * 2.0;
+            card.box.h = hgt + margin * 2.0 + header;
+        }
+        for (const std::string& m : held[h]) cardOf[m] = static_cast<int>(cards.size());
+        cards.push_back(std::move(card));
+    }
+    // A group only partly tidied: its tidied nodes laid out where they are on it, the backdrop grown.
+    for (int h = 0; h < nb; ++h) {
+        if (heldTidied[h].empty() || heldTidied[h].size() == held[h].size()) continue;
+        double left = 0.0, top = 0.0;
+        for (std::size_t i = 0; i < heldTidied[h].size(); ++i) {
+            const LayoutBox& b = box[heldTidied[h][i]];
+            left = i ? std::min(left, b.x) : b.x;
+            top = i ? std::min(top, b.y) : b.y;
+        }
+        std::vector<LayoutBox> now;
+        for (const auto& [m, at] : layoutOf(heldTidied[h])) {
+            moved[m] = {left + at.first, top + at.second};
+            now.push_back({m, left + at.first, top + at.second, box[m].w, box[m].h});
+        }
+        newBackdrop[h] = grownBackdrop(backdropBoxes[h], now, margin, header);
+    }
+    // The outer layout, its top-left where the cards' was.
+    if (!cards.empty()) {
+        double left = 0.0, top = 0.0;
+        std::vector<LayoutBox> units;
+        for (std::size_t i = 0; i < cards.size(); ++i) {
+            left = i ? std::min(left, cards[i].box.x) : cards[i].box.x;
+            top = i ? std::min(top, cards[i].box.y) : cards[i].box.y;
+            units.push_back(cards[i].box);
+        }
+        std::vector<std::pair<int, int>> edges;
+        for (const auto& [from, to] : links) {
+            const auto a = cardOf.find(from), b = cardOf.find(to);
+            if (a != cardOf.end() && b != cardOf.end()) edges.emplace_back(a->second, b->second);
+        }
+        std::vector<int> rank(cards.size(), 1 << 30);
+        for (const auto& [node, card] : cardOf) rank[card] = std::min(rank[card], depth[node]);
+        const std::vector<Offset> at = layeredLayout(units, edges, rank, gapX, gapY);
+        for (std::size_t i = 0; i < cards.size(); ++i) {
+            const double x = left + at[i].first, y = top + at[i].second;
+            const Card& card = cards[i];
+            if (card.backdrop < 0) {
+                moved[card.box.name] = {x, y};
+                continue;
+            }
+            LayoutBox b = card.box;
+            b.x = x;
+            b.y = y;
+            newBackdrop[card.backdrop] = b;
+            carriedBackdrops.insert(card.backdrop);
+            for (const auto& [m, off] : card.members) moved[m] = {x + off.first, y + off.second};
+        }
+    }
+
+    // Written back: the nodes, the backdrops, then the pins and dots.
+    for (json& n : out["nodes"]) {
+        const auto it = moved.find(n.value("name", std::string()));
+        if (it != moved.end()) n["ui"] = {{"x", it->second.first}, {"y", it->second.second}};
+    }
+    for (const auto& [i, b] : newBackdrop) {
+        json& j = out["backdrops"][i];
+        j["x"] = b.x;
+        j["y"] = b.y;
+        j["w"] = b.w;
+        j["h"] = b.h;
+    }
+    auto shift = [&](const std::string& node) -> Offset {
+        const auto it = moved.find(node);
+        if (it == moved.end()) return {0.0, 0.0};
+        return {it->second.first - box[node].x, it->second.second - box[node].y};
+    };
+    std::map<std::string, Offset> pinShift;
+    std::map<std::pair<std::string, int>, Offset> dotShift;
+    for (const int i : carriedBackdrops) {
+        const Offset d{newBackdrop[i].x - backdropBoxes[i].x, newBackdrop[i].y - backdropBoxes[i].y};
+        const CarriedLayout on = layoutOnBackdrop(graph, backdropBoxes[i]);
+        for (const std::string& p : on.pins) pinShift.emplace(p, d);
+        for (const auto& dot : on.dots) dotShift.emplace(dot, d);
+    }
+    auto mean = [&](const std::vector<std::string>& ends) -> Offset {
+        double x = 0.0, y = 0.0;
+        for (const std::string& e : ends) {
+            const Offset d = shift(e);
+            x += d.first;
+            y += d.second;
+        }
+        return ends.empty() ? Offset{0.0, 0.0} : Offset{x / ends.size(), y / ends.size()};
+    };
+    for (const std::string& pin : pinIds(graph)) {
+        if (pinShift.count(pin)) continue;
+        std::vector<std::string> ends;
+        if (const auto source = pinSource(graph, pin)) ends.push_back(source->from);
+        for (const PinLink& l : pinLinks(graph, pin)) ends.push_back(l.to);
+        pinShift[pin] = mean(ends);
+    }
+    for (const auto& [pin, d] : pinShift) {
+        double x = 0.0, y = 0.0;
+        if ((d.first != 0.0 || d.second != 0.0) && pinPosition(graph, pin, &x, &y)) movePin(out, pin, x + d.first, y + d.second);
+    }
+    if (out.contains("portals") && out["portals"].is_array()) {
+        for (json& p : out["portals"]) {
+            if (!p.is_object()) continue;
+            const std::string name = p.value("name", std::string());
+            auto place = [&](json& at, const Offset& d) {
+                if (d.first == 0.0 && d.second == 0.0) return;
+                at["x"] = at.value("x", 0.0) + d.first;
+                at["y"] = at.value("y", 0.0) + d.second;
+            };
+            const auto entry = dotShift.find({name, -1});
+            if (entry != dotShift.end()) {
+                place(p, entry->second);
+            } else {
+                std::vector<std::string> ends{p.value("from", std::string())};
+                place(p, mean(ends));
+            }
+            if (!p.contains("exits") || !p["exits"].is_array()) continue;
+            for (std::size_t e = 0; e < p["exits"].size(); ++e) {
+                json& exit = p["exits"][e];
+                if (!exit.is_object()) continue;
+                const auto known = dotShift.find({name, static_cast<int>(e)});
+                if (known != dotShift.end()) {
+                    place(exit, known->second);
+                    continue;
+                }
+                std::vector<std::string> ends;
+                for (const json& l : exit.value("links", json::array())) ends.push_back(l.value("to", std::string()));
+                place(exit, mean(ends));
+            }
+        }
+    }
+    return out;
 }
 
 }  // namespace groomlab

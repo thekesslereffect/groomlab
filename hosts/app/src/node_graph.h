@@ -281,7 +281,7 @@ public:
     // Align the selected nodes (alignModes: "left", "centerX", "right", "top", "centerY", "bottom",
     // "row", "column", "distributeX", "distributeY"), one undo step.
     void alignSelected(const std::string& mode);
-    // Tidy Selection: the selected nodes laid out where they are (fewer than two: Tidy Layout).
+    // Tidy Selection: Tidy Layout (the selected nodes; fewer than two: all).
     void tidySelection();
     // How links are drawn: "smooth", "square" or "rounded" (wireStyles; another: smooth).
     void setWireStyle(const std::string& style);
@@ -330,7 +330,9 @@ public:
     void renameSelected();     // the prompt, then the document's rename
     void duplicateSelected();  // Ctrl+D: the copies read what the nodes read
     void setSelectedAsOutput();
-    void tidyLayout();         // every position dropped: laid out afresh and fitted (Ctrl+L)
+    // Tidy Layout (L, Ctrl+L): the selected nodes laid out by their links (fewer than two: the whole
+    // graph, then fitted), each backdrop a group (graph_arrange.h tidyGraph). One undo step.
+    void tidyLayout();
     // Ctrl+G: the selected nodes into one Compound (selected after); Ctrl+Shift+G: the selected
     // Compounds' nodes back in the graph (selected after). Each one undo step.
     void groupSelected();

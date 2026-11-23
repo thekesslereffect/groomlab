@@ -248,6 +248,17 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                          },
                          [m](const json&) { return m->document_ && m->document_->paramExposed(paramTarget().first, paramTarget().second); },
                          paramOn};
+    // Promote to Compound (inside one): the param shown on the compound you are in, or no longer.
+    b["param.promote"] = {[m](const json&, bool on) {
+                              if (!m->document_) return;
+                              const auto [node, param] = paramTarget();
+                              const std::string error = m->document_->promoteParam(node, param, on);
+                              if (!error.empty()) m->report(qs(error));
+                              else m->report(qs((on ? "Promoted " : "No longer promoted: ") + node + "." + param));
+                              QTimer::singleShot(0, m, [m] { m->graphEdited(); });
+                          },
+                          [m](const json&) { return m->document_ && m->document_->paramPromoted(paramTarget().first, paramTarget().second); },
+                          paramOn};
     for (const auto& [id, kind] : {std::pair<const char*, const char*>{"param.paintGuides", "guides"}, {"param.paintVertices", "vertices"},
                                    {"param.paintTexture", "texture"}}) {
         b[id] = {run([m, kind = QString::fromLatin1(kind)] {
@@ -474,6 +485,7 @@ std::set<std::string> AppActions::paramState(MainWindow& w, const std::string& n
         const json value = w.document_->paramOrDefault(node, param);
         if (p.contains("port") && p["port"].is_object() && value.is_number()) s.insert("param.canKey");
     }
+    if (w.document_->paramPromotable(node, param)) s.insert("param.promotable");
     if (w.document_->paramKeyedHere(node, param)) s.insert("param.keyed");
     if (w.document_->paramKeyed(node, param)) s.insert("param.linked");
     return s;

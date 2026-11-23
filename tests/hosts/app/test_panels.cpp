@@ -5084,7 +5084,7 @@ bool linked(const GroomDocument& doc, const std::string& from, const std::string
 
 }  // namespace
 
-TEST(AppPanels, GraphMovesAreUndoStepsShiftDragCarriesDownstreamCtrlDragUpstream) {
+TEST(AppPanels, GraphMovesAreUndoStepsShiftDragCarriesUpstreamCtrlDragDownstream) {
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
     const std::string length = nodeOfType(*doc, "Length"), interpolate = nodeOfType(*doc, "Interpolate");
@@ -5103,19 +5103,19 @@ TEST(AppPanels, GraphMovesAreUndoStepsShiftDragCarriesDownstreamCtrlDragUpstream
     EXPECT_EQ(doc->undo(), "");
     view.refresh();
     EXPECT_NEAR(view.nodeRect(length).x(), card.x(), 1e-3);
-    // Ctrl+drag: everything upstream comes along.
-    mouseMods(&view, QEvent::MouseButtonPress, grab, Qt::ControlModifier);
-    mouseMods(&view, QEvent::MouseMove, grab + QPoint(-40, 60), Qt::ControlModifier);
-    mouseMods(&view, QEvent::MouseButtonRelease, grab + QPoint(-40, 60), Qt::ControlModifier);
+    // Shift+drag: everything upstream comes along.
+    mouseMods(&view, QEvent::MouseButtonPress, grab, Qt::ShiftModifier);
+    mouseMods(&view, QEvent::MouseMove, grab + QPoint(-40, 60), Qt::ShiftModifier);
+    mouseMods(&view, QEvent::MouseButtonRelease, grab + QPoint(-40, 60), Qt::ShiftModifier);
     EXPECT_NEAR(view.nodeRect(length).x(), card.x() - 40, 1e-3);
     EXPECT_NEAR(view.nodeRect(interpolate).x(), up.x() - 40, 1e-3);
     EXPECT_NEAR(view.nodeRect(interpolate).y(), up.y() + 60, 1e-3);
-    // Shift+drag: everything downstream instead (interpolate stays).
+    // Ctrl+drag: everything downstream instead (interpolate stays).
     const QRectF interpolateNow = view.nodeRect(interpolate);
     const QPoint grab2 = view.nodeRect(length).center().toPoint();
-    mouseMods(&view, QEvent::MouseButtonPress, grab2, Qt::ShiftModifier);
-    mouseMods(&view, QEvent::MouseMove, grab2 + QPoint(50, 0), Qt::ShiftModifier);
-    mouseMods(&view, QEvent::MouseButtonRelease, grab2 + QPoint(50, 0), Qt::ShiftModifier);
+    mouseMods(&view, QEvent::MouseButtonPress, grab2, Qt::ControlModifier);
+    mouseMods(&view, QEvent::MouseMove, grab2 + QPoint(50, 0), Qt::ControlModifier);
+    mouseMods(&view, QEvent::MouseButtonRelease, grab2 + QPoint(50, 0), Qt::ControlModifier);
     EXPECT_EQ(view.nodeRect(interpolate), interpolateNow);
     EXPECT_NEAR(view.nodeRect(length).x(), card.x() + 10, 1e-3);
     // Ctrl+click without a move toggles the node in the selection.
@@ -5139,6 +5139,13 @@ TEST(AppPanels, GraphMovesAreUndoStepsShiftDragCarriesDownstreamCtrlDragUpstream
     EXPECT_EQ(doc->undoText(), "Undo align top");
     view.tidySelection();
     EXPECT_EQ(doc->undoText(), "Undo tidy selection");
+    // L with nothing selected: the whole graph, every link left to right, one undo step.
+    view.selectNode("");
+    key(&view, QEvent::KeyPress, Qt::Key_L);
+    EXPECT_EQ(doc->undoText(), "Undo tidy layout");
+    for (const auto& c : doc->connections()) {
+        if (view.nodeRect(c.from).isValid() && view.nodeRect(c.to).isValid()) EXPECT_LT(view.nodeRect(c.from).right(), view.nodeRect(c.to).left()) << c.from << " " << c.to;
+    }
 }
 
 TEST(AppPanels, GraphWireStylesPinsAndPortals) {

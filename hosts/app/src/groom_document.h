@@ -367,6 +367,13 @@ public:
     // what Save as Node keeps). One undo step; "" or the error. shownInnerParams: the targets shown.
     std::string showInnerParam(const std::string& compound, const std::string& target, bool shown);
     std::vector<std::string> shownInnerParams(const std::string& compound) const;
+    // Promote to Compound (a param's menu inside a compound, scope()): node.param of the graph shown
+    // as a param of the compound you are in (graph_controls.h promoteParam, every host's), or no
+    // longer. One undo step; "" or why not. paramPromoted: whether it is; paramPromotable: whether
+    // it can be (false outside a compound).
+    std::string promoteParam(const std::string& node, const std::string& param, bool promoted);
+    bool paramPromoted(const std::string& node, const std::string& param) const;
+    bool paramPromotable(const std::string& node, const std::string& param) const;
     // Drive with Slider: a Control node (named <param>Control, its slider from 0 to 1 starting at
     // the param's value) beside the node, feeding the param through its input port (exposed). One
     // undo step; the Control node's name to *made. "" or the error.

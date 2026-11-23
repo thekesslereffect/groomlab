@@ -1828,6 +1828,33 @@ TEST(AppDocument, NodeRenameDuplicateOutputAndTidy) {
     EXPECT_EQ(doc->undo(), "");
 }
 
+TEST(AppDocument, PromoteAParamToTheCompoundFromInsideIt) {
+    // Inside a compound, a param's menu > Promote to Compound shows it on the compound, one undo
+    // step, the compound left open.
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    const std::string color = nodeOfType(doc->nodes(), "HairColor").name;
+    EXPECT_FALSE(doc->paramPromotable(color, "melanin")) << "not inside a compound";
+    EXPECT_NE(doc->promoteParam(color, "melanin", true), "");
+    std::string compound;
+    ASSERT_EQ(doc->collapseNodes({color}, &compound), "");
+    ASSERT_EQ(doc->enterCompound(compound), "");
+    EXPECT_TRUE(doc->paramPromotable(color, "melanin"));
+    EXPECT_FALSE(doc->paramPromoted(color, "melanin"));
+    EXPECT_EQ(doc->promoteParam(color, "melanin", true), "");
+    EXPECT_EQ(doc->scope(), compound);
+    EXPECT_TRUE(doc->paramPromoted(color, "melanin"));
+    EXPECT_EQ(doc->undoText(), "Undo promote " + color + ".melanin on " + compound);
+    doc->leaveCompound();
+    const std::vector<std::string> shown = doc->shownInnerParams(compound);
+    EXPECT_EQ(shown, std::vector<std::string>{color + ".melanin"});
+    ASSERT_EQ(doc->enterCompound(compound), "");
+    EXPECT_EQ(doc->promoteParam(color, "melanin", false), "");
+    EXPECT_FALSE(doc->paramPromoted(color, "melanin"));
+    EXPECT_EQ(doc->undo(), "");
+    EXPECT_TRUE(doc->paramPromoted(color, "melanin"));
+}
+
 TEST(AppDocument, SculptEditsFollowTheirNodeIntoAndOutOfACompound) {
     // A Sculpt node's edits are kept by node path outside the graph ("compound/sculpt" inside a
     // compound): Group, a rename of the compound, a copy of it and Ungroup take them along in the

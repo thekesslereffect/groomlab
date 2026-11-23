@@ -989,7 +989,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
                     else:
                         later(lambda: editor.set_bypass([name], not editor.model.bypassed(name)))
                     return
-        # A drag: Shift carries everything downstream, Ctrl everything upstream (not through
+        # A drag: Shift carries everything upstream, Ctrl everything downstream (not through
         # portals), a shake pulls the nodes out of their links; Shift+click without a move adds the
         # node to the selection (Ctrl+click toggles it: Qt's own). Several nodes moved together take
         # the pins and dots between them.
@@ -1004,7 +1004,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
             if self.isSelected():
                 moving = [i.name for i in self._before if i is not self] + [self.name]
             if shift or ctrl:
-                moving = self.editor.downstream_of(moving) if shift else self.editor.upstream_of(moving)
+                moving = self.editor.upstream_of(moving) if shift else self.editor.downstream_of(moving)
                 self._carry = [(self.editor.items[n], self.editor.items[n].pos()) for n in moving
                                if n != self.name and n in self.editor.items and self.editor.items[n].isVisible()]
             if len(moving) > 1:
@@ -2652,6 +2652,8 @@ class GraphScene(QtWidgets.QGraphicsScene):
             later(lambda: editor.add_pin(link, at, index))
         elif key == QtCore.Qt.Key_O and event.modifiers() == QtCore.Qt.ShiftModifier:
             later(self.editor.add_backdrop)  # Shift+O: a backdrop round the selection (Houdini's key)
+        elif key == QtCore.Qt.Key_L and not event.modifiers():
+            later(self.editor.tidy_layout)  # the selected nodes, or all of them
         elif key == QtCore.Qt.Key_U and not event.modifiers() and self.editor.scope:
             self.editor.leave_compound()  # up out of the compound (Houdini's U)
         elif key == QtCore.Qt.Key_I and not event.modifiers() and len(selected) == 1 and self.editor.model.node_type(selected[0]) == "Compound":
@@ -3060,7 +3062,7 @@ class GraphEditor(QtWidgets.QWidget):
         "graph.redo": "redo",
         "graph.frame": lambda self: self.view.frame(),
         "graph.frameAll": lambda self: self.view.frame_all(),
-        "graph.tidy": "layout_nodes",
+        "graph.tidy": "tidy_layout",
         "graph.up": "leave_compound",
         "align.left": lambda self: self.align_selected("left"),
         "align.centerX": lambda self: self.align_selected("centerX"),
@@ -4446,7 +4448,7 @@ class GraphEditor(QtWidgets.QWidget):
         return [i.name for i in self.scene.selectedItems() if isinstance(i, NodeItem)]
 
     def upstream_of(self, names):
-        """The nodes a Ctrl+drag of `names` carries: those and everything feeding them (not
+        """The nodes a Shift+drag of `names` carries: those and everything feeding them (not
         through a portal)."""
         import groomlab_core
         try:
@@ -4455,7 +4457,7 @@ class GraphEditor(QtWidgets.QWidget):
             return list(names)
 
     def downstream_of(self, names):
-        """The nodes a Shift+drag of `names` carries: those and everything they feed (not through a
+        """The nodes a Ctrl+drag of `names` carries: those and everything they feed (not through a
         portal)."""
         import groomlab_core
         try:
@@ -4798,19 +4800,32 @@ class GraphEditor(QtWidgets.QWidget):
         self.rebuild()
 
     def tidy_selection(self):
-        """Tidy Selection: the selected nodes laid out by their links where they are (fewer than two:
-        Tidy Layout)."""
+        """Tidy Selection: Tidy Layout (the selected nodes; fewer than two: all)."""
+        self.tidy_layout()
+
+    def tidy_layout(self):
+        """Tidy Layout (L): the selected nodes (fewer than two: the whole graph, then framed) laid
+        out by their links, each backdrop a group laid out on it, pins and dots going with what they
+        link (the core's graph_arrange.h tidyGraph, the app's too). One undo step."""
         import groomlab_core
-        items = [self.items[n] for n in self.selected_names() if n in self.items]
-        if len(items) < 2:
-            self.layout_nodes()
+        if not self.model:
             return
-        boxes = [(i.name, i.pos().x(), i.pos().y(), float(NODE_W), float(i.height)) for i in items]
-        for name, (x, y) in groomlab_core.arrange_selection(self.model._query(), boxes, gm.LAYOUT_DX, gm.LAYOUT_DY).items():
-            self.model.set_position(name, x, y)
-        self._layout_dirty = True
-        self.commit_layout("tidy selection")
+        selected = self.selected_names()
+        chosen = selected if len(selected) >= 2 else []
+        boxes = [(name, item.pos().x(), item.pos().y(), float(NODE_W), float(item.height))
+                 for name, item in self.items.items() if isinstance(item, NodeItem)]
+        try:
+            data = json.loads(groomlab_core.tidy_graph(json.dumps(self.model.to_dict()), boxes, chosen,
+                                                       60.0, 40.0, 24.0, 28.0))
+        except (RuntimeError, ValueError) as e:
+            self.report("Tidy Layout: %s" % e, trouble=True)
+            return
+        self.model.load_dict(data)
         self.rebuild()
+        if not chosen:
+            self.view.frame_all()
+        if self.groom:
+            self._save_layout("tidy selection" if chosen else "tidy layout")
 
     def set_wire_style(self, style):
         """How links are drawn: smooth, square or rounded (remembered between sessions)."""
@@ -5090,6 +5105,41 @@ class GraphEditor(QtWidgets.QWidget):
             return False
         self.rebuild()
         self.changed()
+        return True
+
+    def param_promoted(self, node, param):
+        """Inside a compound: whether node.param shows on it (Promote to Compound)."""
+        import groomlab_core
+        if not self.scope or not isinstance(self.model, gm.ScopedModel):
+            return False
+        return groomlab_core.param_promoted(json.dumps(self.model.outer.to_dict()), self.model.name, node, param)
+
+    def param_promotable(self, node, param):
+        """Inside a compound: whether node.param can show on it."""
+        import groomlab_core
+        if not self.scope or not isinstance(self.model, gm.ScopedModel):
+            return False
+        return groomlab_core.param_promotable(json.dumps(self.model.outer.to_dict()), self.model.name, node, param)
+
+    def promote_param(self, node, param, on=True):
+        """Promote to Compound (a param's menu inside a compound): node.param shown on the compound
+        you are in, to set it from outside without going in and out, or no longer (the core's
+        graph_controls.h promoteParam, every host's). The compound stays open; one undo step when Live."""
+        import groomlab_core
+        if not self.scope or not isinstance(self.model, gm.ScopedModel):
+            self.report("Promote to Compound works inside a compound", trouble=True)
+            return False
+        self.model.write_back()
+        outer, name = self.model.outer, self.model.name
+        try:
+            outer.load_dict(json.loads(groomlab_core.promote_param(json.dumps(outer.to_dict()), name, node, param, bool(on))))
+            self.model = gm.ScopedModel(outer, name)
+        except (gm.GraphError, RuntimeError, ValueError) as e:
+            self.report("Promote to Compound: %s" % e, trouble=True)
+            return False
+        self.rebuild()
+        self.changed()
+        self.report(("%s.%s promoted to %s" if on else "%s.%s no longer promoted to %s") % (node, param, name))
         return True
 
     def save_as_node(self, name, header):

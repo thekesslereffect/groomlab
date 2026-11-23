@@ -4,7 +4,7 @@
 // How every host's node editor arranges a graph by hand (the app's node graph, Maya's Graph
 // Editor): aligning and spacing the selected nodes, laying out just the selection, backdrops that
 // grow around the nodes moved on them and fold to their title bar, the shake that pulls a node out
-// of its links, the nodes a Shift or Ctrl+drag carries (downstream or upstream) with their pins and
+// of its links, the nodes a Ctrl or Shift+drag carries (downstream or upstream) with their pins and
 // dots, Houdini's A+drag align gestures, and the three wire styles.
 // Layout only: nothing here changes what the graph evaluates. Positions are the editors' scene
 // units, y growing downward, each node's (x, y) its card's top-left.
@@ -52,6 +52,22 @@ std::vector<std::string> alignModes();
 std::map<std::string, std::pair<double, double>> arrangeSelection(const GraphEdit& edit, const std::vector<LayoutBox>& selected,
                                                                   double column, double row);
 
+// ---- Tidy Layout (every host's L) ---------------------------------------------------------------
+// The graph's layout tidied: the `selected` nodes (none: every node with a box) laid out by their
+// links (as drawn: not through a portal's exits), columns by the longest path in, `gapX` between
+// columns; in each column a card goes level with what feeds it where it can (so chains run
+// straight), `gapY` under the one above. The block's top-left stays where theirs was; the rest of
+// the graph stays put. Backdrops are groups: the nodes on one (the smallest holding a card's
+// center) are laid out on it apart from the rest, the backdrop fitted round them (`margin`, its
+// title bar `header` tall), and it moves in the layout as one card; a folded backdrop keeps its
+// nodes where they are on it. A backdrop with only some of its nodes tidied keeps its place: those
+// are laid out where they are on it, the backdrop grown round them. The pins and dots go with
+// what they link (those on a backdrop moved as a card, with it). `boxes`: every node's card as
+// drawn (hidden ones too). Returns the graph with the nodes' "ui", the backdrops, the pins and
+// the portals' dots moved; everything else as it was.
+nlohmann::json tidyGraph(const nlohmann::json& graph, const std::vector<LayoutBox>& boxes, const std::vector<std::string>& selected,
+                         double gapX = 60.0, double gapY = 40.0, double margin = 24.0, double header = 28.0);
+
 // ---- Backdrops ("backdrops" in the graph: graph_io.h) ------------------------------------------
 // A backdrop holds the nodes whose card's center lies on it.
 bool onBackdrop(const LayoutBox& backdrop, const LayoutBox& node);
@@ -76,11 +92,11 @@ constexpr double kBackdropEscapeSpeed = 1100.0;
 bool backdropKeeps(bool overIt, double speed, bool left);
 
 // ---- Moving a node with what it is part of (every host's) -------------------------------------
-// The nodes a Ctrl+drag of `names` carries: those nodes and everything feeding them (directly or
+// The nodes a Shift+drag of `names` carries: those nodes and everything feeding them (directly or
 // not), in the graph's order. A link teleported through a portal (out of one of its exits,
 // graph_portals.h) is not followed: what feeds the portal stays where it is.
 std::vector<std::string> nodesWithUpstream(const GraphEdit& edit, const std::vector<std::string>& names);
-// The nodes a Shift+drag of `names` carries: those nodes and everything they feed (directly or
+// The nodes a Ctrl+drag of `names` carries: those nodes and everything they feed (directly or
 // not), in the graph's order; again not through a portal's exits.
 std::vector<std::string> nodesWithDownstream(const GraphEdit& edit, const std::vector<std::string>& names);
 // The pins and dots that go with nodes moved together (several at once: a Shift or Ctrl+drag, a

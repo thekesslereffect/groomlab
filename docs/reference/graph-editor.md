@@ -276,14 +276,14 @@ The **Graph Editor** is a dockable node editor for the selected groom:
 - **Undo:** every graph edit is one undo step, layout too: a node move, a backdrop moved, resized
   or folded, a pin or portal moved, Align. Layout steps write the graph with nothing to evaluate.
 - **By hand** (graph_arrange.h, the app's too): Shift+drag a node to move it with everything
-  downstream (nodesWithDownstream), Ctrl+drag with everything upstream (nodesWithUpstream), neither
+  upstream (nodesWithUpstream), Ctrl+drag with everything downstream (nodesWithDownstream), neither
   through a portal's exit, the pins and dots between moved nodes carried too (carriedWith;
   Shift+click without a move adds it to the selection, Ctrl+click toggles it); shake a node while dragging to
   take it out of its links (Detach); Shift+drag from an output to pick up all its links and drop
   them on another output (GraphEdit::moveOutputLinks); Tab with a link selected adds the node into
   it; Ctrl+V pastes at the cursor; Ctrl+D's copies read what their nodes read
   (GraphEdit::duplicateNodes). **Align** (node menu, **...** menu): rows, columns, edges, centers,
-  even spacing, Tidy Selection. **Wire Style** (**...** menu, optionVar `groomLabGraphWireStyle`):
+  even spacing, Tidy Selection (L: tidyGraph). **Wire Style** (**...** menu, optionVar `groomLabGraphWireStyle`):
   Smooth, Square or Rounded. The node in Focus glows.
 - **Round 2** (both hosts): a shake takes nodes out of their links mid-drag (several: detachGroup,
   their own links kept); Alt+drag duplicates (pan is the middle button); a chain drops on a wire as
@@ -309,6 +309,12 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   backdrop carries the pins and dots on it and hides them folded (layoutOnBackdrop), is drawn over
   the links folded and as wide as its title; its card has color swatches (and any color) and a
   title-size slider.
+- **Round 5** (both hosts): Shift+drag carries upstream and Ctrl+drag downstream (swapped);
+  **L** is Tidy Layout (graph_arrange.h tidyGraph: the selected nodes, fewer than two the whole
+  graph; columns by the longest path in, each card level with what feeds it; backdrops as groups
+  laid out on themselves and moved as one card, a folded one as it is, one partly selected tidied
+  in place; pins and dots carried; one undo step); a param's menu inside a compound has **Promote
+  to Compound** (graph_controls.h promoteParam: the param shown on the compound you are in).
 - **Inside a compound:** double-click a Compound (or I) opens its graph to edit (ScopedModel: each
   edit written back with withCompoundGraph, its inputs following its Input nodes, one undo step);
   the path bar over the canvas, or U, goes back up.)

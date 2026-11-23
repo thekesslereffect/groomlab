@@ -412,3 +412,86 @@ std::string unlinkControl(GraphEdit& edit, const std::string& node, const std::s
 }
 
 }  // namespace groomlab
+
+namespace groomlab {
+
+namespace {
+
+// The graph holding the compound at `path` (the whole graph, or a compound's inside), and the
+// compound's name there.
+std::pair<std::string, std::string> holderOf(const std::string& graphJson, const std::string& path) {
+    if (path.empty()) throw GraphError("not inside a compound");
+    const std::size_t slash = path.rfind('/');
+    if (slash == std::string::npos) return {graphJson, path};
+    return {compoundGraphJson(graphJson, path.substr(0, slash)), path.substr(slash + 1)};
+}
+
+const json* compoundNode(const json& graph, const std::string& name) {
+    if (!graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return nullptr;
+    for (const json& n : graph["nodes"]) {
+        if (n.is_object() && n.value("name", std::string()) == name && n.value("type", std::string()) == "Compound") return &n;
+    }
+    return nullptr;
+}
+
+json definitionIn(const json& compound) {
+    const json params = compound.value("params", json::object());
+    const json definition = params.is_object() ? params.value("definition", json::object()) : json::object();
+    if (definition.is_string()) return json::parse(definition.get<std::string>(), nullptr, false);
+    return definition;
+}
+
+}  // namespace
+
+std::string promoteParam(const std::string& graphJson, const std::string& path, const std::string& node, const std::string& param,
+                         bool promoted) {
+    const auto [holder, compound] = holderOf(graphJson, path);
+    GraphEdit edit(holder);
+    const std::string target = node + "." + param;
+    if (promoted) {
+        if (paramPromoted(graphJson, path, node, param)) return graphJson;
+        if (!paramPromotable(graphJson, path, node, param)) throw GraphError(target + " cannot be shown on " + compound);
+        compoundExpose(edit, compound, {}, target);
+    } else if (!compoundUnexpose(edit, compound, target)) {
+        return graphJson;
+    }
+    const std::size_t slash = path.rfind('/');
+    if (slash == std::string::npos) return edit.toJson();
+    return withCompoundGraph(graphJson, path.substr(0, slash), edit.toJson());
+}
+
+bool paramPromoted(const std::string& graphJson, const std::string& path, const std::string& node, const std::string& param) {
+    try {
+        const auto [holder, compound] = holderOf(graphJson, path);
+        const json parsed = json::parse(holder);
+        const json* n = compoundNode(parsed, compound);
+        if (!n) return false;
+        const json definition = definitionIn(*n);
+        const json expose = definition.is_object() ? definition.value("expose", json::object()) : json::object();
+        if (!expose.is_object()) return false;
+        for (const auto& [name, target] : expose.items()) {
+            if (target.is_string() && target.get<std::string>() == node + "." + param) return true;
+        }
+    } catch (const std::exception&) {
+    }
+    return false;
+}
+
+bool paramPromotable(const std::string& graphJson, const std::string& path, const std::string& node, const std::string& param) {
+    try {
+        const auto [holder, compound] = holderOf(graphJson, path);
+        const json parsed = json::parse(holder);
+        const json* n = compoundNode(parsed, compound);
+        if (!n) return false;
+        for (const json& inner : json::parse(compoundInnerParamsJson(definitionIn(*n).dump()))) {
+            if (inner.value("node", std::string()) != node) continue;
+            for (const json& p : inner.value("params", json::array())) {
+                if (p.value("name", std::string()) == param) return true;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return false;
+}
+
+}  // namespace groomlab

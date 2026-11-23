@@ -1004,6 +1004,29 @@ std::string GroomDocument::showInnerParam(const std::string& compound, const std
     });
 }
 
+std::string GroomDocument::promoteParam(const std::string& node, const std::string& param, bool promoted) {
+    if (scope_.empty()) return "Promote to Compound works inside a compound";
+    if (paramPromoted(node, param) == promoted) return {};
+    const std::string path = scope_;
+    const std::size_t slash = path.rfind('/');
+    const std::string compound = slash == std::string::npos ? path : path.substr(slash + 1);
+    // The whole graph edited (the compound is in the graph holding it), the compound kept open.
+    scope_.clear();
+    const std::string error = editGraph((promoted ? "promote " : "unpromote ") + node + "." + param + " on " + compound, [&](json& g) {
+        g = json::parse(groomlab::promoteParam(g.dump(), path, node, param, promoted));
+    });
+    scope_ = path;
+    return error;
+}
+
+bool GroomDocument::paramPromoted(const std::string& node, const std::string& param) const {
+    return !scope_.empty() && groomlab::paramPromoted(graph_.dump(), scope_, node, param);
+}
+
+bool GroomDocument::paramPromotable(const std::string& node, const std::string& param) const {
+    return !scope_.empty() && groomlab::paramPromotable(graph_.dump(), scope_, node, param);
+}
+
 std::string GroomDocument::addControl(const std::string& node, const std::string& param, std::string* made) {
     const json* n = nodeJson(node);
     if (!n) return "no node '" + node + "'";

@@ -1923,8 +1923,8 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
         shakeClock_.start();
         // A node of the selection drags the whole selection; another one is selected alone. With
         // Shift or Ctrl the selection stays as it is until the release (a click adds the node to it,
-        // or toggles it), and a drag carries the node with everything downstream of it (Shift) or
-        // upstream (Ctrl), not through portals, their pins and dots too.
+        // or toggles it), and a drag carries the node with everything upstream of it (Shift) or
+        // downstream (Ctrl), not through portals, their pins and dots too.
         std::vector<std::string> carried;
         if (shiftPress_ || ctrlPress_) {
             std::vector<std::string> roots = isSelected(name) ? selection_ : std::vector<std::string>{name};
@@ -1932,7 +1932,7 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
             if (document_) {
                 try {
                     const GraphEdit edit(document_->viewGraph().dump());
-                    carried = shiftPress_ ? nodesWithDownstream(edit, roots) : nodesWithUpstream(edit, roots);
+                    carried = shiftPress_ ? nodesWithUpstream(edit, roots) : nodesWithDownstream(edit, roots);
                 } catch (const std::exception&) {
                 }
             }
@@ -2905,14 +2905,21 @@ void NodeGraphView::setSelectedAsOutput() {
 
 void NodeGraphView::tidyLayout() {
     if (!document_) return;
-    const std::string error = document_->tidyLayout();
+    // The core's (graph_arrange.h tidyGraph, Maya's too): the selected nodes (fewer than two: all of
+    // them) laid out by their links where they are, each backdrop a group laid out on it.
+    std::vector<LayoutBox> boxes;
+    for (const Node& n : nodes_) boxes.push_back({n.name, n.pos.x(), n.pos.y(), n.size.width(), n.size.height()});
+    const bool all = selection_.size() < 2;
+    const std::vector<std::string> chosen = all ? std::vector<std::string>{} : selection_;
+    const std::string error = document_->editLayout(all ? "tidy layout" : "tidy selection", [&](nlohmann::json& g) {
+        g = tidyGraph(g, boxes, chosen, kColumn - kNodeWidth, 40.0, 24.0, kBackdropHeader);
+    });
     if (!error.empty()) {
         emit message(QString::fromStdString(error));
         return;
     }
     laidOut_.clear();
-    fitted_ = false;
-    emit edited();
+    if (all) fitted_ = false;
     refresh();
 }
 
@@ -3216,6 +3223,10 @@ void NodeGraphView::keyPressEvent(QKeyEvent* event) {
                 aHeld_ = true;
                 aGestured_ = false;
             }
+            event->accept();
+            return;
+        case Qt::Key_L:
+            tidyLayout();  // the selected nodes, or all of them
             event->accept();
             return;
         case Qt::Key_F2:
@@ -3944,33 +3955,7 @@ void NodeGraphView::alignSelected(const std::string& mode) {
     refresh();
 }
 
-void NodeGraphView::tidySelection() {
-    if (!document_) return;
-    if (selection_.size() < 2) {
-        tidyLayout();
-        return;
-    }
-    std::vector<LayoutBox> boxes;
-    for (const std::string& n : selection_) {
-        const int i = nodeIndex(n);
-        if (i >= 0) boxes.push_back({n, nodes_[i].pos.x(), nodes_[i].pos.y(), nodes_[i].size.width(), nodes_[i].size.height()});
-    }
-    std::map<std::string, std::pair<double, double>> placed;
-    try {
-        placed = arrangeSelection(GraphEdit(document_->viewGraph().dump()), boxes, kColumn, kRowGap);
-    } catch (const std::exception& e) {
-        emit message(QString::fromStdString(e.what()));
-        return;
-    }
-    document_->editLayout("tidy selection", [&](nlohmann::json& g) {
-        for (nlohmann::json& n : g["nodes"]) {
-            const auto at = placed.find(n.value("name", std::string()));
-            if (at != placed.end()) n["ui"] = {{"x", at->second.first}, {"y", at->second.second}};
-        }
-    });
-    for (const auto& [name, at] : placed) laidOut_.erase(name);
-    refresh();
-}
+void NodeGraphView::tidySelection() { tidyLayout(); }
 
 void NodeGraphView::selectWire(int wire) {
     selectNode({});

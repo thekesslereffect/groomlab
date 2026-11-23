@@ -4,9 +4,14 @@
 // host's node editor does through the core.
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
+#include <map>
+
 #include <nlohmann/json.hpp>
 
 #include "groomlab/graph_arrange.h"
+#include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
@@ -101,14 +106,14 @@ TEST(GraphArrange, BackdropsGrowAroundTheirNodesAndFold) {
     EXPECT_FALSE(backdropFolded(json{{"title", "x"}}));
 }
 
-TEST(GraphArrange, CtrlDragCarriesEverythingUpstream) {
+TEST(GraphArrange, ShiftDragCarriesEverythingUpstream) {
     const GraphEdit edit(defaultGraphJson());
     EXPECT_EQ(nodesWithUpstream(edit, {"length"}),
               (std::vector<std::string>{"scalp", "guides", "scatter", "interpolate", "length"}));
     EXPECT_EQ(nodesWithUpstream(edit, {"scalp", "nope"}), std::vector<std::string>{"scalp"});
 }
 
-TEST(GraphArrange, ShiftDragCarriesEverythingDownstreamCtrlDragUpstream) {
+TEST(GraphArrange, CtrlDragCarriesEverythingDownstream) {
     const GraphEdit edit(defaultGraphJson());
     const auto down = nodesWithDownstream(edit, {"noise"});
     EXPECT_NE(std::find(down.begin(), down.end(), "noise"), down.end());
@@ -532,6 +537,109 @@ TEST(GraphEditByHand, ADuplicateReadsThroughTheSameDotAndPins) {
     EXPECT_EQ(dot->portal, exit->portal);
     EXPECT_EQ(dot->exit, exit->exit);
     EXPECT_EQ(pinRoute(after, "color1", "strands").size(), 1u);
+}
+
+TEST(GraphArrange, TidyLaysOutTheSelectionOrAllWithBackdropsAsGroups) {
+    // Every node of the default graph scattered about, a backdrop round noise and color.
+    json g = json::parse(defaultGraphJson());
+    std::vector<LayoutBox> boxes;
+    double k = 0.0;
+    for (json& n : g["nodes"]) {
+        const std::string name = n["name"];
+        LayoutBox b{name, std::fmod(k * 370.0, 900.0), std::fmod(k * 530.0, 700.0), 180.0, 80.0};
+        if (name == "noise") b.x = 2000.0, b.y = 2000.0;
+        if (name == "color") b.x = 2300.0, b.y = 1950.0;
+        n["ui"] = {{"x", b.x}, {"y", b.y}};
+        boxes.push_back(b);
+        k += 1.0;
+    }
+    g["backdrops"] = json::array({{{"title", "Look"}, {"x", 1950.0}, {"y", 1900.0}, {"w", 600.0}, {"h", 300.0}, {"color", {0.3, 0.3, 0.3}}}});
+    const json out = tidyGraph(g, boxes, {});
+    std::map<std::string, LayoutBox> at;
+    for (const json& n : out["nodes"]) {
+        const std::string name = n["name"];
+        LayoutBox b = *std::find_if(boxes.begin(), boxes.end(), [&](const LayoutBox& x) { return x.name == name; });
+        b.x = n["ui"]["x"];
+        b.y = n["ui"]["y"];
+        at[name] = b;
+    }
+    // Links run left to right; the backdrop holds noise and color, and no other node.
+    for (const json& c : out["connections"]) EXPECT_LT(at[c["from"]].right(), at[c["to"]].x) << c.dump();
+    const json& bd = out["backdrops"][0];
+    const LayoutBox backdrop{"Look", bd["x"], bd["y"], bd["w"], bd["h"]};
+    for (const auto& [name, b] : at) EXPECT_EQ(onBackdrop(backdrop, b), name == "noise" || name == "color") << name;
+    EXPECT_EQ(bd["title"], "Look");
+    // A chain runs straight: length level with interpolate.
+    EXPECT_NEAR(at["length"].centerY(), at["interpolate"].centerY(), 1e-6);
+    // Nodes do not overlap.
+    for (const auto& [a, ba] : at)
+        for (const auto& [b, bb] : at)
+            if (a < b) EXPECT_FALSE(ba.x < bb.right() && bb.x < ba.right() && ba.y < bb.bottom() && bb.y < ba.bottom()) << a << " " << b;
+
+    // Selected: only those move, from the selection's top-left.
+    const json some = tidyGraph(g, boxes, {"length", "width"});
+    for (std::size_t i = 0; i < some["nodes"].size(); ++i) {
+        const std::string name = some["nodes"][i]["name"];
+        if (name != "length" && name != "width") EXPECT_EQ(some["nodes"][i]["ui"], g["nodes"][i]["ui"]) << name;
+    }
+    // A backdrop with only some of its nodes selected stays where it is (grown when it must).
+    const json part = tidyGraph(g, boxes, {"noise", "length"});
+    EXPECT_GE(part["backdrops"][0]["w"].get<double>(), 600.0 - 1e-9);
+    EXPECT_LE(part["backdrops"][0]["x"].get<double>(), 1950.0 + 1e-9);
+    // Folded: its nodes keep their places on it as it moves.
+    g["backdrops"][0]["collapsed"] = true;
+    const json folded = tidyGraph(g, boxes, {});
+    double nx = 0, cx = 0;
+    for (const json& n : folded["nodes"]) {
+        if (n["name"] == "noise") nx = n["ui"]["x"];
+        if (n["name"] == "color") cx = n["ui"]["x"];
+    }
+    EXPECT_NEAR(cx - nx, 300.0, 1e-9);
+    EXPECT_NEAR(nx - folded["backdrops"][0]["x"].get<double>(), 50.0, 1e-9);
+}
+
+TEST(GraphArrange, APinMovesWithWhatItLinks) {
+    json g = json::parse(defaultGraphJson());
+    std::vector<LayoutBox> boxes;
+    double k = 0.0;
+    for (const json& n : g["nodes"]) boxes.push_back({n["name"], k * 10.0, k * 300.0, 180.0, 80.0}), k += 1.0;
+    const std::string pin = addPin(g, "noise", "strands", 55.0, 66.0);
+    ASSERT_FALSE(pin.empty());
+    const json out = tidyGraph(g, boxes, {});
+    double x = 0, y = 0;
+    ASSERT_TRUE(pinPosition(out, pin, &x, &y));
+    EXPECT_FALSE(x == 55.0 && y == 66.0);
+}
+
+TEST(GraphArrange, PromoteAnInnerParamToTheCompoundFromInside) {
+    GraphEdit edit(defaultGraphJson());
+    const std::string compound = edit.collapse({"color", "width"}, "look");
+    const std::string whole = edit.toJson();
+    EXPECT_TRUE(paramPromotable(whole, compound, "color", "melanin"));
+    EXPECT_FALSE(paramPromoted(whole, compound, "color", "melanin"));
+    EXPECT_FALSE(paramPromotable(whole, compound, "color", "nope"));
+    const std::string promoted = promoteParam(whole, compound, "color", "melanin", true);
+    EXPECT_TRUE(paramPromoted(promoted, compound, "color", "melanin"));
+    // The compound shows it as a param of its own.
+    bool shown = false;
+    const json spec = json::parse(GraphEdit(promoted).nodeSpecJson(compound));
+    for (const json& p : spec["params"]) shown = shown || p["name"] == "melanin";
+    EXPECT_TRUE(shown);
+    EXPECT_EQ(promoteParam(promoted, compound, "color", "melanin", true), promoted);
+    const std::string back = promoteParam(promoted, compound, "color", "melanin", false);
+    EXPECT_FALSE(paramPromoted(back, compound, "color", "melanin"));
+    EXPECT_THROW(promoteParam(whole, "", "color", "melanin", true), GraphError);
+    EXPECT_THROW(promoteParam(whole, compound, "color", "nope", true), GraphError);
+    // A compound inside a compound: promoted to the inner one, written back into the outer.
+    GraphEdit nest(defaultGraphJson());
+    const std::string outer = nest.collapse({"noise", "color", "width"}, "outer");
+    GraphEdit inside(compoundGraphJson(nest.toJson(), outer));
+    const std::string inner = inside.collapse({"color"}, "inner");
+    const std::string nested = withCompoundGraph(nest.toJson(), outer, inside.toJson());
+    const std::string path = outer + "/" + inner;
+    const std::string deep = promoteParam(nested, path, "color", "melanin", true);
+    EXPECT_TRUE(paramPromoted(deep, path, "color", "melanin"));
+    EXPECT_FALSE(paramPromoted(nested, path, "color", "melanin"));
 }
 
 }  // namespace

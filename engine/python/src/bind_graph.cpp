@@ -874,6 +874,14 @@ void bindGraph(py::module_& m) {
                     double row) { return arrangeSelection(edit, boxesOf(boxes), column, row); },
           py::arg("edit"), py::arg("boxes"), py::arg("column"), py::arg("row"),
           "Tidy Selection: {name: (x, y)} for the selected nodes laid out where they were.");
+    m.def("tidy_graph",
+          [boxesOf](const std::string& graphJson, const std::vector<std::tuple<std::string, double, double, double, double>>& boxes,
+                    const std::vector<std::string>& selected, double gapX, double gapY, double margin, double header) {
+              return tidyGraph(nlohmann::json::parse(graphJson), boxesOf(boxes), selected, gapX, gapY, margin, header).dump();
+          },
+          py::arg("graph_json"), py::arg("boxes"), py::arg("selected"), py::arg("gap_x") = 60.0, py::arg("gap_y") = 40.0,
+          py::arg("margin") = 24.0, py::arg("header") = 28.0,
+          "Tidy Layout (L, graph_arrange.h): the graph's JSON with the selected nodes (none: all) laid out, backdrops kept as groups.");
     m.def("grown_backdrop",
           [boxesOf](const std::tuple<double, double, double, double>& backdrop,
                     const std::vector<std::tuple<std::string, double, double, double, double>>& nodes, double margin, double header) {
@@ -1303,6 +1311,10 @@ void bindGraph(py::module_& m) {
     m.def("preset_fields", [] { return presetFields(); }, "A preset's own fields: size, about, requires, backdrops, controls, exposed.");
     m.def("preset_categories", [] { return presetCategories(); }, "The Presets menu's categories, in order.");
     m.def("preset_title", &presetTitle, py::arg("name"), "A preset's title when its file gives none: its name in words.");
+    m.def("promote_param", &promoteParam, py::arg("graph_json"), py::arg("path"), py::arg("node"), py::arg("param"), py::arg("promoted") = true,
+          "Promote to Compound (graph_controls.h): the whole graph with node.param inside the compound at `path` shown on it, or not.");
+    m.def("param_promoted", &paramPromoted, py::arg("graph_json"), py::arg("path"), py::arg("node"), py::arg("param"));
+    m.def("param_promotable", &paramPromotable, py::arg("graph_json"), py::arg("path"), py::arg("node"), py::arg("param"));
     m.def("compound_inner_params_json", &compoundInnerParamsJson, py::arg("definition_json"),
           "A Compound's Show Inner Param list (graph_controls.h, every host's): [{node, params: [spec]}] as JSON.");
     m.def("make_preset_json", &makePresetJson, py::arg("graph_json"), py::arg("size"), py::arg("title") = std::string(),

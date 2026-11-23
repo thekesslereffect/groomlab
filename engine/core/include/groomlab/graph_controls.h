@@ -64,6 +64,19 @@ std::string compoundExpose(GraphEdit& edit, const std::string& compound, const s
 // GraphError for a node that is not a Compound.
 bool compoundUnexpose(GraphEdit& edit, const std::string& compound, const std::string& target);
 
+// Promote to Compound (every host's param menu, from inside a compound, so a param worked on there
+// shows on the compound without going in and out): the param node.param of a node inside the
+// compound at `path` ("outer/inner" from the whole graph, `graphJson`) shown on that compound as
+// compoundExpose names it, or no longer (compoundUnexpose: its value goes back inside). Returns the
+// whole graph with it done (as it was when nothing changes). GraphError for an empty path, a path
+// that is no compound, or a param the compound cannot show.
+std::string promoteParam(const std::string& graphJson, const std::string& path, const std::string& node, const std::string& param,
+                         bool promoted);
+// Whether the compound at `path` shows node.param (false when the path is no compound), and whether
+// it can (compoundInnerParamsJson lists it).
+bool paramPromoted(const std::string& graphJson, const std::string& path, const std::string& node, const std::string& param);
+bool paramPromotable(const std::string& graphJson, const std::string& path, const std::string& node, const std::string& param);
+
 // A Control node driving node.param (exposed first): Maya's add_control, the app's and Blender's
 // "Drive with a slider". Its control is controlName(`name`) (GraphError when the graph has a
 // control of that name), else the param's name, numbered until free (width, width1...): the

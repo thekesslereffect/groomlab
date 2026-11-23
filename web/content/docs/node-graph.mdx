@@ -22,7 +22,7 @@ while you groom another ([The current groom](/docs/guides-and-brushes#the-curren
   **App:** **Tab** or the **Graph** pill opens the Graph Editor over the viewport; **Tab** over it
   searches for a node to add. Click a node to edit it in **Node Settings**; **Node List** on the
   right rail lists the nodes. **B** bypasses, **V** is **View Up to Here**, **Ctrl+D** duplicates,
-  **Ctrl+C** / **Ctrl+V** copy and paste nodes, **F2** renames, **Ctrl+L** tidies, **F** and **A**
+  **Ctrl+C** / **Ctrl+V** copy and paste nodes, **F2** renames, **L** tidies, **F** and **A**
   frame. **Ctrl+G** groups the selected nodes into a Compound
   ([GroomLab app](/docs/app#the-graph-editor)).
 
@@ -86,8 +86,8 @@ The same in Maya's Graph Editor and the standalone app:
 - **Copy and paste:** Ctrl+C and Ctrl+V paste the copied nodes where the cursor is, with the links
   between them but none to the originals' sources. **Ctrl+D** duplicates the selection beside it,
   each copy reading the same inputs as its original.
-- **Shift+drag a node** to move it together with everything downstream of it; **Ctrl+drag** moves
-  it with everything upstream. Neither follows a link through a portal, so what's on the other side
+- **Shift+drag a node** to move it together with everything upstream of it; **Ctrl+drag** moves
+  it with everything downstream. Neither follows a link through a portal, so what's on the other side
   of a portal stays put. The pins and dots between the nodes move with them. Shift+click without
   dragging adds the node to the selection; Ctrl+click toggles it.
 - **Align gestures** (as in Houdini): hold **A** and drag from a node. Drag left or up to line up
@@ -113,8 +113,12 @@ The same in Maya's Graph Editor and the standalone app:
   runs with right angles, or **Rounded** corners. Your choice is remembered between sessions.
 - **Align** (the buttons after the wire style, as in Photoshop; a node's right-click menu; the
   **...** menu): line the selected nodes up in a row
-  or a column, by their edges or centers, or space them evenly. **Tidy Selection** lays out just
-  the selected nodes by their links, where they are.
+  or a column, by their edges or centers, or space them evenly.
+- **Tidy Layout (L):** lays out the selected nodes by their links where they are, or the whole
+  graph when fewer than two are selected. Links run left to right and a chain stays level. Each
+  backdrop stays a group: its nodes are laid out on it, it fits round them and moves as one block,
+  and a folded backdrop keeps its nodes as they are. When only some of a backdrop's nodes are
+  selected, they're tidied in place on it. Pins and dots move with what they link.
 - **Backdrops:** Shift+O, or **Backdrop** in the Tab search, frames the selected nodes. Select one
   to edit its title, a description shown on it, its color (a swatch, or **...** for any color) and
   its title size (a slider). Moving a backdrop moves the pins and dots on it too, and folding it
@@ -549,6 +553,9 @@ The node shows a tag, and the setting is saved with the groom.
 - **Inside a compound:** double-click a compound (or select it and press **I**) to open it and
   edit its nodes in place; each edit is one undo step. The path bar at the top shows where you
   are: click **Graph** in it, or press **U**, to go back out (Maya's Graph Editor and the app).
+- **Promote to Compound:** inside a compound, right-click a parameter in the node's settings >
+  **Promote to Compound** to show it on the compound, so you can set it from outside without going
+  in and out (say a Color node's melanin). Click it again to stop showing it.
 - **Compound nodes:** right-click a compound > **Save as Node...** to keep it in your node
   library: it then shows in **Add Node** in every groom, in the app and Blender too, and shares as
   one file. See [Custom nodes](/docs/custom-nodes).
