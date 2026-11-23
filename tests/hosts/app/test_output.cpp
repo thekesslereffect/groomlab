@@ -324,6 +324,19 @@ TEST(AppOutput, FeathersAndBraidsAskInThePrompt) {
     EXPECT_FALSE(again.made);
     EXPECT_EQ(again.sculpt, sculpt);
     EXPECT_FALSE(window.sculptBraidSections("guides"));
+
+    // Add > Bun: the prompt's Twisted, a Braid of rope style whose paths a Bun node coils, the buns group made.
+    bindings.at("add.bun").trigger(nullptr, false);
+    ASSERT_TRUE(window.overlay()->promptShown());
+    ASSERT_TRUE(window.overlay()->choosePrompt(QStringLiteral("Twisted")));
+    const std::string bun = nodeOfType(*doc, "Bun");
+    ASSERT_FALSE(bun.empty()) << window.lastReport().toStdString();
+    ASSERT_NE(doc->session().authoredHierarchy()->findGroup("buns"), kNoGroup);
+    bool coiled = false;
+    for (const GroomDocument::ConnectionInfo& c : doc->connections()) {
+        if (c.from == bun && c.input == "braids") coiled = doc->param(c.to, "style") == json("rope");
+    }
+    EXPECT_TRUE(coiled);
 }
 
 TEST(AppOutput, HandPlacedFlightFeathersPresetDrawsIntoItsGroup) {

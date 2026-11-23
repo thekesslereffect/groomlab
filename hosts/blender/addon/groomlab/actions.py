@@ -40,6 +40,7 @@ BINDINGS = {
     "sample.buddy": ("groomlab.add_sample", {"sample": "buddy"}),
     "add.feathers": ("groomlab.add_feathers", {}),
     "add.braid": ("groomlab.add_braid", {}),
+    "add.bun": ("groomlab.add_bun", {}),
     "add.cards.hero": ("groomlab.add_cards", {"lod": "hero"}),
     "add.cards.mid": ("groomlab.add_cards", {"lod": "mid"}),
     "add.cards.low": ("groomlab.add_cards", {"lod": "low"}),

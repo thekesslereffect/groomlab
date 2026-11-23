@@ -15,6 +15,7 @@
       {"submenu": "Add", "id": "add", "items": [
         "add.feathers",
         "add.braid",
+        "add.bun",
         {"submenu": "Cards", "id": "cards", "tip": "A Cards node before the output at a level of detail", "items": ["add.cards.hero", "add.cards.mid", "add.cards.low"]},
         "add.collider",
         "add.scalp",

@@ -2694,6 +2694,96 @@ TEST(Braid, FollowGuidesCarriesASculptedSectionsHair) {
     }
 }
 
+TEST(Bun, EachGuideBecomesAPathWindingRoundItsStem) {
+    // A guide standing up at the origin: the path rises `lift` up the middle, winds `turns` times
+    // round it at `radius` (shrinking to `shrink` of it), `rise` higher a turn, then tucks in.
+    auto guides = std::make_shared<GuideSet>();
+    guides->add(7, {{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}});
+    auto bun = OperatorRegistry::instance().create(op::kBun);
+    bun->params().set("radius", 0.5);
+    bun->params().set("turns", 2.0);
+    bun->params().set("rise", 0.2);
+    bun->params().set("lift", 0.3);
+    bun->params().set("shrink", 1.0);
+    bun->params().set("tuck", false);
+    EvalContext ctx;
+    const GuidesPtr paths = valueAs<GuidesPtr>(bun->evaluate(ctx, {Value(GuidesPtr(guides))}));
+    ASSERT_TRUE(paths && paths->size() == 1u);
+    const Guide& p = paths->guides()[0];
+    EXPECT_NE(p.id, 7u);  // an ID of its own, from the guide's
+    EXPECT_EQ(p.points.front(), (Vec3f{0.0f, 0.0f, 0.0f}));
+    // Up the stem, then round: the angle travelled about the axis is two turns.
+    float travelled = 0.0f, lowest = 1e9f, highest = -1e9f;
+    for (std::size_t i = 1; i < p.points.size(); ++i) {
+        const Vec3f a = p.points[i - 1], b = p.points[i];
+        if (std::hypot(a.x, a.z) > 1e-4f && std::hypot(b.x, b.z) > 1e-4f) {
+            float d = std::atan2(b.z, b.x) - std::atan2(a.z, a.x);
+            while (d > 3.14159f) d -= 6.28318f;
+            while (d < -3.14159f) d += 6.28318f;
+            travelled += d;
+        }
+        if (std::hypot(b.x, b.z) > 0.45f) lowest = std::min(lowest, b.y), highest = std::max(highest, b.y);
+    }
+    EXPECT_NEAR(std::abs(travelled), 2.0f * 6.28318f, 0.15f);  // (less the step out of the middle)
+    const Vec3f end = p.points.back();
+    EXPECT_NEAR(std::hypot(end.x, end.z), 0.5f, 1e-3f);
+    EXPECT_NEAR(end.y, 0.3f + 2.0f * 0.2f, 1e-3f);  // two turns up from the stem's top
+    EXPECT_GT(lowest, 0.3f - 1e-3f);
+    // Clockwise winds the other way; tucked, the end comes back in toward the middle.
+    bun->params().set("clockwise", true);
+    bun->params().set("tuck", true);
+    const GuidesPtr other = valueAs<GuidesPtr>(bun->evaluate(ctx, {Value(GuidesPtr(guides))}));
+    const Guide& q = other->guides()[0];
+    EXPECT_LT(std::hypot(q.points.back().x, q.points.back().z), 0.2f);
+    EXPECT_LT(q.points.back().y, 0.3f + 2.0f * 0.2f);
+    const Vec3f a = p.points[10], b = q.points[10];  // a little way round: mirrored about the start
+    EXPECT_NEAR(a.y, b.y, 1e-4f);
+    EXPECT_GT((a - b).length(), 1e-3f);
+    // Flat: a spiral lying at the stem's top, out to the radius.
+    bun->params().set("style", std::string("flat"));
+    bun->params().set("tuck", false);
+    const GuidesPtr flat = valueAs<GuidesPtr>(bun->evaluate(ctx, {Value(GuidesPtr(guides))}));
+    for (std::size_t i = 6; i < flat->guides()[0].points.size(); ++i) EXPECT_NEAR(flat->guides()[0].points[i].y, 0.3f, 1e-4f);
+    EXPECT_NEAR(std::hypot(flat->guides()[0].points.back().x, flat->guides()[0].points.back().z), 0.5f, 1e-3f);
+}
+
+TEST(Bun, ABraidGathersTheHairIntoTheBun) {
+    // On a head: a bun at its top, the hair from all round gathered up into its stem and braided
+    // round the coil; none passes through the head.
+    BraidScene scene("three");
+    scene.sphere();
+    scene.setParam("region", 1.2);
+    scene.setParam("width", 0.12);
+    scene.setParam("end", std::string("bound"));
+    const NodeId bun = scene.lg.g.addNode(op::kBun);
+    scene.lg.g.node(bun).params().set("radius", 0.2);
+    scene.lg.g.node(bun).params().set("rise", 0.1);
+    scene.lg.g.node(bun).params().set("lift", 0.1);
+    scene.lg.g.connect(scene.guides, bun, 0);
+    scene.lg.g.connect(bun, scene.braid, 1);
+    const StrandsPtr out = scene.lg.eval(scene.braid);
+    const std::vector<float>* woven = out->pointChannel("braidWoven");
+    ASSERT_TRUE(woven);
+    std::size_t inBun = 0, braided = 0, cut = 0;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const std::size_t begin = out->strandBegin(s), n = out->strandPointCount(s);
+        bool dips = false, any = false;
+        for (std::size_t i = 1; i < n; ++i) {
+            const Vec3f q = out->strandPoints(s)[i];
+            dips = dips || q.length() < 1.0f - 0.01f;  // (past the polygon sphere's sag between its points)
+            if ((*woven)[begin + i] < 0.999f) continue;
+            any = true;
+            // In the bun: above the head's top, within its radius and a braid's width of the middle.
+            inBun += q.y > 1.0f && std::hypot(q.x, q.z) < 0.2f + 0.12f ? 1 : 0;
+        }
+        braided += any ? 1 : 0;
+        cut += dips ? 1 : 0;
+    }
+    EXPECT_GT(braided, 100u);
+    EXPECT_GT(inBun, 20u * braided);
+    EXPECT_EQ(cut, 0u);
+}
+
 TEST(Braid, BraidPressMarksTheHairLyingAgainstAnotherSection) {
     // braidPress, per point: 0 where a strand lies free in its section, up to 1 where it lies on a
     // contact's facet against another section (the sections pressed: separate), for a Clump's

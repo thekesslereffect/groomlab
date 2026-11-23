@@ -833,6 +833,19 @@ void bindGraph(py::module_& m) {
              py::arg("group") = std::string("braids"), py::arg("params_json") = std::string(), py::arg("after") = std::string(),
              py::arg("groom_size") = py::none(),
              "Add > Braid (graph_inserts.h): a Braid node after the Interpolate, its paths the group's Guides node.")
+        .def("insert_bun",
+             [](GraphEdit& e, const std::string& group, const std::string& style, const std::string& bunParamsJson,
+                const std::string& after, std::optional<double> groomSize) {
+                 const BunNodes made = insertBun(e, group, style, bunParamsJson, after, groomSize);
+                 py::dict out;
+                 out["bun"] = made.bun;
+                 out["braid"] = made.braid;
+                 return out;
+             },
+             py::arg("group") = std::string("buns"), py::arg("style") = std::string("three"),
+             py::arg("bun_params_json") = std::string(), py::arg("after") = std::string(), py::arg("groom_size") = py::none(),
+             "Add > Bun (graph_inserts.h insertBun): a Braid whose paths are a Bun node's, reading the group's Guides node. "
+             "{bun, braid}.")
         .def("insert_braid_sculpt",
              [](GraphEdit& e, const std::string& braid, std::optional<double> groomSize) {
                  const BraidSculptNodes made = insertBraidSculpt(e, braid, groomSize);

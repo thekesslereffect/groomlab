@@ -746,6 +746,11 @@ public:
     // paths in it with the Draw tool): every host's (graph_inserts.h insertBraid). `style` one of
     // braidStyles().
     std::string addBraid(const std::string& style, const std::string& group = "braids", std::string* made = nullptr);
+    // Add > Bun: buns braided from the hair, placed by guide group `group`'s guides (made when
+    // missing; draw them with the Draw tool), every host's (graph_inserts.h insertBun). `style` one
+    // of braidStyles() (rope: twisted), `shape` coil or flat. `made` gets the nodes.
+    std::string addBun(const std::string& style, const std::string& shape, const std::string& group = "buns",
+                       BunNodes* made = nullptr);
     // Sculpt Sections on Braid node `braid`: a Sculpt node of its sections and a FollowGuides after it
     // carrying its hair along them, every host's (graph_inserts.h insertBraidSculpt; a Braid that has
     // them keeps them, no undo step then). `made` gets the nodes. Returns an error, or "".

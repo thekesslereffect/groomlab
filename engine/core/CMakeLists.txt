@@ -173,6 +173,7 @@ add_library(groomlab_core_objects OBJECT
     src/operators/drive_guides_op.cpp
     src/operators/smooth_channel_op.cpp
     src/operators/follow_guides_op.cpp
+    src/operators/bun_op.cpp
 )
 # What every user of the core's objects needs: its headers.
 add_library(groomlab_core_headers INTERFACE)

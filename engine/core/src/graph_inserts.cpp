@@ -15,6 +15,7 @@
 
 #include "groomlab/graph.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/presets.h"
 
 namespace groomlab {
 
@@ -811,6 +812,23 @@ std::string insertBraid(GraphEdit& edit, const std::string& group, const std::st
     edit.connect(paths, braid, "braids");
     if (const auto at = placeBy(edit, anchor, 0.0, 2.0 * kInsertRow)) setNodePosition(edit, paths, at->first, at->second);
     return braid;
+}
+
+BunNodes insertBun(GraphEdit& edit, const std::string& group, const std::string& style, const std::string& bunParamsJson,
+                   const std::string& after, std::optional<double> groomSize) {
+    json bunParams = bunParamsJson.empty() ? json::object() : json::parse(bunParamsJson, nullptr, false);
+    if (!bunParams.is_object()) throw GraphError("a bun's params are a JSON object");
+    // Sized for the Bun's defaults (radius 2, a turn 1 higher than the last, on a 20 unit head):
+    // a braid about as wide as a turn rises, gathering the whole head.
+    const double k = groomSize ? *groomSize / kDefaultsScalpSize : 1.0;
+    const json braidParams{{"style", style}, {"width", 1.2 * k}, {"region", 30.0 * k}, {"end", "bound"},
+                           {"widthProfile", json::array({json::array({0.0, 1.0}), json::array({1.0, 0.7})})}};
+    BunNodes out;
+    out.braid = insertBraid(edit, group, braidParams.dump(), after, groomSize);
+    out.bun = addNodeAt(edit, "Bun", "bun", bunParams, groomSize, placeBy(edit, out.braid, 0.0, kInsertRow));
+    edit.connect(guidesOfGroup(graphOf(edit), group), out.bun, "guides");
+    edit.connect(out.bun, out.braid, "braids");
+    return out;
 }
 
 BraidSculptNodes insertBraidSculpt(GraphEdit& edit, const std::string& braid, std::optional<double> groomSize) {

@@ -59,6 +59,8 @@
                     "tips": {"app": "Feathers on the groom: scattered feathers shaped by the guides (a design, or an assortment), or one hand-placed feather per guide of a guide group"}},
     "add.braid": {"label": "Braid on Curves...", "tip": "The selected curves (drawn from the scalp) become braid paths: a Braid node braids the strands along them",
                     "tips": {"app": "A Braid node after the Interpolate braids the strands along the braids group's guides (draw the paths in it with the Draw tool)"}},
+    "add.bun": {"label": "Bun...", "tip": "Buns from the hair: each selected curve (drawn from the scalp the way the bun stands) places a bun; a Bun node coils a path round its stem and a Braid gathers the hair into it, braided or twisted",
+                    "tips": {"app": "Buns from the hair: each guide of the buns group (drawn from the scalp the way the bun stands) places a bun; a Bun node coils a path round its stem and a Braid gathers the hair into it"}},
     "add.cards.hero": {"label": "Hero", "tip": "A Cards node before the output at the hero level of detail: 6 x 2 cards a clump with flyaways"},
     "add.cards.mid": {"label": "Mid", "tip": "A Cards node before the output at the mid level of detail: 2 x 1 cards a clump"},
     "add.cards.low": {"label": "Low", "tip": "A Cards node before the output at the low level of detail: one flat card a clump"},

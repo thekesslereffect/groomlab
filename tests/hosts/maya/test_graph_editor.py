@@ -643,6 +643,19 @@ class GraphApiTest(unittest.TestCase):
         saved = gm.GraphModel.from_groom(self.groom, self.catalog)
         self.assertNotEqual(saved.param(first, "seed"), saved.param(again, "seed"))
 
+        # groomlab.add_bun: a selected curve places the bun (the buns group), a Bun node's coiled path
+        # the Braid's paths; the groom evaluates with it.
+        place = cmds.curve(degree=1, point=[(0.0, 1.0, 0.0), (0.0, 1.3, 0.0)])
+        made = groomlab.add_bun(self.groom, [place], style="rope", shape="flat")
+        saved = gm.GraphModel.from_groom(self.groom, self.catalog)
+        self.assertEqual(saved.node_type(made["bun"]), "Bun")
+        self.assertEqual(saved.source_of(made["braid"], "braids"), made["bun"])
+        self.assertEqual(saved.param(made["bun"], "style"), "flat")
+        self.assertEqual(saved.param(made["braid"], "style"), "rope")
+        self.assertIn("buns", [g["name"] for g in groomlab.list_guide_groups(self.groom)])
+        self.assertEqual(len(groomlab.guide_ids(self.groom, "buns")), 1)
+        self.assertGreater(cmds.getAttr(self.groom + ".outStrandCount"), 0)
+
     def test_helpers_that_write_the_graph_are_one_undo_step(self):
         # add_control: a Control node, its ctl_ attribute and the graph, back in one undo.
         graph = cmds.getAttr(self.groom + ".graph")

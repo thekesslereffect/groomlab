@@ -2270,6 +2270,12 @@ json Helper::run(const std::string& cmd, const json& args) {
         } else if (op == "insert_braid") {  // Add > Braid, every host's
             const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
             r["name"] = insertBraid(edit, optString(args, "group", "braids"), params.dump(), optString(args, "after", ""), scalpSize(s));
+        } else if (op == "insert_bun") {  // Add > Bun, every host's
+            const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
+            const BunNodes made = insertBun(edit, optString(args, "group", "buns"), optString(args, "style", "three"), params.dump(),
+                                            optString(args, "after", ""), scalpSize(s));
+            r["bun"] = made.bun;
+            r["braid"] = made.braid;
         } else if (op == "insert_braid_sculpt") {  // Sculpt Sections on a Braid, every host's
             const BraidSculptNodes made = insertBraidSculpt(edit, needString(args, "braid"), scalpSize(s));
             r["sculpt"] = made.sculpt;

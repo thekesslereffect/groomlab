@@ -33,6 +33,7 @@ void AppActions::addOutputBindings(ui::Bindings& b, MainWindow& w) {
     // add_wind_action, add_jiggle_action, add_simulate_node).
     b["add.feathers"] = {run([m] { m->askFeathers(); }), {}, groomOpen};
     b["add.braid"] = {run([m] { m->askBraid(); }), {}, groomOpen};
+    b["add.bun"] = {run([m] { m->askBun(); }), {}, groomOpen};
     b["add.collider"] = {run([m] { m->askCollider(); }), {}, groomOpen};
     b["add.wind"] = {run([m] { m->addMotionNode(QStringLiteral("Wind")); }), {}, groomOpen};
     b["add.jiggle"] = {run([m] { m->addMotionNode(QStringLiteral("Jiggle")); }), {}, groomOpen};

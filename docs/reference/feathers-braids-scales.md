@@ -219,6 +219,32 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   quickly there: a **SmoothChannel** between the Braid and the Clump (`channel` braidPress,
   `length` about a crossing's length) spreads the change along the hair, without kinks.
 
+
+## Buns
+
+**Add > Bun...** (every host) makes buns of the hair: each guide of the `buns` group (Maya: each
+selected curve joins it) places one, its root where the bun sits and its way out of the scalp the
+way the bun stands; draw them from the scalp with the Draw tool. It adds a **Bun** node reading that
+group and a **Braid** after the Interpolate whose paths are the Bun's: the Braid gathers the hair
+into each bun's stem (every strand into the nearest bun, so several make bantu knots: `region` on
+the Braid says how far a bun reaches) and plaits (`three`) or twists (`rope`: a twist bun) it along
+the coil, its end bound, the hair's length fitted to the path. By script:
+
+```python
+groomlab.add_bun(groom, ["bunCurve1"], style="rope", shape="coil")
+```
+
+- **The path** (the Bun node, one a guide): up the bun's middle `lift` (the stem the hair is
+  gathered into, a ponytail's base), then `turns` times round it: `coil` (wound round the stem at
+  `radius`, each turn `rise` higher, the last `shrink` as wide as the first: a wrapped bun, a top
+  knot) or `flat` (a snail spiral out to `radius`, lying low). `tuck` turns the end in under the
+  coil toward the middle; `clockwise` and `startAngle` say which way and from where it winds;
+  `axis` `normal` stands the bun out of the scalp whatever way its guide points. `radius`,
+  `turns`, `rise`, `lift` and `startAngle` are mappable, read at each bun's root.
+- **The braid** is the Braid node's: its width, style, tightness, ties and the rest. Keep `rise`
+  about the braid's width so the turns sit on each other. Sculpt Sections works on it like any
+  braid.
+
 ## Scales
 
 Scales (dragons, reptiles, pangolins) are rigid plates, not hair, and the strands lay them out:

@@ -1918,6 +1918,31 @@ def add_braid_dialog(style=None, groom=None):
     return node
 
 
+def add_bun_dialog(style=None, shape=None, groom=None):
+    """Add > Bun...: buns from the hair (groomlab.add_bun): the selected curves (drawn from the scalp
+    the way each bun stands) become the buns group, one bun each. The braid style and the bun's shape
+    are asked when not given (a menu click)."""
+    import groomlab
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    curves = groomlab.selected_curves(groom)
+    if style is None or shape is None:
+        answer = _ask("Bun", [
+            ("style", "Hair", "choice", "three", ["three", "rope", "four", "fishtail"],
+             "three: braided; rope: twisted (a twist bun, bantu knots); four, fishtail: other braids"),
+            ("shape", "Shape", "choice", "coil", ["coil", "flat"],
+             "coil: wound round its stem, turn on turn; flat: a snail spiral lying low")],
+            note="%d curve(s) selected each place a bun." % len(curves) if curves else
+                 "No curves selected: the buns group's guides place the buns (draw them with the Draw tool).")
+        if not answer:
+            return None
+        style, shape = answer["style"], answer["shape"]
+    made = groomlab.add_bun(groom, curves=curves or None, style=style, shape=shape)
+    _say("added %s and %s (a %s %s bun) to %s" % (made["bun"], made["braid"], shape, style, groom))
+    return made
+
+
 def add_cards_action(lod, groom=None):
     """Add > Cards > Hero / Mid / Low: a Cards node before the output at that level of detail
     (groomlab.create_cards with its preset), shown in the groom's cards view."""
@@ -2269,6 +2294,7 @@ ACTIONS = {
     "import.alembicCurves": import_alembic_curves_dialog,
     "add.feathers": add_feathers_dialog,
     "add.braid": add_braid_dialog,
+    "add.bun": add_bun_dialog,
     "add.cards.hero": lambda: add_cards_action("hero"),
     "add.cards.mid": lambda: add_cards_action("mid"),
     "add.cards.low": lambda: add_cards_action("low"),

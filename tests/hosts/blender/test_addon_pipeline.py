@@ -436,6 +436,13 @@ class PipelineOpsTest(unittest.TestCase):
         again = pipeline.sculpt_braid_sections(head, braid)
         self.assertEqual((again["made"], again["sculpt"], again["follow"]), (False, made["sculpt"], made["follow"]))
         tools.sculpt_target(head, base=True)
+        # Add > Bun (graph_inserts.h insertBun): the buns group placing them, a Bun node the Braid's paths.
+        made = pipeline.add_bun(head, style="rope", shape="coil")
+        self.assertEqual(link(head, made["braid"], "braids"), made["bun"])
+        self.assertEqual(param(head, link(head, made["bun"], "guides"), "group"), "buns")
+        self.assertEqual(param(head, made["braid"], "style"), "rope")
+        self.assertIn("buns", {g["name"] for g in tools.call(head, "guides_info")["groups"]})
+        self.assertEqual(process.call("node_status", session=rt.session).get("graphError", ""), "")
         # The feathers' choice in the shared words: scattered feathers, or one feather per guide.
         items = {i.identifier: i.name for i in
                  bpy.ops.groomlab.add_feathers.get_rna_type().properties["source"].enum_items}

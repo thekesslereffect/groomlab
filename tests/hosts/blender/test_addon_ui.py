@@ -219,7 +219,7 @@ class DefinitionsTest(unittest.TestCase):
                           "Unity Feathers...", "Unity Cards...", "glTF Cards...", "Card Maps...", "Scales Mesh (FBX)...",
                           "Scales Instancer (USD)..."])
         add = drawn(bpy.types.GROOMLAB_MT_main_add)
-        self.assertEqual(texts(add), ["Feathers...", "Braid on Curves...", "Collider", "Scalp", "Wind", "Jiggle"])
+        self.assertEqual(texts(add), ["Feathers...", "Braid on Curves...", "Bun...", "Collider", "Scalp", "Wind", "Jiggle"])
         self.assertIn(("menu", "GROOMLAB_MT_main_add_cards", "Cards"), add)
         cards = drawn(bpy.types.GROOMLAB_MT_main_add_cards)
         self.assertEqual(texts(cards), ["Hero", "Mid", "Low"])

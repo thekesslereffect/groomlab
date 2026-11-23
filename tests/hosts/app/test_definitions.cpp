@@ -256,7 +256,7 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
               (std::vector<std::string>{"Show All Hair", "Hide All Hair", "-", "Show All Guides", "Hide All Guides"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Add Sample Mesh"))), (std::vector<std::string>{"Nika (head)", "Manny (head)", "Wolf"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Add"))),
-              (std::vector<std::string>{"Feathers...", "Braid on Curves...", "Cards", "Collider", "Wind", "Jiggle"}));
+              (std::vector<std::string>{"Feathers...", "Braid on Curves...", "Bun...", "Cards", "Collider", "Wind", "Jiggle"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Simulate"))),
               (std::vector<std::string>{"Add Simulate Node", "Simulate Range", "Bake Simulation", "Clear Simulation", "-", "Export Guides for Simulation...", "Load Guide Cache..."}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Utilities"))),

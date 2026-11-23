@@ -327,6 +327,28 @@ bool MainWindow::addBraid(const QString& style) {
     return true;
 }
 
+bool MainWindow::addBun(const QString& style, const QString& shape) {
+    if (!document_) {
+        report(tr("No groom open to add a bun to"));
+        return false;
+    }
+    BunNodes made;
+    const std::string error = document_->addBun(style.toStdString(), shape.toStdString(), "buns", &made);
+    if (!error.empty()) {
+        report(tr("Cannot add a bun: %1").arg(QString::fromStdString(error)));
+        return false;
+    }
+    refreshGroups();
+    graphEdited();
+    const HierarchyPtr h = document_->session().authoredHierarchy();
+    const bool placed = h && h->findGroup("buns") != kNoGroup && !h->guidesInGroup(h->findGroup("buns")).empty();
+    notify(placed ? tr("Added %1 and %2: a bun at each of the buns group's guides").arg(QString::fromStdString(made.bun),
+                                                                                       QString::fromStdString(made.braid))
+                  : tr("Added %1 and %2: draw a guide in the buns group where each bun goes, the way it stands (Draw tool)")
+                        .arg(QString::fromStdString(made.bun), QString::fromStdString(made.braid)));
+    return true;
+}
+
 bool MainWindow::sculptBraidSections(const std::string& braid) {
     if (!document_ || braid.empty()) return false;
     BraidSculptNodes made;
@@ -603,6 +625,20 @@ void MainWindow::askBraid() {
     host_->showPrompt(tr("Braid on Curves"),
                       tr("The braids group's guides become braid paths (draw them from the scalp with the Draw tool). Three: a classic "
                          "plait; Four, Five: more sections; Fishtail; Rope: two strands twisted; Cornrow: fed along the scalp."),
+                      std::move(choices));
+}
+
+void MainWindow::askBun() {
+    if (!document_) return;
+    std::vector<OverlayHost::PromptChoice> choices;
+    choices.push_back({tr("Braided"), true, [this] { addBun(QStringLiteral("three"), QStringLiteral("coil")); }});
+    choices.push_back({tr("Twisted"), false, [this] { addBun(QStringLiteral("rope"), QStringLiteral("coil")); }});
+    choices.push_back({tr("Flat"), false, [this] { addBun(QStringLiteral("three"), QStringLiteral("flat")); }});
+    choices.push_back({tr("Cancel"), false, {}});
+    host_->showPrompt(tr("Bun"),
+                      tr("Each guide of the buns group places a bun, the way it stands (draw them from the scalp with the Draw "
+                         "tool); the hair gathers into the nearest. Braided: a plait wound round its stem; Twisted: a rope (a "
+                         "twist bun, bantu knots); Flat: a snail spiral lying low."),
                       std::move(choices));
 }
 

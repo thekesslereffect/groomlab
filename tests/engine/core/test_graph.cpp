@@ -1080,6 +1080,7 @@ TEST(GraphInserts, BraidsAndFeathersLandAlikeInEveryHost) {
     EXPECT_EQ(again.follow, sculpted.follow);
     EXPECT_THROW(insertBraidSculpt(edit, "guides"), GraphError);
 
+
     // Two designs sharing scattered shafts through a Split, merged with the hair before the output.
     auto design = [](const std::string& name) {
         std::ifstream in(std::filesystem::u8path(presetPath("feathers_" + name, {GROOMLAB_SHIPPED_PRESETS})));
@@ -1126,6 +1127,42 @@ TEST(GraphInserts, BraidsAndFeathersLandAlikeInEveryHost) {
     EXPECT_THROW(insertFeathers(edit, {design("down")}, {}, "nothing"), GraphError);
     EXPECT_THROW(insertFeathers(edit, {FeatherDesign{"empty", R"({"nodes": []})"}}), GraphError);
     EXPECT_FALSE(excludeFromHairGuides(edit, "flight")) << "already left out";
+}
+
+
+TEST(GraphInserts, ABunIsABraidAlongABunNodesPaths) {
+    using nlohmann::json;
+    auto param = [](const GraphEdit& e, const std::string& node, const std::string& name) {
+        const json g = json::parse(e.toJson());
+        for (const json& n : g["nodes"]) {
+            if (n["name"] == node) return n.value("params", json::object()).value(name, json());
+        }
+        return json();
+    };
+    auto source = [](const GraphEdit& e, const std::string& to, const std::string& input) {
+        const json g = json::parse(e.toJson());
+        for (const json& c : g["connections"]) {
+            if (c["to"] == to && c["input"] == input) return c["from"].get<std::string>();
+        }
+        return std::string();
+    };
+    GraphEdit edit(defaultGraphJson());
+    // Add > Bun: a Braid (end bound, sized for a bun) whose paths are a Bun node's, reading the buns
+    // group's Guides node; its lengths fitted to the groom (40: twice the defaults' head).
+    const BunNodes bun = insertBun(edit, "buns", "rope", R"({"turns": 3.0})", {}, 40.0);
+    EXPECT_EQ(edit.nodeType(bun.bun), "Bun");
+    EXPECT_EQ(edit.nodeType(bun.braid), "Braid");
+    EXPECT_EQ(source(edit, bun.braid, "braids"), bun.bun);
+    const std::string places = source(edit, bun.bun, "guides");
+    ASSERT_EQ(edit.nodeType(places), "Guides");
+    EXPECT_EQ(param(edit, places, "group"), "buns");
+    EXPECT_EQ(param(edit, bun.braid, "style"), "rope");
+    EXPECT_EQ(param(edit, bun.braid, "end"), "bound");
+    EXPECT_EQ(param(edit, bun.braid, "width"), 2.4);
+    EXPECT_EQ(param(edit, bun.bun, "turns"), 3.0);
+    EXPECT_EQ(param(edit, bun.bun, "radius"), 4.0);
+    EXPECT_NE(param(edit, "guides", "exclude").get<std::string>().find("buns"), std::string::npos) << "bun places are not hair";
+    EXPECT_THROW(insertBun(edit, "buns", "plait"), GraphError);
 }
 
 TEST(GraphControls, EveryHostMakesAndReadsControlsAlike) {

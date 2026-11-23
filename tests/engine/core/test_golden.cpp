@@ -641,6 +641,11 @@ std::vector<Case> cases() {
              R"({"from": "braid", "to": "moved", "input": "strands", "output": "sections"},)"
              R"({"from": "braid", "to": "op", "input": "rest", "output": "sections"},)" +
              link("braid", "op", "strands") + "," + link("moved", "op", "guides")},
+        // Buns: the primary guides each a bun's place, its coiled path braided with the hair gathered into it.
+        {"Bun", "op",
+         R"({"name": "bun", "type": "Bun", "params": {"radius": 0.12, "turns": 2.0, "rise": 0.08, "lift": 0.05}},
+             {"name": "op", "type": "Braid", "params": {"region": 0.4, "width": 0.08, "end": "bound", "seed": 1}})",
+         link("primaries", "bun", "guides") + "," + link("interp", "op", "strands") + "," + link("bun", "op", "braids")},
     };
 }
 
@@ -1011,6 +1016,8 @@ TEST_P(Golden, MappedParamsAreReadPerStrand) {
         // ties to size or cinch (BraidFreeTies has them); a fed braid starts at its root (no gather).
         "Braid.separate", "Braid.inflate", "Braid.release", "Braid.tieLength", "Braid.cinch", "BraidFed.separate",
         "BraidFed.inflate", "BraidFed.release", "BraidFed.tieLength", "BraidFed.cinch", "BraidFed.gather",
+        // A bun's braid: its end bound (no tail to fade or let go), no ties.
+        "Bun.tailSmoothness", "Bun.release", "Bun.tieLength", "Bun.cinch",
         // Feathers with no down zone (down 0; PropagateDown's has one); round a shaft no sides to
         // weigh; splits under 1 gather no barbs.
         "Propagate.downLength", "Propagate.downCurl", "Propagate.downFrizz", "PropagateGuidesAround.downLength",

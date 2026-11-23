@@ -18,7 +18,8 @@ User guide: [Node graph](https://www.getgroomlab.com/docs/node-graph).
   along their guides' change, a wire deformer: a Braid's sections brushed in a Sculpt node move their
   hair; see [Shaping the sections](feathers-braids-scales.md#braids)).
 - **Collide:** `Collide`, `SelfCollide` (hair no longer through itself), `MeshCut`.
-- **Look:** `Clump`, `Twist`, `Braid`, `Noise`, `Curl`, `Flyaway`, `Static` (charged hair puffing out), `Tangle`, `Wet` (wet hair from one slider), `Instance`, `Scales`.
+- **Look:** `Clump`, `Twist`, `Braid`, `Bun` (coiled paths for a Braid: buns; see
+  [Buns](feathers-braids-scales.md#buns)), `Noise`, `Curl`, `Flyaway`, `Static` (charged hair puffing out), `Tangle`, `Wet` (wet hair from one slider), `Instance`, `Scales`.
 - **Convert:** `ToGuides`, `ToStrands`, `ToMesh`. **Games:** `Cards`.
 - **Color:** `HairColor`, `Bands`, `FeatherColor`, `RenderData`.
 - **Motion:** `Wind`, `Jiggle` (no simulation cache: see [Motion without a cache](motion-and-simulation.md#motion-without-a-cache)), `Simulate`

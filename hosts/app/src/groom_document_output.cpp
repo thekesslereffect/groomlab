@@ -235,6 +235,28 @@ std::string GroomDocument::addBraid(const std::string& style, const std::string&
     return error;
 }
 
+std::string GroomDocument::addBun(const std::string& style, const std::string& shape, const std::string& group, BunNodes* made) {
+    const MeshPtr& scalp = file().data.scalp;
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
+    auto insert = [&](json& g) {
+        GraphEdit edit(g.dump());
+        const BunNodes nodes = insertBun(edit, group, style, json{{"style", shape}}.dump(), {}, size);
+        g = json::parse(edit.toJson());
+        return nodes;
+    };
+    try {  // (tried first: the group is not made for a graph that cannot take a bun)
+        json trial = graph_;
+        insert(trial);
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+    if (const std::string error = ensureGuideGroup(group); !error.empty()) return error;
+    BunNodes nodes;
+    const std::string error = editGraph("add bun", [&](json& g) { nodes = insert(g); });
+    if (error.empty() && made) *made = nodes;
+    return error;
+}
+
 std::string GroomDocument::sculptBraidSections(const std::string& braid, BraidSculptNodes* made) {
     const MeshPtr& scalp = file().data.scalp;
     const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());

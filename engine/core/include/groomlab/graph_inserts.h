@@ -183,6 +183,20 @@ std::string renameGroupReaders(const std::string& graphJson, const std::string& 
 std::string insertBraid(GraphEdit& edit, const std::string& group = "braids", const std::string& paramsJson = {},
                         const std::string& after = {}, std::optional<double> groomSize = std::nullopt);
 
+// Add > Bun: the paths of buns braided from the hair. A Braid (insertBraid: after the
+// Interpolate, `style` one of its styles, rope for a twisted bun) whose braids input is a Bun node
+// reading the first Guides node of `group` (each guide a bun: its root where the bun sits, its way
+// out the bun's axis). The Braid gathers the hair from all over the scalp (each strand into the
+// nearest bun: several are bantu knots), its end bound, as wide as suits the Bun's default size;
+// `bunParamsJson` (an object; "" none) over the Bun's defaults. Lengths fitted to `groomSize`
+// from the defaults' scalp. Returns both nodes' names. GraphError as insertBraid.
+struct BunNodes {
+    std::string bun, braid;
+};
+BunNodes insertBun(GraphEdit& edit, const std::string& group = "buns", const std::string& style = "three",
+                   const std::string& bunParamsJson = {}, const std::string& after = {},
+                   std::optional<double> groomSize = std::nullopt);
+
 // Sculpt Sections (every host's Braid node button): a braid's sections made guides to brush, its hair
 // following them. A Sculpt node reading the Braid's "sections" output (brushed as any Sculpt: its
 // strokes are correctives, so they stay when the braid above changes) and a FollowGuides node right

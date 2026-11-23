@@ -4107,7 +4107,7 @@ class DockableWindowsTest(unittest.TestCase):
                 return [cmds.menuItem(i, query=True, label=True) for i in found]
             # The graph's building blocks, one Simulate menu (nHair under Legacy), the renders, the
             # exports, help; a tooltip on every item.
-            self.assertEqual(entries_of("Add"), ["Feathers...", "Braid on Curves...", "Cards", "Collider", "Wind",
+            self.assertEqual(entries_of("Add"), ["Feathers...", "Braid on Curves...", "Bun...", "Cards", "Collider", "Wind",
                                                  "Jiggle"])
             self.assertEqual(entries_of("Simulate"), ["Add Simulate Node", "Simulate Range", "Bake Simulation",
                                                       "Clear Simulation", "Sculpt on Simulation",

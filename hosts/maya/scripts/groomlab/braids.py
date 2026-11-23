@@ -86,6 +86,36 @@ def add_braid(groom, curves=None, style="three", group="braids", width=0.25, tig
     return braid
 
 
+@undoable("bun")
+def add_bun(groom, curves=None, style="three", shape="coil", group="buns", radius=None, turns=None):
+    """Add > Bun: buns braided (or twisted, style "rope") from the hair; returns {"bun", "braid"}.
+
+    `curves` (drawn from the scalp, pointing the way each bun stands) become the guide group
+    `group` (default "buns"), one bun each; without curves the group's guides are used (draw them
+    with the Draw tool). A Bun node coils a path round each bun's stem (shape "coil", or "flat": a
+    snail spiral) and a Braid after the Interpolate gathers the hair into them, each strand into
+    the nearest bun (several: bantu knots). Every host's graph edit (graph_inserts.h insertBun).
+    `radius` and `turns` set the Bun's (None: its defaults, fitted to the scalp).
+    """
+    from groomlab import graph as gm
+    params = {"style": shape}
+    if radius is not None:
+        params["radius"] = float(radius)
+    if turns is not None:
+        params["turns"] = float(turns)
+    model = gm.GraphModel.from_groom(groom)
+    edit = model._edit()
+    with gm._core_errors():
+        made = edit.insert_bun(group, style, json.dumps(params), "", model.groom_size)
+    model._take(edit)
+    if curves:
+        guides_from_curves(groom, curves, group=group)
+    else:
+        _ensure_guide_group(groom, group)  # draw the bun places in it with the Draw tool
+    model.save(groom)
+    return {"bun": made["bun"], "braid": made["braid"]}
+
+
 # ---------------------------------------------------------------------------
 # Instancing: geometry on the strands (snow, dandruff, dew, beads)
 

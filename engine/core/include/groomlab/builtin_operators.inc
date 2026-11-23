@@ -61,6 +61,7 @@ GROOMLAB_OPERATOR(MeshCut)               // Curves (+ Mesh) -> Curves (cut where
 GROOMLAB_OPERATOR(Clump)                 // Strands + Guides (centers) -> Strands
 GROOMLAB_OPERATOR(Twist)                 // Strands (+ Guides axes) -> Strands (turned around an axis)
 GROOMLAB_OPERATOR(Braid)                 // Strands + Guides (braid paths) -> Strands
+GROOMLAB_OPERATOR(Bun)                   // Guides (bun places) -> Guides (coiled paths a Braid winds the hair along: buns)
 GROOMLAB_OPERATOR(Noise)                 // Strands -> Strands
 GROOMLAB_OPERATOR(Curl)                  // Strands -> Strands
 GROOMLAB_OPERATOR(Flyaway)               // Strands -> Strands (stray hairs)

@@ -535,6 +535,8 @@ public:
     bool drawGuidesInto(const std::string& group);
     // Add > Braid on Curves: a Braid after the Interpolate along the "braids" group's guides.
     bool addBraid(const QString& style);
+    // Add > Bun: a bun's braid `style` (a Braid style; rope: twisted) and `shape` (coil, flat).
+    bool addBun(const QString& style, const QString& shape);
     // Sculpt Sections on Braid node `braid` (GroomDocument::sculptBraidSections), then the brushes
     // shape its Sculpt node's guides.
     bool sculptBraidSections(const std::string& braid);
@@ -1016,6 +1018,7 @@ private:
     // The groom's own choices that ask first in the glass prompt (app_output_actions.cpp).
     void askFeathers();
     void askBraid();
+    void askBun();
     void askCollider();
     void askStrandsToMesh();
     void askImportAlembicCurves();

@@ -1264,6 +1264,21 @@ def add_braid(scalp, curves=None, style="three", group="braids", width=0.25, tig
     return braid
 
 
+def add_bun(scalp, curves=None, style="three", shape="coil", group="buns"):
+    """Add > Bun (Maya's add_bun): curve objects `curves` (drawn from the scalp the way each bun
+    stands) become guide group `group`, one bun each, else its guides place them (draw them with
+    Draw); a Bun node coils a path round each stem (shape coil or flat) and a Braid after the
+    Interpolate gathers the hair into them. Every host's graph edit (graph_inserts.h insertBun).
+    Returns {"bun", "braid"}."""
+    _ensure_group(scalp, group)  # the guides before the graph reads them
+    if curves:
+        guides_from_curves(scalp, curves, group)
+    g = GraphEdits(scalp)
+    r = g.edit(op="insert_bun", group=group, style=style, params={"style": shape})
+    g.finish()
+    return {"bun": r["bun"], "braid": r["braid"]}
+
+
 def sculpt_braid_sections(scalp, braid):
     """Sculpt Sections on Braid node `braid` (Maya's sculpt_braid_sections): a Sculpt node of its
     sections and a FollowGuides after it carrying its hair along them (every host's graph edit,

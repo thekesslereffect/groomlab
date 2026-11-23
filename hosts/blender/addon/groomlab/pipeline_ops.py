@@ -717,6 +717,40 @@ class GROOMLAB_OT_add_braid(_Tipped, GroomOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_add_bun(_Tipped, GroomOperator):
+    """Buns from the hair: each selected curve (drawn from the scalp the way the bun stands) places a bun, the hair gathered and coiled into it"""
+    bl_idname = "groomlab.add_bun"
+    bl_label = "Bun"
+    bl_options = {"REGISTER", "UNDO"}
+
+    style: EnumProperty(name="Hair", items=[
+        ("three", "Braided", "A three-strand braid coiled"), ("rope", "Twisted", "Two strands twisted (a twist bun, bantu knots)"),
+        ("four", "Four", "A four-strand braid"), ("fishtail", "Fishtail", "A fishtail braid")], default="three")
+    shape: EnumProperty(name="Shape", items=[
+        ("coil", "Coil", "Wound round its stem, turn on turn"), ("flat", "Flat", "A snail spiral lying low")], default="coil")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.prop(self, "style")
+        self.layout.prop(self, "shape")
+        n = len(_selected(context, _CURVE_KINDS, active_groom(context)))
+        self.layout.label(text="%d curve object(s) selected each place a bun" % n if n else
+                          "No curves selected: the buns group's guides place the buns (draw them with Draw)", icon="INFO")
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        try:
+            made = pipeline.add_bun(scalp, curves=_selected(context, _CURVE_KINDS, scalp) or None, style=self.style,
+                                    shape=self.shape)
+        except HelperError as e:
+            return _fail(self, e)
+        tools.refresh_info(scalp, context.scene)
+        _say(self, "added %s and %s (a %s bun) to %s" % (made["bun"], made["braid"], self.shape, scalp.name))
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_add_cards(_Tipped, GroomOperator):
     """A Cards node before the output at a level of detail"""
     bl_idname = "groomlab.add_cards"
@@ -1284,7 +1318,7 @@ classes = (GROOMLAB_OT_export_unreal_groom, GROOMLAB_OT_export_unity_strands, GR
            GROOMLAB_OT_export_unity_cards, GROOMLAB_OT_export_unity_feathers, GROOMLAB_OT_to_mesh,
            GROOMLAB_OT_bake_scale_maps, GROOMLAB_OT_bake_follicle_map, GROOMLAB_OT_simulate_add, GROOMLAB_OT_export_guides_sim,
            GROOMLAB_OT_load_guide_cache, GROOMLAB_OT_simulate_range,
-           GROOMLAB_OT_simulate_clear, GROOMLAB_OT_add_feathers, GROOMLAB_OT_add_braid, GROOMLAB_OT_add_cards,
+           GROOMLAB_OT_simulate_clear, GROOMLAB_OT_add_feathers, GROOMLAB_OT_add_braid, GROOMLAB_OT_add_bun, GROOMLAB_OT_add_cards,
            GROOMLAB_OT_add_collider, GROOMLAB_OT_add_sample, GROOMLAB_OT_transfer_groom, GROOMLAB_OT_turntable,
            GROOMLAB_OT_find_missing_files, GROOMLAB_OT_collect_files, GROOMLAB_OT_add_scalp,
            GROOMLAB_OT_prototype_from_selection, GROOMLAB_OT_cards_lod, GROOMLAB_OT_card_stats,
