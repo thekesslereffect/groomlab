@@ -119,6 +119,47 @@ private:
     std::vector<std::unique_ptr<ScalarField>> fields_;  // r, g, b, luminance
 };
 
+// An Expression node's field when its expression gives a vector ([r, g, b], cmap("name"),
+// ccellnoise($clumpId), mix(a, b, $t)...): its value a color (each component remapped min..max),
+// for a color param it is plugged into (ColorField: HairColor's color, dye, tipColor...), its
+// luminance for a number param.
+class ExpressionColorFieldValue : public FieldValue {
+public:
+    ExpressionColorFieldValue(const MapRef& map, MeshPtr scalp) : scalp_(std::move(scalp)), min_(map.min), max_(map.max) {
+        ParamSet values;
+        values.set("map", map);
+        field_ = std::make_unique<VectorField>(values, "map", scalp_.get());
+    }
+    float atRoot(const StrandRoot& root) const override { return luminanceOf(colorAtRoot(root)); }
+    float at(const StrandSet& strands, std::size_t s) const override { return luminanceOf(colorAt(strands, s)); }
+    float atPoint(const StrandSet& strands, std::size_t s, std::size_t point) const override {
+        return luminanceOf(colorAtPoint(strands, s, point));
+    }
+    bool perPoint() const override { return field_->perPoint(); }
+    void validate(const StrandSet& strands) const override { field_->validate(strands); }
+    float maximum() const override { return std::max(min_, max_); }
+    bool readsPositions() const override { return field_->readsPositions(); }
+    bool strandLocal() const override { return field_->strandLocal(); }
+    bool isColor() const override { return true; }
+    std::array<float, 3> colorAt(const StrandSet& strands, std::size_t s) const override {
+        return remap(field_->at(strands, s));
+    }
+    std::array<float, 3> colorAtPoint(const StrandSet& strands, std::size_t s, std::size_t point) const override {
+        return remap(field_->atPoint(strands, s, point));
+    }
+    std::array<float, 3> colorAtRoot(const StrandRoot& root) const override { return remap(field_->atRoot(root)); }
+
+private:
+    std::array<float, 3> remap(const Vec3f& v) const {
+        return {min_ + (max_ - min_) * v.x, min_ + (max_ - min_) * v.y, min_ + (max_ - min_) * v.z};
+    }
+    static float luminanceOf(const std::array<float, 3>& c) { return rec709Luminance(c[0], c[1], c[2]); }
+
+    MeshPtr scalp_;  // kept alive: the field reads it
+    float min_ = 0.0f, max_ = 1.0f;
+    std::unique_ptr<VectorField> field_;
+};
+
 // A map painted on the scalp as a node (Groom Tools > Paint), found by name: the host's map
 // catalog (external "maps") says whether it is a layer on the guides, a value per vertex (a
 // color set of the scalp of that name) or an image at the scalp's UVs (and where); without a
@@ -289,7 +330,9 @@ public:
              "length), pt (by point index), px/py/pz, pointIndex, any point channel; frame, time; vectors [x, y, z], "
              "P, N, tip, pointP, .x .y .z; + - * / ^, comparisons, c ? a : b; sin cos abs sqrt min max clamp mix "
              "smoothstep fit remap step, dot cross length normalize rotate, noise fbm turbulence voronoi cellnoise "
-             "vnoise, curve spline, pick choose cycle, map(\"name\") ..."},
+             "vnoise, curve spline, pick choose cycle, map(\"name\") ... A vector ([r, g, b], cmap(\"name\"), "
+             "ccellnoise($clumpId), mix([1, 0, 0], [0, 0, 1], $t)) is a color for a color param (HairColor's color, "
+             "dye, tipColor), its luminance for a number param"},
             ParamSpec{"min", 0.0, "Output where the expression is 0: what its 0 becomes (an output range, not a limit)"}
                 .soft(0, 1),
             ParamSpec{"max", 1.0, "Output where the expression is 1: what its 1 becomes (in between: linear, and beyond "
@@ -327,6 +370,15 @@ public:
         if (givesValue()) return uniformValue(map, !controls.empty());
         MeshPtr scalp;
         scalpIn(ctx, &scalp);
+        // A vector expression is a color field (a color param takes its color, a number param its
+        // luminance); a number one a field of numbers. (An expression that does not compile says
+        // why from the field below.)
+        bool vector = false;
+        try {
+            vector = Expression(map.name, map.constants, ExpressionType::Any).isVector();
+        } catch (const ExpressionError&) {
+        }
+        if (vector) return FieldPtr(std::make_shared<ExpressionColorFieldValue>(map, scalp));
         ParamSet values;
         values.set("map", map);
         return FieldPtr(std::make_shared<MapFieldValue>(values, scalp, nullptr));

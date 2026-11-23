@@ -538,6 +538,80 @@ TEST(HairColor, AMapsRgbOutputColorsTheStrands) {
     std::filesystem::remove(path);
 }
 
+// An Expression node plugged into a color param (issue #108): a vector expression is a color (per
+// clump, per tube, along the strand), a number one gray; the Expression node takes either.
+TEST(HairColor, AnExpressionColorsTheStrands) {
+    auto withExpression = [&](const json& params, const std::string& param, const std::string& expression) {
+        json graph = json::parse(colorGroom(params).graphJson);
+        graph["nodes"].push_back({{"name", "expr"}, {"type", "Expression"}, {"params", {{"expression", expression}}}});
+        for (json& n : graph["nodes"]) {
+            if (n["name"] == "color") n["paramInputs"] = {param};
+        }
+        graph["connections"].push_back({{"from", "expr"}, {"to", "color"}, {"input", param}});
+        GroomData d;
+        d.scalp = tintedPlane();
+        d.graphJson = graph.dump();
+        GroomSession session(d);
+        const ViewResult& view = session.evaluate(ViewRequest{});
+        EXPECT_TRUE(view.errors.empty()) << expression << ": " << (view.errors.empty() ? "" : view.errors[0]);
+        return view.strands;
+    };
+    const json white = {{"mode", "color"}, {"color", {1.0, 1.0, 1.0}}};
+    // Per clump: one color each (the issue's own expression too), the clumps apart (a random color each).
+    for (const std::string expression : {"$clumpId * [1, 1, 1]", "ccellnoise($clumpId)", "[$clumpId, 0, 1] * 0.01"}) {
+        const StrandsPtr s = withExpression(white, "color", expression);
+        ASSERT_TRUE(s) << expression;
+        const std::vector<float>& clumps = *s->strandChannel("clumpId");
+        std::map<int, Rgb> byClump;
+        std::set<std::array<int, 3>> distinct;
+        for (std::size_t i = 0; i < s->strandCount(); ++i) {
+            const Rgb c = strandColor(*s, i);
+            const auto [it, added] = byClump.emplace(static_cast<int>(clumps[i]), c);
+            if (!added) EXPECT_EQ(it->second, c) << expression;
+            distinct.insert({static_cast<int>(c[0] * 1000), static_cast<int>(c[1] * 1000), static_cast<int>(c[2] * 1000)});
+        }
+        if (expression.rfind("ccellnoise", 0) == 0) EXPECT_GT(distinct.size(), 8u) << expression;
+        EXPECT_GT(byClump.size(), 8u) << expression;
+    }
+    // Per root: u = x on this plane.
+    const StrandsPtr across = withExpression(white, "color", "[$u, 0, 1 - $u]");
+    ASSERT_TRUE(across);
+    for (std::size_t i = 0; i < across->strandCount(); ++i) {
+        const float x = across->strandPoints(i)[0].x;
+        EXPECT_NEAR(strandColor(*across, i)[0], x, 1e-3f);
+        EXPECT_NEAR(strandColor(*across, i)[2], 1.0f - x, 1e-3f);
+    }
+    // Along the strand, with no tip: red roots, blue tips, written per point.
+    const StrandsPtr along = withExpression(white, "color", "mix([1, 0, 0], [0, 0, 1], $t)");
+    ASSERT_TRUE(along);
+    ASSERT_TRUE(along->pointChannel("colorR"));
+    for (std::size_t i = 0; i < along->strandCount(); ++i) {
+        const std::size_t root = along->strandBegin(i), tip = root + along->strandPointCount(i) - 1;
+        EXPECT_NEAR((*along->pointChannel("colorR"))[root], 1.0f, 1e-4f);
+        EXPECT_NEAR((*along->pointChannel("colorB"))[tip], 1.0f, 1e-4f);
+        EXPECT_NEAR((*along->pointChannel("colorR"))[tip], 0.0f, 1e-4f);
+    }
+    // A dye along the strand (mode melanin) does the same.
+    const StrandsPtr dyed = withExpression({{"melanin", 0.0}, {"melaninRandom", 0.0}}, "dye", "mix([1, 0, 0], [0, 0, 1], $t)");
+    ASSERT_TRUE(dyed);
+    ASSERT_TRUE(dyed->pointChannel("colorR"));
+    const std::size_t tip = dyed->strandBegin(0) + dyed->strandPointCount(0) - 1;
+    EXPECT_GT((*dyed->pointChannel("colorR"))[dyed->strandBegin(0)], (*dyed->pointChannel("colorB"))[dyed->strandBegin(0)]);
+    EXPECT_GT((*dyed->pointChannel("colorB"))[tip], (*dyed->pointChannel("colorR"))[tip]);
+    // A number: gray, the param's own color times it.
+    const StrandsPtr gray = withExpression(white, "color", "$clumpId / 12");
+    ASSERT_TRUE(gray);
+    for (std::size_t i = 0; i < gray->strandCount(); ++i) {
+        const Rgb c = strandColor(*gray, i);
+        EXPECT_NEAR(c[0], c[1], 1e-5f);
+        EXPECT_NEAR(c[0], std::clamp((*gray->strandChannel("clumpId"))[i] / 12.0f, 0.0f, 1.0f), 1e-4f);
+    }
+    // A vector expression into a number param reads its luminance.
+    const StrandsPtr lit = withExpression({{"melaninRandom", 0.0}}, "melanin", "[1, 1, 1] * 0.5");
+    ASSERT_TRUE(lit);
+    EXPECT_NEAR((*lit->strandChannel(kMelaninChannel))[0], 0.35f * 0.5f, 1e-4f);
+}
+
 TEST(HairColor, MeanAppearanceIsTheGroomsOneColor) {
     // The one color a host's plain drawing shows (Blender's Solid shading): each strand's
     // appearance averaged; white stays white, a darker base looks darker; none: mid gray.

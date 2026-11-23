@@ -204,7 +204,7 @@ class GraphApiTest(unittest.TestCase):
 
     def test_motion_nodes_are_listed_and_added_in_one_undo(self):
         from groomlab.ui import graph_editor as ge
-        self.assertEqual(dict(ge.categories(self.catalog))["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache", "DriveGuides"])
+        self.assertEqual(dict(ge.categories(self.catalog))["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache", "DriveGuides", "SkinResponse"])
         self.assertEqual(ge.category_of("Simulate", self.catalog), "Motion")
         self.assertEqual(ge.category_of("Jiggle", self.catalog), "Motion")
         self.assertTrue(self.catalog.param_spec("Wind", "strength")["mappable"])
@@ -1892,10 +1892,13 @@ class ExpressionTest(unittest.TestCase):
         self.assertEqual(self.evaluates("# the long ones\n$l = $length / $longest;\nclamp($l * $gain, 0, 1)",
                                         {"gain": 2.0}), [])
         self.assertEqual(self.evaluates("$d = $y - $center.y;\nabs($d)", {"center": [0, 0.5, 0]}), [])
-        errors = self.evaluates("$center + 1", {"center": [0, 0.5, 0]})
-        self.assertTrue(any("vector" in e for e in errors), errors)
+        # A vector is a color field (a number param reads its luminance): the Expression node takes it,
+        # its panel's check too, while a param's own expression must be a number.
+        self.assertEqual(self.evaluates("$center + 1", {"center": [0, 0.5, 0]}), [])
+        from groomlab import expressions
+        self.assertEqual(expressions.check("$center + 1", {"center": [0, 0.5, 0]}, any_type=True), "")
+        self.assertIn("vector", expressions.check("$center + 1", {"center": [0, 0.5, 0]}))
         with self.assertRaises(ValueError):
-            from groomlab import expressions
             expressions.check_variables({"2bad": 1.0})
         # Checked as typed, without evaluating: what is wrong, and where.
         self.assertEqual(expressions.check("$a * 2", {"a": 1.0}), "")

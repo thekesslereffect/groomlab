@@ -20,6 +20,12 @@ mix($n, 1, $crown)                    # the last line is the value
 A number expression on a mappable parameter is mapped from 0-1 onto the parameter's **min** and
 **max**. Expressions give the same values on every machine and every thread count.
 
+An **Expression** node whose expression gives a vector is a color: plugged into a color
+parameter (HairColor's **color**, **dye** and **tipColor**, Bands' and FeatherColor's colors) it
+colors each strand, times the parameter's own color (set that to white to see the expression's
+color as it is). A number expression there colors in gray, and a vector one plugged into a number
+parameter gives its luminance. See [Coloring with an expression](#coloring-with-an-expression).
+
 [Script nodes](/docs/custom-nodes#script-nodes) use this language too, with blocks that run per
 strand and per point, outputs they assign (the point, its width, its color, channels) and loops.
 
@@ -352,6 +358,39 @@ curve($h, 0, 0.3, 4, 0.5, 1, 4, 1, 0.6, 4)
 $a = map('${DESC}/paintmaps/length/');  #3dpaint, 200
 $a
 ```
+
+## Coloring with an expression
+
+Add an **Expression** node, write an expression giving a vector, expose HairColor's **color** (or
+**dye**, **tipColor**) and connect the node to it. Set HairColor's own color to white: the two
+multiply.
+
+```
+# a random color per clump (per tube: $tubeId; per strand: $id)
+ccellnoise($clumpId)
+```
+
+```
+# red roots to blue tips, along every strand
+mix([1, 0, 0], [0, 0, 1], $t)
+```
+
+```
+# the scalp's U and V as red and green
+[$u, $v, 0]
+```
+
+A channel holds its raw numbers: `$clumpId` is 0, 1, 2 and so on, so `$clumpId * [1, 1, 1]` is
+white past the first clump. Turn numbers like that into colors with `ccellnoise(...)` or
+`hash(...)`, or scale them into 0-1 (`$clumpId / 20`).
+
+To see what a channel, a field or an expression holds, put a **Debug** node at the end of the
+graph. It colors the hair by a channel (`clumpId`, `tubeId`, `guideInfluence`...), a number (an
+Expression plugged into its **value**, or an expression typed there) or a color, on a ramp, in
+gray or a random color per whole number, and its note says the values' range, how many there are,
+and whether they vary per strand or per point. Left with no channel named, the note lists the
+channels the strands carry. Its number also goes to the channel `debug`, which the viewport's
+Color by Channel shows unlit.
 
 ## In the viewport
 

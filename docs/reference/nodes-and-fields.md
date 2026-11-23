@@ -96,7 +96,10 @@ as the input. A keyed param is listed in `"paramControls"` with the control that
 `b`, `a`, and `rgb`, its color, for a color param that takes one: ParamSpec `colorField`, the
 spec JSON's `"colorField": true`, read with `ColorField` in field.h; HairColor's `color`, `dye`
 and `tipColor`, Bands' `dye` and `undercoatDye`, FeatherColor's `dye` and `downColor`; the param's
-own color times the map's at each root; a number param reads its luminance). The Graph Editor draws one labelled port per output down the node's right edge; drag
+own color times the map's at each root; a number param reads its luminance). An Expression
+node whose expression gives a vector is a color field the same way (field_ops.cpp
+`ExpressionColorFieldValue`: its color per strand, or per point for an expression of `t`, which
+HairColor's color and dye then write per point). The Graph Editor draws one labelled port per output down the node's right edge; drag
 a link from the one to read. It runs once for all of them. A link names the output it reads in
 `"output"`; without it, it reads the first, so graphs from before read what they always did (a
 Map node's old `channel` param is ignored now: such a node reads luminance until its links are

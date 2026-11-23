@@ -112,6 +112,7 @@ GROOMLAB_OPERATOR(Output)                // Strands -> Strands (graph result)
 GROOMLAB_OPERATOR(Compound)              // a subgraph as one node (PG-6)
 GROOMLAB_OPERATOR(Script)                // Strands -> Strands (a script node: script.h, from a .glnode file)
 GROOMLAB_OPERATOR(SmoothChannel)         // Strands -> Strands (a point channel smoothed along each strand)
+GROOMLAB_OPERATOR(Debug)                 // Curves -> Curves (colored by a channel, a field or an expression, its values noted)
 // [games]
 GROOMLAB_OPERATOR(Cards)                 // Strands -> Strands (+ game cards from these strands)
 // [end]

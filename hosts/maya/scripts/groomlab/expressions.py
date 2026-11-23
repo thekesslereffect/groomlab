@@ -88,12 +88,14 @@ def completions(variables=None, channels=()):
     return out
 
 
-def check(text, variables=None):
+def check(text, variables=None, any_type=False):
     """What is wrong with an expression ("" when nothing), with the node's own variables; the
-    plugin compiles it, so the editor can say so as you type, connected or not."""
+    plugin compiles it, so the editor can say so as you type, connected or not. any_type: a
+    vector does too (the Expression node's: a vector expression is a color), else it must be a number."""
     from maya import cmds
     try:
-        return cmds.groomLabExpression(check=text, variables=json.dumps(check_variables(variables or {}))) or ""
+        return cmds.groomLabExpression(check=text, variables=json.dumps(check_variables(variables or {})),
+                                       anyType=bool(any_type)) or ""
     except ValueError as e:
         return str(e)
 
