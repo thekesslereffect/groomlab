@@ -319,6 +319,12 @@ def main():
                  ids("graph/nodeMenu", exposeParams="node.expose", innerParams="compound.showInner")),
                 ("BackdropItem.ACTIONS", graph_editor.BackdropItem.ACTIONS, graph_editor.BackdropItem,
                  ids("graph/backdropMenu")),
+                ("EdgeItem.ACTIONS", graph_editor.EdgeItem.ACTIONS, graph_editor.EdgeItem, ids("graph/linkMenu")),
+                ("PortalItem.ACTIONS", graph_editor.PortalItem.ACTIONS, graph_editor.PortalItem, ids("graph/portalMenu")),
+                # A port's menus bind in PortItem.contextMenuEvent (the node and port they act on).
+                ("PortItem menus", {a: None for a in ("port.passThrough", "port.renameOutput", "port.outputUp",
+                                                      "port.outputDown")}, None,
+                 ids("graph/portMenu", "graph/outputPortMenu")),
                 ("GraphEditor.ACTIONS", graph_editor.GraphEditor.ACTIONS, editor,
                  ids("graph/editMenu", "graph/addMenu", "graph/presetMenu", "graph/presetItem")),
                 ("ParamPanel.param_actions", editor.params.param_actions("node", "param"), None,
