@@ -117,6 +117,35 @@ ToolView hostOnly(const ToolView& view) {
     return out;
 }
 
+TEST(Stroke, TheSmoothBrushSmoothsAMapOnlyWhenPaintingIt) {
+    // A map painted (a density map, say) leaves paintKind naming it: the Smooth brush picked as a
+    // tool, and Shift+drag with a guide brush, smooth the guides all the same; Shift+drag while
+    // painting, or a scripted Smooth naming the map, smooth the map.
+    BrushToolSettings s;
+    s.paintKind = "vertices";
+    s.brush.attribute = "density";
+    s.setMode("smooth");
+    EXPECT_FALSE(s.paintsScalp()) << "the Smooth brush: the guides";
+    s.setMode("comb");
+    useShiftSmoothing(s.brush);
+    EXPECT_EQ(s.brush.mode, BrushMode::Smooth);
+    EXPECT_FALSE(s.paintsScalp()) << "Shift+drag combing: the guides";
+    endShiftSmoothing(s.brush, BrushMode::Comb);
+    s.setMode("paint");
+    EXPECT_TRUE(s.paintsScalp());
+    useShiftSmoothing(s.brush);
+    EXPECT_TRUE(s.paintsScalp()) << "Shift+drag painting: the map";
+    endShiftSmoothing(s.brush, BrushMode::Attribute);
+    EXPECT_FALSE(s.brush.smoothMap);
+    s.setMode("smooth");
+    s.smoothNamedMap();
+    EXPECT_TRUE(s.paintsScalp()) << "a scripted Smooth naming the map: the map";
+    BrushToolSettings guides;
+    guides.setMode("smooth");
+    guides.smoothNamedMap();
+    EXPECT_FALSE(guides.paintsScalp()) << "naming no map: the guides";
+}
+
 TEST(ToolView, CameraAndRaysFromTheMatrix) {
     const Vec3f eye{0, 1.2f, 4}, target{0, 0.6f, 0};
     const ToolView view = frontView();

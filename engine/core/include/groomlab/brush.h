@@ -71,7 +71,9 @@ const char* brushModeName(BrushMode mode);
 
 struct BrushSettings;
 // A brush's Shift+drag: the Shape brush smooths the channel it paints (smoothTube); every other
-// brush becomes Smooth. endShiftSmoothing puts back `mode` (the brush's own) and clears smoothTube.
+// brush becomes Smooth, smoothing a painted scalp map when it was the Paint brush (smoothMap) and
+// the guides otherwise. endShiftSmoothing puts back `mode` (the brush's own) and clears smoothTube
+// and smoothMap.
 void useShiftSmoothing(BrushSettings& settings);
 void endShiftSmoothing(BrushSettings& settings, BrushMode mode);
 
@@ -150,6 +152,11 @@ struct BrushSettings {
     // section toward its neighbours' mean by the brush's weight there times |strength|) instead
     // of painting it: its Shift+drag (useShiftSmoothing).
     bool smoothTube = false;
+    // Smooth: smooth the scalp map being painted (BrushToolSettings::paintKind "vertices" or
+    // "texture") instead of the guides. Set by Shift+drag while painting (useShiftSmoothing) and by a
+    // scripted stroke naming a map (smoothNamedMap); never by the Smooth brush picked as a tool, nor
+    // by Shift+drag with a guide brush, whatever map was painted last.
+    bool smoothMap = false;
 
     // Freeze mask: guides carrying this attribute (inherited too) are held back
     // by it (1: untouched). Painting the attribute itself is never held back,

@@ -129,9 +129,17 @@ struct BrushToolSettings {
     static constexpr float kMinAlphaSpacing = 0.02f, kMaxAlphaSpacing = 4.0f;
     // Whether dabs stamp the alpha: one is set and the brush paints a scalp map (not smoothing).
     bool stampsAlpha() const { return alpha && brush.mode == BrushMode::Attribute && paintsScalp(); }
-    // A scalp map is painted (Paint) or smoothed (Smooth: Shift+drag while painting, or the brush).
+    // A scalp map is painted (Paint) or smoothed (Smooth with smoothMap: Shift+drag while painting,
+    // or a scripted stroke naming the map). The Smooth brush otherwise smooths the guides, whatever
+    // map paintKind still names from the last painting.
     bool paintsScalp() const {
-        return (brush.mode == BrushMode::Attribute || brush.mode == BrushMode::Smooth) && paintKind != "guides";
+        return (brush.mode == BrushMode::Attribute || (brush.mode == BrushMode::Smooth && brush.smoothMap)) &&
+               paintKind != "guides";
+    }
+    // A scripted stroke's settings (scriptedStroke, a host's scripted brush command): Smooth naming a
+    // scalp map (paintKind "vertices" or "texture") smooths that map, as Shift+drag while painting does.
+    void smoothNamedMap() {
+        if (brush.mode == BrushMode::Smooth && paintKind != "guides") brush.smoothMap = true;
     }
     // comb, smooth... (brush.h), clump, place, draw, part, flow.
     std::string modeName() const;

@@ -1399,6 +1399,7 @@ void useShiftSmoothing(BrushSettings& settings) {
         settings.smoothTube = true;
     } else {
         settings.stretchSmoothing = settings.mode == BrushMode::Comb && settings.stretch;  // (Comb's Stretch)
+        settings.smoothMap = settings.mode == BrushMode::Attribute;  // (painting: the map it paints)
         settings.mode = BrushMode::Smooth;
     }
 }
@@ -1407,6 +1408,7 @@ void endShiftSmoothing(BrushSettings& settings, BrushMode mode) {
     settings.mode = mode;
     settings.smoothTube = false;
     settings.stretchSmoothing = false;
+    settings.smoothMap = false;
 }
 
 const char* tubeChannelName(TubeChannel channel) {
