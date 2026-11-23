@@ -576,6 +576,7 @@ def stroke_bench(api, count, sculpt):
         for i in range(runs + 1):
             stroke = path(i)
             gpu_before = json.loads(cmds.groomLabGpuPreview(groom, stats=True) or "{}").get("stroke", {})
+            cmds.groomLabGraphStats(groom, profileReport=True)  # (the table from here on)
             before = frame_info(groom)
             cmds.groomLabBrushCtx(ctx, edit=True, debugStroke=stroke)
             sync()
@@ -587,7 +588,24 @@ def stroke_bench(api, count, sculpt):
             after = frame_info(groom)
             gpu_after = json.loads(cmds.groomLabGpuPreview(groom, stats=True) or "{}").get("stroke", {})
             draw = json.loads(cmds.groomLabGraphStats(groom, drawTimes=True))
-            rows.append({"ms": times[-1] if times else None, "press": times[0] if times else None,
+            landed = json.loads(cmds.groomLabGraphStats(groom))  # the commit's evaluation, node by node
+            def median_of(values):
+                values = sorted(v for v in values if isinstance(v, (int, float)))
+                return values[len(values) // 2] if values else None
+            dabs = steps[1:-1]
+            dab_parts = {"computeMs": median_of(s.get("computeMs") for s in dabs),
+                         "updateMs": median_of(s.get("draw", {}).get("updateMs") for s in dabs),
+                         "buildMs": median_of(s.get("draw", {}).get("buildMs") for s in dabs),
+                         "uploadMs": median_of(s.get("draw", {}).get("uploadMs") for s in dabs),
+                         "changed": median_of(s.get("changedStrands") for s in dabs),
+                         "cpuMs": median_of(s.get("cpuMs") for s in dabs),
+                         "gpuWaitMs": median_of(s.get("gpuWaitMs") for s in dabs),
+                         "gpuStroke": json.dumps(gpu_after)[:3000],
+                         "profile": cmds.groomLabGraphStats(groom, profileReport=True)}
+            rows.append({"dabParts": dab_parts,
+                         "commitNodes": {n: "%.1f %s" % (ms, landed.get("runs", {}).get(n, "?"))
+                                         for n, ms in landed.get("times", {}).items()},
+                         "ms": times[-1] if times else None, "press": times[0] if times else None,
                          "dabs": sorted(times[1:-1])[len(times[1:-1]) // 2] if len(times) > 2 else None,
                          "pending": bool(release.get("pending") or info.get("pending")), "landMs": land,
                          "commitMs": after.get("commitMs"), "settledBy": after.get("settledBy"),

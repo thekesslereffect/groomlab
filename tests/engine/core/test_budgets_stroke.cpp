@@ -36,10 +36,15 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "groomlab/display.h"
 #include "groomlab/groom_file.h"
+#include "groomlab/graph_edit.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_hierarchy.h"
+#include "groomlab/parallel.h"
+#include "groomlab/profile.h"
 #include "groomlab/stroke.h"
 #include "groomlab/view_projection.h"
 #include "test_helpers.h"
@@ -165,6 +170,7 @@ public:
         in.strandsVersion = version;
         in.hierarchyVersion = version;
         const DisplayFrame& frame = builder_.update(in, settings_);
+        lastUpdateMs = msSince(t0);
         for (const DisplayItem& item : frame.items) {
             if (!item.rebuilt || item.keep || !item.geometry || !item.geometry->lines) continue;
             const StrandLines& lines = *item.geometry->lines;
@@ -172,11 +178,18 @@ public:
             const std::size_t n = lines.vertexCount();
             if (item.updated && b.layout == lines.layoutKey() && b.positions.size() == n * 3) {
                 const StrandSet& strands = *lines.strands;
-                for (const auto& [first, end] : strandRuns(item.updated->strands)) {
+                const auto runs = strandRuns(item.updated->strands);
+                std::size_t covered = 0;
+                for (const auto& [first, end] : runs) covered += end - first;
+                lastRuns = runs.size();
+                lastCoverage = item.updated->strands.empty() ? 1.0 : static_cast<double>(covered) / static_cast<double>(item.updated->strands.size());
+                // (The runs side by side, as Maya's override and the app write them.)
+                parallelFor(0, runs.size(), [&](std::size_t r) {
+                    const auto [first, end] = runs[r];
                     const std::size_t at = strands.strandBegin(first) * 3;
                     lines.writePositions(b.positions.data() + at, first, end);
                     if (lines.lit) lines.writeFrames(b.normals.data() + at, b.tangents.data() + at, first, end);
-                }
+                }, 1);
                 continue;
             }
             if (b.positions.size() != n * 3) {
@@ -196,6 +209,9 @@ public:
         }
         return msSince(t0);
     }
+    double lastUpdateMs = 0.0;  // the last draw's builder update alone (the rest: the buffers written)
+    std::size_t lastRuns = 0;   // the last partial write's runs of strands (strandRuns)
+    double lastCoverage = 0.0;  // ... the strands they covered over those that changed
 
 private:
     struct Buffers {
@@ -228,6 +244,8 @@ struct StrokeTimes {
     std::vector<double> dabMs;         // the dabs after the first, every stroke
     std::vector<double> dabEvalMs;     // ... their evaluations alone
     std::vector<double> dabDrawMs;     // ... their drawing alone
+    std::vector<double> dabUpdateMs;   // ... of which the display builder's update
+    std::vector<double> dabRuns, dabCoverage;  // ... the runs written and the strands they covered over those changed
     std::vector<double> dabChanged;    // ... the share of the strands each changed (-1: not known)
     std::vector<double> releaseMs;     // per stroke: the commit, the evaluation at full density, drawing
     std::vector<double> commitMs;      // ... the commit alone (the tool's end: the stored texts set)
@@ -412,6 +430,9 @@ StrokeTimes strokeLatency(Bench bench, float sculptDensity, int strokes, int dab
             out.dabMs.push_back(msSince(t0));
             out.dabEvalMs.push_back(e);
             out.dabDrawMs.push_back(d);
+            out.dabUpdateMs.push_back(viewport.lastUpdateMs);
+            out.dabRuns.push_back(static_cast<double>(viewport.lastRuns));
+            out.dabCoverage.push_back(viewport.lastCoverage);
             out.dabChanged.push_back(changed);
             out.dabIncremental.push_back(session.incrementalCount() - incremental);
             for (const auto& [name, ms] : session.nodeTimes()) {
@@ -451,11 +472,13 @@ void report(const char* label, const StrokeTimes& t) {
     if (share >= 0.0) std::snprintf(changed, sizeof(changed), "%.0f%% of the strands changed", 100.0 * share);
     std::printf("[ budget ] brush stroke, %s: %zu strands (%zu while stroking): first evaluation %.0f ms; per dab "
                 "median %.1f ms (evaluation %.1f + drawing %.1f, %s), worst %.1f; presses %s ms; releases %s ms\n"
+                "[ budget ]   a dab's drawing: builder update %.1f + buffers written %.1f ms (%.0f runs covering %.1fx the changed strands)\n"
                 "[ budget ]   the last dab's nodes (ms, each as it last ran): %s\n"
                 "[ budget ]   release median: commit %.1f, evaluation %.1f, drawing %.1f ms, %.0f%% of the strands changed; "
                 "its nodes: %s\n",
                 label, t.strands, t.sculptStrands, t.firstMs, median(t.dabMs), median(t.dabEvalMs), median(t.dabDrawMs),
                 changed, *std::max_element(t.dabMs.begin(), t.dabMs.end()), presses.c_str(), releases.c_str(),
+                median(t.dabUpdateMs), median(t.dabDrawMs) - median(t.dabUpdateMs), median(t.dabRuns), median(t.dabCoverage),
                 t.dabNodes.c_str(), median(t.commitMs), median(t.releaseEvalMs), median(t.releaseDrawMs),
                 100.0 * median(t.releaseChanged), t.releaseNodes.c_str());
     if (!t.warmMs.empty()) {
@@ -565,6 +588,99 @@ TEST(Budget, BrushStrokeLatencyWithFields) {
     }
 }
 
+TEST(Performance, StrokeLadder) {
+    // The brush at the strand counts GROOMLAB_PERF_COUNTS lists (comma separated; skipped without),
+    // on the bench sphere and the app's head graph, at sculptDensity 1 (every strand while
+    // stroking) and Maya's 0.35: how a dab, a release and the drawing grow with the hair.
+    const char* counts = std::getenv("GROOMLAB_PERF_COUNTS");
+    if (!counts || !*counts) GTEST_SKIP() << "GROOMLAB_PERF_COUNTS lists no strand counts";
+    std::vector<std::size_t> list;
+    std::stringstream in(counts);
+    for (std::string word; std::getline(in, word, ',');) {
+        if (!word.empty()) list.push_back(static_cast<std::size_t>(std::stod(word)));
+    }
+    for (const std::size_t count : list) {
+        for (const float sculpt : {1.0f, 0.35f}) {
+            char label[128];
+            std::snprintf(label, sizeof(label), "ladder, bench graph, %zuk strands at sculptDensity %.2f", count / 1000, sculpt);
+            report(label, strokeLatency(sphereBench(count), sculpt, 3, 8));
+            std::snprintf(label, sizeof(label), "ladder, head graph, %zuk strands at sculptDensity %.2f", count / 1000, sculpt);
+            report(label, strokeLatency(headBench(count, Collider::Collide), sculpt, 3, 8));
+        }
+    }
+}
+
+TEST(Performance, EveryParamTweakOfAGroomFile) {
+    // GROOMLAB_PROFILE_GROOM's groom (skipped without), every number param of every node nudged
+    // in turn (a float by a tenth, an integer by one) as a host sets it (the graph's text), then
+    // evaluated and drawn as a host's viewport writes its buffers: what a slider costs on the CPU,
+    // slowest first, each with the nodes that ran. (The GPU preview takes many of these drags in
+    // the hosts: look_stages.inc's.)
+    const char* path = std::getenv("GROOMLAB_PROFILE_GROOM");
+    if (!path || !*path) GTEST_SKIP() << "GROOMLAB_PROFILE_GROOM names no groom file";
+    const GroomFile file = readGroomFile(path);
+    const std::filesystem::path before = std::filesystem::current_path();
+    std::filesystem::current_path(std::filesystem::absolute(path).parent_path());
+    struct Back {
+        std::filesystem::path to;
+        ~Back() { std::filesystem::current_path(to); }
+    } back{before};
+    const nlohmann::json graph = nlohmann::json::parse(completeGraphJson(file.data.graphJson));
+    GroomSession session(file.data);
+    ViewRequest request;
+    request.density = 1.0f;
+    request.pointBudget = 16.0e6;
+    HostViewport viewport;
+    std::uint64_t version = 0;
+    auto draw = [&] {
+        const ViewResult& view = session.evaluate(request);
+        viewport.draw(view, false, ++version);
+        return view.errors.empty();
+    };
+    ASSERT_TRUE(draw());
+    draw();
+    struct Row {
+        std::string what, nodes;
+        double ms = 0.0, evalMs = 0.0;
+    };
+    std::vector<Row> rows;
+    for (std::size_t n = 0; n < graph["nodes"].size(); ++n) {
+        const nlohmann::json& node = graph["nodes"][n];
+        for (const auto& [name, value] : node.value("params", nlohmann::json::object()).items()) {
+            if (!value.is_number()) continue;
+            nlohmann::json tweaked = graph;
+            nlohmann::json& p = tweaked["nodes"][n]["params"][name];
+            if (value.is_number_integer()) {
+                p = value.get<std::int64_t>() + 1;
+            } else {
+                const double v = value.get<double>();
+                p = v == 0.0 ? 0.05 : v * 1.1;
+            }
+            Row row;
+            row.what = node.value("name", std::string()) + "." + name;
+            try {
+                const auto t0 = std::chrono::steady_clock::now();
+                session.setGraphJson(tweaked.dump());
+                const ViewResult& view = session.evaluate(request);
+                row.evalMs = msSince(t0);
+                viewport.draw(view, false, ++version);
+                row.ms = msSince(t0);
+                row.nodes = nodeTimes(session);
+                if (!view.errors.empty()) row.nodes = "error: " + view.errors[0];
+            } catch (const std::exception& e) {
+                row.nodes = std::string("refused: ") + e.what();
+            }
+            rows.push_back(row);
+            session.setGraphJson(graph.dump());
+            draw();
+        }
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.ms > b.ms; });
+    for (const Row& r : rows) {
+        std::printf("[ tweak ] %-34s %7.1f ms (evaluation %.1f) %s\n", r.what.c_str(), r.ms, r.evalMs, r.nodes.substr(0, 400).c_str());
+    }
+}
+
 TEST(Budget, ProfileAGroomFile) {
     // A groom file of one's own (GROOMLAB_PROFILE_GROOM: its path; skipped without), profiled: its
     // first evaluation and a second, then a comb stroke on it (the camera aimed at the scalp's
@@ -608,7 +724,10 @@ TEST(Budget, ProfileAGroomFile) {
     for (const float sculpt : {0.35f, 1.0f}) {
         char label[96];
         std::snprintf(label, sizeof(label), "the groom file at sculptDensity %.2f", sculpt);
+        profileReset();
         report(label, strokeLatency(bench, sculpt, 2, 10));
+        // With GROOMLAB_PROFILE=1: where the strokes' time went, phase by phase (profile.h).
+        if (profileEnabled()) std::printf("[ profile ]   phases:\n%s", profileReportText("[ profile ]     ").c_str());
     }
 }
 

@@ -22,6 +22,7 @@
 #include "groom_shape.h"
 #include "groomlab/card_maps.h"
 #include "groomlab/display.h"
+#include "groomlab/profile.h"
 #include "groomlab/expression.h"
 #include "groomlab/flow.h"
 #include "groomlab/graph_io.h"
@@ -172,6 +173,7 @@ MSyntax GraphStatsCmd::newSyntax() {
     s.addFlag("-hl", "-hairLook");
     s.addFlag("-scs", "-strandColorSources");
     s.addFlag("-chr", "-channelRange", MSyntax::kString);
+    s.addFlag("-prr", "-profileReport");  // the engine's phase table so far (GROOMLAB_PROFILE=1), then reset
     s.setObjectType(MSyntax::kStringObjects, 1, 1);
     return s;
 }
@@ -187,6 +189,15 @@ MStatus GraphStatsCmd::doIt(const MArgList& args) {
         if (!groomArgument("groomLabGraphStats", names, &path)) return MS::kFailure;
         GroomShape* shape = groomShapeOf(path);
         if (!shape) return MS::kFailure;
+        if (db.isFlagSet("-profileReport")) {
+            // Where the evaluations' time went since the last report, phase by phase (profile.h;
+            // empty unless GROOMLAB_PROFILE=1 was set when Maya started), the table then reset.
+            shape->settleCommit("profileReport");
+            const std::string text = profileReportText();
+            profileReset();
+            setResult(MString(text.c_str()));
+            return MS::kSuccess;
+        }
         if (db.isFlagSet("-evaluations")) {
             // How many times the groom evaluated live (after evaluating it when dirty; a frame cached
             // playback restored is not evaluated again): what shows its stats asks for them again
