@@ -87,6 +87,38 @@ FootprintTurn footprintTurn(const HierarchyGuide& parent, const Frame& rootFrame
     return out;
 }
 
+// Where a plain tube's children root (GuideHierarchy::resolveFollower): around the parent's root
+// in the parent's root frame stood upright on the scalp (turned by the least rotation taking its
+// tangent, the way the parent leaves the scalp, onto the scalp's normal there), not in the frame
+// of the way it leaves. So combing a parent, however it bends at its root, reshapes its
+// children but never slides their roots across the scalp (nor binds the strands round them again:
+// Interpolate's binding follows guide roots). For a parent leaving along the normal the two frames
+// are one: nothing moves. A child's shift onto its anchored root fades out along it as the snap
+// onto the scalp does, (1 - t)^2. Shaped tubes root on their footprint instead (footprintTurn), a
+// slice of a drawn root in its root.
+struct RootAnchor {
+    bool active = false;
+    Frame upright;  // the parent's root frame stood on the scalp
+    float fade(float t) const {
+        if (!active) return 0.0f;
+        const float f = 1.0f - t;
+        return f * f;
+    }
+};
+
+RootAnchor rootAnchor(const HierarchyGuide& parent, const Frame& rootFrame) {
+    RootAnchor out;
+    if (parent.tube.shaped() || !(parent.rootNormal.length() > 0.0f) || parent.points.size() < 2) return out;
+    const Vec3f normal = parent.rootNormal.normalized();
+    if (rootFrame.tangent.dot(normal) < -1.0f + 1e-4f) return out;  // (straight into the scalp: no least turn)
+    const Rotation stand(rootFrame.tangent, normal);
+    out.upright.tangent = normal;
+    out.upright.normal = stand(rootFrame.normal);
+    out.upright.binormal = stand(rootFrame.binormal);
+    out.active = true;
+    return out;
+}
+
 // A shaped tube's roll on the scalp (TubeProfile::roll): per guide point, the angle its sections
 // turn from the guide's rotation-minimizing frames (`frames`) so that, at twist 0, the section's
 // height (v) points off the scalp and its width (u) lies along it, all along the guide: the
@@ -858,12 +890,14 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     // The offsets are the parent tube's section coordinates (tube.h): across in its sections,
     // along in scene units. A plain round tube's sections (no twist, aspect 1) give the offsets
     // times the width, to the bit as before sections.
+    Vec3f rootOffset;  // the root's offset (across, across, along) from the parent's root (rootAnchor)
     for (std::size_t i = 0; i < n; ++i) {
         const float t = paramAt(i, n);
         const Vec3f off = sampleEven(child.offsets, t, Vec3f{});
         // (A tube of several profiles: the offset carried along them, tube.h.)
         const SectionPoint q = blended ? tubeBlendAt(parent.tube.blendPoint(off.x, off.y), off.x, off.y, t) : SectionPoint{off.x, off.y};
         const Vec3f o = sectionOffset(parent.tube.sectionAt(t), q.u, q.v, scale_);
+        if (i == 0) rootOffset = {o.x, o.y, off.z * scale_};
         if (slides) {
             const AlongCurve at = alongCurve(parent.points, frames, arc, arc[i] + off.z * scale_);
             child.points[i] = at.point + at.frame.toWorld({o.x, o.y, 0.0f});
@@ -887,6 +921,26 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
             if ((p - near.position).dot(scalp->normal(near.root)) < 0.0f) p = near.position;
         }
         child.root = scalp->closestPoint(child.points[0]).root;
+    }
+    // A plain tube's children rooted round its root as it stands on the scalp (rootAnchor), not as
+    // it leaves it: the root's place in the parent's root frame laid in the upright one.
+    if (!slice && scalp && scalp->triangleCount() > 0 && n >= 2) {
+        const RootAnchor anchor = rootAnchor(parent, frames[0]);
+        if (anchor.active && scalp->contains(parent.root)) {
+            // Worked out once for these offsets and this parent root, then kept (anchorCache).
+            const Frame onScalp = rootFrame(*scalp, parent.root);
+            auto& cache = child.anchorCache;
+            const auto bits = [](const void* a, const void* b, std::size_t n) { return std::memcmp(a, b, n) == 0; };
+            if (!cache.valid || !bits(&cache.offset, &rootOffset, sizeof(Vec3f)) || cache.parent.face != parent.root.face ||
+                !bits(&cache.parent.u, &parent.root.u, sizeof(float)) || !bits(&cache.parent.v, &parent.root.v, sizeof(float))) {
+                cache.valid = true;
+                cache.offset = rootOffset;
+                cache.parent = parent.root;
+                cache.local = onScalp.toLocal(anchor.upright.toWorld(rootOffset));
+            }
+            const Vec3f shift = parent.points[0] + onScalp.toWorld(cache.local) - child.points[0];
+            for (std::size_t i = 0; i < n; ++i) child.points[i] += shift * anchor.fade(paramAt(i, n));
+        }
     }
     // A shaped tube's parent leaving the scalp at a slant: its children's roots on its root
     // footprint (footprintTurn), not snapped straight down from its root section.
@@ -943,12 +997,25 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
         const Vec3f onFoot = from[0] - parent.points[0];
         shift = onFoot - foot.back(onFoot);
     }
+    // ... and a plain tube's child's anchored root shift (rootAnchor) taken out the same way.
+    const RootAnchor anchor = n >= 2 && !slice ? rootAnchor(parent, frames[0]) : RootAnchor{};
+    if (anchor.active) {
+        // (Where resolveFollower placed the root before anchoring it: the same offsets in the
+        // parent's own frame, slid along its curve where the child follows it so.)
+        const Vec3f local = anchor.upright.toLocal(from[0] - parent.points[0]);
+        Vec3f placed = parent.points[0] + frames[0].toWorld(local);
+        if (followsAlongCurve(child)) {
+            const AlongCurve at = alongCurve(parent.points, frames, arcLengthsOf(parent.points), local.z);
+            placed = at.point + at.frame.toWorld({local.x, local.y, 0.0f});
+        }
+        shift = from[0] - placed;
+    }
     std::vector<Vec3f> offsets(n);
     const bool slides = followsAlongCurve(child);
     const std::vector<float> arc = slides ? arcLengthsOf(parent.points) : std::vector<float>{};
     for (std::size_t i = 0; i < n; ++i) {
         const float t = paramAt(i, n);
-        const Vec3f p = from[i] - shift * foot.fade(t);
+        const Vec3f p = from[i] - shift * (anchor.active ? anchor.fade(t) : foot.fade(t));
         Vec3f local = frames[i].toLocal(p - parent.points[i]);
         float along = local.z;
         if (slides) {

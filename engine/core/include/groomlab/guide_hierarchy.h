@@ -101,6 +101,16 @@ struct HierarchyGuide {
     // The scalp's normal at its root, from the last evaluate on a scalp (zero before): where its
     // children root on a shaped tube's footprint (generateChildren). Not stored, not hashed.
     Vec3f rootNormal;
+    // A following child's root as last anchored round its parent's root (resolveFollower,
+    // rootAnchor): where in the parent root's scalp frame it sits, for the root offset and the
+    // parent root it was worked out from. Kept while both stay the same to the bit, so combing the
+    // parent never moves the child's root, not even by a rounding. Not stored, not hashed.
+    struct RootAnchorCache {
+        bool valid = false;
+        Vec3f offset;       // the root's offset in the parent's root section (across, across, along)
+        StrandRoot parent;  // the parent's root on the scalp
+        Vec3f local;        // the anchored root in that root's scalp frame (rootFrame)
+    } anchorCache;
     // A root-first tube's (or a slice of one's: a tube of its hierarchy taking a root shape of its
     // own) direction across the scalp at its root (ScalpMesh::acrossAt), from the last evaluate on
     // a scalp (zero before): what lays its footprint on the scalp where it draws (display.h, issue

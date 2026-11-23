@@ -1410,11 +1410,56 @@ TEST(TubeChildren, ChildrenOfASlantedTubeSpreadOverItsFootprint) {
     EXPECT_GT(along, 0.3f * across) << "not on a line";
     float roundAlong = 0, roundAcross = 0;
     spreads(10.0f, false, &roundAlong, &roundAcross);
-    std::printf("round tube at 10 degrees (as before): %.4f along, %.4f across\n", roundAlong, roundAcross);
-    EXPECT_LT(roundAlong, 0.25f * roundAcross) << "a round tube's children as they always were";
+    std::printf("round tube at 10 degrees: %.4f along, %.4f across\n", roundAlong, roundAcross);
+    // A round tube's children root round its root as it stands on the scalp too (rootAnchor): spread
+    // over a disc, not squashed onto a line across a parent lying low.
+    EXPECT_GT(roundAlong, 0.6f * roundAcross) << "on a line";
+    EXPECT_LT(roundAlong, 1.6f * roundAcross);
     float upAlong = 0, upAcross = 0;
     spreads(90.0f, true, &upAlong, &upAcross);
     EXPECT_GT(upAlong, 0.2f * upAcross);
+}
+
+TEST(TubeChildren, CombingAParentLeavesItsChildrensRootsWhereTheyAre) {
+    // A parent bent at its root (a comb dab, pose) reshapes its children, but their roots stay put
+    // on the scalp to the bit: Interpolate binds no strand again for them (its binding follows
+    // guide roots). A parent standing up or lying low alike.
+    for (const float degrees : {80.0f, 25.0f}) {
+        const std::shared_ptr<const ScalpMesh> scalp = test::makePlane(16, 2.0f);
+        GuideHierarchy h;
+        const GroupId primary = h.addGroup("primary");
+        const float a = degrees * kPi / 180.0f;
+        std::vector<Vec3f> pts;
+        for (int i = 0; i <= 8; ++i) pts.push_back(Vec3f(0.6f, 0.0f, 1.0f) + Vec3f(std::cos(a), std::sin(a), 0.0f) * (0.8f * i / 8.0f));
+        TubeProfile tube;
+        tube.width = {0.15f};
+        const GuideId parent = h.addGuide(primary, pts, tube);
+        h.evaluate(scalp.get());
+        ChildGenerationParams params;
+        params.count = 12;
+        const GroupId kids = h.generateChildren(primary, "children", params);
+        h.evaluate(scalp.get());
+        const std::vector<GuideId> ids = h.guidesInGroup(kids);
+        std::vector<std::vector<Vec3f>> before;
+        for (const GuideId id : ids) before.push_back(h.guide(id)->points);
+        // Bent at the root a little more each dab, turned about the scalp's normal too.
+        for (int dab = 1; dab <= 4; ++dab) {
+            std::vector<Vec3f> bent = h.guide(parent)->points;
+            const float turn = 0.15f * static_cast<float>(dab);
+            for (std::size_t i = 1; i < bent.size(); ++i) {
+                const Vec3f d = bent[i] - bent[0];
+                bent[i] = bent[0] + Vec3f(d.x * std::cos(turn) - d.z * std::sin(turn), d.y * std::cos(0.3f * turn) + 0.02f * i,
+                                          d.x * std::sin(turn) + d.z * std::cos(turn));
+            }
+            h.pose(parent, bent);
+            h.evaluateDescendants(scalp.get(), {parent});
+            for (std::size_t k = 0; k < ids.size(); ++k) {
+                const std::vector<Vec3f>& now = h.guide(ids[k])->points;
+                EXPECT_EQ(now.front(), before[k].front()) << degrees << " degrees, dab " << dab << ", child " << k;
+                EXPECT_GT((now.back() - before[k].back()).length(), 1e-3f) << "the child follows its parent's shape";
+            }
+        }
+    }
 }
 
 // The sections roll to lie as the scalp does: a ribbon's height points off the head all along a

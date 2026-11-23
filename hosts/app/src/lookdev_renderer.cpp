@@ -1371,14 +1371,21 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
         QElapsedTimer timer;
         timer.start();
         const StrandSet& s = *strands_;
-        std::vector<float> points, strandData, pointColors;
+        // Every run built at once (a dab's runs one after another left the cores waiting), then
+        // each uploaded where it goes.
+        const std::vector<std::pair<std::size_t, std::size_t>> runs = strandRuns(changes_.changes->strands, 64);
+        std::vector<std::vector<float>> points(runs.size()), strandData(runs.size()), pointColors(runs.size());
+        parallelFor(0, runs.size(), [&](std::size_t r) {
+            buildHairRange(s, scalp_.get(), runs[r].first, runs[r].second, points[r], strandData[r], nullptr,
+                           pointColored_ ? &pointColors[r] : nullptr);
+        }, 1);
         std::size_t strands = 0;
-        for (const auto& [first, end] : strandRuns(changes_.changes->strands, 64)) {
-            buildHairRange(s, scalp_.get(), first, end, points, strandData, nullptr, pointColored_ ? &pointColors : nullptr);
+        for (std::size_t r = 0; r < runs.size(); ++r) {
+            const auto [first, end] = runs[r];
             const std::size_t pBegin = s.strandBegin(first), pEnd = s.offsets()[end];
-            if (pEnd > pBegin) uploadTexelRange(batch, g.points.get(), pBegin, pEnd - pBegin, points.data());
-            if (pEnd > pBegin && pointColored_) uploadTexelRange(batch, g.pointColors.get(), pBegin, pEnd - pBegin, pointColors.data());
-            uploadTexelRange(batch, g.strands.get(), first * 3, (end - first) * 3, strandData.data());
+            if (pEnd > pBegin) uploadTexelRange(batch, g.points.get(), pBegin, pEnd - pBegin, points[r].data());
+            if (pEnd > pBegin && pointColored_) uploadTexelRange(batch, g.pointColors.get(), pBegin, pEnd - pBegin, pointColors[r].data());
+            uploadTexelRange(batch, g.strands.get(), first * 3, (end - first) * 3, strandData[r].data());
             strands += end - first;
         }
         // The bounds a whole write gives, shrinking too (the set's extent, measured again only in

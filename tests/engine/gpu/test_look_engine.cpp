@@ -2408,11 +2408,11 @@ TEST_P(LookEngineTest, InterpolateWithRegionsBlendsAsTheCpuDoes) {
     }
 }
 
-TEST_P(LookEngineTest, AStrokeOnGuidesWithChildrenBindsWhereTheirRootsMoved) {
-    // Guides with children generated in their tubes: bending a parent at its root moves its
-    // children's roots on the scalp, so the strands near them are bound again (on the CPU, as
-    // Interpolate binds them, sharing the rest) and the GPU blends from that binding; against a
-    // fresh CPU session of the same preview, dab after dab.
+TEST_P(LookEngineTest, AStrokeOnGuidesWithChildrenKeepsTheirRootsAndTheBinding) {
+    // Guides with children generated in their tubes: bending a parent at its root reshapes its
+    // children but leaves their roots on the scalp (guide_hierarchy.cpp rootAnchor), so no strand is
+    // bound again and the GPU blends from the binding it holds; against a fresh CPU session of the
+    // same preview, dab after dab. (Roots that do move: GuideRootsMovedDabAfterDabRewriteOnlyTheirRecords.)
     LookGraph g;
     g.guides = true;
     GroomData data = groom(g.json());
@@ -2457,7 +2457,7 @@ TEST_P(LookEngineTest, AStrokeOnGuidesWithChildrenBindsWhereTheirRootsMoved) {
         ASSERT_TRUE(prepareRun(session, {}, "interpolate", &p, &inputs)) << p.why;
         expectClose(runAndCompare(session, {}, fresh, "interpolate"));
     }
-    EXPECT_GT(inputs.rebinds(), 0u) << "the children's roots moved with their parents'";
+    EXPECT_EQ(inputs.rebinds(), 0u) << "the children's roots stay where they are";
 }
 
 TEST_P(LookEngineTest, GuideRootsMovedDabAfterDabRewriteOnlyTheirRecords) {

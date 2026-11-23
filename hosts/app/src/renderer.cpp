@@ -18,6 +18,7 @@
 
 #include "gpu_preview.h"
 #include "groomlab/math.h"
+#include "groomlab/parallel.h"
 #include "groomlab/profile.h"
 #include "groomlab/scalp_paint.h"
 #include "groomlab/color.h"
@@ -1038,30 +1039,38 @@ void GroomRenderer::upload(QRhi* rhi, QRhiResourceUpdateBatch* batch, GpuItem& i
                              item.heldVertices == n && n > 0 && item.pendingUpdated->strands.size() * 3 < strandCount;
         if (partial) {
             const StrandSet& s = *l.strands;
-            std::vector<float> xyz, nrm, tan, rgba, uv;
+            // Every run's vertices side by side in one scratch array per stream, all the runs
+            // written at once (each run's own writes are parallel too, but a dab's hundred runs one
+            // after another left the cores waiting), then each run handed to the GPU where its
+            // vertices are (the batch copies what it is given).
+            const std::vector<std::pair<std::size_t, std::size_t>> runs = strandRuns(item.pendingUpdated->strands, kRunGap);
+            std::vector<std::size_t> at(runs.size() + 1, 0);
+            for (std::size_t r = 0; r < runs.size(); ++r) at[r + 1] = at[r] + (s.offsets()[runs[r].second] - s.strandBegin(runs[r].first));
+            const bool frames = l.lit && item.normals && item.tangents, colors = l.colors && item.colors, uvs = item.uvs != nullptr;
+            std::vector<float> xyz(at.back() * 3), nrm(frames ? at.back() * 3 : 0), tan(frames ? at.back() * 3 : 0);
+            std::vector<float> rgba(colors ? at.back() * 4 : 0), uv(uvs ? at.back() * 2 : 0);
+            parallelFor(0, runs.size(), [&](std::size_t r) {
+                const auto [first, end] = runs[r];
+                l.writePositions(xyz.data() + at[r] * 3, first, end);
+                if (frames) l.writeFrames(nrm.data() + at[r] * 3, tan.data() + at[r] * 3, first, end);
+                if (colors) l.writeColors(rgba.data() + at[r] * 4, first, end);
+                if (uvs) l.writeUvs(uv.data() + at[r] * 2, 2, first, end);  // (u, width): these strands' widths (the others' stay)
+            }, 1);
             std::size_t strands = 0;
-            for (const auto& [first, end] : strandRuns(item.pendingUpdated->strands, kRunGap)) {
-                const std::size_t v0 = s.strandBegin(first), v1 = s.offsets()[end], count = v1 - v0;
+            for (std::size_t r = 0; r < runs.size(); ++r) {
+                const auto [first, end] = runs[r];
+                const std::size_t v0 = s.strandBegin(first), count = at[r + 1] - at[r];
                 if (count == 0) continue;
-                xyz.resize(count * 3);
-                l.writePositions(xyz.data(), first, end);
-                batch->uploadStaticBuffer(item.positions.get(), static_cast<quint32>(v0 * kStrideXYZ), static_cast<quint32>(count * kStrideXYZ), xyz.data());
-                if (l.lit && item.normals && item.tangents) {
-                    nrm.resize(count * 3);
-                    tan.resize(count * 3);
-                    l.writeFrames(nrm.data(), tan.data(), first, end);
-                    batch->uploadStaticBuffer(item.normals.get(), static_cast<quint32>(v0 * kStrideXYZ), static_cast<quint32>(count * kStrideXYZ), nrm.data());
-                    batch->uploadStaticBuffer(item.tangents.get(), static_cast<quint32>(v0 * kStrideXYZ), static_cast<quint32>(count * kStrideXYZ), tan.data());
+                batch->uploadStaticBuffer(item.positions.get(), static_cast<quint32>(v0 * kStrideXYZ), static_cast<quint32>(count * kStrideXYZ), xyz.data() + at[r] * 3);
+                if (frames) {
+                    batch->uploadStaticBuffer(item.normals.get(), static_cast<quint32>(v0 * kStrideXYZ), static_cast<quint32>(count * kStrideXYZ), nrm.data() + at[r] * 3);
+                    batch->uploadStaticBuffer(item.tangents.get(), static_cast<quint32>(v0 * kStrideXYZ), static_cast<quint32>(count * kStrideXYZ), tan.data() + at[r] * 3);
                 }
-                if (l.colors && item.colors) {
-                    rgba.resize(count * 4);
-                    l.writeColors(rgba.data(), first, end);
-                    batch->uploadStaticBuffer(item.colors.get(), static_cast<quint32>(v0 * kStrideRGBA), static_cast<quint32>(count * kStrideRGBA), rgba.data());
+                if (colors) {
+                    batch->uploadStaticBuffer(item.colors.get(), static_cast<quint32>(v0 * kStrideRGBA), static_cast<quint32>(count * kStrideRGBA), rgba.data() + at[r] * 4);
                 }
-                if (item.uvs) {  // (u, width): these strands' widths (the others' stay)
-                    uv.resize(count * 2);
-                    l.writeUvs(uv.data(), 2, first, end);
-                    batch->uploadStaticBuffer(item.uvs.get(), static_cast<quint32>(v0 * kStrideUV), static_cast<quint32>(count * kStrideUV), uv.data());
+                if (uvs) {
+                    batch->uploadStaticBuffer(item.uvs.get(), static_cast<quint32>(v0 * kStrideUV), static_cast<quint32>(count * kStrideUV), uv.data() + at[r] * 2);
                 }
                 strands += end - first;
             }

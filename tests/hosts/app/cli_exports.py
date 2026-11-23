@@ -8,6 +8,7 @@ without a window, and each file is there and readable enough to tell its format.
 
 import json
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -23,6 +24,8 @@ def run(exe, args):
 
 
 def main(exe, groom, work):
+    # (A fresh folder each run: a sim cache left by an earlier run of other output takes the name.)
+    shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work, exist_ok=True)
     # The sample's graph with a Cards node before the output: the sample holds the default
     # graph as "{}", so the app saves it first (it writes the graph as the core does, every
