@@ -642,6 +642,8 @@ TEST(Performance, EveryParamTweakOfAGroomFile) {
     struct Row {
         std::string what, nodes;
         double ms = 0.0, evalMs = 0.0;
+        double dragMs = 0.0;  // the same step while a drag the CPU evaluates is on (setCpuDrag: thinned)
+        std::size_t dragStrands = 0;
     };
     std::vector<Row> rows;
     for (std::size_t n = 0; n < graph["nodes"].size(); ++n) {
@@ -671,6 +673,23 @@ TEST(Performance, EveryParamTweakOfAGroomFile) {
             } catch (const std::exception& e) {
                 row.nodes = std::string("refused: ") + e.what();
             }
+            // The same change as the next step of a drag the CPU evaluates (setCpuDrag): thinned.
+            try {
+                nlohmann::json further = tweaked;
+                nlohmann::json& q = further["nodes"][n]["params"][name];
+                q = q.is_number_integer() ? nlohmann::json(q.get<std::int64_t>() + 1) : nlohmann::json(q.get<double>() * 1.1 + 0.001);
+                session.setCpuDrag(true);
+                session.setGraphJson(tweaked.dump());
+                draw();  // (the drag's first step)
+                const auto t0 = std::chrono::steady_clock::now();
+                session.setGraphJson(further.dump());
+                const ViewResult& view = session.evaluate(request);
+                row.dragStrands = view.strands ? view.strands->strandCount() : 0;
+                viewport.draw(view, false, ++version);
+                row.dragMs = msSince(t0);
+            } catch (const std::exception&) {
+            }
+            session.setCpuDrag(false);
             rows.push_back(row);
             session.setGraphJson(graph.dump());
             draw();
@@ -678,7 +697,8 @@ TEST(Performance, EveryParamTweakOfAGroomFile) {
     }
     std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.ms > b.ms; });
     for (const Row& r : rows) {
-        std::printf("[ tweak ] %-34s %7.1f ms (evaluation %.1f) %s\n", r.what.c_str(), r.ms, r.evalMs, r.nodes.substr(0, 400).c_str());
+        std::printf("[ tweak ] %-34s %7.1f ms (evaluation %.1f), dragging %6.1f ms (%zu strands) %s\n", r.what.c_str(), r.ms,
+                    r.evalMs, r.dragMs, r.dragStrands, r.nodes.substr(0, 300).c_str());
     }
 }
 

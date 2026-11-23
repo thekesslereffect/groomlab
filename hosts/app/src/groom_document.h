@@ -287,6 +287,8 @@ public:
     std::function<bool(const std::string& node, const std::string& name, const nlohmann::json& value)> livePreview;
     std::function<void()> livePreviewEnded;
     bool previewing() const { return preview_.held; }
+    // A drag the CPU evaluated is over (GroomSession::setCpuDrag off): the view shows every strand again.
+    void endCpuDrag();
     std::string setBypass(const std::string& node, bool bypass);
     // When the node runs (graph.h EvaluationMode): "always", "viewportOnly" (exports skip it) or
     // "renderOnly" (the viewport skips it). One undo step. "" or why it was refused.

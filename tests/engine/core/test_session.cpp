@@ -346,6 +346,51 @@ TEST(Session, AStrokeAtTheSculptDensityKeepsTheViewsCache) {
     EXPECT_EQ(session.evaluationCount(), strokeRuns);
 }
 
+TEST(Session, ACpuDragOfABigGroomShowsItThinnedAndTheReleaseShowsItWhole) {
+    // A slider the GPU preview does not take, dragged (setCpuDrag): a groom of more strands than
+    // the request's dragStrands shows about that many, on a document of its own; the release shows
+    // every strand again with the dragged value, the nodes before the dragged one not run again.
+    GroomSession session(groomData());
+    ViewRequest request;
+    const StrandsPtr before = session.evaluate(request).strands;
+    ASSERT_GT(before->strandCount(), 400u);
+    request.dragStrands = before->strandCount() / 4;
+    nlohmann::json graph = nlohmann::json::parse(kGraph);
+    const auto bump = [&](double strength) {  // the Clump's strength, dragged
+        for (nlohmann::json& n : graph["nodes"]) {
+            if (n["type"] == "Clump") n["params"]["strength"] = strength;
+        }
+        session.setGraphJson(graph.dump());
+    };
+    session.setCpuDrag(true);
+    bump(0.31);
+    const StrandsPtr during = session.evaluate(request).strands;
+    EXPECT_LT(during->strandCount(), before->strandCount() / 2);
+    EXPECT_GT(during->strandCount(), before->strandCount() / 10);
+    bump(0.33);  // the drag goes on: still thinned
+    EXPECT_LT(session.evaluate(request).strands->strandCount(), before->strandCount() / 2);
+    const std::size_t dragRuns = session.evaluationCount();
+    session.setCpuDrag(false);
+    const StrandsPtr after = session.evaluate(request).strands;
+    EXPECT_EQ(after->strandCount(), before->strandCount());
+    // The release ran the dragged node and what follows it, not what feeds it (the view's cache).
+    const GroomStats stats = session.stats();
+    std::string runs;
+    for (const auto& [name, kind] : stats.runs) runs += name + ":" + kind + " ";
+    for (const char* upstream : {"scatter", "interpolate"}) {
+        const auto it = stats.runs.find(upstream);
+        EXPECT_TRUE(it == stats.runs.end() || it->second.rfind("cached", 0) == 0) << runs;
+    }
+    EXPECT_NE(stats.runs.find("clump"), stats.runs.end()) << runs;
+    EXPECT_GT(session.evaluationCount(), dragRuns);
+    // A groom no bigger than dragStrands: a drag shows every strand.
+    request.dragStrands = before->strandCount();
+    session.setCpuDrag(true);
+    bump(0.35);
+    EXPECT_EQ(session.evaluate(request).strands->strandCount(), before->strandCount());
+    session.setCpuDrag(false);
+}
+
 TEST(Session, AStrokeAHostRunsPastANodeEvaluatesWhatFeedsItAlone) {
     // ViewRequest::stopAt (Maya's GPU preview runs Interpolate and what follows on a live stroke's
     // dabs): the guides are evaluated, nothing after them, the view keeps its strands; the same

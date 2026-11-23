@@ -2676,6 +2676,16 @@ CPU's, read back), `-sync` (wait for the GPU: timing) and `-drawApi` help measur
 says whether it is on; `groomlab_gpu_tests` (`tests/engine/gpu`) checks every kernel against its operator
 on a device of their own (skipped without one), on both APIs, and the `viewport` GUI suite checks
 the Maya side (drags, a stroke's dabs) on both APIs (`maya.gui`, `maya.gui_dx11`).
+**CPU drags of big grooms, thinned.** A drag the GPU preview does not take (Scatter's, Interpolate's
+binding, Clump's size and count, Resample's, HairColor's...) evaluates on the CPU at every step. While
+one goes on the host says so (`GroomSession::setCpuDrag`: Maya's `groomLabGpuPreview -cpuDrag on|off`
+from the Graph Editor's `preview_param` and `end_preview`, the app's `GroomDocument::setParam` without
+recording, the Blender add-on's quick changes of a param, `set_cpu_drag` in the helper): a groom whose
+last whole view showed more than `ViewRequest::dragStrands` (300k) strands is evaluated at the density
+that shows about that many, on the stroke document (`sculptDoc_`), so the view's cache stays and the
+release evaluates the dragged node and what follows it at every strand. At 1M strands a step goes
+from 180-580 ms to 65-220 ms (`Performance.EveryParamTweakOfAGroomFile`'s dragging column).
+
 **Commits off the UI thread.** A GPU drag's release (`-endDrag`, then `set_param`) and the release
 of a brush stroke whose dabs the GPU drew commit what the viewport already shows; the commit's CPU
 evaluation (a full one for a drag, the incremental one of a stroke) took ~70 ms and ~230 ms at 500k

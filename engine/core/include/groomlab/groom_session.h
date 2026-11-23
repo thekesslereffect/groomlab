@@ -56,6 +56,11 @@ constexpr double kLiveCardBuildBudgetMs = 250.0;
 struct ViewRequest {
     float density = 1.0f;        // the graph's preview density (EvalContext::previewDensity)
     float sculptDensity = 1.0f;  // multiplies `density` while a stroke is live (hasPreview)
+    // While a drag the CPU evaluates is on (setCpuDrag), the view holds about this many strands at most:
+    // a groom whose last full view showed more is evaluated thinned for the drag (its density
+    // times this over that count), on a document of its own (the view's cache stays for the
+    // release, which shows every strand again). 0: never thinned.
+    std::size_t dragStrands = 300000;
     double pointBudget = 0.0;    // points the view may hold (EvalContext::maxPoints); 0: no limit
     std::string viewNode;        // a node whose strands to show instead of the output ("" or not a Strands node: the output)
     double time = 0.0;           // seconds
@@ -782,6 +787,11 @@ public:
     // evaluation makes their result again); off, the next view refines them again.
     void setLiveDrag(bool on) { liveDrag_ = on; }
     bool liveDrag() const { return liveDrag_; }
+    // A host's param drag the CPU evaluates (a slider whose drag the GPU preview does not take):
+    // while on, a groom bigger than ViewRequest::dragStrands shows thinned, evaluated on a document
+    // of its own; off (the release), the view shows every strand again from its own cache.
+    void setCpuDrag(bool on) { cpuDrag_ = on; }
+    bool cpuDrag() const { return cpuDrag_; }
     // Whether the output is refined for the viewport by a Subdivide (one not bypassed, of viewport
     // levels): what a live drag (setLiveDrag) hands on.
     bool viewRefinesStrands() const;
@@ -891,6 +901,8 @@ private:
     std::unique_ptr<GraphDocument> parsed_;
     GraphEdit::FlatCompounds flat_;  // parsed_'s compounds inline (flattenCompounds)
     bool liveDrag_ = false;          // setLiveDrag
+    bool cpuDrag_ = false;           // setCpuDrag
+    std::size_t fullViewStrands_ = 0;  // the last view not thinned: its strands (ViewRequest::dragStrands)
     std::unique_ptr<GraphDocument> doc_;        // the view's
     std::uint64_t docGeneration_ = 0;           // each new doc_ (a detached evaluation's base)
     std::uint64_t strokeDocGeneration_ = 0;     // each time sculptDoc_ goes or takes another graph (adoptWarm)

@@ -723,6 +723,7 @@ def push_param(node, param, context=None):
     spec = node.gl_param_specs.get(param)
     scene = context.scene if context is not None and getattr(context, "scene", None) is not None else groom.scene_of(scalp)
     value = property_value(node, spec, scene)
+    _drag_step(scalp)
     if not set_param_value(scalp, node, param, value):
         return
     # A param whose unit this one decides (Noise's frequency by its space): shown again in its new unit.
@@ -735,6 +736,52 @@ def push_param(node, param, context=None):
             continue
         with props.quiet():
             _to_property(node, s, stored, scene)
+
+
+# A slider drag (Blender says no press or release: changes of a param coming in quick succession):
+# while one goes on, a big groom shows thinned (the helper's set_cpu_drag, GroomSession::setCpuDrag);
+# once they stop, every strand again. A single change (a typed value) is never thinned.
+_DRAG_GAP = 0.3  # seconds between a drag's changes, at most
+_drags = {}      # scalp name: [time of the last change, whether the drag thins now]
+
+
+def _drag_step(scalp):
+    import time
+    now = time.monotonic()
+    last = _drags.get(scalp.name)
+    if last is None or now - last[0] > _DRAG_GAP:
+        _drags[scalp.name] = [now, False]  # the first change: evaluated as ever
+        return
+    last[0] = now
+    if last[1]:
+        return
+    try:
+        _call("set_cpu_drag", session=groom.ensure(scalp).session, on=True)
+    except HelperError:
+        return
+    last[1] = True
+    import bpy
+    name = scalp.name
+
+    def ended():
+        state = _drags.get(name)
+        if state is None:
+            return None
+        import time as _time
+        left = _DRAG_GAP - (_time.monotonic() - state[0])
+        if left > 0.0:
+            return left  # still dragging: asked again when it may have stopped
+        _drags.pop(name, None)
+        target = bpy.data.objects.get(name)
+        if target is not None and groom.is_groom(target):
+            try:
+                _call("set_cpu_drag", session=groom.ensure(target).session, on=False)
+                groom.mark(target, "eval")  # every strand again
+            except HelperError:
+                pass
+        return None
+
+    bpy.app.timers.register(ended, first_interval=_DRAG_GAP)
 
 
 def set_param_value(scalp, node, param, value):

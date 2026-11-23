@@ -4177,6 +4177,7 @@ class GraphEditor(QtWidgets.QWidget):
         if self._preview_base is None:  # a drag is on from now: syncing from the groom must not undo it
             from maya import cmds
             self._preview_base = cmds.getAttr(self.groom + ".graph") or ""
+            self._cpu_drag(True)
         if not getattr(self, "_preview_pending", False):
             self._preview_pending = True
             QtCore.QTimer.singleShot(40, self._write_preview)
@@ -4193,6 +4194,7 @@ class GraphEditor(QtWidgets.QWidget):
             if not plugs:
                 return
             self._key_preview = {"plugs": plugs, "before": [cmds.getAttr(p) for p in plugs], "values": None}
+            self._cpu_drag(True)
         values = list(value) if len(self._key_preview["plugs"]) == 3 else [value]
         self._key_preview["values"] = [float(v) for v in values]
         if not getattr(self, "_preview_pending", False):
@@ -4231,10 +4233,23 @@ class GraphEditor(QtWidgets.QWidget):
             cmds.setAttr(self.groom + ".graph", self.model.to_json(), type="string")
         cmds.refresh(currentView=True, force=False)
 
+    def _cpu_drag(self, on):
+        """A slider drag the CPU evaluates (the GPU preview did not take it): a big groom shows thinned
+        while it goes on, whole again at the release (groomLabGpuPreview -cpuDrag)."""
+        if on == getattr(self, "_cpu_dragging", False) or not self.groom:
+            return
+        self._cpu_dragging = on
+        try:
+            from maya import cmds
+            cmds.groomLabGpuPreview(self.groom, cpuDrag=on)
+        except (RuntimeError, TypeError, AttributeError):  # no such command or flag: the drag shows every strand
+            pass
+
     def end_preview(self):
         """Put back the graph (or a keyed param's attribute) from before a slider drag, silently, so
         the commit is one undo step from it."""
         self._preview_pending = False  # a write still waiting is superseded by the commit
+        self._cpu_drag(False)
         if getattr(self, "_gpu_dragging", False):
             self._gpu_dragging = False
             try:

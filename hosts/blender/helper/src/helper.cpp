@@ -2146,6 +2146,12 @@ json Helper::run(const std::string& cmd, const json& args) {
         if (spec.is_null()) fail("not_found", "node '" + node + "' has no param '" + param + "'");
         return {{"value", spec.value("default", json(nullptr))}, {"set", false}};
     }
+    if (cmd == "set_cpu_drag") {  // a slider drag the CPU evaluates: a big groom thinned while on (GroomSession::setCpuDrag)
+        Session& s = session(args);
+        const bool on = optBool(args, "on", false);
+        s.groom->setCpuDrag(on);
+        return {{"on", on}};
+    }
     if (cmd == "set_param") {
         Session& s = session(args);
         const std::string node = needString(args, "node"), param = needString(args, "param");

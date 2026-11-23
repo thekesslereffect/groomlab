@@ -240,6 +240,9 @@ class ProtocolTest(HelperTestCase):
         self.assertEqual(self.h.request("load_groom", session=s, path=bad)["error"]["code"], "parse")
         self.assertEqual(self.h.request("set_param", session=s, node="nope", param="x", value=1)["error"]["code"],
                          "not_found")
+        # A slider drag the CPU evaluates (the add-on's quick changes): thinned while on (GroomSession::setCpuDrag).
+        self.assertIs(self.h.call("set_cpu_drag", session=s, on=True)["on"], True)
+        self.assertIs(self.h.call("set_cpu_drag", session=s, on=False)["on"], False)
         # An array too short for its shape in a real block (beyond any page: macOS gives a block's
         # size rounded up to its 16 KB pages).
         refs = self.h.put(points=np.zeros((2, 3), np.float32))

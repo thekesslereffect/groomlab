@@ -1742,10 +1742,14 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     EvalContext ctx;
     ctx.previewDensity = request.density;
     // While a brush stroke is live, fewer strands keep the viewport responsive, evaluated on a
-    // document of their own (the view's cache stays for the release).
+    // document of their own (the view's cache stays for the release); so too a live param drag of
+    // a groom bigger than the request's dragStrands (setCpuDrag: a drag the GPU preview does not take).
     if (hasPreview()) ctx.previewDensity *= request.sculptDensity;
     if (liveStroke_) strokeDensityUsed_ = true;
-    const bool sculpting = hasPreview() && ctx.previewDensity != request.density && doc_;
+    if (cpuDrag_ && !hasPreview() && request.dragStrands > 0 && fullViewStrands_ > request.dragStrands) {
+        ctx.previewDensity *= static_cast<float>(static_cast<double>(request.dragStrands) / static_cast<double>(fullViewStrands_));
+    }
+    const bool sculpting = (hasPreview() || cpuDrag_) && ctx.previewDensity != request.density && doc_;
     if (sculpting && !sculptDoc_) {
         sculptDoc_ = std::make_unique<GraphDocument>(parsed_->clone());
         sculptDoc_->graph.setCacheIntermediates(cacheIntermediates_);
@@ -2088,6 +2092,8 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     out.flow = flow_;
     out.errors = std::move(errors);
     out.messages = std::move(messages);
+    // What a drag thins against (ViewRequest::dragStrands): the strands of the last view shown whole.
+    if (!sculpting && out.strands && !out.strandsKept) fullViewStrands_ = out.strands->strandCount();
     return out;
 }
 

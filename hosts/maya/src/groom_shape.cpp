@@ -2728,6 +2728,14 @@ void GroomShape::setLiveDrag(bool on) {
     tick.setInt(tick.asInt() + 1);
 }
 
+void GroomShape::setCpuDrag(bool on) {
+    if (session_.cpuDrag() == on) return;
+    settleCommit("setCpuDrag");
+    session_.setCpuDrag(on);
+    MPlug tick(thisMObject(), aBrushTick);  // (evaluated again: thinned, or whole on the release)
+    tick.setInt(tick.asInt() + 1);
+}
+
 std::vector<SimStatus> GroomShape::simulationStatus() {
     ensureEvaluated();
     return session_.simulationStatus();

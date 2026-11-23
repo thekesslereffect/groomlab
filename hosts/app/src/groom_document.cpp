@@ -1824,6 +1824,10 @@ std::string GroomDocument::setParam(const std::string& node, const std::string& 
         preview_ = Preview{};
         if (livePreviewEnded) livePreviewEnded();
     }
+    // A drag's step the CPU evaluates: a big groom shows thinned while the drag goes on; a recorded
+    // edit (the drag's end, or a plain edit) shows every strand again (GroomSession::setCpuDrag).
+    endCpuDrag();
+    if (!record) session().setCpuDrag(true);
     return applyParam(node, name, value, record);
 }
 
@@ -1885,8 +1889,15 @@ std::string GroomDocument::applyParam(const std::string& node, const std::string
 
 void GroomDocument::record(Edit edit) { history_.record(std::move(edit)); }
 
+void GroomDocument::endCpuDrag() {
+    if (!session().cpuDrag()) return;
+    session().setCpuDrag(false);
+    dirty_ = true;  // every strand again, at the value the drag ended at
+}
+
 void GroomDocument::recordEdit(const std::string& node, const std::string& name, const json& before, const json& after) {
     commitPreview();  // a drag previewed elsewhere ends here: its value applied for real
+    endCpuDrag();     // ... and one the CPU evaluated, thinned, shows every strand again
     if (before == after) return;
     Edit edit;
     edit.node = node;

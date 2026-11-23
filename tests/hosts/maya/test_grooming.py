@@ -183,6 +183,23 @@ class GroomingTest(unittest.TestCase):
         self.primaries = groomlab.guide_ids(self.groom, "primary")
         self.children = groomlab.guide_ids(self.groom, "children")
 
+    def test_a_cpu_drag_of_a_big_groom_shows_it_thinned(self):
+        # A slider drag the GPU preview does not take (groomLabGpuPreview -cpuDrag, the Graph
+        # Editor's CPU preview): a groom of more strands than the view's drag budget (300k) shows
+        # about that many while it goes on, every strand again at the release.
+        cmds.setAttr(self.groom + ".previewDensity", 1.0)
+        cmds.setAttr(self.groom + ".previewPointBudget", 0.0)
+        groomlab.set_param(self.groom, "scatter", "density", 40000.0)
+        full = cmds.getAttr(self.groom + ".outStrandCount")
+        self.assertGreater(full, 400000)
+        cmds.groomLabGpuPreview(self.groom, cpuDrag=True)
+        groomlab.set_param(self.groom, "noise", "amplitude", 0.05)
+        during = cmds.getAttr(self.groom + ".outStrandCount")
+        self.assertLess(during, 0.75 * full)
+        self.assertGreater(during, 250000)
+        cmds.groomLabGpuPreview(self.groom, cpuDrag=False)
+        self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), full)
+
     def test_symmetry_sync_copies_children_and_undoes(self):
         # Bend a +X child by hand, then sync: its mirror image comes across, counts stay.
         plus = [c for c in self.children if cmds.groomLabGuides(self.groom, guidePoints=c)[0] > 0.05]

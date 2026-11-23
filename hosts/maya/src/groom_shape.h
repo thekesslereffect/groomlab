@@ -378,6 +378,9 @@ public:
     // its strands on so the GPU's preview runs the drag; off, the next evaluation refines again.
     // The groom evaluates again either way.
     void setLiveDrag(bool on);
+    // A slider drag the CPU evaluates (GroomSession::setCpuDrag): a big groom shows thinned while it
+    // is on; off (the release), every strand again. groomLabGpuPreview -cpuDrag.
+    void setCpuDrag(bool on);
     std::vector<SimStatus> simulationStatus();
     // Bakes the current cards' textures as TGA files in `directory`, Unreal's
     // hair card layout: <base>_Depth, _Coverage, _Tangent, _Attribute (root UV,

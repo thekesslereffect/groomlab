@@ -850,6 +850,7 @@ MSyntax GpuPreviewCmd::newSyntax() {
     s.addFlag("-r", "-ramp", MSyntax::kString);  // a profile's keys, as the graph's JSON holds them
     s.addFlag("-vc", "-vector", MSyntax::kDouble, MSyntax::kDouble, MSyntax::kDouble);  // a vec3 param (Curl's weightDirection)
     s.addFlag("-end", "-endDrag");
+    s.addFlag("-cd", "-cpuDrag", MSyntax::kBoolean);  // a slider drag the CPU evaluates: on at its start, off at the release
     s.addFlag("-st", "-stats");
     s.addFlag("-w", "-wait");
     s.addFlag("-c", "-check");
@@ -923,6 +924,14 @@ MStatus GpuPreviewCmd::doIt(const MArgList& args) {
             MString from;
             if (db.isFlagSet("-from")) db.getFlagArgument("-from", 0, from);
             setResult(MString(preview ? preview->checkJson(*shape, from.asChar()).c_str() : "{\"why\": \"not drawn\"}"));
+            return MS::kSuccess;
+        }
+        if (db.isFlagSet("-cpuDrag")) {
+            // A drag the GPU preview did not take, evaluated on the CPU: a big groom thinned while it
+            // goes on (GroomSession::setCpuDrag, ViewRequest::dragStrands), whole again at the release.
+            bool on = false;
+            db.getFlagArgument("-cpuDrag", 0, on);
+            shape->setCpuDrag(on);
             return MS::kSuccess;
         }
         if (db.isFlagSet("-endDrag")) {
