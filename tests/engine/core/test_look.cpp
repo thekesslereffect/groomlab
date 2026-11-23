@@ -706,6 +706,20 @@ TEST(Clump, SaysWhereAcrossItsClumpEachStrandGrowsSoALengthCanShapeFeathers) {
     EXPECT_LT(lengthOf(*shaped, edge), 0.2f * lengthOf(*out, edge) + 1e-4f);
     EXPECT_GT(lengthOf(*shaped, middle), 0.85f * lengthOf(*out, middle));
 
+    // No guides yet (nothing to clump toward): the channels there all the same, 0 (every strand down
+    // a clump's middle), so the Length after reads them and keeps every strand whole.
+    lg.ext.set("centers", GuidesPtr(std::make_shared<GuideSet>()), 8);
+    const StrandsPtr empty = lg.eval(trim);
+    const StrandsPtr passed = lg.eval(clump);
+    ASSERT_NE(passed->strandChannel("clumpDist"), nullptr);
+    ASSERT_NE(passed->strandChannel("clumpSide"), nullptr);
+    for (std::size_t s = 0; s < passed->strandCount(); ++s) {
+        EXPECT_EQ((*passed->strandChannel("clumpDist"))[s], 0.0f);
+        EXPECT_EQ((*passed->strandChannel("clumpSide"))[s], 0.0f);
+        EXPECT_NEAR(lengthOf(*empty, s), lengthOf(*passed, s), 1e-5f);
+    }
+    lg.ext.set("centers", GuidesPtr(centers), 9);
+
     // Empty names: no channels.
     lg.g.node(clump).params().set("distChannel", std::string());
     lg.g.node(clump).params().set("sideChannel", std::string());

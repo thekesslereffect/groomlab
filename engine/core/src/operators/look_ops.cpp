@@ -2075,12 +2075,17 @@ private:
     }
 
     // The strands as they came, every one in no clump (the channel's -1), when there is nothing
-    // to clump toward: what reads the channel after (Curl by clump, Merge) finds it either way.
+    // to clump toward (no guides yet): what reads the channels after (Curl by clump, Merge, a
+    // Length keeping 1 - $clumpDist^2) finds them either way, distChannel and sideChannel 0 (every
+    // strand down a clump's middle: full length).
     StrandsPtr unclumped(const StrandsPtr& in) const {
         const std::string channel = params().getString("clumpChannel");
-        if (channel.empty()) return in;
+        const std::string dist = params().getString("distChannel"), side = params().getString("sideChannel");
+        if (channel.empty() && dist.empty() && side.empty()) return in;
         auto out = std::make_shared<StrandSet>(*in);
-        out->addStrandChannel(channel, -1.0f);
+        if (!channel.empty()) out->addStrandChannel(channel, -1.0f);
+        if (!dist.empty()) out->addStrandChannel(dist, 0.0f);
+        if (!side.empty()) out->addStrandChannel(side, 0.0f);
         return StrandsPtr(out);
     }
 
