@@ -14,7 +14,7 @@ the selected grooms), and each is one undo step.
 | **Curves to Guides...** | Tagged curves update their own guide in place; any other curve becomes a new guide. |
 | **Strands to Curves...** | The evaluated strands as plain Maya curves (20,000 by default), with their attributes. |
 | **To Mesh...** | A snapshot of the groom as one mesh, with UVs: the strands as tubes or ribbons, the scales as their plates, feathers as barbs and rachis, cards, instances. For a mesh that follows the animation, see [The groom as a mesh](#the-groom-as-a-mesh). |
-| **Bake Node to Guides...** | The groom's output, or any node's strands or guides, converted to brushable guides. To keep them procedural instead, use a ToGuides followed by a Sculpt node ([Node graph](/docs/node-graph#other-main-nodes)). |
+| **Bake Node to Guides...** | The groom's output, or any node's strands or guides, converted to brushable guides. To keep them procedural instead, use a ToGuides followed by a SculptGuides node ([Node graph](/docs/node-graph#other-main-nodes)). |
 
 To edit guides with Maya tools: **Guides to Curves**, edit the curves (CVs, lattices, a sculpt
 deformer), then **Curves to Guides...**.

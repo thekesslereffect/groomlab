@@ -584,7 +584,7 @@ void pruneTargets(ToolState& t) {
         bool sculpt = false;
         try {
             const GraphEdit edit(g.data().graphJson);
-            sculpt = edit.hasNode(node) && (edit.nodeType(node) == "Sculpt" || edit.nodeType(node) == "SculptStrands");
+            sculpt = edit.hasNode(node) && (edit.nodeType(node) == "SculptGuides" || edit.nodeType(node) == "SculptStrands");
         } catch (const std::exception&) {
         }
         if (!sculpt) g.setSculptTarget({});

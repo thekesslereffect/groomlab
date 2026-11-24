@@ -1468,7 +1468,7 @@ TEST(AppPanels, CorrectivesPanelAimsTheBrushAtASculptNode) {
     const std::string graph = R"({"version": 1, "output": "output", "nodes": [
       {"name": "scalp", "type": "Scalp"}, {"name": "sparse", "type": "Guides"},
       {"name": "even", "type": "Scatter", "params": {"density": 6.0, "randomness": 0.0, "length": 0.5, "previewAll": true}},
-      {"name": "dense", "type": "Interpolate"}, {"name": "toGuides", "type": "ToGuides"}, {"name": "sculpt1", "type": "Sculpt"},
+      {"name": "dense", "type": "Interpolate"}, {"name": "toGuides", "type": "ToGuides"}, {"name": "sculpt1", "type": "SculptGuides"},
       {"name": "roots", "type": "Scatter", "params": {"density": 60.0}}, {"name": "hair", "type": "Interpolate"},
       {"name": "output", "type": "Output"}],
      "connections": [

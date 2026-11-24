@@ -50,7 +50,7 @@ time, each host calling the one version:
 - E0 (done): the undo step and history (`groom_edit.h`); the app's document keeps its history in
   an `EditHistory` and applies steps as an `EditorHost`.
 - E1 (done): the graph's edits (`graph_edits.h`). `followGraphEdit`: after an edit, the Sculpt
-  nodes' edits, the brushes' Sculpt node, Show Tubes and the viewed node follow the nodes it
+  nodes' edits, the brushes' SculptGuides node, Show Tubes and the viewed node follow the nodes it
   renamed, grouped, copied or removed (the app's `editGraph`; Maya's `GraphModel.save` and
   `params.set_graph` through `params.follow_nodes`; the Blender helper's `commitGraph` and its plain
   `edit_graph` ops, a rename, copy (`copyOf`) or removal that carries Sculpt edits being one undo
@@ -2638,12 +2638,12 @@ The dab is drawn by the GPU from the stroke document's base (Scatter's strands, 
 its binding and the dab's guide shapes; the release commits on the CPU, incrementally, as ever,
 off the UI thread (Commits off the UI thread, below).
 
-A stroke on a Sculpt node's guides (the brushes' sculpt target, `setPreviewSculpt`) arms the same
+A stroke on a SculptGuides node's guides (the brushes' sculpt target, `setPreviewSculpt`) arms the same
 way (`gpu::strokeShapesGuides`: a guide preview, or a sculpt preview without parts or flow): each
-dab's evaluation up to Interpolate evaluates the Sculpt node alone (the stroke's edits laid on its
+dab's evaluation up to Interpolate evaluates the SculptGuides node alone (the stroke's edits laid on its
 cached input, the ToGuides above it untouched), and the GPU runs Interpolate and what follows from
 the guides it hands on. Its edits turn segments and scale them, never moving roots, so
-Interpolate's binding holds. A drag of a Sculpt node's `strength` makes its guides on the CPU at
+Interpolate's binding holds. A drag of a SculptGuides node's `strength` makes its guides on the CPU at
 the dragged value (`gpu::sculptedGuides`, its stored edits on its cached input, nothing of the graph
 evaluated) and runs from the first stage they make (`LookInputs::read`'s `standIn`); guides that
 reach Interpolate through another node (a Noise of the guides) make that drag the CPU's.

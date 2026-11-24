@@ -44,7 +44,7 @@ GROOMLAB_OPERATOR(Part)                  // Strands -> Strands (opens the parts)
 GROOMLAB_OPERATOR(Smooth)                // Curves -> Curves (bumps up to a size relaxed, at 1 straight; lengths kept)
 GROOMLAB_OPERATOR(Mirror)                // Curves -> Curves (mirrored across a plane, rooted again on the scalp)
 GROOMLAB_OPERATOR(RestoreLength)         // Curves (+ Curves reference) -> Curves (segment lengths restored)
-GROOMLAB_OPERATOR(Sculpt)                // Guides (+ Mesh scalp) -> Guides (brush strokes kept in the node: sculpt.h)
+GROOMLAB_OPERATOR(SculptGuides)          // Guides (+ Mesh scalp) -> Guides (brush strokes kept in the node: sculpt.h)
 GROOMLAB_OPERATOR(Subdivide)             // Curves -> Curves (segments doubled per level along a smooth curve; viewport/render levels)
 GROOMLAB_OPERATOR(SculptStrands)         // Strands -> Strands (brushed on the strands themselves; edits kept by strand ID, filled into new ones)
 // [deform]

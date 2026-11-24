@@ -87,7 +87,7 @@ bool LookPreview::plan(const GroomSession& session, const Shown& shown, const Ov
     std::set<NodeId> sculpts;
     for (auto at = own.begin(); at != own.end();) {
         const NodeId id = doc->nodesByName.at(at->first);  // (previewableOverrides: each is a node)
-        if (doc->graph.node(id).typeName() != op::kSculpt) {
+        if (doc->graph.node(id).typeName() != op::kSculptGuides) {
             ++at;
             continue;
         }

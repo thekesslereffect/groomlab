@@ -751,7 +751,7 @@ class GraphEditorTest(unittest.TestCase):
             follow = [n for n in model.order if model.node_type(n) == "FollowGuides"]
             self.assertEqual(len(follow), 1, self.editor.status.text())
             sculpt = model.source_of(follow[0], "guides")
-            self.assertEqual(model.node_type(sculpt), "Sculpt")
+            self.assertEqual(model.node_type(sculpt), "SculptGuides")
             self.assertEqual(model.source_of(follow[0], "strands"), braid)
             self.assertEqual(model.source_of(sculpt, "guides"), braid)
             self.assertEqual(sculpts.target(self.groom), sculpt, self.editor.status.text())
@@ -853,7 +853,7 @@ class GraphEditorTest(unittest.TestCase):
         to_guides = self.editor.add_node("ToGuides")
         self.editor.link("interpolate", to_guides, "strands")
         self.editor.scene.clearSelection()
-        sculpt = self.editor.add_node("Sculpt")
+        sculpt = self.editor.add_node("SculptGuides")
         self.editor.link(to_guides, sculpt, "guides")
         self.editor.link("scalp", sculpt, "scalp")
         self.editor.scene.clearSelection()

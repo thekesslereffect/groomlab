@@ -63,7 +63,7 @@ SCULPT_GRAPH = {
               {"name": "even", "type": "Scatter", "params": {"density": 6.0, "randomness": 0.0, "length": 0.5,
                                                              "previewAll": True}},
               {"name": "dense", "type": "Interpolate"}, {"name": "toGuides", "type": "ToGuides"},
-              {"name": "sculpt1", "type": "Sculpt"}, {"name": "roots", "type": "Scatter", "params": {"density": 60.0}},
+              {"name": "sculpt1", "type": "SculptGuides"}, {"name": "roots", "type": "Scatter", "params": {"density": 60.0}},
               {"name": "hair", "type": "Interpolate"}, {"name": "output", "type": "Output"}],
     "connections": [{"from": "scalp", "to": "even", "input": "scalp"},
                     {"from": "even", "to": "dense", "input": "strands"},

@@ -99,7 +99,7 @@ GROOMLAB_STAGE(Mirror, "mirror", "", "", "", "")
 
 // (Wet's other params pick its levels' centers: the CPU's.)
 GROOMLAB_STAGE_NODE(Wet, Clump, "", "", "affect wetness")
-GROOMLAB_GPU_PARAMS(Sculpt, "", "", "strength")
+GROOMLAB_GPU_PARAMS(SculptGuides, "", "", "strength")
 
 // RenderData (the shader's channels) and Cards (its card layer) too: their channels and cards stay
 // as the last evaluation made them while the GPU previews, and the commit makes them again from

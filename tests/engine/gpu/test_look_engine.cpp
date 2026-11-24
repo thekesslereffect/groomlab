@@ -4407,7 +4407,7 @@ std::string sculptGraph(double strength = 1.0, const std::string& between = "") 
     g.guides = true;
     g.nodes = R"(, {"name": "even", "type": "Scatter", "params": {"density": 3.0, "randomness": 0.0, "length": 3.0, "previewAll": true}},
         {"name": "dense", "type": "Interpolate"}, {"name": "toGuides", "type": "ToGuides"},
-        {"name": "sculpt", "type": "Sculpt", "params": {"strength": )" + std::to_string(strength) + "}}";
+        {"name": "sculpt", "type": "SculptGuides", "params": {"strength": )" + std::to_string(strength) + "}}";
     g.connections = R"(, {"from": "scalp", "to": "even", "input": "scalp"}, {"from": "even", "to": "dense", "input": "strands"},
         {"from": "guides", "to": "dense", "input": "guides"}, {"from": "scalp", "to": "dense", "input": "scalp"},
         {"from": "dense", "to": "toGuides", "input": "strands"}, {"from": "toGuides", "to": "sculpt", "input": "guides"},
@@ -4741,8 +4741,8 @@ TEST(GpuPreview, SculptsGuidesThroughNodesTheGpuDoesNotRunAreTheCpus) {
     // A Sculpt node's strength drags on the GPU where its guides feed the look's Interpolate as it
     // makes them; through another node (a Noise of the guides) the guides Interpolate takes are not
     // the ones made at the dragged strength: the CPU's. The node's other params do not drag.
-    EXPECT_TRUE(gpu::previewableParam("Sculpt", "strength"));
-    EXPECT_FALSE(gpu::previewableParam("Sculpt", "seed"));
+    EXPECT_TRUE(gpu::previewableParam("SculptGuides", "strength"));
+    EXPECT_FALSE(gpu::previewableParam("SculptGuides", "seed"));
     GroomData data = groom(withoutClearance(sculptGraph(1.0, "Noise")));
     {
         GroomSession probe(data);

@@ -249,13 +249,13 @@ from these names.
 
 ### Correctives and photos
 
-- **Sculpt nodes** brush the guides the graph made (sparse guides -> Scatter + Interpolate ->
-  ToGuides -> **Sculpt** -> the next Interpolate): select the Sculpt node in the Graph Editor, or
+- **SculptGuides nodes** brush the guides the graph made (sparse guides -> Scatter + Interpolate ->
+  ToGuides -> **Sculpt** -> the next Interpolate): select the SculptGuides node in the Graph Editor, or
   its row **Node: sculpt1** in the Correctives list, and the shaping brushes reshape its guides
   (drawn as the guides meanwhile). Each stroke is one undo step, kept in the node as bends and
   length changes along each guide, by its ID: comb the sparse guides later and the sculpted
   guides keep their hooks and combs on top of the new shapes. **Clear Edits** (the node's panel or
-  menu) drops them. In the app: the Correctives panel's **Sculpt into** lists the Sculpt nodes.
+  menu) drops them. In the app: the Correctives panel's **Sculpt into** lists the SculptGuides nodes.
 - **Correctives** (Correctives tab) are sculpt layers over the base groom, like Yeti's: pick a
   corrective and strokes are recorded on it, leaving the guides alone. The tab shows only the
   tools that record into one (Comb, Slide, Smooth, Lift, Swing, Attract, Cut, Length, Select);
