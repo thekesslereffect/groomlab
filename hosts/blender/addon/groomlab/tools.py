@@ -1117,10 +1117,29 @@ def sculpt_target(scalp, node=None, corrective=None, base=False):
     elif base:
         args["base"] = True
     r = call(scalp, "sculpt_target", **args)
+    _sculpt_targets[scalp.name] = r.get("target") or {}
     if args:
         display.mark(scalp)
         groom._redraw()
     return r
+
+
+_sculpt_targets = {}  # groom name -> its sculpt_target's target as last read (sculpted_braid's)
+
+
+def sculpted_braid(scalp):
+    """The Braid whose sections the brushes shape now (Sculpt Sections: its sections' Sculpt node the
+    target), or "": what the Braid's panel shows Done Sculpting Sections by. As sculpt_target last
+    read it (every change goes through it), read once when never asked."""
+    if scalp is None:
+        return ""
+    if scalp.name not in _sculpt_targets:
+        try:
+            sculpt_target(scalp)
+        except HelperError:
+            return ""
+    target = _sculpt_targets.get(scalp.name) or {}
+    return (target.get("braid") or "") if target.get("kind") == "node" else ""
 
 
 def sculpt_clear(scalp, node):

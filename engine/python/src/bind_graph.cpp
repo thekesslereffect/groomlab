@@ -1043,6 +1043,10 @@ void bindGraph(py::module_& m) {
              py::arg("braid"), py::arg("groom_size") = py::none(),
              "Sculpt Sections (graph_inserts.h insertBraidSculpt): a Sculpt of the Braid's sections and a FollowGuides "
              "after it carrying the hair along them. {sculpt, follow, made}.")
+        .def("braid_sculpt_node", [](const GraphEdit& e, const std::string& braid) { return braidSculptNode(e, braid); },
+             py::arg("braid"), "The Sculpt node Sculpt Sections made on Braid node `braid` (graph_inserts.h), '' none.")
+        .def("sculpted_braid", [](const GraphEdit& e, const std::string& sculpt) { return sculptedBraid(e, sculpt); },
+             py::arg("sculpt"), "The Braid whose sections Sculpt node `sculpt` brushes (graph_inserts.h), '' for any other.")
         .def("insert_feathers",
              [](GraphEdit& e, const std::vector<std::pair<std::string, std::string>>& designs, const std::vector<double>& weights,
                 const std::string& source, const std::string& group, bool keepHair, std::optional<double> density,

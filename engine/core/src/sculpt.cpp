@@ -240,7 +240,51 @@ std::vector<std::string> sculptedNodes(const std::string& text) {
 
 std::string sculptExternal(const std::string& nodePath) { return "sculpt:" + nodePath; }
 
-std::vector<Vec3f> applySculpt(const Guide& input, const GuideSculpt& edit, float strength, const ScalpMesh* scalp) {
+const char* const kPathFrameLayers[10] = {"braidPathAt",  "braidPathX",    "braidPathY",    "braidPathZ",    "braidNormalX",
+                                          "braidNormalY", "braidNormalZ", "braidTangentX", "braidTangentY", "braidTangentZ"};
+
+namespace {
+
+// A guide's path frame per point (kPathFrameLayers): the arc length, the point and the frame.
+struct PathFrames {
+    std::vector<float> at;
+    std::vector<Vec3f> center;
+    std::vector<Frame> frames;
+
+    // A point (of index j) in the path's straightened space, and back.
+    Vec3f straight(std::size_t j, const Vec3f& p) const {
+        const Vec3f l = frames[j].toLocal(p - center[j]);
+        return {l.x, l.y, at[j] + l.z};
+    }
+    Vec3f onPath(std::size_t j, const Vec3f& q) const { return center[j] + frames[j].toWorld({q.x, q.y, q.z - at[j]}); }
+};
+
+bool pathFramesOf(const Guide& g, PathFrames& out) {
+    const std::size_t n = g.points.size();
+    const std::vector<float>* layers[10];
+    for (std::size_t k = 0; k < 10; ++k) {
+        const auto it = g.pointAttributes.find(kPathFrameLayers[k]);
+        if (it == g.pointAttributes.end() || it->second.size() != n) return false;
+        layers[k] = &it->second;
+    }
+    out.at = *layers[0];
+    out.center.resize(n);
+    out.frames.resize(n);
+    for (std::size_t j = 0; j < n; ++j) {
+        const auto v = [&](std::size_t k) { return Vec3f{(*layers[k])[j], (*layers[k + 1])[j], (*layers[k + 2])[j]}; };
+        out.center[j] = v(1);
+        Frame& f = out.frames[j];
+        f.tangent = v(7).normalized();
+        Vec3f normal = v(4);
+        normal = normal - f.tangent * normal.dot(f.tangent);
+        if (!(f.tangent.length() > 0.5f) || !(normal.length() > 1e-6f)) return false;
+        f.normal = normal.normalized();
+        f.binormal = f.tangent.cross(f.normal);
+    }
+    return true;
+}
+
+std::vector<Vec3f> applySculptIn(const Guide& input, const GuideSculpt& edit, float strength, const ScalpMesh* scalp) {
     const std::vector<Vec3f>& pts = input.points;
     std::vector<float> t, lengths;
     if (pts.size() < 2 || edit.samples.empty() || strength == 0.0f || !segmentMiddles(pts, t, lengths)) return pts;
@@ -260,7 +304,7 @@ std::vector<Vec3f> applySculpt(const Guide& input, const GuideSculpt& edit, floa
     return out;
 }
 
-GuideSculpt recordSculpt(const Guide& input, const std::vector<Vec3f>& sculpted, float strength, const ScalpMesh* scalp) {
+GuideSculpt recordSculptIn(const Guide& input, const std::vector<Vec3f>& sculpted, float strength, const ScalpMesh* scalp) {
     if (std::abs(strength) < kMinStrength) {
         throw std::invalid_argument("the Sculpt node's strength is 0: raise it to sculpt");
     }
@@ -296,6 +340,32 @@ GuideSculpt recordSculpt(const Guide& input, const std::vector<Vec3f>& sculpted,
     }
     // Two samples at the same t (zero-length segments): only the first is read.
     return edit;
+}
+
+// The guide in its path's straightened space (its root for no scalp: world axes there).
+Guide straightened(const Guide& input, const PathFrames& path, const std::vector<Vec3f>& points) {
+    Guide flat;
+    flat.id = input.id;
+    flat.points.resize(points.size());
+    for (std::size_t j = 0; j < points.size(); ++j) flat.points[j] = path.straight(j, points[j]);
+    return flat;
+}
+
+}  // namespace
+
+std::vector<Vec3f> applySculpt(const Guide& input, const GuideSculpt& edit, float strength, const ScalpMesh* scalp) {
+    PathFrames path;
+    if (edit.samples.empty() || strength == 0.0f || !pathFramesOf(input, path)) return applySculptIn(input, edit, strength, scalp);
+    std::vector<Vec3f> out = applySculptIn(straightened(input, path, input.points), edit, strength, nullptr);
+    for (std::size_t j = 1; j < out.size(); ++j) out[j] = path.onPath(j, out[j]);
+    if (!out.empty()) out[0] = input.points[0];  // (the root to the bit)
+    return out;
+}
+
+GuideSculpt recordSculpt(const Guide& input, const std::vector<Vec3f>& sculpted, float strength, const ScalpMesh* scalp) {
+    PathFrames path;
+    if (sculpted.size() != input.points.size() || !pathFramesOf(input, path)) return recordSculptIn(input, sculpted, strength, scalp);
+    return recordSculptIn(straightened(input, path, input.points), straightened(input, path, sculpted).points, strength, nullptr);
 }
 
 std::shared_ptr<const GuideSet> applySculpts(const std::shared_ptr<const GuideSet>& input, const SculptEdits& edits,
@@ -420,7 +490,14 @@ std::shared_ptr<GuideHierarchy> sculptHierarchy(const GuideSet& guides, const st
         const Vec3f& c = guides.displayColor();
         h->setGroupColor(root, {c.x, c.y, c.z});
     }
-    h->addGuides(root, guides);
+    // Each where the node has it: a guide fed off the scalp (a Braid's sections start where its
+    // weave does) is shown and brushed there, not moved onto the scalp (the node never moves a root).
+    // (The path frames a Braid's sections carry are the edits' frames, not layers to brush or show.)
+    GuideSet shown = guides;
+    for (Guide& g : shown.guides()) {
+        for (const char* layer : kPathFrameLayers) g.pointAttributes.erase(layer);
+    }
+    for (const GuideId id : h->addGuides(root, shown)) h->setKeepsPlace(id);
     if (scalp && scalp->triangleCount() > 0) h->evaluate(scalp);
     return h;
 }

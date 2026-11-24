@@ -103,6 +103,7 @@
 #include "groomlab/braid_tubes.h"
 #include "groomlab/curve.h"
 #include "groomlab/frames.h"
+#include "groomlab/sculpt.h"
 #include "groomlab/graph.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -3336,9 +3337,26 @@ private:
             if ((*section)[s] < 0.0f) continue;  // (the path itself: the paths output's)
             const Vec3f* p = curves->strandPoints(s);
             Guide& g = out->add(curves->ids()[s], std::vector<Vec3f>(p, p + curves->strandPointCount(s)));
-            g.root = br.paths[s / perPath].guideRoot;
+            const BraidPath& path = br.paths[s / perPath];
+            g.root = path.guideRoot;
             g.attributes["braidId"] = (*id)[s];
             g.attributes["braidSection"] = (*section)[s];
+            // Each point's place on the path and the path's frame there (sculpt.h kPathFrameLayers),
+            // as pathStrands laid it: a Sculpt keeps its edits in that frame, so they ride along
+            // with the path when it is drawn again.
+            const std::size_t m = g.points.size();
+            const float from = std::clamp(path.weaveFrom, 0.0f, path.length);
+            std::array<std::vector<float>, 10> layers;
+            for (std::vector<float>& l : layers) l.resize(m);
+            for (std::size_t j = 0; j < m; ++j) {
+                const float at = from + (path.length - from) * static_cast<float>(j) / static_cast<float>(std::max<std::size_t>(m, 2) - 1);
+                Vec3f center;
+                const Frame& f = br.of(s / perPath).frameAt(path, at, &center);
+                const float values[10] = {at, center.x, center.y, center.z, f.normal.x, f.normal.y, f.normal.z,
+                                          f.tangent.x, f.tangent.y, f.tangent.z};
+                for (std::size_t k = 0; k < 10; ++k) layers[k][j] = values[k];
+            }
+            for (std::size_t k = 0; k < 10; ++k) g.pointAttributes[kPathFrameLayers[k]] = std::move(layers[k]);
         }
         return GuidesPtr(out);
     }

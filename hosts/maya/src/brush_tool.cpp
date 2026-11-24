@@ -1035,6 +1035,19 @@ void BrushContext::toolOffCleanup() {
     MPxContext::toolOffCleanup();
 }
 
+void BrushContext::abortAction() {
+    if (!tool_.stroking() && findGroom()) {
+        const MString node = MFnDagNode(groom_).findPlug("sculptNode", true).asString();
+        if (node.length() > 0) {
+            MString call("try:\n    from groomlab import sculpts\n    sculpts.leave('");
+            call += groom_.fullPathName();
+            call += "')\nexcept ImportError:\n    pass";
+            MGlobal::executePythonCommandOnIdle(call);
+        }
+    }
+    MPxContext::abortAction();
+}
+
 GroomShape* BrushContext::liveShape() const {
     return shape_ && shapeNode_.isAlive() && shapeNode_.isValid() ? shape_ : nullptr;
 }

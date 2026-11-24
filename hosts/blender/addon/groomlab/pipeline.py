@@ -1292,6 +1292,19 @@ def sculpt_braid_sections(scalp, braid):
     return {k: r.get(k) for k in ("sculpt", "follow", "made")}
 
 
+def done_sculpt_sections(scalp):
+    """Done Sculpting Sections (and Esc in the brush tool while the brushes shape a Sculpt node):
+    the brushes shape the guides again, the braid's path among them; the sections' strokes stay in
+    their Sculpt node. Returns {"node": the Sculpt node left, "braid": the Braid whose sections it
+    brushed} (None each when the brushes shaped no Sculpt node)."""
+    from . import tools
+    target = tools.sculpt_target(scalp).get("target") or {}
+    if target.get("kind") != "node":
+        return {"node": None, "braid": None}
+    tools.sculpt_target(scalp, base=True)
+    return {"node": target.get("name"), "braid": target.get("braid")}
+
+
 def set_prototypes(scalp, objects, replace=True):
     """Meshes the groom's Instance nodes (scales' plates of your own) name, in their own object space
     (their up is the prototype's +Y, its long axis), with per-corner normals and UVs."""

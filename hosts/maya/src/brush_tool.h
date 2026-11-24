@@ -132,6 +132,9 @@ public:
     void getClassName(MString& name) const override;  // "groomLabBrush": Tool Settings MEL procs
     void toolOnSetup(MEvent& event) override;
     void toolOffCleanup() override;
+    // Esc: while the brushes shape a Sculpt node (Sculpt Sections, Brush This Node's Guides) and no
+    // stroke is going, they shape the guides again (groomlab.sculpts.leave, on idle).
+    void abortAction() override;
 
     MStatus doPress(MEvent& event, MHWRender::MUIDrawManager& draw, const MHWRender::MFrameContext& ctx) override;
     MStatus doDrag(MEvent& event, MHWRender::MUIDrawManager& draw, const MHWRender::MFrameContext& ctx) override;

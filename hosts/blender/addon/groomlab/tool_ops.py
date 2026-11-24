@@ -225,6 +225,8 @@ class ToolSession(object):
                 leave_roots(context, scalp)  # the Tube tool's root mode left: the Tube brush again
                 display.redraw()
                 return {"RUNNING_MODAL"}
+            if kind == "ESC" and self.leave_sculpt_node(context, scalp):
+                return {"RUNNING_MODAL"}  # (again: leaves the tool)
             if kind == "ESC":
                 self.leave(context, clear_tool=True)
                 return {"FINISHED"}
@@ -465,6 +467,22 @@ class ToolSession(object):
         except Exception:
             pass
         self.cursor = over
+
+    def leave_sculpt_node(self, context, scalp):
+        """Esc while the brushes shape a Sculpt node (Sculpt Sections, Brush This Node's Guides): they
+        shape the guides again (pipeline.done_sculpt_sections), the tool kept. Whether they did."""
+        from . import pipeline
+        try:
+            left = pipeline.done_sculpt_sections(scalp)
+        except HelperError as e:
+            tools.status(context.scene, e.message)
+            return False
+        if not left["node"]:
+            return False
+        tools.status(context.scene, "Brushing the guides again" +
+                     (" (done sculpting %s's sections)" % left["braid"] if left["braid"] else ""))
+        display.redraw()
+        return True
 
     def leave(self, context, clear_tool=False):
         self.set_cursor(context, False)

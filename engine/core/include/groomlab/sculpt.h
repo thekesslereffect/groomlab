@@ -102,6 +102,14 @@ std::vector<std::string> sculptedNodes(const std::string& json);
 // The external a Sculpt node reads its edits from: "sculpt:<node path>".
 std::string sculptExternal(const std::string& nodePath);
 
+// A guide fed with a path frame per point (a Braid's sections: point layers kPathFrameLayers, the
+// path's arc length there, its point and its frame's normal and tangent) is edited in that path's
+// straightened space: each point as its offset in the frame there (normal, binormal, and along the
+// tangent from the arc length), the relative form recorded and applied there with world axes, the
+// result put back on the path as it is now. So a section's strokes ride along with its braid's path
+// when the path is moved or bent (its weave in the path's frame unchanged: the same strokes).
+extern const char* const kPathFrameLayers[10];  // braidPathAt, braidPathX..Z, braidNormalX..Z, braidTangentX..Z
+
 // A guide fed the node (its points, its root for the frame) with an edit at `strength` (0: the
 // guide as it is; 1: the edit; between, every turn and length factor that share of it).
 std::vector<Vec3f> applySculpt(const Guide& input, const GuideSculpt& edit, float strength, const ScalpMesh* scalp);

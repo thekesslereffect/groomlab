@@ -270,6 +270,7 @@ void MainWindow::buildPanels() {
             viewport_->setToolMode(Viewport::ToolMode::Brush);
         }
         refreshTool();
+        if (params_) params_->refreshActions();  // (a Braid's Sculpt Sections, or Done Sculpting Sections)
     });
     connect(correctives_, &CorrectivesPanel::message, this, [this](const QString& text) { report(text); });
     connect(guidesPanel_, &GuidesPanel::displayChanged, this, [this] {

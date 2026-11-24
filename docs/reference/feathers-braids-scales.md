@@ -71,8 +71,12 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   right after the Braid carries each section's hair along its own section's change (`rest` the
   sections, `guides` the Sculpt's), the hair still on its way in from the scalp following as it
   comes in (`braidWoven`), the roots staying. The brushes pick the Sculpt node (Brush This Node's
-  Guides); comb a section aside, lift a crossing, bend the tail. Clicked again it brushes the same
-  nodes. The sections are not pressed against each other again after a brush: a section pushed into
+  Guides); comb a section aside, lift a crossing, bend the tail. The sections are shown and brushed
+  where the braid has them, curving paths too. The strokes are kept in the braid path's frame (each
+  section point carries its place on the path: `braidPathAt`, `braidPath*`, `braidNormal*`,
+  `braidTangent*`), so moving or bending the braid's path carries them along. While they are brushed the button reads **Done
+  Sculpting Sections**: it (or Esc in the brush tool) goes back to brushing the guides, the braid's
+  path among them, the strokes kept; Sculpt Sections again brushes the same nodes. The sections are not pressed against each other again after a brush: a section pushed into
   another passes through it.
 - **Feed** (`feed`, on for cornrows by default in `add_braid`): strands within `region` of
   anywhere along a path join it, as hair is picked up into cornrows and French braids; each

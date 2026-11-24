@@ -540,6 +540,10 @@ public:
     // Sculpt Sections on Braid node `braid` (GroomDocument::sculptBraidSections), then the brushes
     // shape its Sculpt node's guides.
     bool sculptBraidSections(const std::string& braid);
+    // Done Sculpting Sections, and Esc in the brush tool while the brushes shape a Sculpt node: they
+    // shape the guides again (the braid's path among them), the node's strokes kept. False: they
+    // shaped no Sculpt node.
+    bool leaveSculptNode();
     // Import > Alembic Curves: the file's curves as the guides (an ImportCurves node).
     bool importAlembicCurves(const QString& path, const QString& object = {});
     // Utilities > Strands to Mesh: the strands as tubes (or ribbons) in an OBJ at `path` (at most

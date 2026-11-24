@@ -37,6 +37,7 @@
 
 #include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/node_library.h"
 
@@ -97,6 +98,8 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
     b["node.bake"] = {run([m, selected] { askBakeNode(*m, selected()); }), {}, nodeOn};
     // A Braid's sections made guides to brush, its hair following them (graph_inserts.h insertBraidSculpt).
     b["braid.sculptSections"] = {run([m, selected] { m->sculptBraidSections(selected()); }), {}, nodeOn};
+    // Back to the guides from them (Esc in the brush tool too: MainWindow::leaveSculptNode).
+    b["braid.doneSculptSections"] = {run([m] { m->leaveSculptNode(); }), {}, nodeOn};
     // GroomLab > Utilities > Bake Node to Guides...: the graph's selected node, else the output.
     b["node.bakeToGuides"] = {run([m, selected] {
                                   if (!m->document_) return;
@@ -489,6 +492,13 @@ std::set<std::string> AppActions::nodeState(MainWindow& w, const std::string& no
     }
     s.insert("type." + type);  // (graph_ui.json's nodeActions: by the node's type)
     if (type == "Sculpt") s.insert("node.sculpt");
+    // A Braid whose sections the brushes shape (Sculpt Sections): Done Sculpting Sections in its place.
+    if (type == "Braid" && !w.document_->sculptTarget().empty()) {
+        try {
+            if (braidSculptNode(GraphEdit(w.document_->graph().dump()), node) == w.document_->sculptTarget()) s.insert("braid.sculpting");
+        } catch (const std::exception&) {
+        }
+    }
     if (mappable) s.insert("node.mappable");
     if (type == "Script") s.insert("node.script");
     if (type == "Compound") s.insert("node.compound");

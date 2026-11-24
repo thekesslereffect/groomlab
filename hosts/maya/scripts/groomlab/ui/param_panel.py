@@ -975,18 +975,25 @@ class ParamPanel(QtWidgets.QScrollArea):
             "node.bake": lambda: later(lambda: editor.bake_to_guides(name)),
             "sculpt.clearEdits": lambda: later(lambda: (editor.clear_sculpt_edits(name), editor.reload())),
             "braid.sculptSections": lambda: later(lambda: editor.sculpt_braid_sections(name)),
+            "braid.doneSculptSections": lambda: later(lambda: editor.done_sculpt_sections(name)),
             "compound.ungroup": lambda: later(lambda: editor.expand([name])),
             "compound.saveAsNode": lambda: later(lambda: editor.show_save_node(name)),
             "compound.saveToLibrary": lambda: later(lambda: editor.save_to_library(name)),
         }
 
     def node_action_state(self, name):
-        """The conditions graph_ui.json's nodeActions need for node `name`: "type.<its type>", and
-        "node.library" for a node from the library."""
+        """The conditions graph_ui.json's nodeActions need for node `name`: "type.<its type>",
+        "node.library" for a node from the library, and "braid.sculpting" for a Braid whose sections
+        the brushes shape (Sculpt Sections: Done Sculpting Sections in its place)."""
         model = self.editor.model
-        state = {"type." + model.node_type(name)}
+        node_type = model.node_type(name)
+        state = {"type." + node_type}
         if model.library_info(name):
             state.add("node.library")
+        if node_type == "Braid":
+            target = self.editor.sculpt_target()
+            if target and model.braid_sculpt_node(name) == target:
+                state.add("braid.sculpting")
         return state
 
     def node_actions(self, name):

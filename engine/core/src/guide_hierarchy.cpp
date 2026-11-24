@@ -1365,6 +1365,12 @@ void GuideHierarchy::placeGuide(HierarchyGuide& g, const ScalpMesh* scalp, const
         }
         return;
     }
+    if (g.keepsPlace) {  // (a Sculpt node's guides: where the node has them)
+        if (!scalp->contains(g.root)) g.root = scalp->closestPoint(g.points.front()).root;
+        g.layFrame = false;
+        bind(g, *scalp, scale_);
+        return;
+    }
     // Never-rooted primaries accept curves drawn tip-first. Edited guides
     // keep their root, so a combed guide lying on the scalp never flips; a
     // curve with both ends on the scalp (a braid path) roots where it starts.
@@ -2021,6 +2027,15 @@ void GuideHierarchy::transfer(const ScalpMapping& mapping) {
         }
     }
     evaluate(&to);
+}
+
+void GuideHierarchy::setKeepsPlace(GuideId id, bool keeps) {
+    HierarchyGuide* g = mutableGuide(id);
+    if (!g) throw std::invalid_argument("setKeepsPlace: unknown guide");
+    if (g->keepsPlace == keeps) return;
+    invalidateHash();
+    g->keepsPlace = keeps;
+    g->rootLocal.clear();  // (bound again at the next evaluate)
 }
 
 void GuideHierarchy::setPoints(GuideId id, std::vector<Vec3f> points) {

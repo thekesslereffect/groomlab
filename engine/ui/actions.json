@@ -249,7 +249,8 @@
     "corrective.keyWeight": {"label": "Key Weight Here", "tip": "Key the weight on this frame"},
     "corrective.clearKeys": {"label": "Clear Keys (every frame)", "tip": "Delete the weight's keys: the corrective on every frame"},
     "corrective.rename": {"label": "Rename", "tip": "Rename the corrective (or double-click its name)"},
-    "braid.sculptSections": {"label": "Sculpt Sections", "tip": "Brush the braid's sections: each section's curve becomes a guide the brushes shape (a Sculpt node keeps the strokes) and its hair follows it (a FollowGuides node after the Braid). The strokes stay when the braid above changes"},
+    "braid.sculptSections": {"label": "Sculpt Sections", "tip": "Brush the braid's sections: each section's curve becomes a guide the brushes shape (a Sculpt node keeps the strokes) and its hair follows it (a FollowGuides node after the Braid). The strokes stay when the braid above changes. Done Sculpting Sections (or Esc in the brush tool) goes back to the guides"},
+    "braid.doneSculptSections": {"label": "Done Sculpting Sections", "tip": "Back to brushing the guides, the braid's path among them: the brushes leave the sections' Sculpt node, its strokes kept (Esc in the brush tool does it too). Sculpt Sections brushes them again"},
     "sculpt.clearEdits": {"label": "Clear Sculpt Edits", "tip": "Drop every stroke kept in this node: its guides as it is fed them (one undo step)"},
 
     "photo.import": {"label": "Import Photo...", "tip": "A photo as a camera: copied into the scene's groomlab/<scene>/references folder, aimed at the groom",

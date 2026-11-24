@@ -1503,6 +1503,23 @@ class GROOMLAB_OT_graph_sculpt_sections(_NodeOp):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_graph_sculpt_sections_done(_NodeOp):
+    """Back to brushing the guides, the braid's path among them: the brushes leave the sections' Sculpt node, its strokes kept (Esc in the brush tool too)"""
+    bl_idname = "groomlab.graph_sculpt_sections_done"
+    bl_label = "Done Sculpting Sections"
+    action_id = "braid.doneSculptSections"
+
+    def execute(self, context):
+        from . import pipeline
+        scalp = _ge().context_groom(context)
+        try:
+            pipeline.done_sculpt_sections(scalp)
+        except HelperError as e:
+            return _fail(self, e)
+        self.report({"INFO"}, "brushing the guides again: done sculpting %s's sections" % self.target(context))
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_graph_paint_param(_ParamOp):
     """Paint this param: a map feeding it (white = its value now, black = 0), painted in Groom Tools > Paint"""
     bl_idname = "groomlab.graph_paint_param"
@@ -1581,6 +1598,7 @@ def _bind_all():
          lambda ctx, item: bool(ctx.scalp) and sculpt_target(ctx.scalp) == ctx.node)
     bind("sculpt.clearEdits", "groomlab.graph_sculpt_clear", _n)
     bind("braid.sculptSections", "groomlab.graph_sculpt_sections", _n)
+    bind("braid.doneSculptSections", "groomlab.graph_sculpt_sections_done", _n)
 
 
 classes = (GROOMLAB_OT_graph_group, GROOMLAB_OT_graph_ungroup, GROOMLAB_OT_graph_show_inner, GROOMLAB_OT_graph_expose,
@@ -1594,7 +1612,7 @@ classes = (GROOMLAB_OT_graph_group, GROOMLAB_OT_graph_ungroup, GROOMLAB_OT_graph
            GROOMLAB_OT_graph_paste, GROOMLAB_OT_graph_backdrop_add, GROOMLAB_OT_graph_backdrop_rename,
            GROOMLAB_OT_graph_backdrop_color, GROOMLAB_OT_graph_backdrop_delete, GROOMLAB_OT_graph_rename,
            GROOMLAB_OT_graph_delete, GROOMLAB_OT_graph_brush_sculpt, GROOMLAB_OT_graph_sculpt_clear, GROOMLAB_OT_graph_sculpt_sections,
-           GROOMLAB_OT_graph_paint_param)
+           GROOMLAB_OT_graph_sculpt_sections_done, GROOMLAB_OT_graph_paint_param)
 
 
 def register():
