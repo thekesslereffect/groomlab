@@ -23,7 +23,7 @@ from maya import cmds
 
 from groomlab import undoable
 
-TYPE = "Sculpt"
+TYPE = "SculptGuides"
 STRANDS_TYPE = "SculptStrands"  # brushes shape its strands (sculpt_strands.h), late in the chain
 TYPES = (TYPE, STRANDS_TYPE)
 
@@ -44,7 +44,7 @@ def sculpt_nodes(groom):
 
 
 def node_type(groom, node):
-    """Node `node`'s type ("Sculpt", "SculptStrands"...), or None."""
+    """Node `node`'s type ("SculptGuides", "SculptStrands"...), or None."""
     from groomlab.params import get_graph
     return next((n.get("type") for n in get_graph(groom).get("nodes", []) if n.get("name") == node), None)
 

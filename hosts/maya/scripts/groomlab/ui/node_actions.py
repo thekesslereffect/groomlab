@@ -207,7 +207,7 @@ def node_actions(self, name):
         buttons.append(("Save to Library", "Write this script node to your node library (Add Node, Tab search; "
                         "the standalone app and Blender too), one version up when the library has it",
                         lambda _=False: later(lambda: self.editor.save_script_to_library(name))))
-    elif node_type in ("Sculpt", "SculptStrands") and groom:
+    elif node_type in ("SculptGuides", "SculptStrands") and groom:
         from groomlab import sculpts
         edited = sculpts.edited_guides(groom, name)
         brushing = sculpts.target(groom) == name

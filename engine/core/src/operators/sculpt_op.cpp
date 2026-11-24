@@ -20,7 +20,7 @@ namespace {
 
 class SculptOp : public Operator {
 public:
-    std::string typeName() const override { return op::kSculpt; }
+    std::string typeName() const override { return op::kSculptGuides; }
     std::string category() const override { return "shape"; }
     std::vector<PortSpec> inputs() const override {
         return {{"guides", PortType::Guides}, {"scalp", PortType::Mesh, true}};
@@ -49,8 +49,8 @@ public:
 
 }  // namespace
 
-void registerSculptOperator(OperatorRegistry& registry) {
-    registry.registerType(op::kSculpt,
+void registerSculptGuidesOperator(OperatorRegistry& registry) {
+    registry.registerType(op::kSculptGuides,
                           {"shape",
                            "Brush the guides the graph made (ToGuides): the strokes are kept in the node and follow the guides when what feeds it changes.",
                            "brush correctives strokes edit guides"},

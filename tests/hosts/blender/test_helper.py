@@ -2493,7 +2493,7 @@ class ToolsTest(HelperTestCase):
         self.assertEqual(r["undo"]["undoLabel"], "rename_node sculpt1")
         self.assertEqual(sorted(json.loads(self.texts()["sculptData"])), ["shaping"])
         self.assertEqual(self.call("sculpt_target")["target"], {"kind": "node", "name": "shaping"})
-        r = self.call("edit_graph", op="add_node", type="Sculpt", copyOf="shaping")
+        r = self.call("edit_graph", op="add_node", type="SculptGuides", copyOf="shaping")
         self.assertEqual(sorted(json.loads(self.texts()["sculptData"])), sorted(["shaping", r["name"]]))
         self.call("edit_graph", op="remove_node", name="shaping", keepFlow=True)
         self.assertEqual(sorted(json.loads(self.texts()["sculptData"])), [r["name"]])
@@ -2527,7 +2527,7 @@ SCULPT_GRAPH = {
               {"name": "even", "type": "Scatter", "params": {"density": 0.5, "randomness": 0.0, "length": 4.0,
                                                              "previewAll": True}},
               {"name": "dense", "type": "Interpolate"}, {"name": "toGuides", "type": "ToGuides"},
-              {"name": "sculpt1", "type": "Sculpt"}, {"name": "roots", "type": "Scatter", "params": {"density": 20.0}},
+              {"name": "sculpt1", "type": "SculptGuides"}, {"name": "roots", "type": "Scatter", "params": {"density": 20.0}},
               {"name": "hair", "type": "Interpolate"}, {"name": "output", "type": "Output"}],
     "connections": [{"from": "scalp", "to": "even", "input": "scalp"},
                     {"from": "even", "to": "dense", "input": "strands"},

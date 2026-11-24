@@ -179,7 +179,7 @@ TEST(AppGraphEditor, TheNodeMenuFollowsTheNodesKind) {
     EXPECT_TRUE(w.doc()->paramExposed(scatter, param)) << param;
     // A Sculpt node: Brush This Node's Guides (what brushes shape) and Clear Sculpt Edits.
     std::string sculpt;
-    ASSERT_EQ(w.doc()->addNode("Sculpt", 0.0f, 600.0f, &sculpt), "");
+    ASSERT_EQ(w.doc()->addNode("SculptGuides", 0.0f, 600.0f, &sculpt), "");
     graph->refresh();
     QMenu sculptMenu;
     graph->fillContextMenu(&sculptMenu, graph->nodeRect(sculpt).center());

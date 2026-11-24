@@ -1621,7 +1621,7 @@ bool sculptedGuides(const GraphDocument& doc, NodeId sculpt, const SculptEdits* 
                     std::string* why) {
     const Graph& graph = doc.graph;
     const std::string name = doc.nameOf(sculpt);
-    if (graph.node(sculpt).typeName() != op::kSculpt) {
+    if (graph.node(sculpt).typeName() != op::kSculptGuides) {
         *why = name + " is no Sculpt node";
         return false;
     }

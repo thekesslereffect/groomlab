@@ -341,7 +341,7 @@ std::string workflowGraph(const std::string& sculpt = "sculpt1", double strength
       {"name": "even", "type": "Scatter", "params": {"density": 6.0, "randomness": 0.0, "length": 0.5, "previewAll": true}},
       {"name": "dense", "type": "Interpolate"},
       {"name": "toGuides", "type": "ToGuides"},
-      {"name": ")" + sculpt + R"(", "type": "Sculpt", "params": {"strength": )" + std::to_string(strength) + R"(}},
+      {"name": ")" + sculpt + R"(", "type": "SculptGuides", "params": {"strength": )" + std::to_string(strength) + R"(}},
       {"name": "roots", "type": "Scatter", "params": {"density": 60.0}},
       {"name": "hair", "type": "Interpolate"},
       {"name": "output", "type": "Output"}],
@@ -644,7 +644,7 @@ TEST(SculptNode, GroupingUngroupingAndRenamingCarryTheEdits) {
 
     // Ungrouped where the name is taken: the node comes out renamed, its edits under the new name.
     GraphEdit taken(group.toJson());
-    taken.addNode("Sculpt", "sculpt1");
+    taken.addNode("SculptGuides", "sculpt1");
     const std::vector<std::string> made = taken.expand(compound);
     ASSERT_EQ(made.size(), 2u);
     EXPECT_NE(made[1], "sculpt1");

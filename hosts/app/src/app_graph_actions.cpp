@@ -491,7 +491,7 @@ std::set<std::string> AppActions::nodeState(MainWindow& w, const std::string& no
     } catch (const std::exception&) {
     }
     s.insert("type." + type);  // (graph_ui.json's nodeActions: by the node's type)
-    if (type == "Sculpt" || type == "SculptStrands") s.insert("node.sculpt");
+    if (type == "SculptGuides" || type == "SculptStrands") s.insert("node.sculpt");
     // A Braid whose sections the brushes shape (Sculpt Sections): Done Sculpting Sections in its place.
     if (type == "Braid" && !w.document_->sculptTarget().empty()) {
         try {

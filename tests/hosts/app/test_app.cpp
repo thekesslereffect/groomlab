@@ -1956,7 +1956,7 @@ TEST(AppDocument, SculptEditsFollowTheirNodeIntoAndOutOfACompound) {
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
     std::string sculpt;
-    ASSERT_EQ(doc->addNode("Sculpt", 0.0f, 0.0f, &sculpt), "");
+    ASSERT_EQ(doc->addNode("SculptGuides", 0.0f, 0.0f, &sculpt), "");
     SculptSet set;
     set.nodes[sculpt].guides[7].samples = {{0.0f, 0.1f, 0.0f, 1.0f}, {1.0f, 0.2f, 0.0f, 1.0f}};
     ASSERT_EQ(doc->editStoredText("sculpt edits", StrokeField::Sculpts, [&](std::string& text) { text = set.toJson(); }), "");
@@ -4672,7 +4672,7 @@ TEST(AppGpuPreview, SculptStrokeDabsRunOnTheGpu) {
     graph["nodes"].push_back({{"name", "even"}, {"type", "Scatter"}, {"params", {{"density", 150.0}, {"randomness", 0.0}, {"length", 0.8}, {"previewAll", true}}}});
     graph["nodes"].push_back({{"name", "dense"}, {"type", "Interpolate"}});
     graph["nodes"].push_back({{"name", "toGuides"}, {"type", "ToGuides"}});
-    graph["nodes"].push_back({{"name", "sculpt"}, {"type", "Sculpt"}});
+    graph["nodes"].push_back({{"name", "sculpt"}, {"type", "SculptGuides"}});
     for (json& c : graph["connections"]) {
         if (c["from"] == "guides" && c["to"] == "interpolate") c["from"] = "sculpt";
     }

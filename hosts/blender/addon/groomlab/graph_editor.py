@@ -747,7 +747,7 @@ def node_state(node):
     state = set()
     if _viewable(node):
         state.add("node.viewable")
-    if node.gl_type in ("Sculpt", "SculptStrands"):
+    if node.gl_type in ("SculptGuides", "SculptStrands"):
         state.add("node.sculpt")
     if graph_tree.bakeable(node):  # (the core's rule, every host's)
         state.add("node.bakeable")

@@ -484,10 +484,10 @@ and the tools' selection and hidden groups: what the add-on keeps in the `.blend
 keeping the session's scalp; a vertex map travels per face corner, so a point no face uses comes
 back 0 (as in every host).
 
-### Authoring (Maya's Graph Editor, node library, correctives and Sculpt nodes)
+### Authoring (Maya's Graph Editor, node library, correctives and SculptGuides nodes)
 
 What Maya's Graph Editor (`groomlab/graph.py`'s GraphModel, `params.py`), node library
-(`nodes.py`), Save as Preset (`presets.py`), Correctives tab (`shots.py`) and Sculpt nodes
+(`nodes.py`), Save as Preset (`presets.py`), Correctives tab (`shots.py`) and SculptGuides nodes
 (`sculpts.py`) do, over the helper (`hosts/blender/helper/src/authoring.cpp`). Every edit of the
 groom is one step on the session's undo stack (above): `"undo"` in the answer, `"graphChanged"`
 when the graph changed (the add-on's tree follows, as after `map_for_param`), and `undo`/`redo`
@@ -498,7 +498,7 @@ it is kept as `edit_graph` keeps it, without a step (`"undoable": false`).
 
 | Command | Arguments | Result |
 |---|---|---|
-| `edit_graph` `op=group` | `names`, `name` ("": compound1...) | `{"name", "moved" [[from, to]...]}`: Group (Ctrl+G), `GraphEdit::collapse`; the Sculpt nodes' edits follow their nodes in the same step (`moveSculptNodes`) |
+| `edit_graph` `op=group` | `names`, `name` ("": compound1...) | `{"name", "moved" [[from, to]...]}`: Group (Ctrl+G), `GraphEdit::collapse`; the SculptGuides nodes' edits follow their nodes in the same step (`moveSculptNodes`) |
 | `edit_graph` `op=ungroup` | `name` (a Compound) | `{"names", "moved"}`: `GraphEdit::expand` |
 | `edit_graph` `op=expose_param` / `unexpose_param` | `name`, `param` | the param's input port (`paramInputs`: a Field port for a mappable number or a color field, Curve for a ramp, Value for the rest; refused for a param that sets the node's ports); unexposed, what fed it goes and the param keeps its value |
 | `edit_graph` `op=compound_expose` / `compound_unexpose` | `name` (a Compound), `param` (the name it shows), `target` ("node.param" inside) | the compound's panel (`definition.expose`); unexposed, the inner param keeps the value the compound set last |
@@ -534,7 +534,7 @@ it is kept as `edit_graph` keeps it, without a step (`"undoable": false`).
 | `corrective_rename` | `name`, `to` | refused when `to` is taken or not letters, digits and _ (the answer suggests one); the target follows |
 | `corrective_move` / `corrective_solo` | `name`, `step` (+1 up the stack) / `name` | reordered / only this one on (on again: every one back on) |
 | `corrective_delete` / `corrective_clear_keys` | `name` | removed (the target goes back to the base groom) / its keys or fades dropped: on every frame at its weight now |
-| `sculpt_target` | `node` (a Sculpt node), `corrective`, or `base`; none: as it is | `{"target": {"kind": base, corrective or node, "name"}, "sculptNodes": [{"name", "editedGuides"}]}`: what brushes edit. A corrective: strokes reshape the groom as shown and record offsets into the layer at the session's time (shot sculpting, `SessionStrokeHost::setShotSculpt`; a layer with no weight then records nothing and the stroke answers a warning). A Sculpt node: shaping brushes reshape its output guides (`GroomSession::setSculptTarget`; `display` shows them as the guides), their edits kept in `sculptData`. Not an undo step; an undo or edit that takes the layer or node away puts the base groom back |
+| `sculpt_target` | `node` (a SculptGuides node), `corrective`, or `base`; none: as it is | `{"target": {"kind": base, corrective or node, "name"}, "sculptNodes": [{"name", "editedGuides"}]}`: what brushes edit. A corrective: strokes reshape the groom as shown and record offsets into the layer at the session's time (shot sculpting, `SessionStrokeHost::setShotSculpt`; a layer with no weight then records nothing and the stroke answers a warning). A SculptGuides node: shaping brushes reshape its output guides (`GroomSession::setSculptTarget`; `display` shows them as the guides), their edits kept in `sculptData`. Not an undo step; an undo or edit that takes the layer or node away puts the base groom back |
 | `sculpt_clear` | `node` | `{"cleared", "sculptNodes", "undo"}`: the node's edits dropped, its guides as it is fed them (`clearSculptNode`) |
 
 Differences from Maya: a corrective's weight is the layer's own (its value, its fades, or its

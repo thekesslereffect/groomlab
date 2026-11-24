@@ -241,7 +241,7 @@ The guides a graph makes can be brushed in place, as Houdini's guide levels are:
 guides -> an even `Scatter` + `Interpolate` -> `ToGuides` (dense, evenly spaced guides) ->
 **`Sculpt`** -> the next `Interpolate`, a Clump's `centers` and so on.
 
-- **Pick the node:** select the Sculpt node in the Graph Editor, its row **Node: sculpt1** in
+- **Pick the node:** select the SculptGuides node in the Graph Editor, its row **Node: sculpt1** in
   Groom Tools > Correctives, or its menu's **Brush This Node's Guides**. The viewport then
   draws the node's output as the guides, and the shaping brushes (Comb, Smooth, Lift, Length,
   Twist, Attract, Cut; symmetry as for the guides) reshape
@@ -259,7 +259,7 @@ guides -> an even `Scatter` + `Interpolate` -> `ToGuides` (dense, evenly spaced 
 - **Renames, copies, deletion:** the Graph Editor carries the edits with a renamed node, gives a
   duplicate a copy and drops a deleted node's, in the edit's own undo step. **Clear Edits** (the
   node's panel, its menu, or the Correctives row's right-click) drops them.
-- **While brushing** only the Sculpt node and what follows it evaluate (its input stays cached);
+- **While brushing** only the SculptGuides node and what follows it evaluate (its input stays cached);
   the dabs are the CPU's (the GPU preview does not draw Sculpt strokes).
 
 ```python
@@ -270,5 +270,5 @@ sculpts.clear_edits(groom, "sculpt1")   # its guides as fed again (one undo step
 sculpts.set_target(groom, None)         # back to the base groom
 ```
 
-Limits: guides only (not strands); a Sculpt node inside a compound is not brushed from the UI;
+Limits: guides only (not strands); a SculptGuides node inside a compound is not brushed from the UI;
 sculpting while the groom follows a moving scalp away from its rest pose shows the guides at rest.

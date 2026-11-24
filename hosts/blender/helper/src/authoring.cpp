@@ -644,7 +644,7 @@ json sculptNodesJson(Session& s) {
     try {
         const GraphEdit edit(graphTextOf(*s.groom));
         for (const std::string& n : edit.nodeNames()) {
-            if (edit.nodeType(n) != "Sculpt" && edit.nodeType(n) != "SculptStrands") continue;  // (what brushes can shape)
+            if (edit.nodeType(n) != "SculptGuides" && edit.nodeType(n) != "SculptStrands") continue;  // (what brushes can shape)
             std::size_t guides = 0;  // (a SculptStrands node's: its strands)
             for (const char* kind : {"guides", "strands"}) {
                 if (edits.is_object() && edits.contains(n) && edits[n].is_object() && edits[n].contains(kind) && edits[n][kind].is_object()) {
@@ -668,7 +668,7 @@ json sculptTarget(Session& s, const json& args) {
     if (node) {
         const std::string name = needString(args, "node");
         const GraphEdit edit(graphTextOf(*s.groom));
-        if (!edit.hasNode(name) || (edit.nodeType(name) != "Sculpt" && edit.nodeType(name) != "SculptStrands")) {
+        if (!edit.hasNode(name) || (edit.nodeType(name) != "SculptGuides" && edit.nodeType(name) != "SculptStrands")) {
             fail("not_found", "the groom has no Sculpt or SculptStrands node named '" + name + "'");
         }
         setShotLayer(s, {});  // brushes shape the node's guides: no corrective (sculpts.py)

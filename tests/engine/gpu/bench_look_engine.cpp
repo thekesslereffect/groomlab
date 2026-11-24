@@ -761,7 +761,7 @@ std::string sculptBenchGraph(std::size_t strands, std::size_t guides) {
                           {"params", {{"density", static_cast<double>(guides) / area}, {"randomness", 0.0}, {"length", 15.0}, {"previewAll", true}}}});
     g["nodes"].push_back({{"name", "dense"}, {"type", "Interpolate"}});
     g["nodes"].push_back({{"name", "toGuides"}, {"type", "ToGuides"}});
-    g["nodes"].push_back({{"name", "sculpt"}, {"type", "Sculpt"}});
+    g["nodes"].push_back({{"name", "sculpt"}, {"type", "SculptGuides"}});
     for (auto& c : g["connections"]) {
         if (c["from"] == "guides" && c["to"] == "interpolate") c["from"] = "sculpt";
     }

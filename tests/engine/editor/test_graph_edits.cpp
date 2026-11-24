@@ -23,8 +23,8 @@ namespace {
 // Two Sculpt nodes after Length in the default graph.
 std::string sculptedGraph() {
     GraphEdit edit(defaultGraphJson());
-    const std::string a = edit.addNode("Sculpt", "sculpt1");
-    const std::string b = edit.addNode("Sculpt", "sculpt2");
+    const std::string a = edit.addNode("SculptGuides", "sculpt1");
+    const std::string b = edit.addNode("SculptGuides", "sculpt2");
     (void)a;
     (void)b;
     return edit.toJson();
@@ -52,7 +52,7 @@ TEST(GraphEdits, RenamesCopiesAndRemovalsCarryWhatNamesTheNodes) {
     EXPECT_EQ(now.sculptTarget, "shaping");
     EXPECT_EQ(now.viewNode, "shaping");
     // A copy gets its source's edits; a removed node loses its own, and the target and view let it go.
-    edit.addNode("Sculpt", "shaping1");
+    edit.addNode("SculptGuides", "shaping1");
     edit.removeNode("sculpt2");
     now = followGraphEdit(edit.toJson(), now, {}, {{"shaping1", "shaping"}});
     EXPECT_EQ(sculptedNodes(now.sculpts), (std::vector<std::string>{"shaping", "shaping1"}));

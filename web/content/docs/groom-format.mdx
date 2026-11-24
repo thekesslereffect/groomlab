@@ -59,7 +59,7 @@ GroomLab always writes the fields marked *always*; the others only when they hol
 | `parts` | object | none | Parting lines bound to the scalp's triangles as stored (before any subdivision). **Unstable.** |
 | `flow` | object | none | Flow arrows and sinks bound to the scalp's triangles as stored (before any subdivision). **Unstable.** |
 | `correctives` | object | none | Shot sculpt layers. **Unstable.** |
-| `sculpts` | object | none | Sculpt nodes' edits by node name: `{"sculpt1": {"guides": {"<id>": [t, ax, ay, scale, ...]}}}`, per edited guide one sample per segment (where along it, a turn in its own frame, a length factor). |
+| `sculpts` | object | none | SculptGuides nodes' edits by node name: `{"sculpt1": {"guides": {"<id>": [t, ax, ay, scale, ...]}}}`, per edited guide one sample per segment (where along it, a turn in its own frame, a length factor). |
 | `transferMarkers` | array | none | Marker pairs for Transfer Groom: `[{"old": {"face", "u", "v", "point"}, "new": {...}}]`, each side a point on its scalp (a triangle and barycentrics, and the point). |
 | `controls` | object | none | `{"name": number}`: Control values when the file was saved. |
 | `controlKeys` | object | none | `{"name": [[frame, value], ...]}`: a Control's keys (the app's param keys), frames ascending. A host takes the value at each frame from a smooth curve through them that never goes past two keys' values (monotone cubic), held at the first and last key outside them. |

@@ -313,7 +313,7 @@ TEST(AppOutput, FeathersAndBraidsAskInThePrompt) {
     // node's guides the brushes shape, its hair through a FollowGuides; again, the same nodes.
     ASSERT_TRUE(window.sculptBraidSections(four)) << window.lastReport().toStdString();
     const std::string sculpt = doc->sculptTarget();
-    ASSERT_EQ(sculpt, nodeOfType(*doc, "Sculpt"));
+    ASSERT_EQ(sculpt, nodeOfType(*doc, "SculptGuides"));
     const std::string follow = nodeOfType(*doc, "FollowGuides");
     ASSERT_FALSE(follow.empty());
     EXPECT_TRUE(linked(*doc, four, follow, "strands"));

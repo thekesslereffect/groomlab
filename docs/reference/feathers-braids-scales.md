@@ -65,12 +65,12 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   `braidSection` attributes: clump centers that follow the weave (a Clump with `centersFrom`
   inputCurves), tubes or curves of the braid itself.
 - **Shaping the sections (Sculpt Sections):** the Braid node's **Sculpt Sections** button (every
-  host's Graph Editor) makes its sections guides you brush, its hair following them: a Sculpt node
+  host's Graph Editor) makes its sections guides you brush, its hair following them: a SculptGuides node
   reads the `sections` output (its strokes are kept as bends of what it is fed, so they stay when
   the braid above changes: the path drawn again, the width, the weave) and a **FollowGuides** node
   right after the Braid carries each section's hair along its own section's change (`rest` the
   sections, `guides` the Sculpt's), the hair still on its way in from the scalp following as it
-  comes in (`braidWoven`), the roots staying. The brushes pick the Sculpt node (Brush This Node's
+  comes in (`braidWoven`), the roots staying. The brushes pick the SculptGuides node (Brush This Node's
   Guides); comb a section aside, lift a crossing, bend the tail. The sections are shown and brushed
   where the braid has them, curving paths too. The strokes are kept in the braid path's frame (each
   section point carries its place on the path: `braidPathAt`, `braidPath*`, `braidNormal*`,

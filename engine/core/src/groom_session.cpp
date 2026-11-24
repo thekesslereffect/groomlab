@@ -1192,7 +1192,7 @@ SculptInput GroomSession::sculptInput(const std::string& node) {
     const auto found = doc_->nodesByName.find(node);
     if (found == doc_->nodesByName.end()) throw std::runtime_error("the graph has no node named '" + node + "'");
     const std::string type = doc_->graph.node(found->second).typeName();
-    if (type != op::kSculpt && type != op::kSculptStrands) {
+    if (type != op::kSculptGuides && type != op::kSculptStrands) {
         throw std::runtime_error("node '" + node + "' is a " + type + ", not a Sculpt or SculptStrands node");
     }
     // A scratch copy of the view's document at the last view's settings: what the view made is
@@ -1242,7 +1242,7 @@ GuidesPtr GroomSession::sculptOutput(GraphDocument& doc, const EvalContext& ctx)
             const StrandsPtr strands = shownStrands(valueAs<StrandsPtr>(doc.graph.evaluate(found->second, ctx)));
             return strands ? strandsAsGuides(*strands, kSculptStrandsColor) : nullptr;
         }
-        if (type != op::kSculpt) return nullptr;
+        if (type != op::kSculptGuides) return nullptr;
         return valueAs<GuidesPtr>(doc.graph.evaluate(found->second, ctx));
     } catch (const std::exception&) {
         return nullptr;  // the evaluation's own errors say why

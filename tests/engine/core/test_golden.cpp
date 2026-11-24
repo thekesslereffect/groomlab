@@ -507,8 +507,8 @@ std::vector<Case> cases() {
          link("guides", "op", "strands") + "," + link("scatter", "grown", "strands") + "," + link("op", "grown", "guides") + "," +
              link("scalp", "grown", "scalp"),
          false, 0.0, false, 0, false, false, true},
-        {"Sculpt", "grown",
-         R"({"name": "op", "type": "Sculpt", "params": {"strength": 0.8}},
+        {"SculptGuides", "grown",
+         R"({"name": "op", "type": "SculptGuides", "params": {"strength": 0.8}},
             {"name": "grown", "type": "Interpolate"})",
          link("guides", "op", "guides") + "," + link("scalp", "op", "scalp") + "," + link("scatter", "grown", "strands") + "," +
              link("op", "grown", "guides") + "," + link("scalp", "grown", "scalp"),

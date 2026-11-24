@@ -835,7 +835,7 @@ std::string braidSculptNode(const GraphEdit& edit, const std::string& braid) {
     const json g = graphOf(edit);
     if (typeOf(g, braid) != "Braid") return {};
     for (const Link& l : linksFrom(g, braid)) {
-        if (l.output != "sections" || typeOf(g, l.to) != "Sculpt") continue;
+        if (l.output != "sections" || typeOf(g, l.to) != "SculptGuides") continue;
         for (const Link& f : linksFrom(g, l.to)) {
             if (typeOf(g, f.to) == "FollowGuides" && f.input == "guides") return l.to;
         }
@@ -845,7 +845,7 @@ std::string braidSculptNode(const GraphEdit& edit, const std::string& braid) {
 
 std::string sculptedBraid(const GraphEdit& edit, const std::string& sculpt) {
     const json g = graphOf(edit);
-    if (sculpt.empty() || typeOf(g, sculpt) != "Sculpt") return {};
+    if (sculpt.empty() || typeOf(g, sculpt) != "SculptGuides") return {};
     for (const json& c : g.value("connections", json::array())) {
         if (!c.is_object() || c.value("to", std::string()) != sculpt || c.value("output", std::string()) != "sections") continue;
         const std::string braid = c.value("from", std::string());
@@ -866,7 +866,7 @@ BraidSculptNodes insertBraidSculpt(GraphEdit& edit, const std::string& braid, st
     }
     const std::vector<Link> fed = linksFrom(g, braid);  // (before the follow is made)
     out.made = true;
-    out.sculpt = addNodeAt(edit, "Sculpt", "braidSculpt", json::object(), groomSize, placeBy(edit, braid, 0.0, kInsertRow));
+    out.sculpt = addNodeAt(edit, "SculptGuides", "braidSculpt", json::object(), groomSize, placeBy(edit, braid, 0.0, kInsertRow));
     out.follow = addNodeAt(edit, "FollowGuides", "braidFollow", json::object(), groomSize,
                            placeBy(edit, braid, kInsertColumn / 2.0, kInsertRow / 2.0));
     edit.connect(braid, out.sculpt, "guides", "sections");

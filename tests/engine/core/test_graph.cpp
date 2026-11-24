@@ -1063,7 +1063,7 @@ TEST(GraphInserts, BraidsAndFeathersLandAlikeInEveryHost) {
     ASSERT_FALSE(fedBySecond.empty());
     const BraidSculptNodes sculpted = insertBraidSculpt(edit, second);
     EXPECT_TRUE(sculpted.made);
-    EXPECT_EQ(edit.nodeType(sculpted.sculpt), "Sculpt");
+    EXPECT_EQ(edit.nodeType(sculpted.sculpt), "SculptGuides");
     EXPECT_EQ(edit.nodeType(sculpted.follow), "FollowGuides");
     EXPECT_EQ(source(edit, sculpted.sculpt, "guides"), second);
     EXPECT_EQ(source(edit, sculpted.follow, "strands"), second);

@@ -720,7 +720,7 @@ std::vector<std::string> GroomDocument::sculptNodes() const {
     if (!graph_.contains("nodes")) return names;
     for (const json& n : graph_["nodes"]) {
         const std::string type = n.value("type", std::string());
-        if (type == op::kSculpt || type == op::kSculptStrands) names.push_back(n.value("name", std::string()));  // (what brushes can shape)
+        if (type == op::kSculptGuides || type == op::kSculptStrands) names.push_back(n.value("name", std::string()));  // (what brushes can shape)
     }
     return names;
 }
@@ -1298,7 +1298,7 @@ std::string GroomDocument::pasteNodes(const std::string& text, float dx, float d
         for (const auto& [name, from] : edit.pasteNodes(text, dx, dy)) {
             names.push_back(name);
             const std::string type = edit.nodeType(name);
-            if ((type == op::kSculpt || type == op::kSculptStrands || type == "Compound") && nodeJson(from)) copiedSculpts[name] = from;
+            if ((type == op::kSculptGuides || type == op::kSculptStrands || type == "Compound") && nodeJson(from)) copiedSculpts[name] = from;
         }
         g = json::parse(edit.toJson());
     }, {}, copiedSculpts);
@@ -1361,7 +1361,7 @@ std::string GroomDocument::duplicateNodes(const std::vector<std::string>& nodes,
         for (const auto& [copy, source] : edit.duplicateNodes(nodes, dx, dy)) {
             names.push_back(copy);
             const std::string type = edit.nodeType(copy);
-            if (type == op::kSculpt || type == op::kSculptStrands || type == "Compound") copied[copy] = source;
+            if (type == op::kSculptGuides || type == op::kSculptStrands || type == "Compound") copied[copy] = source;
         }
         g = json::parse(edit.toJson());
     }, {}, copied);

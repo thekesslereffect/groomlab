@@ -732,7 +732,7 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(len(head.groomlab_tools.corrective_weights), 0)
         self.assertEqual([r.kind for r in t.correctives], ["base"])
         # A Sculpt node: brushed (its row picked), its edits cleared.
-        made, _err = graph.add_node(head, "Sculpt")
+        made, _err = graph.add_node(head, "SculptGuides")
         tools.refresh_info(head)
         self.assertEqual([(r.kind, r.name) for r in t.correctives], [("node", made), ("base", "Base groom")])
         t.corrective_index = 0
