@@ -205,33 +205,8 @@ class ParamPanel(QtWidgets.QScrollArea):
     def keep_scroll(self, body, value):
         """The params of `body` (just shown) scrolled to `value` once they are laid out: the scroll
         bar's range only grows to it when Qt lays the new widgets out, after this event."""
-        bar = self.verticalScrollBar()
-        if value <= 0:
-            return
-
-        def apply(*_):
-            if not widgets.alive(body) or self.widget() is not body:
-                done()
-                return
-            bar.setValue(min(value, bar.maximum()))
-            if bar.maximum() >= value:
-                done()
-
-        following = [True]
-
-        def done():
-            if not following[0]:
-                return
-            following[0] = False
-            try:
-                bar.rangeChanged.disconnect(apply)
-            except (RuntimeError, TypeError):
-                pass
-
-        bar.rangeChanged.connect(apply)
-        apply()
-        # Laid out by now: stop following the range (the user's own scrolling and later growth are theirs).
-        later(lambda: (apply(), done()))
+        widgets.scroll_when_laid_out(self.verticalScrollBar(), value,
+                                     still=lambda: widgets.alive(body) and self.widget() is body)
 
     def update_error(self):
         """The red line under the node's header: its error from the last evaluation (or an amber

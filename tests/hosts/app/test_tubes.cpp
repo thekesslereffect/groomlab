@@ -13,12 +13,16 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QResizeEvent>
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QToolButton>
 #include <QTreeWidget>
 
@@ -491,6 +495,72 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     EXPECT_FALSE(tubes->preview()->editable()) << "a small read-only preview";
     tools.setTool("select");
     EXPECT_TRUE(tubes->isHidden()) << "Select's card is the selection's: the tubes are the Tube brush's";
+}
+
+TEST(AppGroomTools, PickingAToolKeepsThePanelsScroll) {
+    // Issue 114: a tile clicked leaves the panel where it is scrolled; only a card too short to
+    // reach there scrolls up to its end.
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    BrushSession session;
+    session.setDocument(doc.get());
+    GroomTools tools;
+    tools.setSession(&session);
+    tools.setGroomName(QStringLiteral("sample"));
+    tools.resize(300, 360);
+    tools.show();
+    auto settle = [] {
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+    };
+    QScrollBar* bar = tools.scrollArea()->verticalScrollBar();
+    auto pick = [&](const char* tool) {
+        session.setTool(tool);
+        tools.setTool(tool);
+        settle();
+    };
+    auto userScroll = [&](int value) {  // as a drag or the wheel does: an action of the bar's
+        bar->setSliderPosition(value);
+        bar->triggerAction(QAbstractSlider::SliderMove);
+        EXPECT_EQ(bar->value(), value);
+    };
+    auto waitMs = [](int ms) {  // (the hold over: its timer run)
+        QElapsedTimer clock;
+        clock.start();
+        while (clock.elapsed() < ms) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    };
+    pick("comb");
+    const int combMax = bar->maximum();
+    pick("shape");
+    const int tall = bar->maximum();
+    ASSERT_GT(tall, combMax) << "the Tube tool's card is the longer";
+    const int at = combMax / 2;
+    ASSERT_GT(at, 0) << "Comb's card scrolls too";
+    userScroll(at);
+    for (const char* tool : {"comb", "shape", "comb", "shape"}) {  // a tile clicked: the panel stays
+        pick(tool);
+        EXPECT_EQ(bar->value(), at) << tool;
+    }
+    waitMs(1600);  // (after the card's layouts settle: still there)
+    EXPECT_EQ(bar->value(), at);
+    // Moved by something else while the card lays out (the focus passed on down the panel): back.
+    pick("comb");
+    bar->setValue(0);
+    EXPECT_EQ(bar->value(), at);
+    // Below where Comb's card reaches: Comb at its end; the Tube tool picked straight back (Comb
+    // still holding), where it was.
+    waitMs(1600);
+    pick("shape");
+    userScroll(tall - 20);
+    pick("comb");
+    EXPECT_EQ(bar->value(), bar->maximum());
+    EXPECT_LT(bar->value(), tall - 20);
+    pick("shape");
+    EXPECT_EQ(bar->value(), tall - 20);
+    // The user's own scrolling while it holds: theirs.
+    pick("comb");
+    userScroll(0);
+    settle();
+    EXPECT_EQ(bar->value(), 0);
 }
 
 TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
