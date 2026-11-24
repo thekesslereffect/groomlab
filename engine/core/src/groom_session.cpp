@@ -1668,14 +1668,14 @@ std::shared_ptr<const std::vector<Vec3f>> GroomSession::clumpCenterDots(GraphDoc
     // read and its kept state names, preview_core.h).
     (void)clumped;
     const std::string from = op.params().getString("centersFrom");
-    if (from != "pick") {  // the centers input (guides or strands), when one is linked
+    if (from != "pick" && from != "upstreamClump") {  // the centers input (guides or strands), when one is linked
         if (!doc.graph.inputSource(node, 1, &source, &output)) return dots;
         doc.graph.evaluateOutput(source, output, ctx);
         const Value value = doc.graph.cachedValue(source, output);
         centers = valueAs<GuidesPtr>(value);
         centerStrands = valueAs<StrandsPtr>(value);
     } else {
-        // A Clump picking its own centers: the strands they are (their roots), else (centers on the
+        // A Clump picking its own centers (pick, upstreamClump): the strands they are (their roots), else (centers on the
         // scalp, its axes moved to their spots: ClumpState::offsets) the centers' curves as it kept them.
         ClumpState state;
         const StrandsPtr made = valueAs<StrandsPtr>(doc.graph.cachedValue(node));

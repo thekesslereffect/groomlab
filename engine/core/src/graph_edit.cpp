@@ -833,6 +833,32 @@ bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, co
         }
         return false;
     };
+    // A Clump linked to a Clump's centers (issue #115): the smaller clumps inside its clumps
+    // (upstreamClump), reading the clump numbers it writes; this one's own written under another
+    // name when it would take that one's (subClumpId).
+    if (input == "centers" && nodeType(dst) == op::kClump && nodeType(src) == op::kClump) {
+        std::string upChannel = "clumpId";
+        for (const json& n : impl_->nodes()) {
+            if (n.is_object() && n.value("name", std::string()) == src && n.contains("params") && n["params"].is_object()) {
+                const auto it = n["params"].find("clumpChannel");
+                if (it != n["params"].end() && it->is_string()) upChannel = it->get<std::string>();
+            }
+        }
+        for (json& n : impl_->nodes()) {
+            if (!n.is_object() || n.value("name", std::string()) != dst) continue;
+            json& params = n["params"];
+            if (!params.is_object()) params = json::object();
+            const auto it = params.find("centersFrom");
+            if (it != params.end() && !(it->is_string() && it->get<std::string>() == "pick")) return false;
+            params["centersFrom"] = "upstreamClump";
+            params["upstreamChannel"] = upChannel;
+            const auto own = params.find("clumpChannel");
+            const std::string ownChannel = own != params.end() && own->is_string() ? own->get<std::string>() : std::string("clumpId");
+            if (!upChannel.empty() && ownChannel == upChannel) params["clumpChannel"] = "subClumpId";
+            return true;
+        }
+        return false;
+    }
     struct Switch {
         const char *type, *input, *param, *from, *to, *toForGuides;
     };

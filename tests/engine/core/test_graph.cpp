@@ -1675,6 +1675,26 @@ TEST(GraphEdit, MovedGuidesLinkedByHandMakeAClumpFollowThem) {
     }
 }
 
+TEST(GraphEdit, AClumpLinkedToAClumpsCentersClumpsInsideItsClumps) {
+    // Issue #115: a Clump linked by hand into a picking Clump's centers: the smaller clumps inside
+    // its clumps (upstreamClump), reading the numbers it writes (its clumpChannel); this one's own
+    // written under another name so both are kept.
+    const nlohmann::json g = {
+        {"version", 1},
+        {"nodes",
+         {{{"name", "s"}, {"type", "Scatter"}},
+          {{"name", "big"}, {"type", "Clump"}, {"params", {{"clumpChannel", "lockId"}}}},
+          {{"name", "small"}, {"type", "Clump"}, {"params", {{"clumpChannel", "lockId"}}}}}},
+        {"connections",
+         {{{"from", "s"}, {"to", "big"}, {"input", "strands"}}, {{"from", "big"}, {"to", "small"}, {"input", "strands"}}}}};
+    GraphEdit edit(g.dump());
+    EXPECT_TRUE(edit.connectByHand("big", "small", "centers"));
+    const nlohmann::json small = nlohmann::json::parse(edit.toJson())["nodes"][2]["params"];
+    EXPECT_EQ(small.value("centersFrom", std::string()), "upstreamClump");
+    EXPECT_EQ(small.value("upstreamChannel", std::string()), "lockId");
+    EXPECT_EQ(small.value("clumpChannel", std::string()), "subClumpId");
+}
+
 TEST(GraphEdit, DetachTakesANodeOutOfTheFlowAndKeepsIt) {
     // Detach (every host's node menu, Ctrl+Shift+X; issue #80): what fed the node feeds what it fed,
     // the graph's output passes on, the node stays unlinked below the new link.

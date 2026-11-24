@@ -1294,7 +1294,10 @@ TEST(ClumpCenters, ClumpByReadsOnlyTheOneItPicks) {
         if (op["type"] != "Clump") continue;
         for (const nlohmann::json& p : op["params"]) {
             if (p["name"] == "count") EXPECT_EQ(p["showWhen"], (nlohmann::json{{"param", "clumpBy"}, {"in", {"count"}}}));
-            if (p["name"] == "clumpBy") EXPECT_EQ(p["showWhen"], (nlohmann::json{{"param", "centersFrom"}, {"in", {"pick"}}}));
+            // (Its own centers: pick, and upstreamClump's inside an upstream Clump's, issue #115.)
+            if (p["name"] == "clumpBy") {
+                EXPECT_EQ(p["showWhen"], (nlohmann::json{{"param", "centersFrom"}, {"in", {"pick", "upstreamClump"}}}));
+            }
         }
     }
 }
@@ -6133,6 +6136,50 @@ TEST(Clump, WithoutCentersPicksItsOwn) {
     EXPECT_EQ(maxDisplacement(*before, *none), 0.0f);
     ASSERT_NE(none->strandChannel("clumpId"), nullptr);
     for (const float id : *none->strandChannel("clumpId")) EXPECT_EQ(id, -1.0f);
+}
+
+TEST(Clump, UpstreamClumpMakesSmallerClumpsInsideTheBigOnes) {
+    // Issue #115: a big Clump, then a small one of centersFrom upstreamClump: the small clumps lie
+    // inside the big ones (never two big clumps' strands in one small clump), more of them, the big
+    // clumps' numbers kept, and each small clump draws its strands closer together still.
+    LookGraph lg;
+    const NodeId big = lg.add(op::kClump, lg.scatter);
+    lg.g.node(big).params().set("count", std::int64_t{6});
+    const NodeId small = lg.add(op::kClump, big);
+    lg.g.node(small).params().set("count", std::int64_t{40});
+    lg.g.node(small).params().set("clumpChannel", std::string("subClumpId"));
+    lg.g.node(small).params().set("centersFrom", std::string("upstreamClump"));
+    const StrandsPtr bigOut = lg.eval(big);
+    const StrandsPtr out = lg.eval(small);
+    const auto* bigIds = out->strandChannel("clumpId");
+    const auto* subIds = out->strandChannel("subClumpId");
+    ASSERT_NE(bigIds, nullptr);
+    ASSERT_NE(subIds, nullptr);
+    EXPECT_EQ(*bigIds, *bigOut->strandChannel("clumpId")) << "the big clumps' numbers kept";
+    auto crossing = [&](const std::vector<float>& sub) {
+        std::map<int, std::set<int>> bigsOf;
+        for (std::size_t s = 0; s < sub.size(); ++s) {
+            if (sub[s] >= 0.0f) bigsOf[static_cast<int>(sub[s])].insert(static_cast<int>((*bigIds)[s]));
+        }
+        std::size_t across = 0;
+        for (const auto& [id, bigs] : bigsOf) across += bigs.size() > 1;
+        return std::make_pair(across, bigsOf.size());
+    };
+    const auto [across, subs] = crossing(*subIds);
+    EXPECT_EQ(across, 0u) << "a small clump takes strands of two big clumps";
+    std::set<int> bigs(bigIds->begin(), bigIds->end());
+    EXPECT_GT(subs, bigs.size()) << "no more clumps than the big ones";
+    EXPECT_GT(maxDisplacement(*bigOut, *out), 0.001f);
+    // Plain pick (the same count) clumps across the big clumps: the mode is what keeps them inside.
+    lg.g.node(small).params().set("centersFrom", std::string("pick"));
+    EXPECT_GT(crossing(*lg.eval(small)->strandChannel("subClumpId")).first, 0u);
+    // Its clumpChannel the upstream's own: that one's numbers stay (a note says to name another).
+    lg.g.node(small).params().set("centersFrom", std::string("upstreamClump"));
+    lg.g.node(small).params().set("clumpChannel", std::string("clumpId"));
+    EXPECT_EQ(*lg.eval(small)->strandChannel("clumpId"), *bigOut->strandChannel("clumpId"));
+    const auto note = lg.g.lastNotes().find(small);
+    ASSERT_NE(note, lg.g.lastNotes().end());
+    EXPECT_NE(note->second.find("subClumpId"), std::string::npos) << note->second;
 }
 
 TEST(ClumpCenters, StrandsWithoutPointsAreNeverCentersNorRead) {

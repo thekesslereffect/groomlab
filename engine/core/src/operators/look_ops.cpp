@@ -925,15 +925,25 @@ public:
                       "strands: a Scatter, guides, single points) only says where the clumps are (their roots), each "
                       "axis the strand it gathers nearest its center's root (the hair as grown there); inputCurves: each "
                       "axis is the center curve itself (groomed clump curves, a Noise on the centers waving each clump "
-                      "as one). Connecting centers in the Graph Editor sets inputPoints (a Guides node: inputCurves)",
-                      "", {"pick", "inputPoints", "inputCurves"}},
+                      "as one); upstreamClump: smaller clumps inside an earlier Clump's (issue #115): it picks its own "
+                      "centers as pick does, and each strand gathers only toward the centers inside its own upstream "
+                      "clump (upstreamChannel, the clump number that Clump writes), so the big clumps keep their shape "
+                      "and split into smaller ones, a big clump with no center of its own left as it is. Connecting "
+                      "centers in the Graph Editor sets inputPoints (a Guides node: inputCurves; a Clump: upstreamClump)",
+                      "", {"pick", "inputPoints", "inputCurves", "upstreamClump"}},
+            ParamSpec{"upstreamChannel", std::string("clumpId"),
+                      "centersFrom upstreamClump: the per-strand channel numbering the upstream Clump's clumps (its "
+                      "clumpChannel; any Clump before this one in the chain, or the one linked to centers). Give this "
+                      "Clump's own clumpChannel another name (subClumpId) to keep both"}
+                .readsChannel(true)
+                .when("centersFrom", {"upstreamClump"}),
             ParamSpec{"clumpBy", std::string("count"),
                       "The clumps it picks among the strands: count: about `count` of them, whatever the scalp's size "
                       "(re-fitted to the scalp's area: an edit that changes it by more than 1% moves every clump); size: "
                       "clumps about `size` apart, as many as the scalp holds (a whole body gets more than a head, of the "
                       "same size; an edit of the scalp changes the clumps only near it)",
                       "", {"count", "size"}}
-                .when("centersFrom", {"pick"}),
+                .when("centersFrom", {"pick", "upstreamClump"}),
             notAnimatable({"count", std::int64_t{300}, "About how many clumps (clumpBy count); 0: none (the strands as they "
                                                        "came)"})
                 .atLeast(0)
@@ -951,11 +961,11 @@ public:
                            "past 1 on beyond it, up to 2. As Scatter's", "fraction"})
                 .range(0, kMaxCenterRandomness)
                 .soft(0, 1)
-                .when("centersFrom", {"pick"}),
+                .when("centersFrom", {"pick", "upstreamClump"}),
             ParamSpec{"centerWeight", 1.0, "Chance each strand can be a center it picks, 0-1 (mappable: e.g. an Expression "
                                            "favoring long strands, or guideInfluence)", "fraction"}
                 .soft(0, 1)
-                .when("centersFrom", {"pick"})
+                .when("centersFrom", {"pick", "upstreamClump"})
                 .adv(),
             ParamSpec{"pastTip", std::string("fit"),
                       "How a strand lies along its clump's axis. fit: tip to tip, each point at the same share of the "
@@ -999,7 +1009,7 @@ public:
                       "rooted in and a strand gathers toward its own tube's; strands in no tube clump as ever. Off: by "
                       "root across tubes. "
                       "Strands without those channels clump as ever either way"}
-                .when("centersFrom", {"pick"}),
+                .when("centersFrom", {"pick", "upstreamClump"}),
             ParamSpec{"repelRadius", 0.5, "With a negative strength: how far from its center a strand is pushed out to at "
                                           "least (the part's half width): those within twice it move out, the nearest "
                                           "to it, keeping their order; those farther away stay as they are (mappable: "
@@ -1201,9 +1211,12 @@ private:
         const StrandsPtr in = requireStrands(inputs, 0, op::kClump);
         ProfilePhases phase("clump.centers");
         const std::string from = params().getString("centersFrom");
-        const bool own = from == "pick";
+        // upstreamClump: centers of its own, as pick, each strand clumping only within its upstream
+        // clump (below, by regions).
+        const bool upstream = from == "upstreamClump";
+        const bool own = from == "pick" || upstream;
         if (!own && from != "inputPoints" && from != "inputCurves") {
-            throw GraphError("Clump: unknown centersFrom '" + from + "' (pick, inputPoints or inputCurves)");
+            throw GraphError("Clump: unknown centersFrom '" + from + "' (pick, inputPoints, inputCurves or upstreamClump)");
         }
         const bool linked = inputs.at(1).index() != 0;
         const std::string regionName = params().getString("regionChannel");
@@ -1255,7 +1268,7 @@ private:
                 if (side) c.side = (*side)[s];
             }, 1024);
         };
-        if (own && linked) {
+        if (own && linked && !upstream) {
             ctx.note("centers are connected but centersFrom is pick (it picks its own): set centersFrom to inputPoints "
                      "or inputCurves to clump by them");
         } else if (!own) {
@@ -1343,7 +1356,9 @@ private:
 
         const ScalarField strength(params(), "strength", scalpOf(ctx));
         strength.validate(*in);
-        const std::string channel = params().getString("clumpChannel");
+        // (upstreamClump writing the upstream Clump's own channel: left as that Clump numbered it.)
+        const bool keepsUpstream = upstream && params().getString("clumpChannel") == params().getString("upstreamChannel");
+        const std::string channel = keepsUpstream ? std::string() : params().getString("clumpChannel");
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         // Each clump's axis: the core strand it gathers nearest its center's root (centersFrom
         // inputPoints), else the center's own curve (a center of its own is a strand).
@@ -1482,6 +1497,41 @@ private:
                 tubeRegions[s] = t >= 0.0f ? kTubeRegionBase + t : channelRegions ? (*channelRegions)[s] : 0.0f;
             }, 4096);
             strandRegions = &tubeRegions;
+        }
+        // upstreamClump: each upstream clump (its number in upstreamChannel, on these strands, else on
+        // the strands linked as centers when they are these strands as that Clump left them) a region
+        // of its own within the regions above, so a strand clumps only toward the centers inside its
+        // own big clump, the big clump's shape kept (its axes are its own strands).
+        std::vector<float> upstreamRegions;
+        if (upstream && !vanes.active()) {
+            const std::string upName = params().getString("upstreamChannel");
+            const std::vector<float>* up = upName.empty() ? nullptr : in->strandChannel(upName);
+            if (!up && !upName.empty()) {
+                if (const StrandsPtr linkedStrands = valueAs<StrandsPtr>(inputs.at(1))) {
+                    const std::vector<float>* theirs = linkedStrands->strandChannel(upName);
+                    if (theirs && linkedStrands->strandCount() == in->strandCount() && linkedStrands->ids() == in->ids()) up = theirs;
+                }
+            }
+            if (!up || up->size() != in->strandCount()) {
+                ctx.note("no upstream clumps: no Clump before this one writes " + (upName.empty() ? std::string("a channel") : upName) +
+                         " (its clumpChannel): it clumps as pick does");
+            } else {
+                if (keepsUpstream) {
+                    ctx.note("its clumpChannel is the upstream Clump's own (" + upName + "): it is kept as that Clump numbered "
+                             "it; name this one's another (subClumpId) to have both");
+                }
+                // (Numbered in order of first appearance: the same strands, the same regions.)
+                std::unordered_map<std::uint64_t, float> numberOf;
+                upstreamRegions.resize(in->strandCount());
+                for (std::size_t s = 0; s < upstreamRegions.size(); ++s) {
+                    const float base = strandRegions ? (*strandRegions)[s] : 0.0f;
+                    const float clump = (*up)[s];
+                    std::uint64_t key = hashFloat(hashFloat(hash64(0x5CB1u), base), clump >= 0.0f ? clump : -1.0f);
+                    const auto it = numberOf.emplace(key, static_cast<float>(numberOf.size())).first;
+                    upstreamRegions[s] = it->second;
+                }
+                strandRegions = &upstreamRegions;
+            }
         }
         const PreviewCore core(*in);  // what a center's region and axis come from (preview_core.h)
         const std::uint64_t regionHash = strandRegions ? hashChannel(*strandRegions) : 0;
