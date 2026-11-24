@@ -6182,6 +6182,47 @@ TEST(Clump, UpstreamClumpMakesSmallerClumpsInsideTheBigOnes) {
     EXPECT_NE(note->second.find("subClumpId"), std::string::npos) << note->second;
 }
 
+TEST(Clump, AfterABraidItClumpsAlongEachSectionOfEachBraid) {
+    // A Clump after a Braid (centersFrom upstreamClump, upstreamChannel braidSection): clumps
+    // along each section of each braid, never two braids' (nor two sections') strands in one clump,
+    // though sections are numbered within their braid (braidSection read with braidId).
+    std::vector<float> xs;
+    for (int i = 0; i < 72; ++i) xs.push_back((static_cast<float>(i) + 0.5f) / 72.0f);
+    auto in = uprights(xs);
+    std::vector<float>& braidIds = in->addStrandChannel("braidId", -1.0f);
+    std::vector<float>& sections = in->addStrandChannel("braidSection", -1.0f);
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+        braidIds[i] = static_cast<float>((i / 2) % 2);  // the two braids' strands side by side
+        sections[i] = static_cast<float>(i % 3);
+    }
+    auto op = OperatorRegistry::instance().create(op::kClump);
+    op->params().set("count", std::int64_t{8});
+    op->params().set("centersFrom", std::string("upstreamClump"));
+    op->params().set("upstreamChannel", std::string("braidSection"));
+    auto mixed = [&](const StrandsPtr& out) {
+        std::map<int, std::set<std::pair<int, int>>> groupsOf;
+        const std::vector<float>& ids = *out->strandChannel("clumpId");
+        for (std::size_t s = 0; s < ids.size(); ++s) {
+            if (ids[s] >= 0.0f) groupsOf[static_cast<int>(ids[s])].insert({static_cast<int>(braidIds[s]), static_cast<int>(sections[s])});
+        }
+        std::size_t across = 0;
+        for (const auto& [id, groups] : groupsOf) across += groups.size() > 1;
+        return std::make_pair(across, groupsOf.size());
+    };
+    const StrandsPtr out = valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value{}}));
+    ASSERT_TRUE(out);
+    const auto [across, clumps] = mixed(out);
+    EXPECT_EQ(across, 0u) << "a clump takes strands of two braids' sections";
+    EXPECT_GE(clumps, 6u) << "every section of each braid clumped";
+    // The section number alone would join the two braids' sections of the same number.
+    op->params().set("upstreamChannel", std::string("braidId"));
+    const StrandsPtr byBraid = valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value{}}));
+    EXPECT_GT(mixed(byBraid).first, 0u) << "braidId alone: across a braid's sections";
+    op->params().set("centersFrom", std::string("pick"));
+    const StrandsPtr picked = valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value{}}));
+    EXPECT_GT(mixed(picked).first, 0u) << "pick clumps across the braids";
+}
+
 TEST(ClumpCenters, StrandsWithoutPointsAreNeverCentersNorRead) {
     // Strands of no points (an empty guide's, a cut to nothing) among the rest: no read past their
     // points, never a center; Merge's seam blend skips them the same way.

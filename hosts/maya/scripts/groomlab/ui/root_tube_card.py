@@ -276,7 +276,8 @@ class RootTubeCard(QtCore.QObject):
     def refresh(self, groom, full=True):
         """The buttons as the tool stands, and the hierarchy's levels. `full` False (the palette's
         frequent tick): the levels and the density map read again only for another groom or after
-        an action here (each read parses the guides and lays the scalp: a hitch every tick)."""
+        an action here (each read parses the guides and lays the scalp: a hitch every tick); `full`:
+        also when the guides or maps changed since they were read."""
         self.tool.poll()  # (after an undo the tool reads the groom again: its outlines follow)
         mode = self._mode()
         editing = mode == "edit"
@@ -291,8 +292,16 @@ class RootTubeCard(QtCore.QObject):
         self.duplicate_root.setEnabled(picked)
         self.duplicate_root.setChecked(mode == "duplicate")
         self.subdivide_root.setEnabled(picked)
-        heavy = full or groom != getattr(self, "_read_groom", "?") or self._levels is None
+        # (The levels and the density map read only when the guides or maps changed, or for another
+        # groom or level picked: each read parses the guides and lays the scalp, a hitch per tick.)
+        from groomlab.ui import groom_watch
+        stamp = groom_watch.stamp(groom, ("guideData", "scalpMaps"))
+        key = (stamp, self.owner.current_group())
+        heavy = (groom != getattr(self, "_read_groom", "?") or self._levels is None
+                 or (full and (stamp is None or key != getattr(self, "_read_key", None))))
         self._read_groom = groom
+        if heavy:
+            self._read_key = key
         if heavy:
             self.fill_density_maps(groom)
         else:

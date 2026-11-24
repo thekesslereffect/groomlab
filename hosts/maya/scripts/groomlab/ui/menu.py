@@ -2511,6 +2511,11 @@ def uninstall():
         mesh_maps.stop()
     except Exception:
         pass
+    try:
+        from groomlab.ui import groom_watch
+        groom_watch.stop()
+    except Exception:
+        pass
     if _SIMS_SCENE_JOBS:
         from maya.api import OpenMaya as om
         for job in _SIMS_SCENE_JOBS:

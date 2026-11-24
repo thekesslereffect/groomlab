@@ -1094,6 +1094,68 @@ TEST(RootSubdivision, CellsOfALeaningTubeStayInItFromTheRoot) {
     }
 }
 
+// The sphere with a thin closed box standing just over part of the top (an ear under a root drawn
+// above it: over the scalp, under the plane a root's cut is laid in).
+std::shared_ptr<const ScalpMesh> headWithEar() {
+    static const std::shared_ptr<const ScalpMesh> mesh = [] {
+        const auto sphere = head();
+        std::vector<Vec3f> pts(sphere->points().begin(), sphere->points().end());
+        std::vector<ScalpMesh::Triangle> tris(sphere->triangles().begin(), sphere->triangles().end());
+        const std::int32_t o = static_cast<std::int32_t>(pts.size());
+        const float x0 = 0.17f, x1 = 0.45f, z0 = -0.12f, z1 = 0.12f, y0 = 0.988f, y1 = 0.996f;
+        for (const float y : {y0, y1}) {
+            pts.push_back({x0, y, z0}), pts.push_back({x1, y, z0}), pts.push_back({x1, y, z1}), pts.push_back({x0, y, z1});
+        }
+        // (Faces wound as the sphere's, outward: checked below by the normal they give.)
+        const std::vector<std::array<int, 4>> quads{{4, 5, 6, 7}, {3, 2, 1, 0}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+        std::vector<ScalpMesh::Triangle> box;
+        for (const auto& q : quads) {
+            box.push_back({o + q[0], o + q[1], o + q[2]});
+            box.push_back({o + q[0], o + q[2], o + q[3]});
+        }
+        const ScalpMesh probe(pts, [&] { auto t = tris; t.insert(t.end(), box.begin(), box.end()); return t; }());
+        const SurfacePoint top = probe.closestPoint({0.3f, 1.2f, 0.0f});
+        const bool sphereOut = sphere->normal(sphere->closestPoint({0, 2, 0}).root).y > 0.0f;
+        if ((probe.normal(top.root).y > 0.0f) != sphereOut) {
+            for (auto& t : box) std::swap(t[1], t[2]);
+        }
+        tris.insert(tris.end(), box.begin(), box.end());
+        return std::make_shared<const ScalpMesh>(std::move(pts), std::move(tris));
+    }();
+    return mesh;
+}
+
+TEST(RootSubdivision, CellsAreCutOnTheScalpTheRootIsDrawnOnNotOnAnEarOverIt) {
+    // Issue #110: a root drawn over the top of a head, an ear standing just over part of it (between
+    // the scalp and the plane the cut is laid in): every cell, its CVs, its site and its guide's
+    // root are on the head, none taken up onto the ear.
+    GuideHierarchy h;
+    const auto scalp = headWithEar();
+    RootTubeOptions o;
+    o.length = 0.8f;
+    o.segments = 8;
+    const GuideId root = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.3f), {}, o);
+    for (const Vec3f& p : rootTubeOutline(h, *scalp, root)) ASSERT_NEAR(p.length(), 1.0f, 2e-3f) << "the root drawn on the head";
+    RootSubdivisionOptions cut;
+    cut.multiplier = 3.0f;
+    const std::vector<GuideId> cells = subdivideRootTubes(h, *scalp, {root}, cut).cells;
+    h.evaluate(scalp.get());
+    ASSERT_GE(cells.size(), 8u);
+    auto onHead = [](const Vec3f& p) { return std::abs(p.length() - 1.0f) < 2e-3f; };
+    int nearEar = 0;
+    for (const GuideId c : cells) {
+        for (const Vec3f& p : rootTubeOutline(h, *scalp, c)) {
+            EXPECT_TRUE(onHead(p)) << "cell " << c << " has a CV off the head at " << p.x << " " << p.y << " " << p.z;
+            nearEar += p.x > 0.17f && std::abs(p.z) < 0.12f;
+        }
+        EXPECT_TRUE(onHead(h.guide(c)->points.front())) << "cell " << c << "'s guide rooted off the head";
+    }
+    EXPECT_GT(nearEar, 0) << "cells under the ear (the case looked at)";
+    ASSERT_EQ(h.rootSubdivisions().size(), 1u);
+    for (const StrandRoot& site : h.rootSubdivisions()[0].sites) EXPECT_TRUE(onHead(scalp->position(site)));
+    for (const StrandRoot& sample : h.rootSubdivisions()[0].samples) EXPECT_TRUE(onHead(scalp->position(sample)));
+}
+
 }  // namespace
 }  // namespace groomlab
 

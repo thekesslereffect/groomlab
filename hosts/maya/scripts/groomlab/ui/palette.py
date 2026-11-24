@@ -564,12 +564,20 @@ class TubePanel(QtWidgets.QWidget):
         (busy()); `force` (after the panel's own edit): only not mid-drag."""
         if self.editor.busy() if force else self.busy():
             return
+        # (Polled: read again only when the guides or their selection changed, or for another
+        # groom or mode; each read parses the guides, a hitch every tick on a big groom.)
+        from groomlab.ui import groom_watch
+        stamp = groom_watch.stamp(groom, ("guideData", "guideSelection"))
+        key = (groom, self.mode, stamp)
+        if not force and stamp is not None and key == getattr(self, "_read_key", None):
+            return
+        self._read_key = key
         info = {"source": "none", "guides": [], "tube": None, "shapes": [], "midShapes": [], "tipShapes": [], "inUse": []}
         if groom:
             try:
                 if self.mode == "edit":
                     info = groomlab.tube_targets(groom)
-                if full or groom != self._groom:
+                if full or force or groom != self._groom or stamp is not None:
                     self._library = [s for s in groomlab.tube_shapes(groom) if not s["builtin"]]
             except (RuntimeError, ValueError):
                 pass

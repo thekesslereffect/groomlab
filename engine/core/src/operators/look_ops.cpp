@@ -928,13 +928,17 @@ public:
                       "as one); upstreamClump: smaller clumps inside an earlier Clump's (issue #115): it picks its own "
                       "centers as pick does, and each strand gathers only toward the centers inside its own upstream "
                       "clump (upstreamChannel, the clump number that Clump writes), so the big clumps keep their shape "
-                      "and split into smaller ones, a big clump with no center of its own left as it is. Connecting "
-                      "centers in the Graph Editor sets inputPoints (a Guides node: inputCurves; a Clump: upstreamClump)",
+                      "and split into smaller ones, a big clump with no center of its own left as it is; after a "
+                      "Braid, its sections (upstreamChannel braidSection): clumps along each section of each braid, "
+                      "never across braids. Connecting centers in the Graph Editor sets inputPoints (a Guides node: "
+                      "inputCurves; a Clump: upstreamClump); wiring it after a Clump or a Braid sets upstreamClump",
                       "", {"pick", "inputPoints", "inputCurves", "upstreamClump"}},
             ParamSpec{"upstreamChannel", std::string("clumpId"),
                       "centersFrom upstreamClump: the per-strand channel numbering the upstream Clump's clumps (its "
-                      "clumpChannel; any Clump before this one in the chain, or the one linked to centers). Give this "
-                      "Clump's own clumpChannel another name (subClumpId) to keep both"}
+                      "clumpChannel; any Clump before this one in the chain, or the one linked to centers), or a "
+                      "Braid's braidSection (each section of each braid: read with its braidId, as sections are "
+                      "numbered within their braid; braidId alone: clumps across a whole braid). Give this Clump's own "
+                      "clumpChannel another name (subClumpId) to keep both"}
                 .readsChannel(true)
                 .when("centersFrom", {"upstreamClump"}),
             ParamSpec{"clumpBy", std::string("count"),
@@ -1512,6 +1516,15 @@ private:
                     if (theirs && linkedStrands->strandCount() == in->strandCount() && linkedStrands->ids() == in->ids()) up = theirs;
                 }
             }
+            // (A Braid's sections are numbered within their braid: braidSection read with braidId.)
+            const std::vector<float>* braid = nullptr;
+            if (up && upName == "braidSection") {
+                braid = in->strandChannel("braidId");
+                if (!braid && in->strandChannel(upName) != up) {
+                    if (const StrandsPtr linkedStrands = valueAs<StrandsPtr>(inputs.at(1))) braid = linkedStrands->strandChannel("braidId");
+                }
+                if (braid && braid->size() != up->size()) braid = nullptr;
+            }
             if (!up || up->size() != in->strandCount()) {
                 ctx.note("no upstream clumps: no Clump before this one writes " + (upName.empty() ? std::string("a channel") : upName) +
                          " (its clumpChannel): it clumps as pick does");
@@ -1527,6 +1540,7 @@ private:
                     const float base = strandRegions ? (*strandRegions)[s] : 0.0f;
                     const float clump = (*up)[s];
                     std::uint64_t key = hashFloat(hashFloat(hash64(0x5CB1u), base), clump >= 0.0f ? clump : -1.0f);
+                    if (braid) key = hashFloat(key, (*braid)[s] >= 0.0f ? (*braid)[s] : -1.0f);
                     const auto it = numberOf.emplace(key, static_cast<float>(numberOf.size())).first;
                     upstreamRegions[s] = it->second;
                 }
