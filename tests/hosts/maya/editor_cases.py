@@ -86,7 +86,7 @@ class GraphEditorTest(unittest.TestCase):
 
     def test_motion_nodes_come_from_the_add_menu_and_notes_badge_them(self):
         cats = dict(self.ge.categories(self.editor.catalog))
-        self.assertEqual(cats["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache", "DriveGuides"])
+        self.assertEqual(cats["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache", "DriveGuides", "SkinResponse"])
         self.editor.items["resample"].setSelected(True)
         name = self.editor.add_node("Jiggle")
         self.assertEqual(self.editor.model.source_of(name, "strands"), "resample")
@@ -3593,6 +3593,72 @@ class StarterCardTest(unittest.TestCase):
             self.assertFalse(card.isVisibleTo(tools))
         finally:
             cmds.optionVar(remove=palette.STARTER_VAR)
+            tools.close()
+            tools.deleteLater()
+
+
+class ToolScrollTest(unittest.TestCase):
+    """Issue 114: picking a tool leaves the Groom Tools panel where it is scrolled; only a card too
+    short to reach there scrolls up to its end."""
+
+    def test_picking_a_tool_keeps_the_scroll(self):
+        from groomlab.ui import palette
+        cmds.file(new=True, force=True)
+        groom = groomlab.create_groom(cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20)[0])
+        groomlab.guides_from_curves(groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 2, 0)])])
+        cmds.select(groom)
+        tools = palette.ToolPalette()
+        try:
+            tools.resize(380, 420)
+            tools.show()
+            tools.poll()
+            bar = tools.scroll.verticalScrollBar()
+
+            def pick(tool, settle=50):
+                tools.activate(tool)
+                tools.poll()  # (the card's lists filled in, as the panel's timer does)
+                wait(settle)
+
+            def user_scroll(value):  # as a drag or the wheel does: an action of the bar's
+                bar.setSliderPosition(value)
+                bar.triggerAction(QtWidgets.QAbstractSlider.SliderMove)
+                self.assertEqual(bar.value(), value)
+
+            from groomlab.ui.qt import QtWidgets
+            pick("comb", settle=600)
+            comb_max = bar.maximum()
+            pick("shape", settle=600)
+            tall = bar.maximum()
+            self.assertGreater(tall, comb_max, "the Tube tool's card is the longer")
+            at = comb_max // 2
+            self.assertGreater(at, 0, "Comb's card scrolls too")
+            user_scroll(at)
+            for tool in ("comb", "shape", "comb", "shape"):  # a tile clicked: the panel stays
+                pick(tool)
+                self.assertEqual(bar.value(), at, tool)
+            wait(1600)  # (after the card's layouts settle: still there)
+            self.assertEqual(bar.value(), at)
+            # Moved by something else while the card lays out (the focus passed on down the panel): back.
+            pick("comb", settle=0)
+            bar.setValue(0)
+            self.assertEqual(bar.value(), at)
+            # Below where Comb's card reaches: Comb at its end; the Tube tool picked straight back
+            # (Comb still holding), where it was.
+            wait(1600)
+            pick("shape", settle=600)
+            user_scroll(tall - 20)
+            pick("comb")
+            self.assertEqual(bar.value(), bar.maximum())
+            self.assertLess(bar.value(), tall - 20)
+            pick("shape")
+            self.assertEqual(bar.value(), tall - 20)
+            # The user's own scrolling while it holds: theirs.
+            pick("comb", settle=0)
+            user_scroll(0)
+            wait(300)
+            self.assertEqual(bar.value(), 0)
+        finally:
+            cmds.setToolTo("selectSuperContext")
             tools.close()
             tools.deleteLater()
 

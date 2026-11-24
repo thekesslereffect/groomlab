@@ -206,6 +206,7 @@ private:
     QToolButton* makeTile(const std::string& id, const QString& label, const QString& tip);
     void refreshTiles();       // checked state and the icons' tint
     void refreshCard();        // the card for the tool and the tab
+    void keepScroll(const std::string& card);  // another card: the panel held where it is scrolled
     void refreshVisibility();  // empty state vs the work, the tab's grid, card and list
     void groupPicked(const std::string& name);  // a guide groups row clicked
     QToolButton* menuChip(const ui::Item& item, const ui::Bindings& bindings, const ui::FillOptions& options, QWidget* parent);
@@ -238,6 +239,12 @@ private:
     std::vector<QWidget*> gridLabels_;  // each grid's category name (hidden with an empty grid)
     // Scrolls.
     QScrollArea* scroll_ = nullptr;
+    // The card (tab/tool) shown; a tool picked leaves the panel where it is scrolled (issue 114),
+    // held there (scrollHeld_) while scrollPending_() as the new card lays out.
+    std::string scrollCard_;
+    bool scrollCardSet_ = false;
+    int scrollHeld_ = 0;
+    std::function<bool()> scrollPending_;
     QFrame* empty_ = nullptr;
     QVBoxLayout* emptyItems_ = nullptr;
     QWidget* work_ = nullptr;

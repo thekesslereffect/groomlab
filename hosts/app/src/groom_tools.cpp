@@ -2,6 +2,8 @@
 #include "groom_tools.h"
 
 #include <algorithm>
+#include <functional>
+#include <memory>
 
 #include <QRegularExpression>
 #include <QAbstractButton>
@@ -18,9 +20,11 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QStyle>
 #include <QTabBar>
+#include <QTimer>
 #include <QToolButton>
 #include <QTreeView>
 #include <QVariant>
@@ -47,6 +51,47 @@ QString qs(const std::string& s) { return QString::fromStdString(s); }
 
 // At most this many tiles to a row, however wide the dock.
 constexpr int kMaxTileColumns = 4;
+
+// Scroll bar `bar` to `value` and keep it there for `followMs` while what was just shown is laid
+// out: the card's lists and blocks fill in over a few events, and the range only grows to `value`
+// as they do. Moved meanwhile by anything but the user (the focus passed on down the panel, a
+// layout): back. `still()` false (the content changed again) or the user's own scrolling (wheel,
+// drag, keys: an action of the bar's) stops it. Returns whether it is still being followed (where
+// the bar is meant to be is then `value`, not where it is on the way).
+std::function<bool()> scrollWhenLaidOut(QScrollBar* bar, int value, std::function<bool()> still, int followMs) {
+    auto following = std::make_shared<bool>(true);
+    std::function<bool()> pending = [following] { return *following; };
+    if (value <= 0 && followMs <= 0) {
+        bar->setValue(bar->minimum());  // (the top: there whatever is laid out)
+        *following = false;
+        return pending;
+    }
+    auto connections = std::make_shared<std::vector<QMetaObject::Connection>>();
+    auto done = [following, connections] {
+        if (!*following) return;
+        *following = false;
+        for (const QMetaObject::Connection& c : *connections) QObject::disconnect(c);
+    };
+    auto apply = [bar, value, still, following, done] {
+        if (!*following) return;
+        if (still && !still()) {
+            done();
+            return;
+        }
+        bar->setValue(std::min(value, bar->maximum()));
+    };
+    connections->push_back(QObject::connect(bar, &QScrollBar::rangeChanged, bar, [apply](int, int) { apply(); }));
+    connections->push_back(QObject::connect(bar, &QScrollBar::valueChanged, bar, [apply](int) { apply(); }));
+    connections->push_back(QObject::connect(bar, &QScrollBar::actionTriggered, bar, [done](int) { done(); }));
+    apply();
+    QTimer::singleShot(followMs, bar, [apply, done] {
+        apply();
+        done();
+    });
+    return pending;
+}
+
+constexpr int kScrollFollowMs = 1500;
 
 QString textAt(const std::string& path) {
     const ui::json* t = defs().find(path);
@@ -735,6 +780,7 @@ void GroomTools::refreshCard() {
     // The Paint tab's card is Paint's; Photos has none; the others the tool's.
     const std::string tab = currentTab().toStdString();
     const std::string shown = tab == "paint" ? std::string("paint") : tab == "photos" ? std::string() : tool_;
+    keepScroll(tab + "/" + shown);  // (before anything shown or hidden here is laid out)
     const bool hadTubes = !tubes_->isHidden();
     card_->setTool(shown);
     const bool open = groomOpen();
@@ -765,6 +811,21 @@ void GroomTools::refreshCard() {
         tubesStale_ = false;
         tubes_->refresh();
     }
+}
+
+void GroomTools::keepScroll(const std::string& card) {
+    if (scrollCardSet_ && card == scrollCard_) return;
+    // (Not laid out again yet: where it is; a tool picked again while the last switch still holds:
+    // where that one holds.)
+    QScrollBar* bar = scroll_->verticalScrollBar();
+    const int at = scrollPending_ && scrollPending_() ? scrollHeld_ : bar->value();
+    const bool first = !scrollCardSet_;
+    scrollCard_ = card;
+    scrollCardSet_ = true;
+    scrollPending_ = nullptr;
+    if (first) return;
+    scrollHeld_ = at;
+    scrollPending_ = scrollWhenLaidOut(bar, at, [this, card] { return scrollCard_ == card; }, kScrollFollowMs);
 }
 
 void GroomTools::refreshTubes() {

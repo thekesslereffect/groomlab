@@ -135,6 +135,62 @@ def alive(widget):
     return qt.shiboken.isValid(widget)
 
 
+def scroll_when_laid_out(bar, value, still=None, follow_ms=0):
+    """Scroll bar `bar` to `value` once what was just shown is laid out: its range only grows to
+    `value` when Qt lays the new widgets out, after this event. `still()` false (the content gone or
+    changed again meanwhile) stops it. Moved meanwhile by anything but the user (the focus passed on
+    down the panel): back. Followed until the range reaches `value`, the user scrolls, or
+    the next event (`follow_ms`: kept there that long, for content that fills in over a few events,
+    unless the user scrolls); after that
+    the user's own scrolling and later growth are theirs. Returns pending(): `value` while it is
+    still being followed, else None (where the bar is meant to be, not where it is on the way)."""
+    following = [True]
+
+    def pending():
+        return value if following[0] else None
+
+    if value <= 0 and not follow_ms:
+        bar.setValue(bar.minimum())  # (the top: there whatever is laid out)
+        following[0] = False
+        return pending
+
+    def done(*_):
+        if not following[0]:
+            return
+        following[0] = False
+        for signal, slot in ((bar.rangeChanged, apply), (bar.valueChanged, apply), (bar.actionTriggered, done)):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+
+    def apply(*_):
+        if not following[0]:
+            return
+        if not alive(bar) or (still is not None and not still()):
+            done()
+            return
+        bar.setValue(min(value, bar.maximum()))
+        if bar.maximum() >= value and not follow_ms:
+            done()  # (followed a while: kept there through the card's later layouts too)
+
+    def run():
+        try:
+            apply()
+            done()
+        except RuntimeError:  # (the panel went away meanwhile)
+            pass
+
+    bar.rangeChanged.connect(apply)
+    # Moved by anything but the user (the focus passed on to a field further down, a layout): back
+    # (issue #47's snap); the user's own scrolling (wheel, drag, keys: an action) is theirs.
+    bar.valueChanged.connect(apply)
+    bar.actionTriggered.connect(done)
+    apply()
+    QtCore.QTimer.singleShot(follow_ms, run)
+    return pending
+
+
 class busy(object):
     """While a window's long action runs (Generate, Transfer, Bake Maps...): its buttons disabled, the
     wait cursor, and `text` in its status label, repainted before the work starts. Everything back

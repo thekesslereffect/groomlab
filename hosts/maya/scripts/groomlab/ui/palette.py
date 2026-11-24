@@ -1087,6 +1087,10 @@ class ToolPalette(QtWidgets.QWidget):
         # tool whose settings the Brush block shows now (remember_brush, recall_brush).
         self.brushes = {}
         self._brush_shown = None
+        # The card (tab, tool) shown, and while a switch holds the scroll where it was (issue 114):
+        # scroll_when_laid_out's pending().
+        self._scroll_card = None
+        self._scroll_pending = None
         self.buttons = {}  # tool -> its tile (the first made; a tool with tiles on two tabs: tiles)
         self.tiles = {}    # tool -> every tile of it
 
@@ -2564,6 +2568,22 @@ class ToolPalette(QtWidgets.QWidget):
         tool's own, Applies to (Paint: its own block, then Brush, titled)."""
         self.sync_brush()
         tool = self.card_tool()
+        # Another card (a tool picked): the panel stays where it is scrolled (issue 114), not moved by
+        # the card's blocks hiding and showing or the focus passed on; only a card too short to reach
+        # there scrolls up to its end. (Taken before anything shown or hidden here moves it; a tool
+        # picked again while the last switch still holds: where that one holds.)
+        card = (self.current_tab(), tool)
+        if card != self._scroll_card:
+            bar = self.scroll.verticalScrollBar()
+            held = self._scroll_pending() if self._scroll_pending else None
+            at = held if held is not None else bar.value()
+            first = self._scroll_card is None
+            self._scroll_card = card
+            self._scroll_pending = None
+            if not first:
+                # Held a while: the card's lists and blocks fill in over a few events.
+                self._scroll_pending = widgets.scroll_when_laid_out(
+                    bar, at, still=lambda: self._scroll_card == card, follow_ms=1500)
         uses = TOOL_SETTINGS.get(tool, set())
         photos = self.current_tab() == "photos"
         self.settings.setVisible(not photos and tool is not None)
