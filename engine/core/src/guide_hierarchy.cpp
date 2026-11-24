@@ -16,6 +16,7 @@
 
 #include "schema_internal.h"
 
+#include "groomlab/brush.h"
 #include "groomlab/curve.h"
 #include "groomlab/frames.h"
 #include "groomlab/math.h"
@@ -119,6 +120,42 @@ RootAnchor rootAnchor(const HierarchyGuide& parent) {
     out.upright.binormal = normal.cross(out.upright.normal);
     out.active = true;
     return out;
+}
+
+// A slice's points out of the scalp (resolveFollower): each point under it (belowScalpAt: across
+// the surface, not off past an open border) lifted along the scalp's normal to `clearance(t)`
+// above it, and the lift carried smoothly onto its neighbours, fading over `reach` along the
+// guide, so the guide rises over the scalp in one smooth curve. Pressing each point onto its own closest scalp point (as it
+// was) crumpled a tube's base where a combed parent's sections dip into the head (issue #110), and
+// took a point hanging past the open edge of a scalp up to that edge (issue #111). The root stays.
+// False when no point was under the scalp.
+bool liftOffScalp(std::vector<Vec3f>& points, const ScalpMesh& scalp, float reach, const std::function<float(float)>& clearance) {
+    const std::size_t n = points.size();
+    if (n < 2 || !(reach > 0.0f)) return false;
+    std::vector<float> depth(n, 0.0f), arc(n, 0.0f);
+    std::vector<Vec3f> normal(n);
+    bool any = false;
+    for (std::size_t i = 1; i < n; ++i) {
+        arc[i] = arc[i - 1] + (points[i] - points[i - 1]).length();
+        const SurfacePoint sp = scalp.closestPoint(points[i]);
+        if (sp.root.face < 0) continue;
+        normal[i] = sp.normal.normalized();
+        if (!belowScalpAt(points[i], sp)) continue;
+        const float above = clearance ? clearance(static_cast<float>(i) / static_cast<float>(n - 1)) : 0.0f;
+        depth[i] = above - (points[i] - sp.position).dot(normal[i]);
+        any = any || depth[i] > 0.0f;
+    }
+    if (!any) return false;
+    for (std::size_t i = 1; i < n; ++i) {
+        float lift = 0.0f;
+        for (std::size_t j = 1; j < n; ++j) {
+            if (depth[j] <= 0.0f) continue;
+            const float k = 1.0f - std::fabs(arc[i] - arc[j]) / reach;
+            if (k > 0.0f) lift = std::max(lift, depth[j] * k * k * (3.0f - 2.0f * k));  // (smoothstep)
+        }
+        if (lift > 0.0f && normal[i].length() > 0.5f) points[i] += normal[i] * lift;
+    }
+    return true;
 }
 
 // A primary about to be reshaped (setPoints, pose): its frame up as it is now, kept as the one its
@@ -924,12 +961,18 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     // scalp's point nearest its guide's first.
     const bool slice = isSliceOf(child, parent);
     if (slice && scalp && scalp->triangleCount() > 0 && n > 0) {
-        // (No point of it inside the head: one there, a parent combed down onto the scalp or a
-        // point groomed so, taken out onto the scalp; the others left as they are.)
-        for (Vec3f& p : child.points) {
-            const SurfacePoint near = scalp->closestPoint(p);
-            if (near.root.face < 0) continue;
-            if ((p - near.position).dot(scalp->normal(near.root)) < 0.0f) p = near.position;
+        // (No point of it inside the head, a parent combed down onto the scalp or a point groomed
+        // so: its root taken out onto the scalp, the rest lifted over it smoothly (liftOffScalp,
+        // over a few of the parent's root widths), never pressed onto it point by point nor pulled
+        // to the edge of an open scalp.)
+        const SurfacePoint near = scalp->closestPoint(child.points[0]);
+        if (near.root.face >= 0 && belowScalpAt(child.points[0], near)) child.points[0] = near.position;
+        // (Lifted clear of the scalp by its own tube's half thickness, so the tube rests on the scalp
+        // rather than half in it.)
+        const auto clearance = [&](float t) { return child.tube.widthAt(t) * std::min(1.0f, child.tube.aspectAt(t)) * scale_; };
+        const float reach = 3.0f * parent.tube.widthAt(0.0f) * std::max(1.0f, parent.tube.aspectAt(0.0f)) * scale_;
+        for (int pass = 0; pass < 3; ++pass) {  // (a lift can bring a point over another part of a curved scalp)
+            if (!liftOffScalp(child.points, *scalp, reach, clearance)) break;
         }
         child.root = scalp->closestPoint(child.points[0]).root;
     }

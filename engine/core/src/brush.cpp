@@ -167,6 +167,7 @@ namespace {
 constexpr float kPerStampRate = 0.05f;  // Length and the Shape brush's width change per stamp at strength 1
 constexpr float kFlattenRate = 0.1f;    // Shape on flatness: share of the way to flat (either axis) per stamp at strength 1
 constexpr float kTwistRate = 0.1f;      // radians per stamp at strength 1
+constexpr float kBelowScalpCos = 0.5f;  // belowScalpAt: behind the surface within 60 degrees of straight in
 constexpr float kAttractRate = 0.1f;    // fraction of the way to the center per stamp, at the tip
 
 std::vector<float> segmentLengths(const std::vector<Vec3f>& pts) {
@@ -1469,13 +1470,22 @@ TubeChannel tubeChannelFromString(const std::string& name) {
     throw std::invalid_argument("the Tube brush paints width, flatness or twist, not '" + name + "'");
 }
 
+bool belowScalpAt(const Vec3f& p, const SurfacePoint& closest, float offset) {
+    const Vec3f d = p - closest.position;
+    const float h = d.dot(closest.normal.normalized());
+    if (h >= offset - 1e-5f) return false;
+    // Behind the surface: across it, not off past an open border (a scalp cut at the neck or the
+    // face), where the closest point is on the border edge and p lies out to its side, along the
+    // surface more than into it (issue #111: hair hanging past the neck pulled up to the edge).
+    return h >= 0.0f || -h >= kBelowScalpCos * d.length();
+}
+
 std::vector<Vec3f> keepOffScalp(const std::vector<Vec3f>& points, const ScalpMesh& scalp, float offset) {
     if (points.size() < 2 || scalp.triangleCount() == 0) return points;
     // Height above the surface near p, and the surface normal there; false when the surface is far.
     auto below = [&](const Vec3f& p, float reach, SurfacePoint* sp) {
         *sp = scalp.closestPoint(p, reach);
-        if (sp->root.face < 0) return false;
-        return (p - sp->position).dot(sp->normal.normalized()) < offset - 1e-5f;
+        return sp->root.face >= 0 && belowScalpAt(p, *sp, offset);
     };
     std::vector<Vec3f> out(points.size());
     out[0] = points[0];

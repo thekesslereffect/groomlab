@@ -10,6 +10,7 @@
 #include <map>
 #include <set>
 
+#include "groomlab/brush.h"
 #include "groomlab/display.h"
 #include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
@@ -789,6 +790,134 @@ TEST(RootSubdivision, ApplyKeepsTheOuterEdgesAsEdited) {
     float stayed = 1e9f;
     for (const StrandRoot& r : h.rootSubdivisions()[0].outline) stayed = std::min(stayed, (scalp->position(r) - moved).length());
     EXPECT_LT(stayed, 1e-3f) << "the cut's outline did not take the edit";
+}
+
+// Issues #110 and #111: a slice's points under the scalp (its parent's sections dipping into the
+// head where the parent leans over) are lifted over it smoothly, not pressed onto it point by
+// point, and a slice hanging past the open edge of a scalp stays with its parent.
+
+// The sphere's upper half: an open scalp, its rim the equator (a scalp cut at the neck: the rim's
+// normal points out sideways).
+std::shared_ptr<const ScalpMesh> openHead() {
+    static const std::shared_ptr<const ScalpMesh> cap = [] {
+        const auto whole = head();
+        std::vector<ScalpMesh::Triangle> kept;
+        for (const auto& t : whole->triangles()) {
+            const auto y = [&](int c) { return whole->points()[static_cast<std::size_t>(t[c])].y; };
+            if (y(0) >= -1e-4f && y(1) >= -1e-4f && y(2) >= -1e-4f) kept.push_back(t);
+        }
+        return std::make_shared<const ScalpMesh>(std::vector<Vec3f>(whole->points().begin(), whole->points().end()), kept);
+    }();
+    return cap;
+}
+
+// Whether p lies under `scalp` (behind it across the surface, deeper than `slack`).
+bool underScalp(const ScalpMesh& scalp, const Vec3f& p, float slack = 1e-4f) {
+    const SurfacePoint sp = scalp.closestPoint(p);
+    return sp.root.face >= 0 && belowScalpAt(p, sp, -slack);
+}
+
+// The largest turn between a guide's consecutive spans, in degrees.
+float sharpestTurn(const std::vector<Vec3f>& pts) {
+    float worst = 0.0f;
+    for (std::size_t i = 1; i + 1 < pts.size(); ++i) {
+        const Vec3f a = (pts[i] - pts[i - 1]).normalized(), b = (pts[i + 1] - pts[i]).normalized();
+        worst = std::max(worst, std::acos(std::clamp(a.dot(b), -1.0f, 1.0f)) * 180.0f / kPi);
+    }
+    return worst;
+}
+
+TEST(RootSlices, SlicesOfALeaningTubeRiseOverTheScalpSmoothly) {
+    // Issue #110: a wide root combed to lean far over: its sections near the root dip into the
+    // head on the side it leans to, and so would its slices there. They are lifted over the scalp
+    // in a smooth curve, their tubes resting on it, never crumpled onto it nor folded back.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootTubeOptions o;
+    o.length = 1.2f;
+    o.segments = 16;
+    // (An oval long along the way it leans: the sections near the root stand its length on end, its
+    // far half down into the head.)
+    std::vector<Vec3f> oval;
+    for (int k = 0; k < 10; ++k) {
+        const float a = 2.0f * kPi * static_cast<float>(k) / 10.0f;
+        oval.push_back(Vec3f{0.35f * std::cos(a), 1.0f, 0.12f * std::sin(a)}.normalized());
+    }
+    const GuideId root = makeRootTube(h, *scalp, oval, {}, o);
+    addTubeLevel(h, scalp.get(), {root});
+    addTubeLevel(h, scalp.get(), {root});
+    // Level 1 combed down to lie along the scalp, just over it.
+    std::vector<Vec3f> combed = h.guide(root)->points;
+    for (std::size_t i = 1; i < combed.size(); ++i) {
+        const float a = 1.4f * static_cast<float>(i) / static_cast<float>(combed.size() - 1);
+        const float rise = std::min(1.0f, a / 0.35f);  // (leaving the scalp over its first stretch)
+        combed[i] = Vec3f{std::sin(a), std::cos(a), 0.0f} * (1.0f + 0.06f * rise * rise * (3.0f - 2.0f * rise));
+    }
+    h.setPoints(root, combed);
+    h.evaluate(scalp.get());
+    std::size_t slices = 0;
+    std::vector<GuideId> todo = h.childrenOf(root);
+    while (!todo.empty()) {
+        const GuideId k = todo.back();
+        todo.pop_back();
+        for (const GuideId c : h.childrenOf(k)) todo.push_back(c);
+        const HierarchyGuide* g = h.guide(k);
+        ++slices;
+        std::size_t pressed = 0;
+        for (std::size_t i = 1; i < g->points.size(); ++i) {
+            EXPECT_FALSE(underScalp(*scalp, g->points[i])) << "slice " << k << " point " << i << " under the scalp";
+            pressed += (g->points[i] - scalp->closestPoint(g->points[i]).position).length() < 1e-3f;
+        }
+        EXPECT_EQ(pressed, 0u) << "slice " << k << " pressed onto the scalp point by point (its tube half in it)";
+        EXPECT_LT(sharpestTurn(g->points), 60.0f) << "slice " << k << " crumpled or folded back";
+    }
+    EXPECT_EQ(slices, 6u);
+}
+
+TEST(RootSlices, ASliceHangingPastAnOpenScalpsEdgeStaysWithItsParent) {
+    // Issue #111: a root near the rim of an open scalp, its tube hanging down past the rim: its
+    // slices stay round it all along, none pulled up to the rim (the scalp's point nearest a point
+    // below the rim is on the rim, the point off to its side rather than behind the surface).
+    GuideHierarchy h;
+    const auto scalp = openHead();
+    RootTubeOptions o;
+    o.segments = 16;
+    const Vec3f at = Vec3f{0.94f, 0.34f, 0.0f}.normalized();
+    const GuideId root = makeRootTube(h, *scalp, ring(at, 0.12f, 10), {}, o);
+    addTubeLevel(h, scalp.get(), {root});
+    // Level 1 combed out and down past the rim, hanging just inside the sphere's line below it.
+    std::vector<Vec3f> combed = h.guide(root)->points;
+    for (std::size_t i = 1; i < combed.size(); ++i) {
+        const float f = static_cast<float>(i) / static_cast<float>(combed.size() - 1);
+        combed[i] = f < 0.25f ? at + (Vec3f{1.08f, 0.2f, 0.0f} - at) * (f / 0.25f) : Vec3f{1.08f - 0.25f * (f - 0.25f) / 0.75f, 0.2f - 1.6f * (f - 0.25f) / 0.75f, 0.0f};
+    }
+    h.setPoints(root, combed);
+    h.evaluate(scalp.get());
+    const HierarchyGuide* parent = h.guide(root);
+    const float reach = 3.0f * parent->tube.widthAt(0.0f) * h.scale();  // (the slices lie within its tube)
+    const std::vector<GuideId> kids = h.childrenOf(root);
+    ASSERT_EQ(kids.size(), 2u);
+    for (const GuideId k : kids) {
+        const HierarchyGuide* g = h.guide(k);
+        ASSERT_EQ(g->points.size(), parent->points.size());
+        float farthest = 0.0f;
+        for (std::size_t i = 0; i < g->points.size(); ++i) farthest = std::max(farthest, (g->points[i] - parent->points[i]).length());
+        EXPECT_LT(farthest, reach) << "slice " << k << " left its parent (pulled to the rim?)";
+        EXPECT_LT(g->points.back().y, -1.0f) << "slice " << k << "'s tip taken up to the rim";
+    }
+}
+
+TEST(Brush, KeepOffScalpLeavesHairHangingPastAnOpenEdge) {
+    // Issue #111: the brushes' Keep off scalp (keepOffScalp) slides a guide along the scalp where it
+    // goes in, but a guide hanging down past the open rim of a scalp is not in it: left as it is.
+    const auto scalp = openHead();
+    const std::vector<Vec3f> hanging{{0.94f, 0.34f, 0.0f}, {1.05f, 0.1f, 0.0f}, {0.98f, -0.3f, 0.0f}, {0.95f, -0.8f, 0.0f}, {0.95f, -1.3f, 0.0f}};
+    const std::vector<Vec3f> kept = keepOffScalp(hanging, *scalp);
+    ASSERT_EQ(kept.size(), hanging.size());
+    for (std::size_t i = 0; i < hanging.size(); ++i) EXPECT_LT((kept[i] - hanging[i]).length(), 1e-4f) << "point " << i;
+    // Behind the surface it is still taken out.
+    const std::vector<Vec3f> into{{0.0f, 1.0f, 0.0f}, {0.0f, 0.8f, 0.0f}, {0.0f, 0.6f, 0.0f}};
+    for (const Vec3f& p : keepOffScalp(into, *scalp)) EXPECT_FALSE(underScalp(*scalp, p, 1e-3f));
 }
 
 }  // namespace
