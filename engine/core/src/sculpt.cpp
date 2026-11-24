@@ -26,20 +26,14 @@ constexpr float kMoved = 1e-4f;      // a move that counts as sculpted, as a sha
 constexpr float kIdentity = 1e-6f;   // a turn (radians) or length factor this close to none is none
 constexpr float kMinStrength = 1e-3f;
 
-// The segment frames of a polyline (tangent along each segment), rotation-minimizing from the
-// root's surface frame (sculpt.h). Zero-length segments keep the frame before them.
-std::vector<Frame> segmentFrames(const std::vector<Vec3f>& pts, const StrandRoot& root, const ScalpMesh* scalp) {
+// The segment frames of a polyline (tangent along each segment), rotation-minimizing from a root
+// frame (its unit normal, and an edge across it). Zero-length segments keep the frame before them.
+std::vector<Frame> segmentFramesFrom(const std::vector<Vec3f>& pts, const Vec3f& normal, Vec3f edge) {
     const std::size_t segments = pts.size() < 2 ? 0 : pts.size() - 1;
     std::vector<Frame> frames(segments);
     if (segments == 0) return frames;
-    Vec3f normal(0.0f, 1.0f, 0.0f), edge(1.0f, 0.0f, 0.0f);
-    if (scalp && scalp->contains(root)) {
-        normal = scalp->normal(root);
-        const auto& tri = scalp->triangles()[static_cast<std::size_t>(root.face)];
-        Vec3f e = scalp->points()[tri[1]] - scalp->points()[tri[0]];
-        e = e - normal * e.dot(normal);
-        edge = e.length() > 1e-12f ? e.normalized() : anyPerpendicular(normal);
-    }
+    edge = edge - normal * edge.dot(normal);
+    edge = edge.length() > 1e-12f ? edge.normalized() : anyPerpendicular(normal);
     Vec3f tangent = normal;  // the direction before the first segment: the normal
     Vec3f n = edge;
     for (std::size_t j = 0; j < segments; ++j) {
@@ -56,6 +50,18 @@ std::vector<Frame> segmentFrames(const std::vector<Vec3f>& pts, const StrandRoot
         tangent = t;
     }
     return frames;
+}
+
+// The root's surface frame (sculpt.h): the scalp's normal there and its triangle's first edge;
+// world +Y and +X off the scalp.
+std::vector<Frame> segmentFrames(const std::vector<Vec3f>& pts, const StrandRoot& root, const ScalpMesh* scalp) {
+    Vec3f normal(0.0f, 1.0f, 0.0f), edge(1.0f, 0.0f, 0.0f);
+    if (scalp && scalp->contains(root)) {
+        normal = scalp->normal(root);
+        const auto& tri = scalp->triangles()[static_cast<std::size_t>(root.face)];
+        edge = scalp->points()[tri[1]] - scalp->points()[tri[0]];
+    }
+    return segmentFramesFrom(pts, normal, edge);
 }
 
 // The normalized arc length of each segment's middle; false for a guide of no length.
@@ -120,6 +126,13 @@ std::uint64_t SculptEdits::contentHash() const {
         h = hashCombine(h, g.samples.size());
         for (const SculptSample& s : g.samples) h = hashFloat(hashFloat(hashFloat(hashFloat(h, s.t), s.ax), s.ay), s.scale);
     }
+    for (const auto& [id, v] : frozen) h = hashFloat(hashCombine(hashCombine(h, 0xF0F0), id), v);
+    for (const auto& [id, s] : strands) {
+        h = hashCombine(hashCombine(h, 0x57A4D), id);
+        h = hashFloat(hashFloat(hashFloat(hashCombine(h, static_cast<std::uint64_t>(s.root.face)), s.root.u), s.root.v), s.spacing);
+        h = hashCombine(h, s.edit.samples.size());
+        for (const SculptSample& x : s.edit.samples) h = hashFloat(hashFloat(hashFloat(hashFloat(h, x.t), x.ax), x.ay), x.scale);
+    }
     return h;
 }
 
@@ -138,7 +151,22 @@ std::string SculptSet::toJson() const {
         if (edits.empty()) continue;
         json guides = json::object();
         for (const auto& [id, g] : edits.guides) guides[std::to_string(id)] = guideJson(g);
-        out[name] = {{"guides", std::move(guides)}};
+        json node = {{"guides", std::move(guides)}};
+        if (!edits.frozen.empty()) {
+            json frozen = json::object();
+            for (const auto& [id, v] : edits.frozen) frozen[std::to_string(id)] = v;
+            node["frozen"] = std::move(frozen);
+        }
+        if (!edits.strands.empty()) {
+            json strands = json::object();
+            for (const auto& [id, s] : edits.strands) {
+                json flat = {s.root.face, s.root.u, s.root.v, s.spacing};
+                for (const SculptSample& x : s.edit.samples) flat.insert(flat.end(), {x.t, x.ax, x.ay, x.scale});
+                strands[std::to_string(id)] = std::move(flat);
+            }
+            node["strands"] = std::move(strands);
+        }
+        out[name] = std::move(node);
     }
     return out.dump();
 }
@@ -162,6 +190,26 @@ SculptSet SculptSet::fromJson(const std::string& text) {
                 std::sort(g.samples.begin(), g.samples.end(),
                           [](const SculptSample& a, const SculptSample& b) { return a.t < b.t; });
                 if (!g.samples.empty()) edits.guides[std::stoull(it.key())] = std::move(g);
+            }
+            const json frozen = node.value().value("frozen", json::object());
+            for (auto it = frozen.begin(); it != frozen.end(); ++it) {
+                const float v = it.value().get<float>();
+                if (v > 0.0f) edits.frozen[std::stoull(it.key())] = v;
+            }
+            const json strands = node.value().value("strands", json::object());
+            for (auto it = strands.begin(); it != strands.end(); ++it) {
+                const json& flat = it.value();
+                if (!flat.is_array() || flat.size() < 4) throw std::invalid_argument("strand " + it.key() + " has no root");
+                StrandSculpt s;
+                s.root = {flat[0].get<std::int32_t>(), flat[1].get<float>(), flat[2].get<float>()};
+                s.spacing = flat[3].get<float>();
+                for (std::size_t i = 4; i + 3 < flat.size(); i += 4) {
+                    s.edit.samples.push_back({flat[i].get<float>(), flat[i + 1].get<float>(), flat[i + 2].get<float>(),
+                                              flat[i + 3].get<float>()});
+                }
+                std::sort(s.edit.samples.begin(), s.edit.samples.end(),
+                          [](const SculptSample& a, const SculptSample& b) { return a.t < b.t; });
+                edits.strands[std::stoull(it.key())] = std::move(s);  // (an empty edit too: brushed, left as it was)
             }
             if (!edits.empty()) set.nodes[node.key()] = std::move(edits);
         }
@@ -284,11 +332,12 @@ bool pathFramesOf(const Guide& g, PathFrames& out) {
     return true;
 }
 
-std::vector<Vec3f> applySculptIn(const Guide& input, const GuideSculpt& edit, float strength, const ScalpMesh* scalp) {
-    const std::vector<Vec3f>& pts = input.points;
+// The relative form laid on `pts` in its segments' frames (`framesOf(pts)`, made only when needed).
+template <class FramesOf>
+std::vector<Vec3f> applySculptPts(const std::vector<Vec3f>& pts, const GuideSculpt& edit, float strength, FramesOf framesOf) {
     std::vector<float> t, lengths;
     if (pts.size() < 2 || edit.samples.empty() || strength == 0.0f || !segmentMiddles(pts, t, lengths)) return pts;
-    const std::vector<Frame> frames = segmentFrames(pts, input.root, scalp);
+    const std::vector<Frame> frames = framesOf(pts);
     std::vector<Vec3f> out(pts.size());
     out[0] = pts[0];
     for (std::size_t j = 0; j + 1 < pts.size(); ++j) {
@@ -304,16 +353,22 @@ std::vector<Vec3f> applySculptIn(const Guide& input, const GuideSculpt& edit, fl
     return out;
 }
 
-GuideSculpt recordSculptIn(const Guide& input, const std::vector<Vec3f>& sculpted, float strength, const ScalpMesh* scalp) {
+std::vector<Vec3f> applySculptIn(const Guide& input, const GuideSculpt& edit, float strength, const ScalpMesh* scalp) {
+    return applySculptPts(input.points, edit, strength,
+                          [&](const std::vector<Vec3f>& pts) { return segmentFrames(pts, input.root, scalp); });
+}
+
+// The relative form taking `pts` to `sculpted` in `pts`' segments' frames (`framesOf(pts)`).
+template <class FramesOf>
+GuideSculpt recordSculptPts(const std::vector<Vec3f>& pts, const std::vector<Vec3f>& sculpted, float strength, FramesOf framesOf) {
     if (std::abs(strength) < kMinStrength) {
         throw std::invalid_argument("the Sculpt node's strength is 0: raise it to sculpt");
     }
-    const std::vector<Vec3f>& pts = input.points;
     if (sculpted.size() != pts.size()) throw std::invalid_argument("a sculpted guide has another point count than its input");
     GuideSculpt edit;
     std::vector<float> t, lengths;
     if (pts.size() < 2 || !segmentMiddles(pts, t, lengths)) return edit;
-    const std::vector<Frame> frames = segmentFrames(pts, input.root, scalp);
+    const std::vector<Frame> frames = framesOf(pts);
     edit.samples.reserve(pts.size() - 1);
     for (std::size_t j = 0; j + 1 < pts.size(); ++j) {
         SculptSample s;
@@ -342,6 +397,11 @@ GuideSculpt recordSculptIn(const Guide& input, const std::vector<Vec3f>& sculpte
     return edit;
 }
 
+GuideSculpt recordSculptIn(const Guide& input, const std::vector<Vec3f>& sculpted, float strength, const ScalpMesh* scalp) {
+    return recordSculptPts(input.points, sculpted, strength,
+                           [&](const std::vector<Vec3f>& pts) { return segmentFrames(pts, input.root, scalp); });
+}
+
 // The guide in its path's straightened space (its root for no scalp: world axes there).
 Guide straightened(const Guide& input, const PathFrames& path, const std::vector<Vec3f>& points) {
     Guide flat;
@@ -366,6 +426,16 @@ GuideSculpt recordSculpt(const Guide& input, const std::vector<Vec3f>& sculpted,
     PathFrames path;
     if (sculpted.size() != input.points.size() || !pathFramesOf(input, path)) return recordSculptIn(input, sculpted, strength, scalp);
     return recordSculptIn(straightened(input, path, input.points), straightened(input, path, sculpted).points, strength, nullptr);
+}
+
+std::vector<Vec3f> applySculptFramed(const std::vector<Vec3f>& points, const GuideSculpt& edit, float strength, const Vec3f& normal,
+                                     const Vec3f& across) {
+    return applySculptPts(points, edit, strength, [&](const std::vector<Vec3f>& pts) { return segmentFramesFrom(pts, normal, across); });
+}
+
+GuideSculpt recordSculptFramed(const std::vector<Vec3f>& points, const std::vector<Vec3f>& sculpted, float strength, const Vec3f& normal,
+                               const Vec3f& across) {
+    return recordSculptPts(points, sculpted, strength, [&](const std::vector<Vec3f>& pts) { return segmentFramesFrom(pts, normal, across); });
 }
 
 std::shared_ptr<const GuideSet> applySculpts(const std::shared_ptr<const GuideSet>& input, const SculptEdits& edits,
@@ -483,6 +553,21 @@ void SculptStrokeRecord::record(SculptEdits& edits, const SculptEdits& stored, c
     }
 }
 
+void layFrozen(GuideHierarchy& h, const SculptEdits& edits, const std::string& freeze) {
+    for (const auto& [id, v] : edits.frozen) {
+        if (h.guide(id)) h.setAttribute(id, freeze, v);
+    }
+}
+
+std::map<std::uint64_t, float> frozenOf(const GuideHierarchy& h, const std::string& freeze) {
+    std::map<std::uint64_t, float> out;
+    for (const HierarchyGuide& g : h.guides()) {
+        const auto it = g.attributes.find(freeze);
+        if (it != g.attributes.end() && it->second > 0.0f) out[g.id] = std::min(it->second, 1.0f);
+    }
+    return out;
+}
+
 std::shared_ptr<GuideHierarchy> sculptHierarchy(const GuideSet& guides, const std::string& group, const ScalpMesh* scalp) {
     auto h = std::make_shared<GuideHierarchy>();
     const GroupId root = h->addGroup(group.empty() ? std::string("sculpt") : group);
@@ -493,11 +578,20 @@ std::shared_ptr<GuideHierarchy> sculptHierarchy(const GuideSet& guides, const st
     // Each where the node has it: a guide fed off the scalp (a Braid's sections start where its
     // weave does) is shown and brushed there, not moved onto the scalp (the node never moves a root).
     // (The path frames a Braid's sections carry are the edits' frames, not layers to brush or show.)
-    GuideSet shown = guides;
-    for (Guide& g : shown.guides()) {
-        for (const char* layer : kPathFrameLayers) g.pointAttributes.erase(layer);
+    const bool framed = std::any_of(guides.guides().begin(), guides.guides().end(), [](const Guide& g) {
+        return g.pointAttributes.count(kPathFrameLayers[0]) > 0;
+    });
+    std::vector<GuideId> added;
+    if (framed) {
+        GuideSet shown = guides;
+        for (Guide& g : shown.guides()) {
+            for (const char* layer : kPathFrameLayers) g.pointAttributes.erase(layer);
+        }
+        added = h->addGuides(root, shown);
+    } else {
+        added = h->addGuides(root, guides);  // (none to leave out: no copy of a large set)
     }
-    for (const GuideId id : h->addGuides(root, shown)) h->setKeepsPlace(id);
+    for (const GuideId id : added) h->setKeepsPlace(id);
     if (scalp && scalp->triangleCount() > 0) h->evaluate(scalp);
     return h;
 }

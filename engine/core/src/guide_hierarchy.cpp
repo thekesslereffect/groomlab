@@ -673,6 +673,8 @@ std::vector<GuideId> GuideHierarchy::addBakedGuides(const std::string& name, con
 std::vector<GuideId> GuideHierarchy::addGuides(GroupId groupId, const GuideSet& set, TubeProfile tube) {
     invalidateHash();
     std::vector<GuideId> added;
+    added.reserve(set.size());
+    guides_.reserve(guides_.size() + set.size());  // (a large set, a SculptStrands node's strands: no copies as it grows)
     for (const Guide& g : set.guides()) {
         if (g.points.size() < 2) continue;
         const GuideId wanted = g.id != kNoGuide && !index_.count(g.id) ? g.id : kNoGuide;

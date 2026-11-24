@@ -35,12 +35,18 @@ const char* strokeFieldName(StrokeField field) {
     return "";
 }
 
+// The freeze layer a Sculpt or SculptStrands node's brushes skip (SculptEdits::frozen).
+std::string sculptFreezeName(const BrushToolSettings& s) { return s.brush.freeze.empty() ? std::string("freeze") : s.brush.freeze; }
+
 std::string sculptRefusal(const BrushToolSettings& s) {
     using Tool = BrushToolSettings::Tool;
     const char* why = "GroomLab sculpt: only shaping brushes (comb, smooth, lift, length, twist, straighten, attract, "
-                      "cut) shape a Sculpt node's guides (pick no Sculpt node to place, draw, erase, paint "
-                      "or part)";
-    if (s.tool != Tool::Brush || s.paintsScalp()) return why;
+                      "cut) and Freeze shape a Sculpt node's guides or a SculptStrands node's strands (pick no such "
+                      "node to place, draw, erase, paint or part)";
+    if (s.tool != Tool::Brush) return why;
+    // Freeze: painting the node's own freeze (its brushes skip what it holds).
+    if (!s.paintsScalp() && s.brush.mode == BrushMode::Attribute && s.brush.attribute == sculptFreezeName(s)) return {};
+    if (s.paintsScalp()) return why;
     switch (s.brush.mode) {
         case BrushMode::Comb:
         case BrushMode::Smooth:
@@ -609,6 +615,7 @@ bool BrushTool::startStroke(StrokeHost& host, const ToolView& view, float x, flo
         }
         sculptEdits_ = sculptIn_.edits;
         sculptRecord_.clear();
+        strandRecord_.clear();
         sculpt_ = true;
         shot_ = false;
     }
@@ -647,9 +654,24 @@ bool BrushTool::startStroke(StrokeHost& host, const ToolView& view, float x, flo
     // the poses and correctives on top. Shot strokes reshape the groom as shown, posed and
     // corrected, and record the difference.
     // A Sculpt node's stroke shapes the node's output now (its input with its stored edits).
-    if (sculpt_) {
+    if (sculpt_ && sculptIn_.strands) {
+        // A SculptStrands node's: its strands as they show now (its input with its stored edits), one
+        // guide a strand.
+        const StrandsPtr output =
+            applyStrandSculpts(sculptIn_.strands, sculptIn_.edits, sculptIn_.strength, sculptIn_.scalp.get(), sculptIn_.fill);
+        try {
+            strandRecord_.begin(sculptIn_.strands, output, sculptIn_.scalp.get());
+        } catch (const std::exception& e) {
+            host.warn("GroomLab sculpt: " + sculptNode + ": " + e.what());
+            sculpt_ = false;
+            return false;
+        }
+        working_ = groomlab::sculptHierarchy(*strandsAsGuides(*output, Vec3f(0.95f, 0.55f, 0.2f)), sculptNode, scalp_.get());
+        layFrozen(*working_, sculptIn_.edits, sculptFreezeName(settings));
+    } else if (sculpt_) {
         const GuidesPtr output = applySculpts(sculptIn_.guides, sculptIn_.edits, sculptIn_.strength, sculptIn_.scalp.get());
         working_ = groomlab::sculptHierarchy(*output, sculptNode, scalp_.get());
+        layFrozen(*working_, sculptIn_.edits, sculptFreezeName(settings));
     } else {
         const std::shared_ptr<const GuideHierarchy> current = shot_ ? host.shownHierarchy() : host.authoredHierarchy();
         working_ = std::make_shared<GuideHierarchy>(current ? *current : GuideHierarchy{});
@@ -702,7 +724,11 @@ void BrushTool::previewGuides(StrokeHost& host) {
     // The node's edits as this stroke leaves them: the guides it moved recorded again (those the
     // dabs since the last preview changed; the others keep what they recorded).
     try {
-        sculptRecord_.record(sculptEdits_, sculptIn_.edits, *sculptIn_.guides, *working_, sculptIn_.strength, sculptIn_.scalp.get());
+        if (sculptIn_.strands) {
+            strandRecord_.record(sculptEdits_, sculptIn_.edits, *working_, sculptIn_.strength);
+        } else {
+            sculptRecord_.record(sculptEdits_, sculptIn_.edits, *sculptIn_.guides, *working_, sculptIn_.strength, sculptIn_.scalp.get());
+        }
     } catch (const std::exception& e) {
         host.warn(std::string("GroomLab sculpt: ") + e.what());
         return;
@@ -714,10 +740,20 @@ void BrushTool::commitSculpt(StrokeHost& host) {
     host.previewSculpt(sculptIn_.node, nullptr, nullptr);  // the stored edits take over
     host.liveStroke(false);
     sculptRecord_.clear();
-    if (!changed_ || !working_) return;
+    if (!changed_ || !working_) {
+        strandRecord_.clear();
+        return;
+    }
     try {
-        sculptEdits_ = sculptIn_.edits;
-        recordSculptStroke(sculptEdits_, *sculptIn_.guides, *working_, sculptIn_.strength, sculptIn_.scalp.get());
+        if (sculptIn_.strands) {
+            // The strands the last dabs moved recorded too (the others as the dabs left them).
+            if (strandRecord_.started()) strandRecord_.record(sculptEdits_, sculptIn_.edits, *working_, sculptIn_.strength);
+            strandRecord_.clear();
+        } else {
+            sculptEdits_ = sculptIn_.edits;
+            recordSculptStroke(sculptEdits_, *sculptIn_.guides, *working_, sculptIn_.strength, sculptIn_.scalp.get());
+        }
+        sculptEdits_.frozen = frozenOf(*working_, sculptFreezeName(settings));  // (a freeze stroke's, else as it was)
         if (sculptEdits_ == sculptIn_.edits) return;  // nothing moved enough to record
         SculptSet set = SculptSet::fromJson(host.storedText(StrokeField::Sculpts));
         if (sculptEdits_.empty()) {
@@ -1114,6 +1150,7 @@ void BrushTool::cancel(StrokeHost* host) {
     sculpt_ = false;
     sculptIn_ = SculptInput{};
     sculptRecord_.clear();
+    strandRecord_.clear();
     base_.reset();
     working_.reset();
     workingParts_.reset();
@@ -1167,7 +1204,25 @@ void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, 
     if (both && paintsSelection() && host.attach()) {
         selecting_ = true;
         selectMoved_ = false;
-        selectBase_ = host.selectedGuides();
+        // A targeted Sculpt or SculptStrands node: its own guides or strands, the ones it holds
+        // unfrozen the selection so far (none frozen: none yet).
+        selectSculpt_ = !host.sculptNode().empty();
+        selectBase_.clear();
+        if (selectSculpt_) {
+            if (const std::shared_ptr<const GuideHierarchy> h = host.shownHierarchy()) {
+                const std::string freeze = settings.brush.freeze.empty() ? std::string("freeze") : settings.brush.freeze;
+                bool any = false;
+                for (const HierarchyGuide& g : h->guides()) {
+                    const auto it = g.attributes.find(freeze);
+                    const bool frozen = it != g.attributes.end() && it->second >= 0.5f;
+                    any = any || frozen;
+                    if (!frozen) selectBase_.push_back(g.id);
+                }
+                if (!any) selectBase_.clear();
+            }
+        } else {
+            selectBase_ = host.selectedGuides();
+        }
         selectPicked_.clear();
         selectSeen_.clear();
         pressX_ = x;
@@ -1233,6 +1288,19 @@ StrokeRelease BrushTool::release(StrokeHost& host, const ToolView& view) {
         shiftPending_ = false;  // a Shift+click: nothing (no drag, no smoothing)
         return StrokeRelease::None;
     }
+    if (selecting_ && selectSculpt_) {
+        // The node's: what was painted (and what it held unfrozen) kept, the rest frozen; a drag
+        // over nothing unfreezes them all.
+        selecting_ = selectSculpt_ = false;
+        if (selectPicked_.empty() && !selectMoved_) return StrokeRelease::None;
+        try {
+            sculptFreezeToSelection(host, selectPicked_.empty() ? std::vector<GuideId>{} : combineSelection(selectBase_, selectPicked_, SelectMode::Add),
+                                    settings.brush.freeze);
+        } catch (const std::exception& e) {
+            host.warn(std::string("GroomLab sculpt: ") + e.what());
+        }
+        return StrokeRelease::Stroke;
+    }
     if (selecting_) {
         selecting_ = false;
         if (!selectPicked_.empty()) {
@@ -1297,7 +1365,9 @@ void BrushTool::paintSelectionAt(StrokeHost& host, const ToolView& view, float x
     if (!h) return;
     // The guides of the brush's level or group (not hidden) with a point in its circle, only what
     // the view shows (nothing behind the scalp), and with symmetry their mirror guides.
-    const std::vector<GuideId> candidates = guidesAt(*h, settings.brush.level, settings.brush.group, host.hiddenGroups());
+    // (A targeted node's: all of its guides or strands, whatever the brush's level.)
+    const std::vector<GuideId> candidates = selectSculpt_ ? guidesAt(*h, 0, std::string(), {})
+                                                          : guidesAt(*h, settings.brush.level, settings.brush.group, host.hiddenGroups());
     const float radius = std::max(settings.screenRadius, 1.0f);
     std::vector<std::array<float, 2>> ring;
     for (int k = 0; k < 24; ++k) {
@@ -1314,7 +1384,7 @@ void BrushTool::paintSelectionAt(StrokeHost& host, const ToolView& view, float x
     for (const GuideId id : picked) {
         if (selectSeen_.insert(id).second) selectPicked_.push_back(id), grew = true;
     }
-    if (grew) host.paintSelection(combineSelection(selectBase_, selectPicked_, SelectMode::Add), false);
+    if (grew && !selectSculpt_) host.paintSelection(combineSelection(selectBase_, selectPicked_, SelectMode::Add), false);
 }
 
 int BrushTool::pickLevel(StrokeHost& host, const ToolView& view, float x, float y) {
@@ -1476,15 +1546,28 @@ std::size_t scriptedStroke(StrokeHost& host, BrushToolSettings s, const std::vec
         if (!refusal.empty()) throw std::invalid_argument(refusal);
         requireScalp();
         const SculptInput in = host.sculptInput(sculptNode);
-        const std::shared_ptr<GuideHierarchy> h =
-            sculptHierarchy(*applySculpts(in.guides, in.edits, in.strength, in.scalp.get()), sculptNode, scalp.get());
+        StrandStrokeRecord strands;
+        std::shared_ptr<GuideHierarchy> h;
+        if (in.strands) {  // a SculptStrands node's: its strands as they show now, one guide a strand
+            const StrandsPtr output = applyStrandSculpts(in.strands, in.edits, in.strength, in.scalp.get(), in.fill);
+            strands.begin(in.strands, output, in.scalp.get());
+            h = sculptHierarchy(*strandsAsGuides(*output, Vec3f(0.95f, 0.55f, 0.2f)), sculptNode, scalp.get());
+        } else {
+            h = sculptHierarchy(*applySculpts(in.guides, in.edits, in.strength, in.scalp.get()), sculptNode, scalp.get());
+        }
+        layFrozen(*h, in.edits, sculptFreezeName(s));
         s.brush.level = 0;
         s.brush.group.clear();
         s.prepareMask(*h, {}, s.selectedOnly ? host.selectedGuides() : std::vector<GuideId>{},
                       s.selectedOnly ? host.softSelectRadius() : 0.0f, scalp.get());
         applyBrushStroke(*h, scalp.get(), s.brush, path);
         SculptEdits edits = in.edits;
-        recordSculptStroke(edits, *in.guides, *h, in.strength, in.scalp.get());
+        if (in.strands) {
+            strands.record(edits, in.edits, *h, in.strength);
+        } else {
+            recordSculptStroke(edits, *in.guides, *h, in.strength, in.scalp.get());
+        }
+        edits.frozen = frozenOf(*h, sculptFreezeName(s));
         if (edits == in.edits) return 0;
         SculptSet set = SculptSet::fromJson(host.storedText(StrokeField::Sculpts));
         if (edits.empty()) {
@@ -1629,6 +1712,63 @@ std::size_t scriptedStroke(StrokeHost& host, BrushToolSettings s, const std::vec
     }
     host.commit(std::move(edit));
     return 0;
+}
+
+
+namespace {
+
+// The targeted node's freeze set by `change` on its guides or strands as they show (their frozen
+// laid on), one committed edit when it changes (`label` its name). False when no node is targeted.
+template <class Change>
+bool sculptFreezeChange(StrokeHost& host, const std::string& label, const std::string& freeze, Change change) {
+    const std::string node = host.sculptNode();
+    if (node.empty()) return false;
+    const SculptInput in = host.sculptInput(node);
+    const MeshPtr scalp = host.scalp();
+    std::shared_ptr<GuideHierarchy> h;
+    if (in.strands) {
+        h = sculptHierarchy(*strandsAsGuides(*applyStrandSculpts(in.strands, in.edits, in.strength, in.scalp.get(), in.fill),
+                                             Vec3f(0.95f, 0.55f, 0.2f)),
+                            node, scalp.get());
+    } else {
+        h = sculptHierarchy(*applySculpts(in.guides, in.edits, in.strength, in.scalp.get()), node, scalp.get());
+    }
+    const std::string name = freeze.empty() ? std::string("freeze") : freeze;
+    layFrozen(*h, in.edits, name);
+    change(*h, name);
+    SculptEdits edits = in.edits;
+    edits.frozen = frozenOf(*h, name);
+    if (edits == in.edits) return true;  // (nothing to change: no step)
+    SculptSet set = SculptSet::fromJson(host.storedText(StrokeField::Sculpts));
+    if (edits.empty()) {
+        set.nodes.erase(node);
+    } else {
+        set.nodes[node] = std::move(edits);
+    }
+    StrokeEdit edit;
+    edit.mode = label;
+    edit.set(StrokeField::Sculpts, set.toJson());
+    host.commit(std::move(edit));
+    return true;
+}
+
+}  // namespace
+
+bool sculptFreezeEdit(StrokeHost& host, const std::string& op, const std::string& freeze) {
+    if (host.sculptNode().empty()) return false;
+    if (op != "unfreeze_all" && op != "invert") throw std::invalid_argument("sculpt freeze: op is unfreeze_all or invert");
+    return sculptFreezeChange(host, op == "invert" ? "invert frozen" : "unfreeze all", freeze, [&](GuideHierarchy& h, const std::string& name) {
+        if (op == "invert") {
+            invertFrozen(h, name);
+        } else {
+            unfreezeAll(h, name);
+        }
+    });
+}
+
+bool sculptFreezeToSelection(StrokeHost& host, const std::vector<GuideId>& keep, const std::string& freeze) {
+    return sculptFreezeChange(host, "solo selection", freeze,
+                              [&](GuideHierarchy& h, const std::string& name) { freezeToSelection(h, keep, name); });
 }
 
 }  // namespace groomlab

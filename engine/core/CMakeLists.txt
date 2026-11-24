@@ -122,6 +122,7 @@ add_library(groomlab_core_objects OBJECT
     src/lod.cpp
     src/correctives.cpp
     src/sculpt.cpp
+    src/sculpt_strands.cpp
     src/flow.cpp
     src/follow_scalp.cpp
     src/strand_geometry.cpp
@@ -179,6 +180,7 @@ add_library(groomlab_core_objects OBJECT
     src/operators/bun_op.cpp
     src/operators/skin_response_op.cpp
     src/operators/debug_op.cpp
+    src/operators/sculpt_strands_op.cpp
 )
 # What every user of the core's objects needs: its headers.
 add_library(groomlab_core_headers INTERFACE)

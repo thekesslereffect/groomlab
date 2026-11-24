@@ -1153,7 +1153,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
         state = set()
         if self.viewable():
             state.add("node.viewable")
-        if self.op_type == "Sculpt":
+        if self.op_type in ("Sculpt", "SculptStrands"):
             state.add("node.sculpt")
         if self.editor.model.bakeable(self.name):  # (the core's rule, every host's)
             state.add("node.bakeable")
@@ -4295,8 +4295,9 @@ class GraphEditor(QtWidgets.QWidget):
         if getattr(self, "item_props", None) is not None:
             self.item_props.show_item(items[0] if len(items) == 1 and not nodes else None)
         self.update_dot_preview()
-        # A Sculpt node selected: brushes shape its guides (before its panel shows, which says so).
-        if len(nodes) == 1 and self.model.node_type(nodes[0]) == "Sculpt":
+        # A Sculpt node selected: brushes shape its guides (a SculptStrands node's: its strands), before
+        # its panel shows, which says so.
+        if len(nodes) == 1 and self.model.node_type(nodes[0]) in ("Sculpt", "SculptStrands"):
             self.target_sculpt(nodes[0])
         self.params.show_node(nodes[0] if len(nodes) == 1 else None)
 

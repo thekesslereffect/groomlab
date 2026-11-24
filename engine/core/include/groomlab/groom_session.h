@@ -634,6 +634,9 @@ public:
     void setPreviewSculpt(const std::string& node, SculptPtr edits, std::shared_ptr<const GuideHierarchy> shown);
     bool hasPreviewSculpt() const { return previewSculpt_ != nullptr; }
     const std::string& previewSculptNode() const { return previewSculptNode_; }  // "" without a preview
+    // Whether the live preview's node is a SculptStrands node (its strands, not guides: the GPU's guide
+    // stroke preview does not take it, look_preview.h strokeShapesGuides).
+    bool previewSculptsStrands() const;
     // What a stroke on Sculpt node `node` reads (sculpt.h SculptInput): the guides it is fed and
     // the scalp it takes (its inputs, with the last view's inputs and settings), its strength and
     // its stored edits. Throws std::runtime_error: no graph, no node of that name, not a Sculpt node, nothing fed.
@@ -1047,6 +1050,7 @@ private:
     HierarchyPtr sculptShown_;
     GuidesPtr sculptShownFrom_;
     MeshPtr sculptShownOn_;
+    std::uint64_t sculptShownFrozen_ = 0;  // the hash of the frozen guides it was drawn with
     // The target's output, from the view's document (evaluated there when the view did not reach it).
     GuidesPtr sculptOutput(GraphDocument& doc, const EvalContext& ctx);
 

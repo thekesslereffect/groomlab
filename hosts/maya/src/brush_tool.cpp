@@ -94,6 +94,8 @@ const char* kSmoothModeFlag[] = {"-smm", "-smoothMode"};  // Smooth: curve, leng
 const char* kPressureFlag[] = {"-prs", "-pressure"};
 const char* kPartNameFlag[] = {"-pn", "-partName"};
 const char* kFlowSinkFlag[] = {"-fsk", "-flowSink"};
+// groomLabBrushStroke -sculptFreeze unfreeze_all|invert: on the Sculpt or SculptStrands node targeted (sculptFreezeEdit).
+const char* kSculptFreezeFlag[] = {"-sfz", "-sculptFreeze"};
 const char* kDragSliderFlag[] = {"-ds", "-dragSlider"};
 const char* kDebugPickFlag[] = {"-dbp", "-debugPick"};
 const char* kTubeShadedFlag[] = {"-tsh", "-tubeShaded"};        // the Tube brush's tubes drawn shaded
@@ -567,6 +569,7 @@ MSyntax BrushStrokeCmd::newSyntax() {
     s.addFlag(kPointFlag[0], kPointFlag[1], MSyntax::kDouble, MSyntax::kDouble, MSyntax::kDouble);
     s.makeFlagMultiUse(kPointFlag[0]);
     s.addFlag(kInteractiveFlag[0], kInteractiveFlag[1], MSyntax::kBoolean);
+    s.addFlag(kSculptFreezeFlag[0], kSculptFreezeFlag[1], MSyntax::kString);
     s.setObjectType(MSyntax::kSelectionList, 1, 1);
     s.useSelectionAsDefault(true);
     s.enableQuery(false);
@@ -591,6 +594,22 @@ MStatus BrushStrokeCmd::doIt(const MArgList& args) {
         settings_.setMode("comb");  // unless -mode says otherwise
         const MStatus flags = applyBrushFlags(db, settings_, kName);
         if (!flags) return flags;
+        if (db.isFlagSet(kSculptFreezeFlag[0])) {
+            // Unfreeze All / Invert Frozen on the targeted node's guides or strands: one undo step.
+            MString op;
+            db.getFlagArgument(kSculptFreezeFlag[0], 0, op);
+            auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(groom_).userNode());
+            mode_ = op.asChar();
+            ScriptedStrokeHost host(*this, shape);
+            try {
+                if (!sculptFreezeEdit(host, op.asChar(), settings_.brush.freeze)) {
+                    return fail(kName, "-sculptFreeze: no Sculpt or SculptStrands node is targeted (sculptNode)");
+                }
+            } catch (const std::exception& e) {
+                return fail(kName, e.what());
+            }
+            return redoIt();
+        }
         double d = 0;
         if (db.isFlagSet(kRadiusFlag[0]) && db.getFlagArgument(kRadiusFlag[0], 0, d)) settings_.brush.radius = float(d);
         mode_ = settings_.modeName();

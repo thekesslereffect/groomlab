@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/groom_session.h"
 #include "groomlab/preview_core.h"
+#include "groomlab/sculpt_strands.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1190,8 +1191,9 @@ SculptInput GroomSession::sculptInput(const std::string& node) {
     if (!doc_) throw std::runtime_error(graphError_.empty() ? "the groom has no graph" : graphError_);
     const auto found = doc_->nodesByName.find(node);
     if (found == doc_->nodesByName.end()) throw std::runtime_error("the graph has no node named '" + node + "'");
-    if (doc_->graph.node(found->second).typeName() != op::kSculpt) {
-        throw std::runtime_error("node '" + node + "' is a " + doc_->graph.node(found->second).typeName() + ", not a Sculpt node");
+    const std::string type = doc_->graph.node(found->second).typeName();
+    if (type != op::kSculpt && type != op::kSculptStrands) {
+        throw std::runtime_error("node '" + node + "' is a " + type + ", not a Sculpt or SculptStrands node");
     }
     // A scratch copy of the view's document at the last view's settings: what the view made is
     // reused, and nothing it holds is evicted.
@@ -1209,23 +1211,48 @@ SculptInput GroomSession::sculptInput(const std::string& node) {
     in.node = node;
     NodeId source = 0;
     std::size_t output = 0;
+    in.strength = static_cast<float>(doc_->graph.node(found->second).params().getDouble("strength"));
+    if (const SculptEdits* stored = sculpts_.node(node)) in.edits = *stored;
+    if (type == op::kSculptStrands) {
+        // The strands it is fed (the shown ones, as a view hands them), the scalp its strokes' frames
+        // and fill read (as the node's external: the rest pose while following).
+        if (!scratch.graph.inputSource(id, 0, &source, &output)) throw std::runtime_error("SculptStrands node '" + node + "' is fed no strands");
+        in.strands = shownStrands(valueAs<StrandsPtr>(scratch.graph.evaluateOutput(source, output, ctx)));
+        if (!in.strands) throw std::runtime_error("SculptStrands node '" + node + "' is fed no strands");
+        in.scalp = following_ ? followRest_ : scalp_;
+        in.fill = doc_->graph.node(found->second).params().getBool("fill");
+        return in;
+    }
     if (!scratch.graph.inputSource(id, 0, &source, &output)) throw std::runtime_error("Sculpt node '" + node + "' is fed no guides");
     in.guides = valueAs<GuidesPtr>(scratch.graph.evaluateOutput(source, output, ctx));
     if (!in.guides) throw std::runtime_error("Sculpt node '" + node + "' is fed no guides");
     if (scratch.graph.inputSource(id, 1, &source, &output)) in.scalp = valueAs<MeshPtr>(scratch.graph.evaluateOutput(source, output, ctx));
-    in.strength = static_cast<float>(doc_->graph.node(found->second).params().getDouble("strength"));
-    if (const SculptEdits* stored = sculpts_.node(node)) in.edits = *stored;
     return in;
 }
 
+// The color a SculptStrands node's strands draw in while the brushes shape them (as guides).
+static const Vec3f kSculptStrandsColor(0.95f, 0.55f, 0.2f);
+
 GuidesPtr GroomSession::sculptOutput(GraphDocument& doc, const EvalContext& ctx) {
     const auto found = doc.nodesByName.find(sculptTarget_);
-    if (found == doc.nodesByName.end() || doc.graph.node(found->second).typeName() != op::kSculpt) return nullptr;
+    if (found == doc.nodesByName.end()) return nullptr;
+    const std::string type = doc.graph.node(found->second).typeName();
     try {
+        if (type == op::kSculptStrands) {  // its strands as guides, one a strand: what the brushes shape
+            const StrandsPtr strands = shownStrands(valueAs<StrandsPtr>(doc.graph.evaluate(found->second, ctx)));
+            return strands ? strandsAsGuides(*strands, kSculptStrandsColor) : nullptr;
+        }
+        if (type != op::kSculpt) return nullptr;
         return valueAs<GuidesPtr>(doc.graph.evaluate(found->second, ctx));
     } catch (const std::exception&) {
         return nullptr;  // the evaluation's own errors say why
     }
+}
+
+bool GroomSession::previewSculptsStrands() const {
+    if (!previewSculpt_ || !doc_) return false;
+    const auto found = doc_->nodesByName.find(previewSculptNode_);
+    return found != doc_->nodesByName.end() && doc_->graph.node(found->second).typeName() == op::kSculptStrands;
 }
 
 HierarchyPtr GroomSession::sculptHierarchy() {
@@ -1992,10 +2019,22 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
             if (!output) {
                 sculptShown_.reset();
                 sculptShownFrom_.reset();
-            } else if (output != sculptShownFrom_ || scalp_ != sculptShownOn_ || !sculptShown_) {
-                sculptShown_ = groomlab::sculptHierarchy(*output, sculptTarget_, following_ ? nullptr : scalp_.get());
-                sculptShownFrom_ = output;
-                sculptShownOn_ = scalp_;
+            } else {
+                // (What the node holds frozen draws frozen: a freeze stroke changes it, not the output.)
+                const SculptEdits* stored = sculpts_.node(sculptTarget_);
+                std::uint64_t frozen = hash64(0xF0F0);
+                if (stored) {
+                    for (const auto& [id, v] : stored->frozen) frozen = hashFloat(hashCombine(frozen, id), v);
+                }
+                if (output != sculptShownFrom_ || scalp_ != sculptShownOn_ || !sculptShown_ || frozen != sculptShownFrozen_) {
+                    const std::shared_ptr<GuideHierarchy> made =
+                        groomlab::sculptHierarchy(*output, sculptTarget_, following_ ? nullptr : scalp_.get());
+                    if (stored) layFrozen(*made, *stored);
+                    sculptShown_ = made;
+                    sculptShownFrom_ = output;
+                    sculptShownOn_ = scalp_;
+                    sculptShownFrozen_ = frozen;
+                }
             }
             if (sculptShown_) shownHierarchy = sculptShown_;
         }

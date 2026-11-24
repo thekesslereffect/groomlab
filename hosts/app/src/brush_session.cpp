@@ -195,6 +195,14 @@ bool BrushSession::editLengths(const char* what,
     return error_.empty();
 }
 
+bool BrushSession::sculptFreeze(const std::string& op) {
+    if (!host_ || !document_ || document_->sculptTarget().empty()) return false;
+    bool done = false;
+    error_.clear();
+    guard("sculpt freeze", [&] { done = sculptFreezeEdit(*host_, op, tool_.settings.brush.freeze); });
+    return done && error_.empty();
+}
+
 bool BrushSession::committedSincePress() const {
     return document_ && (document_->undoIndex() != pressIndex_ || document_->undoText() != pressText_);
 }

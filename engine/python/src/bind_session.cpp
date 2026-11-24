@@ -167,7 +167,8 @@ void bindSession(py::module_& m) {
         .def("set_sculpts_json", &GroomSession::setSculptsJson, py::arg("json"),
              "The Sculpt nodes' edits ({node: {'guides': {id: [t, ax, ay, scale, ...]}}}; '' none).")
         .def_property("sculpt_target", &GroomSession::sculptTarget, &GroomSession::setSculptTarget,
-                      "The Sculpt node brushes shape ('' none): the view's hierarchy is its output meanwhile.")
+                      "The Sculpt or SculptStrands node brushes shape ('' none): the view's hierarchy is its output "
+                      "meanwhile (a SculptStrands node's: its strands, one guide a strand).")
         .def(
             "sculpt_input",
             [](GroomSession& s, const std::string& node) {
@@ -176,9 +177,13 @@ void bindSession(py::module_& m) {
                 d["guides"] = in.guides ? py::cast(std::make_shared<GuideSet>(*in.guides)) : py::none();
                 d["scalp"] = in.scalp ? py::cast(std::make_shared<ScalpMesh>(*in.scalp)) : py::none();
                 d["strength"] = in.strength;
+                d["strands"] = in.strands ? py::cast(std::make_shared<StrandSet>(*in.strands)) : py::none();
+                d["fill"] = in.fill;
                 return d;
             },
-            py::arg("node"), "What Sculpt node `node` is fed: {'guides', 'scalp', 'strength'}. Raises RuntimeError.")
+            py::arg("node"),
+            "What Sculpt node `node` is fed: {'guides', 'scalp', 'strength', 'strands', 'fill'} (a SculptStrands node's: its "
+            "strands, guides None). Raises RuntimeError.")
         .def("set_corrective_weights", &GroomSession::setCorrectiveWeights, py::arg("weights"),
              "{slot: weight}: layers with a slot take these instead of their envelope.")
         .def("clear_corrective_weights", &GroomSession::clearCorrectiveWeights)

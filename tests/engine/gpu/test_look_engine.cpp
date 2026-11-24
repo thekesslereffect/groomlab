@@ -52,6 +52,7 @@
 #include "groomlab/noise.h"
 #include "groomlab/parts.h"
 #include "groomlab/sculpt.h"
+#include "groomlab/sculpt_strands.h"
 #include "groomlab/stroke.h"
 
 namespace groomlab {
@@ -4532,6 +4533,55 @@ TEST_P(LookEngineTest, ASculptStrokesDabsRunDownstreamOnTheGpu) {
         EXPECT_TRUE(host.edits()[0].text(StrokeField::Sculpts).set);
         ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
         EXPECT_LT(gpu::compareVectors(lastGpu, session.last().strands->positions()).max, kPointTolerance);
+    }
+}
+
+TEST_P(LookEngineTest, SculptStrandsLaysItsEditsAsTheCpuDoes) {
+    // A SculptStrands node's strokes (a hook on a third of the strands, recorded as the brushes
+    // record them) laid by its stage: a drag of its strength, and a drag above it (a Noise's
+    // amplitude: the same edits on new shapes), as the CPU evaluates the graph holding the value.
+    const std::string graph = chainGraph({{"Noise", R"("params": {"amplitude": 0.1, "frequency": 2.0})"}, {"SculptStrands", ""}});
+    GroomData data = groom(graph);
+    {
+        GroomSession probe(data);
+        ASSERT_TRUE(probe.evaluate(ViewRequest{}).strands);
+        const StrandsPtr in = valueAs<StrandsPtr>(probe.evaluateNode("n0", 1.0f, 0.0));
+        ASSERT_TRUE(in && in->strandCount() > 300);
+        std::vector<std::pair<std::size_t, std::vector<Vec3f>>> sculpted;
+        for (std::size_t s = 0; s < in->strandCount(); s += 3) {
+            const Vec3f* p = in->strandPoints(s);
+            std::vector<Vec3f> pts(p, p + in->strandPointCount(s));
+            const std::size_t from = pts.size() / 2;
+            for (std::size_t k = from + 1; k < pts.size(); ++k) {  // the tip half turned 0.8 radians about X: a hook
+                const Vec3f d = pts[k] - pts[from];
+                pts[k] = pts[from] + Vec3f(d.x, d.y * std::cos(0.8f) - d.z * std::sin(0.8f), d.y * std::sin(0.8f) + d.z * std::cos(0.8f));
+            }
+            sculpted.emplace_back(s, std::move(pts));
+        }
+        SculptEdits edits;
+        recordStrandStroke(edits, *in, sculpted, 1.0f, probe.last().scalp.get());
+        SculptSet set;
+        set.nodes["n1"] = edits;
+        data.sculptsJson = set.toJson();
+    }
+    auto session = [&](const std::string& g) {
+        GroomData d = data;
+        d.graphJson = g;
+        return d;
+    };
+    {
+        GroomSession dragged(session(graph));
+        ASSERT_TRUE(dragged.evaluate(ViewRequest{}).strands);
+        GroomSession committed(session(withParam(graph, "n1", "strength", 0.5)));
+        ASSERT_TRUE(committed.evaluate(ViewRequest{}).strands);
+        expectClose(runAndCompare(dragged, gpu::Overrides{{"n1", {{"strength", 0.5}}}}, committed));
+    }
+    {
+        GroomSession dragged(session(graph));
+        ASSERT_TRUE(dragged.evaluate(ViewRequest{}).strands);
+        GroomSession committed(session(withParam(graph, "n0", "amplitude", 0.3)));
+        ASSERT_TRUE(committed.evaluate(ViewRequest{}).strands);
+        expectClose(runAndCompare(dragged, gpu::Overrides{{"n0", {{"amplitude", 0.3}}}}, committed));
     }
 }
 

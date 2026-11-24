@@ -18,6 +18,7 @@
 #include "groomlab/operator_state.h"
 #include "groomlab/ramp.h"
 #include "groomlab/scalp_mesh.h"
+#include "groomlab/sculpt_strands.h"
 #include "groomlab/strand_set.h"
 
 namespace groomlab::gpu {
@@ -491,6 +492,7 @@ struct StageInputs {
     std::shared_ptr<const RestoreInputs> restore;
     std::shared_ptr<const BlendNeighborsState> neighbors;  // BlendNeighbors: its neighbours (operator_state.h)
     std::shared_ptr<const TangleInputs> tangle;
+    std::shared_ptr<const ResolvedStrandSculpts> sculpts;  // SculptStrands: each strand's edit and root frame (sculpt_strands.h)
     std::shared_ptr<const FlowInputs> flow;
     std::shared_ptr<const JiggleInputs> jiggle;
     std::shared_ptr<const MeshCutInputs> meshCut;

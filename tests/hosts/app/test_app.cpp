@@ -1333,6 +1333,53 @@ struct BrushFixture {
     const HierarchyGuide& guide(std::size_t index) const { return doc->session().hierarchy()->guides().at(index); }
 };
 
+TEST(AppBrush, ASculptStrandsNodesStrandsAreBrushedAndFrozenAsItsOwn) {
+    // A SculptStrands node targeted (the Correctives' row, the node menu): the brushes shape its
+    // strands, the strokes kept in the node (one undo step each); Freeze paints what it holds frozen,
+    // and Unfreeze All / Invert Frozen act on it, not the groom's guides.
+    BrushFixture f;
+    json graph = json::parse(f.doc->graph().dump());
+    std::string output, feeding;
+    for (const json& n : graph["nodes"]) {
+        if (n.value("type", std::string()) == "Output") output = n.value("name", std::string());
+    }
+    for (json& c : graph["connections"]) {
+        if (c.value("to", std::string()) == output && c.value("input", std::string()) == "strands") {
+            feeding = c.value("from", std::string());
+            c["from"] = "fix";
+        }
+    }
+    ASSERT_FALSE(feeding.empty());
+    graph["nodes"].push_back({{"name", "fix"}, {"type", "SculptStrands"}});
+    graph["connections"].push_back({{"from", feeding}, {"to", "fix"}, {"input", "strands"}});
+    ASSERT_EQ(f.doc->replaceGraph(graph.dump()), "");
+    EXPECT_NE(std::find(f.doc->sculptNodes().begin(), f.doc->sculptNodes().end(), "fix"), f.doc->sculptNodes().end());
+    f.doc->setSculptTarget("fix");
+    ViewRequest request;
+    request.density = 0.2f;
+    ASSERT_TRUE(f.doc->evaluate(request).strands);
+    const HierarchyPtr shown = f.doc->session().sculptHierarchy();
+    ASSERT_TRUE(shown && shown->guides().size() > 20u);
+    // A comb across the strand nearest the middle of the view.
+    const HierarchyGuide& g = shown->guides()[shown->guides().size() / 2];
+    const QPointF at = f.widgetPoint(g.points[g.points.size() / 2]);
+    f.session.settings().setMode("comb");
+    f.session.settings().screenRadius = 60.0f;
+    const std::string before = f.guides();
+    ASSERT_TRUE(f.session.stroke({at, at + QPointF(30, 0), at + QPointF(60, 5)})) << f.session.lastError();
+    EXPECT_GT(f.doc->sculptedGuides("fix"), 0u) << "its strands sculpted";
+    EXPECT_EQ(f.guides(), before) << "the groom's guides untouched";
+    // Invert Frozen and Unfreeze All: the node's.
+    ASSERT_TRUE(f.session.sculptFreeze("invert")) << f.session.lastError();
+    EXPECT_FALSE(SculptSet::fromJson(f.doc->storedText(StrokeField::Sculpts)).node("fix")->frozen.empty());
+    ASSERT_TRUE(f.session.sculptFreeze("unfreeze_all")) << f.session.lastError();
+    EXPECT_TRUE(SculptSet::fromJson(f.doc->storedText(StrokeField::Sculpts)).node("fix")->frozen.empty());
+    EXPECT_EQ(f.guides(), before);
+    // No node targeted: not the node's.
+    f.doc->setSculptTarget({});
+    EXPECT_FALSE(f.session.sculptFreeze("invert"));
+}
+
 TEST(AppBrush, CtrlShiftWithAGuideBrushPaintsTheSelectionTheRestFreeze) {
     // A Shape or Trim brush's Ctrl+Shift drag: the guides it passes over selected (the document's
     // selection, as it goes), every other guide frozen in one undo step ("solo selection"), no

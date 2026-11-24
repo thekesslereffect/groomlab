@@ -24,6 +24,8 @@ from maya import cmds
 from groomlab import undoable
 
 TYPE = "Sculpt"
+STRANDS_TYPE = "SculptStrands"  # brushes shape its strands (sculpt_strands.h), late in the chain
+TYPES = (TYPE, STRANDS_TYPE)
 
 
 def _text(groom):
@@ -36,9 +38,15 @@ def _set_text(groom, text):
 
 
 def sculpt_nodes(groom):
-    """The groom's Sculpt nodes, in graph order (top level)."""
+    """The groom's Sculpt and SculptStrands nodes (what brushes can shape), in graph order (top level)."""
     from groomlab.params import get_graph
-    return [n["name"] for n in get_graph(groom).get("nodes", []) if n.get("type") == TYPE]
+    return [n["name"] for n in get_graph(groom).get("nodes", []) if n.get("type") in TYPES]
+
+
+def node_type(groom, node):
+    """Node `node`'s type ("Sculpt", "SculptStrands"...), or None."""
+    from groomlab.params import get_graph
+    return next((n.get("type") for n in get_graph(groom).get("nodes", []) if n.get("name") == node), None)
 
 
 def sculpted_nodes(groom):
@@ -47,10 +55,11 @@ def sculpted_nodes(groom):
 
 
 def edited_guides(groom, node):
-    """How many guides of `node` hold an edit."""
+    """How many guides of `node` hold an edit (a SculptStrands node's: strands)."""
     text = _text(groom)
     data = json.loads(text) if text.strip() else {}
-    return len(data.get(node, {}).get("guides", {}))
+    entry = data.get(node, {})
+    return len(entry.get("guides", {})) + len(entry.get("strands", {}))
 
 
 def target(groom):
@@ -59,10 +68,11 @@ def target(groom):
 
 
 def set_target(groom, node):
-    """Brushes shape Sculpt node `node`'s guides (shot sculpting off), or none (None)."""
+    """Brushes shape Sculpt node `node`'s guides, or SculptStrands node `node`'s strands (shot
+    sculpting off), or none (None)."""
     if node:
         if node not in sculpt_nodes(groom):
-            raise ValueError("%s has no Sculpt node named %r" % (groom, node))
+            raise ValueError("%s has no Sculpt or SculptStrands node named %r" % (groom, node))
         if cmds.getAttr(groom + ".shotSculpt"):
             cmds.setAttr(groom + ".shotSculpt", False)
     if (cmds.getAttr(groom + ".sculptNode") or "") != (node or ""):

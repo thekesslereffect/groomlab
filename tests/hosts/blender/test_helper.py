@@ -2432,6 +2432,29 @@ class ToolsTest(HelperTestCase):
         self.assertEqual(self.texts()["correctiveData"], "")
         self.assertEqual(self.call("correctives_list")["target"]["kind"], "base")
 
+    def test_sculpt_strands_node_strokes_and_freeze(self):
+        # A SculptStrands node targeted: strokes shape its strands (sculptData's "strands"), and
+        # Unfreeze All / Invert Frozen are its own (its frozen strands), each one undo step.
+        self.place_guides(4)
+        self.call("set_graph", graph=STRANDS_SCULPT_GRAPH)
+        self.assertEqual(self.call("evaluate", density=0.1)["errors"], [])
+        r = self.call("sculpt_target", node="fix")
+        self.assertEqual(r["target"], {"kind": "node", "name": "fix"})
+        self.assertEqual(r["sculptNodes"], [{"name": "fix", "editedGuides": 0}])
+        guide_data = self.texts()["guideData"]
+        self.assertTrue(self.stroke("comb", self.comb_events(), settings={"radius": 150.0})["committed"])
+        self.assertEqual(self.texts()["guideData"], guide_data)  # the node's strands, not the guides
+        self.assertIn("strands", json.loads(self.texts()["sculptData"])["fix"])
+        self.assertGreater(self.call("correctives_list")["sculptNodes"][0]["editedGuides"], 0)
+        r = self.call("guides_edit", op="invert_frozen")
+        self.assertEqual(r.get("sculptNode"), "fix")
+        self.assertTrue(json.loads(self.texts()["sculptData"])["fix"].get("frozen"))
+        self.call("guides_edit", op="unfreeze_all")
+        self.assertNotIn("frozen", json.loads(self.texts()["sculptData"])["fix"])
+        self.assertEqual(self.texts()["guideData"], guide_data)
+        self.call("undo")
+        self.assertTrue(json.loads(self.texts()["sculptData"])["fix"].get("frozen"))
+
     def test_sculpt_node_strokes_and_clear(self):
         self.place_guides(4)
         self.call("set_graph", graph=SCULPT_GRAPH)
@@ -2487,6 +2510,17 @@ class ToolsTest(HelperTestCase):
 
 # Sparse hand guides -> an even Scatter + Interpolate -> ToGuides -> Sculpt -> the strands'
 # Interpolate (sculpt.h's workflow, Maya's test_grooming.py).
+# Scatter -> SculptStrands -> Output: brushes shaping the strands themselves (sculpt_strands.h).
+STRANDS_SCULPT_GRAPH = {
+    "version": 1, "output": "output",
+    "nodes": [{"name": "scalp", "type": "Scalp"},
+              {"name": "roots", "type": "Scatter", "params": {"density": 2.0, "length": 4.0, "previewAll": True}},
+              {"name": "fix", "type": "SculptStrands"}, {"name": "output", "type": "Output"}],
+    "connections": [{"from": "scalp", "to": "roots", "input": "scalp"},
+                    {"from": "roots", "to": "fix", "input": "strands"},
+                    {"from": "fix", "to": "output", "input": "strands"}],
+}
+
 SCULPT_GRAPH = {
     "version": 1, "output": "output",
     "nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "sparse", "type": "Guides"},

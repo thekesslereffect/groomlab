@@ -75,6 +75,7 @@ GROOMLAB_KERNEL(Smooth)
 GROOMLAB_KERNEL(RestoreLength)
 GROOMLAB_KERNEL(BlendNeighbors)
 GROOMLAB_KERNEL(Tangle)
+GROOMLAB_KERNEL(SculptStrands)
 GROOMLAB_KERNEL(Flow)
 // A masked node's result mixed back by its affect; Jiggle with motion; MeshCut.
 GROOMLAB_KERNEL(Affect)
