@@ -98,7 +98,9 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "groomlab/braid_tubes.h"
 #include "groomlab/curve.h"
@@ -2764,6 +2766,33 @@ private:
             for (const Vec3f& q : scalp->points()) headMiddle = headMiddle + q;
             headMiddle = headMiddle * (1.0f / static_cast<float>(scalp->pointCount()));
         }
+        // The scalp's open edges (on one triangle only: a neck's cut, a face's), made when a path is
+        // first measured against the scalp: a path point whose closest scalp point lies on one is out
+        // past the scalp's edge (a braid hanging below the neck), never sunk into it.
+        std::optional<std::unordered_set<std::uint64_t>> openEdges;
+        auto edgeKey = [](std::int32_t a, std::int32_t b) {
+            return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(std::min(a, b))) << 32) |
+                   static_cast<std::uint32_t>(std::max(a, b));
+        };
+        auto onOpenEdge = [&](const SurfacePoint& sp) {
+            if (!openEdges) {
+                openEdges.emplace();
+                std::unordered_map<std::uint64_t, int> uses;
+                for (const auto& t : scalp->triangles()) {
+                    for (int e = 0; e < 3; ++e) ++uses[edgeKey(t[static_cast<std::size_t>(e)], t[static_cast<std::size_t>((e + 1) % 3)])];
+                }
+                for (const auto& [key, count] : uses) {
+                    if (count == 1) openEdges->insert(key);
+                }
+            }
+            if (openEdges->empty() || sp.root.face < 0 || static_cast<std::size_t>(sp.root.face) >= scalp->triangleCount()) return false;
+            const auto& t = scalp->triangles()[static_cast<std::size_t>(sp.root.face)];
+            // (point = a + u (b - a) + v (c - a): on edge bc when 1 - u - v is 0, ca when u is, ab when v is)
+            constexpr float kOn = 1e-4f;
+            const float wa = 1.0f - sp.root.u - sp.root.v;
+            return (wa < kOn && openEdges->count(edgeKey(t[1], t[2]))) || (sp.root.u < kOn && openEdges->count(edgeKey(t[2], t[0]))) ||
+                   (sp.root.v < kOn && openEdges->count(edgeKey(t[0], t[1])));
+        };
         // Braid paths, evenly resampled, with frames facing out.
         phase.next("braid.paths");
         for (const Guide& g : braids->guides()) {
@@ -2794,7 +2823,12 @@ private:
                     // Below the scalp counts (a guide a simulation let sink in: the braid comes out
                     // all the same), down to a braid width (deeper, the closest point may lie on
                     // the scalp's far side). (No face found: far above; finite, as sample() blends it.)
-                    p.overScalp[k] = sp.root.face < 0 ? 1e30f : std::max((p.points[k] - sp.position).dot(sp.normal), -pb.width);
+                    // A point out past an open edge (a braid hanging below the neck's cut: its
+                    // closest point on the rim) is in the clear, however far below the scalp's
+                    // level, else the braid is lifted off its path there by up to a braid width.
+                    const float height = (p.points[k] - sp.position).dot(sp.normal);
+                    const bool pastEdge = height < 0.0f && onOpenEdge(sp);
+                    p.overScalp[k] = sp.root.face < 0 || pastEdge ? 1e30f : std::max(height, -pb.width);
                 }
             }
             // The weave travelled along the path: the steps a unit of length integrated.

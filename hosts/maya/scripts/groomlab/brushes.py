@@ -281,14 +281,8 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
                           targets=targets,
                           maskByScalp=mask_by_scalp, **kwargs)
     if activate:
-        if mode == "flow":
-            # Drawing flow needs a Flow node to lay the strands (as the part tool makes its Part
-            # node): the current groom's graph gets one when it has none (issue #112).
-            from groomlab.flow import ensure_flow_node
-            from groomlab.groom import active_groom
-            groom = active_groom()
-            if groom:
-                ensure_flow_node(groom)
+        # (The Flow tool changes nothing as it is picked: its first stroke makes the graph's Flow
+        # node when it has none, core BrushTool::commitFlow, issue #112.)
         cmds.setToolTo(BRUSH_CONTEXT)
     return BRUSH_CONTEXT
 

@@ -58,7 +58,7 @@ def flow_tool(groom=None, radius=60, strength=1.0, symmetry=None):
     """
     if groom:
         cmds.select(groom)
-    return brush_tool("flow", radius=radius, strength=strength, symmetry=symmetry)  # (makes the Flow node)
+    return brush_tool("flow", radius=radius, strength=strength, symmetry=symmetry)  # (its first stroke makes the Flow node)
 
 
 def flow_stroke(groom, points, radius=0.25, strength=1.0, erase=False, symmetry=None):

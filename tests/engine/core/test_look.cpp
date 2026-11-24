@@ -2263,6 +2263,63 @@ TEST(Braid, EveryStyleAndCornrowsStayAboveTheScalp) {
     EXPECT_THROW(bad.lg.eval(bad.braid), GraphError);
 }
 
+TEST(Braid, ABraidHangingPastTheScalpsOpenEdgeFollowsItsPath) {
+    // A braid laid over the edge of an open scalp (the plane's, as a neck's cut) and hanging down
+    // past it, well below its level: there it is not sunk into the scalp (its closest point is on the
+    // scalp's open edge), so it is not lifted off its path but follows it.
+    std::vector<Vec3f> path;
+    auto add = [&](Vec3f a, Vec3f b, int n) {
+        for (int k = 0; k < n; ++k) path.push_back(a + (b - a) * (static_cast<float>(k) / static_cast<float>(n)));
+    };
+    add({0.5f, 0.0f, 0.5f}, {0.5f, 0.4f, 0.5f}, 8);
+    add({0.5f, 0.4f, 0.5f}, {1.2f, 0.4f, 0.5f}, 14);
+    add({1.2f, 0.4f, 0.5f}, {1.35f, -1.2f, 0.5f}, 30);  // (hanging down past the edge, well below its level)
+    path.push_back({1.35f, -1.2f, 0.5f});
+    BraidScene scene("three", path);
+    const StrandsPtr out = scene.lg.eval(scene.braid);
+    ASSERT_TRUE(out);
+    const std::vector<float>& braid = *out->strandChannel("braidId");
+    const std::vector<float>& woven = *out->pointChannel("braidWoven");
+    const std::vector<float>& tail = *out->pointChannel("braidTail");
+    const float width = static_cast<float>(scene.lg.g.node(scene.braid).params().getDouble("width"));
+    auto fromPath = [&](const Vec3f& q) {
+        float best = 1e30f;
+        for (std::size_t k = 0; k + 1 < path.size(); ++k) {
+            const Vec3f a = path[k], ab = path[k + 1] - a;
+            const float t = std::clamp((q - a).dot(ab) / std::max(ab.dot(ab), 1e-12f), 0.0f, 1.0f);
+            best = std::min(best, (q - (a + ab * t)).length());
+        }
+        return best;
+    };
+    // The braid's middle at each share along its strands (their woven points' mean there: the
+    // Braider places a point by its share along the path, whatever the strand's length).
+    constexpr std::size_t kBins = 40;
+    std::vector<Vec3f> sum(kBins);
+    std::vector<std::size_t> count(kBins, 0);
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const std::size_t n = out->strandPointCount(s);
+        if (braid[s] < 0.0f || n < 2) continue;
+        for (std::size_t i = 1; i < n; ++i) {
+            const std::size_t at = out->strandBegin(s) + i;
+            if (woven[at] < 0.99f || tail[at] > 0.01f) continue;
+            const auto bin = std::min<std::size_t>(kBins - 1, i * kBins / n);
+            sum[bin] = sum[bin] + out->strandPoints(s)[i];
+            ++count[bin];
+        }
+    }
+    float worst = 0.0f;
+    std::size_t below = 0;
+    for (std::size_t k = 0; k < kBins; ++k) {
+        if (count[k] < 20) continue;
+        const Vec3f middle = sum[k] / static_cast<float>(count[k]);
+        if (middle.x < 1.1f || middle.y > -0.1f) continue;  // (out past the edge and below the scalp)
+        ++below;
+        worst = std::max(worst, fromPath(middle));
+    }
+    ASSERT_GT(below, 3u);
+    EXPECT_LT(worst, 0.25f * width) << "the braid leaves its path below the scalp's open edge (braid width " << width << ")";
+}
+
 TEST(Braid, FlatnessTightnessRollAndSectionsShapeTheWeave) {
     // The braid's cross-section half way up: its extent across x and z (one is depth, one side to side).
     auto spread = [](BraidScene& scene) {
