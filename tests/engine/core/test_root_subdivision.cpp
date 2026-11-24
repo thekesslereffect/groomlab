@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -248,6 +249,82 @@ TEST(RootSubdivision, PaintingAgainCutsOnlyWhereTheDensityChanged) {
         if (h.guide(g)->isChild()) cells.insert(g);  // (the root cut is a root too)
     }
     EXPECT_EQ(live, cells);
+}
+
+// A guide's tube as it is drawn (display.cpp appendTubeSurface: its sections, joined from its root
+// loop on the scalp), a triangle mesh.
+struct DrawnTube {
+    std::vector<Vec3f> points;
+    std::vector<std::uint32_t> triangles;
+    std::vector<std::size_t> near;  // each vertex's nearest guide point
+};
+DrawnTube drawnTube(const HierarchyGuide& g, float scale) {
+    DisplayGeometry geo;
+    appendTubeSurface(geo, g, scale);
+    DrawnTube out;
+    for (std::size_t k = 0; k + 2 < geo.positions.size(); k += 3) {
+        const Vec3f x{geo.positions[k], geo.positions[k + 1], geo.positions[k + 2]};
+        std::size_t near = 0;
+        for (std::size_t i = 1; i < g.points.size(); ++i) {
+            if ((g.points[i] - x).length() < (g.points[near] - x).length()) near = i;
+        }
+        out.points.push_back(x);
+        out.near.push_back(near);
+    }
+    out.triangles = geo.indices;
+    return out;
+}
+// Whether `x` lies inside a drawn tube (its winding number, the tube open at its ends: a point
+// well inside it counts, one by an open end may not).
+bool insideTube(const DrawnTube& t, const Vec3f& x) {
+    double turns = 0.0;
+    for (std::size_t k = 0; k + 2 < t.triangles.size(); k += 3) {
+        const Vec3f a = t.points[t.triangles[k]] - x, b = t.points[t.triangles[k + 1]] - x, c = t.points[t.triangles[k + 2]] - x;
+        const double la = a.length(), lb = b.length(), lc = c.length();
+        turns += 2.0 * std::atan2(a.dot(b.cross(c)), la * lb * lc + a.dot(b) * lc + b.dot(c) * la + c.dot(a) * lb);
+    }
+    return std::abs(turns) / (4.0 * kPi) >= 0.5;
+}
+// How far `x` is from a drawn tube's surface.
+float distanceToTube(const DrawnTube& t, const Vec3f& x) {
+    float best = std::numeric_limits<float>::infinity();
+    for (std::size_t k = 0; k + 2 < t.triangles.size(); k += 3) {
+        const Vec3f a = t.points[t.triangles[k]], b = t.points[t.triangles[k + 1]], c = t.points[t.triangles[k + 2]];
+        // (The nearest point of the triangle: inside it, else on its nearest edge.)
+        const Vec3f n = (b - a).cross(c - a);
+        const float nn = n.dot(n);
+        if (nn > 1e-20f) {
+            const Vec3f q = x - n * ((x - a).dot(n) / nn);
+            const bool in = (b - a).cross(q - a).dot(n) >= 0.0f && (c - b).cross(q - b).dot(n) >= 0.0f && (a - c).cross(q - c).dot(n) >= 0.0f;
+            if (in) {
+                best = std::min(best, (x - q).length());
+                continue;
+            }
+        }
+        for (const auto& [p, r] : {std::pair<Vec3f, Vec3f>{a, b}, {b, c}, {c, a}}) {
+            const Vec3f e = r - p;
+            const float f = e.dot(e) > 0.0f ? std::clamp((x - p).dot(e) / e.dot(e), 0.0f, 1.0f) : 0.0f;
+            best = std::min(best, (x - (p + e * f)).length());
+        }
+    }
+    return best;
+}
+// How far cells' drawn tubes pass into each other: the deepest vertex of one inside another (its
+// open ends' rows left out).
+float deepestPassing(const GuideHierarchy& h, const std::vector<GuideId>& cells) {
+    std::vector<DrawnTube> tubes;
+    for (const GuideId c : cells) tubes.push_back(drawnTube(*h.guide(c), h.scale()));
+    float worst = 0.0f;
+    for (std::size_t a = 0; a < tubes.size(); ++a) {
+        const std::size_t last = h.guide(cells[a])->points.size() - 1;
+        for (std::size_t k = 0; k < tubes[a].points.size(); ++k) {
+            if (tubes[a].near[k] == 0 || tubes[a].near[k] == last) continue;
+            for (std::size_t b = 0; b < tubes.size(); ++b) {
+                if (b != a && insideTube(tubes[b], tubes[a].points[k])) worst = std::max(worst, distanceToTube(tubes[b], tubes[a].points[k]));
+            }
+        }
+    }
+    return worst;
 }
 
 // A point's section coordinates in a spine's sample i (its center and axes).
@@ -505,14 +582,22 @@ TEST(RootSubdivision, CellsTileTheTubeAllAlongWithNoPenetration) {
     const TubeSpine pspine = sourceSpine(source, h.scale());
     const std::vector<GuideId> cells = subdivideRootTubes(h, *scalp, {root}).cells;
     ASSERT_GE(cells.size(), 4u);
-    EXPECT_TRUE(tubeOverlaps(h, cells).empty()) << "tubeOverlaps finds cells passing into each other";
+    // (A hair where neighbours' joins from their root loops meet near the root, no more.)
+    for (const TubeOverlap& ov : tubeOverlaps(h, cells)) {
+        EXPECT_LT(ov.depth, 0.03f) << "tubeOverlaps finds cell " << ov.from << " passing into " << ov.into << " at " << ov.at;
+    }
     std::vector<TubeSpine> spines;
     for (const GuideId c : cells) {
         const HierarchyGuide* g = h.guide(c);
         ASSERT_EQ(g->points.size(), n);
         spines.emplace_back(g->points.data(), n, g->frameUp, g->tube, h.scale());
     }
+    // As drawn (their sections joined from their root loops): none inside another.
+    EXPECT_LT(deepestPassing(h, cells), 0.01f) << "cells' drawn tubes pass into each other";
+    // Their sections, past the root's join (within it the tube is its join from the root loop: a
+    // cell rooted on the scalp leaves its section there, as its part of the tube does).
     for (std::size_t i = 1; i < n; ++i) {
+        if (static_cast<float>(i) / static_cast<float>(n - 1) < pspine.rootJoin()) continue;
         std::vector<std::vector<SectionPoint>> at(cells.size());
         for (std::size_t k = 0; k < cells.size(); ++k) {
             for (const SectionPoint& q : tubeOutline(h.guide(cells[k])->tube)) at[k].push_back(inSection(pspine, i, spines[k].atSample(i, q.u, q.v)));
@@ -590,8 +675,11 @@ TEST(RootSubdivision, EachCellsGuideSitsInItsMiddleOnACurvedScalp) {
     const std::size_t n = h.guide(root)->points.size();
     const auto cells = subdivideRootTubes(h, *scalp, {root}, cut).cells;
     ASSERT_GE(cells.size(), 6u);
-    // And they tile it past the root, none reaching into another.
+    // And they tile it past the root, none reaching into another: as drawn, and their sections past
+    // the root's join.
+    EXPECT_LT(deepestPassing(h, cells), 0.01f) << "cells' drawn tubes pass into each other";
     for (std::size_t i = 1; i < n; ++i) {
+        if (static_cast<float>(i) / static_cast<float>(n - 1) < pspine.rootJoin()) continue;
         std::vector<std::vector<SectionPoint>> at;
         for (const GuideId c : cells) {
             const HierarchyGuide* g = h.guide(c);
@@ -965,5 +1053,47 @@ TEST(Brush, KeepOffScalpLeavesHairHangingPastAnOpenEdge) {
     for (const Vec3f& p : keepOffScalp(into, *scalp)) EXPECT_FALSE(underScalp(*scalp, p, 1e-3f));
 }
 
+// How far each of `inner`'s drawn tube's vertices lies outside `outer`'s drawn tube (0 inside),
+// by the guide point they lie nearest (its open ends' rows left out).
+std::vector<float> outsideTube(const HierarchyGuide& outer, const HierarchyGuide& inner, float scale) {
+    const DrawnTube o = drawnTube(outer, scale), in = drawnTube(inner, scale);
+    std::vector<float> out(inner.points.size(), 0.0f);
+    for (std::size_t k = 0; k < in.points.size(); ++k) {
+        const std::size_t i = in.near[k];
+        if (i == 0 || i + 1 >= inner.points.size() || insideTube(o, in.points[k])) continue;
+        out[i] = std::max(out[i], distanceToTube(o, in.points[k]));
+    }
+    return out;
+}
+
+TEST(RootSubdivision, CellsOfALeaningTubeStayInItFromTheRoot) {
+    // Issue #110: a wide root combed to lean far over, cut into cells: each cell's guide runs where
+    // its part of the tube runs as the tube is drawn, from its root on the scalp (the tube's root
+    // section, tilted, far off the scalp at its edges, joined down to its root loop): its tube inside
+    // the root's all along, never bulging out of it near the root.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootTubeOptions o;
+    o.length = 1.2f;
+    o.segments = 16;
+    const std::vector<Vec3f> path{{0, 1, 0}, {0.25f, 1.08f, 0}, {0.7f, 1.0f, 0}, {1.1f, 0.75f, 0}, {1.35f, 0.3f, 0}};
+    const GuideId root = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.3f, 10), path, o);
+    RootSubdivisionOptions cut;
+    cut.multiplier = 2.0f;
+    const std::vector<GuideId> cells = subdivideRootTubes(h, *scalp, {root}, cut).cells;
+    h.evaluate(scalp.get());
+    ASSERT_GE(cells.size(), 4u);
+    const HierarchyGuide* tube = h.guide(root);
+    const float width = tube->tube.widthAt(0.0f) * h.scale();
+    for (const GuideId c : cells) {
+        const HierarchyGuide* g = h.guide(c);
+        const std::vector<float> out = outsideTube(*tube, *g, h.scale());
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            EXPECT_LT(out[i], 0.05f * width) << "cell " << c << " leaves the tube near its point " << i;
+        }
+    }
+}
+
 }  // namespace
 }  // namespace groomlab
+

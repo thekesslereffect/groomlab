@@ -1038,8 +1038,7 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
         if (!g || g->points.size() < 2) continue;
         ++counts[g->points.size()];
         const SectionPoint uv = spine.rootCoords(g->points.front());
-        const float w0 = g->tube.widthAt(0.0f) * h.scale();
-        const std::vector<Vec3f> was = slicePath(scalp, source, uv.u, uv.v, std::max(w0, w0 * g->tube.aspectAt(0.0f)), h.scale());
+        const std::vector<Vec3f> was = slicePath(scalp, source, uv.u, uv.v, h.scale());
         if (was.size() < 2) continue;
         const std::vector<Vec3f> a = resamplePolyline(g->points, kAlongDeviation + 1);
         const std::vector<Vec3f> b = resamplePolyline(was, kAlongDeviation + 1);

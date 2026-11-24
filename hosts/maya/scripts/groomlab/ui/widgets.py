@@ -1386,17 +1386,55 @@ class Pages(QtWidgets.QWidget):
 
 
 class StatusLabel(QtWidgets.QLabel):
-    """A message line that takes no room while it has nothing to say."""
+    """A message line that takes no room while it has nothing to say. `single_line`: always one
+    line high, shown even when empty, a longer message cut short with "..." and whole in its
+    tooltip, so nothing under it moves as messages come and go (the Groom Tools panel, issue #114)."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, single_line=False):
         super(StatusLabel, self).__init__(parent)
-        self.setWordWrap(True)
+        self.single_line = single_line
+        self.full_text = ""
         self.setProperty("role", "status")
-        self.setVisible(False)
+        if single_line:
+            self.setWordWrap(False)
+            self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
+            self.fit_height()
+        else:
+            self.setWordWrap(True)
+            self.setVisible(False)
+
+    def text(self):
+        return self.full_text if self.single_line else super(StatusLabel, self).text()
 
     def setText(self, text):
-        super(StatusLabel, self).setText(text)
-        self.setVisible(bool(text))
+        text = text or ""
+        if not self.single_line:
+            super(StatusLabel, self).setText(text)
+            self.setVisible(bool(text))
+            return
+        self.full_text = " ".join(text.split())  # (one line)
+        self.setToolTip(self.full_text)
+        self._elide()
+
+    def fit_height(self):
+        """One line high, with its margins (again after they or the font change)."""
+        m = self.contentsMargins()
+        self.setFixedHeight(self.fontMetrics().height() + m.top() + m.bottom() + 4)
+
+    def _elide(self):
+        width = max(self.contentsRect().width(), 1)
+        super(StatusLabel, self).setText(self.fontMetrics().elidedText(self.full_text, QtCore.Qt.ElideRight, width))
+
+    def resizeEvent(self, event):
+        super(StatusLabel, self).resizeEvent(event)
+        if self.single_line:
+            self._elide()
+
+    def changeEvent(self, event):
+        super(StatusLabel, self).changeEvent(event)
+        if self.single_line and event.type() == QtCore.QEvent.FontChange:
+            self.fit_height()
+            self._elide()
 
 
 class Section(QtWidgets.QWidget):

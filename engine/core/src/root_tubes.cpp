@@ -1562,14 +1562,55 @@ std::vector<TubeOverlap> tubeOverlaps(const GuideHierarchy& h, const std::vector
     std::vector<float> reach;
     for (const HierarchyGuide* g : tubes) {
         spines.emplace_back(g->points.data(), g->points.size(), g->frameUp, g->tube, h.scale());
+        if (g->rootNormal.length() > 0.5f && g->rootAcross.length() > 0.5f) spines.back().setRootOnScalp(g->rootNormal, g->rootAcross);
         reach.push_back(std::max(spines.back().rootWidth(), spines.back().rootHeight()));
     }
-    // A point's section coordinates at a spine's sample (its center and axes, least squares).
-    auto coords = [](const TubeSpine& s, std::size_t i, const Vec3f& p) {
-        const Vec3f d = p - s.center(i), a = s.axisU(i), b = s.axisV(i);
+    // The tubes as they are drawn and their hair grows (display.cpp appendTubeSurface, sliceFit):
+    // the sections, joined from the root loop on the scalp (else the footprint) by (1 - t / join)^2.
+    // (Near a leaning root the sections alone are not the tube: a cell rooted on the scalp leaves
+    // its section there, as its part of the tube does.)
+    auto weight = [](const TubeSpine& s, float t) {
+        const float join = s.rootJoin();
+        return t < join ? (1.0f - t / join) * (1.0f - t / join) : 0.0f;
+    };
+    auto share = [&](std::size_t k, std::size_t i) {
+        return tubes[k]->points.size() > 1 ? static_cast<float>(i) / static_cast<float>(tubes[k]->points.size() - 1) : 0.0f;
+    };
+    auto drawn = [&](std::size_t k, std::size_t i, const SectionPoint& q) {
+        const HierarchyGuide& g = *tubes[k];
+        const TubeSpine& s = spines[k];
+        const std::vector<SectionPoint>& outline = tubeOutline(g.tube);
+        const Vec3f root = g.rootRing.size() == outline.size() && outline.size() >= 3 ? cageMap(outline, g.rootRing, q) : s.footprintAt(q.u, q.v);
+        return s.atSample(i, q.u, q.v) + (root - s.at(0.0f, q.u, q.v)) * weight(s, share(k, i));
+    };
+    // A point's drawn section coordinates at a tube's sample: least squares on the footprint's
+    // join, then refined on the root loop's (Newton's, by differences).
+    auto coords = [&](std::size_t k, std::size_t i, const Vec3f& p) {
+        const TubeSpine& s = spines[k];
+        const float w = weight(s, share(k, i));
+        const Vec3f c0 = s.at(0.0f, 0.0f, 0.0f), f0 = s.footprintAt(0.0f, 0.0f);
+        const Vec3f c = s.center(i) + (f0 - c0) * w;
+        const Vec3f a = s.axisU(i) + ((s.footprintAt(1.0f, 0.0f) - f0) - (s.at(0.0f, 1.0f, 0.0f) - c0)) * w;
+        const Vec3f b = s.axisV(i) + ((s.footprintAt(0.0f, 1.0f) - f0) - (s.at(0.0f, 0.0f, 1.0f) - c0)) * w;
+        const Vec3f d = p - c;
         const float aa = a.dot(a), bb = b.dot(b), ab = a.dot(b), da = d.dot(a), db = d.dot(b);
         const float det = std::max(aa * bb - ab * ab, 1e-30f);
-        return SectionPoint{(da * bb - db * ab) / det, (db * aa - da * ab) / det};
+        SectionPoint q{(da * bb - db * ab) / det, (db * aa - da * ab) / det};
+        if (w > 0.0f) {
+            for (int it = 0; it < 4; ++it) {
+                constexpr float e = 1e-3f;
+                const Vec3f at = drawn(k, i, q);
+                const Vec3f f = at - p;
+                const Vec3f ju = (drawn(k, i, {q.u + e, q.v}) - at) * (1.0f / e);
+                const Vec3f jv = (drawn(k, i, {q.u, q.v + e}) - at) * (1.0f / e);
+                const float uu = ju.dot(ju), uv = ju.dot(jv), vv = jv.dot(jv), dd = uu * vv - uv * uv;
+                if (!(dd > 0.0f)) break;
+                const float fu = f.dot(ju), fv = f.dot(jv);
+                q.u -= (fu * vv - fv * uv) / dd;
+                q.v -= (fv * uu - fu * uv) / dd;
+            }
+        }
+        return q;
     };
     // How far inside the outline (unit coordinates) a point lies; below 0: outside.
     auto depthIn = [](const std::vector<SectionPoint>& poly, const SectionPoint& p) {
@@ -1602,7 +1643,7 @@ std::vector<TubeOverlap> tubeOverlaps(const GuideHierarchy& h, const std::vector
                 const std::size_t j = std::min(m - 1, static_cast<std::size_t>(std::lround(t * static_cast<float>(m - 1))));
                 if (j == 0) continue;
                 for (const SectionPoint& q : theirs) {
-                    const float d = depthIn(own, coords(spines[x], i, spines[y].atSample(j, q.u, q.v)));
+                    const float d = depthIn(own, coords(x, i, drawn(y, j, q)));
                     if (d > worst.depth) worst = {into.id, from.id, t, d};
                 }
             }
@@ -1652,27 +1693,26 @@ TubeSpine sourceSpine(const TubeSource& source, float scale) {
     return spine;
 }
 
-std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, float u, float v, float extent, float scale, bool alongOnly) {
-    // Rooted in its middle on the scalp (its part of the footprint taken onto the scalp along the
-    // footprint's normal, as its CVs were taken off it), then the path its middle takes inside the
-    // source's tube, joined from the root as a strand rooted there joins it (TubeSpine::rootJoin's
-    // (1 - t / join)^2, over a few of its own widths), along the tube only (square to its sections:
-    // across it, where its neighbours meet it, it stays its part of the tube).
+std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, float u, float v, float scale) {
+    // Its part of the source's tube as the tube is drawn (display.cpp appendTubeSurface, sliceFit):
+    // rooted on the scalp where the tube's root loop (else its flat footprint) has (u, v), then the
+    // tube's section point (u, v), joined from that root over the tube's own root join
+    // ((1 - t / join)^2, TubeSpine::rootJoin), the whole of the pull. So a cell never leaves its
+    // tube nor kinks at its base where the tube leans out of the scalp (issue #110): it runs where
+    // that part of the tube runs, and its neighbours beside it as they tile the tube.
     const TubeSpine spine = sourceSpine(source, scale);
     const std::size_t n = source.points.size();
     std::vector<Vec3f> path;
     if (n < 2) return path;
-    const Vec3f rooted = alongNormal(scalp, spine.footprintAt(u, v), source.normal);
+    const bool ring = source.ring.size() >= 3 && source.ring.size() == source.cage.size();
+    const Vec3f foot = ring ? cageMap(source.cage, source.ring, {u, v}) : spine.footprintAt(u, v);
+    const Vec3f rooted = alongNormal(scalp, foot, source.normal);
     const Vec3f lift = rooted - spine.at(0.0f, u, v);
-    float length = 0.0f;
-    for (std::size_t i = 1; i < n; ++i) length += (source.points[i] - source.points[i - 1]).length();
-    const float join = length > 0.0f ? std::clamp(3.0f * extent / length, 1e-3f, 1.0f) : 1.0f;
-    const std::vector<Frame> frames = rotationMinimizingFrames(source.points.data(), n, source.frameUp);
+    const float join = std::clamp(spine.rootJoin(), 1e-3f, 1.0f);
     for (std::size_t i = 0; i < n; ++i) {
         const float t = static_cast<float>(i) / static_cast<float>(n - 1);
         const float k = t < join ? (1.0f - t / join) * (1.0f - t / join) : 0.0f;
-        const Vec3f way = frames[i].tangent;
-        path.push_back(i == 0 ? rooted : spine.at(t, u, v) + (alongOnly ? way * lift.dot(way) : lift) * k);
+        path.push_back(i == 0 ? rooted : spine.at(t, u, v) + lift * k);
     }
     return path;
 }
@@ -1805,20 +1845,9 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
     for (float& a : tube.aspect) a = static_cast<float>(clampAspect(a * sv / su));
     tube.rollOnScalp = false;
     tube.roll.clear();
-    // Its guide: rooted in its middle on the scalp (its part of the footprint taken onto the scalp
-    // along the footprint's normal, as its CVs were taken off it), then the path its middle takes
-    // inside the source's tube, joined from the root as a strand rooted there joins it
-    // (TubeSpine::rootJoin's (1 - t / join)^2, over a few of its own widths), along the tube: it
-    // starts where its hair grows and runs with its neighbours.
-    // (A slice joins from its root as the whole tube does: over its level 1 root's size; a cell of a
-    // cut, a root of its own, over its own.)
-    const float whole = static_cast<float>(source.tube.widthAt(0.0f) * std::max(1.0f, source.tube.aspectAt(0.0f)) * source.tube.joinScale) *
-                        h.scale();
-    const float extent = into != kNoGuide ? whole
-                                          : static_cast<float>(std::max(su * source.tube.widthAt(0.0f), sv * source.tube.widthAt(0.0f) * source.tube.aspectAt(0.0f))) *
-                                                h.scale();
-    // (A slice of the hierarchy: in its parent's sections all along, its root section its part of the
-    // parent's, as GuideHierarchy's resolveFollower keeps it; a cell of a cut: rooted on the scalp.)
+    // Its guide: a slice of the hierarchy in its parent's sections all along, its root section its
+    // part of the parent's, as GuideHierarchy's resolveFollower keeps it; a cell of a cut rooted on
+    // the scalp, then its part of the source's tube as the tube is drawn (slicePath).
     std::vector<Vec3f> path;
     if (into != kNoGuide) {
         const TubeSpine spine = sourceSpine(source, h.scale());
@@ -1827,7 +1856,7 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
             path.push_back(spine.at(static_cast<float>(i) / static_cast<float>(n - 1), static_cast<float>(cu), static_cast<float>(cv)));
         }
     } else {
-        path = slicePath(scalp, source, static_cast<float>(cu), static_cast<float>(cv), extent, h.scale(), true);
+        path = slicePath(scalp, source, static_cast<float>(cu), static_cast<float>(cv), h.scale());
     }
     if (deviation) {  // (grooming kept: the shape the guides near it were given, on top)
         for (std::size_t i = 1; i < path.size(); ++i) path[i] = path[i] + deviation(static_cast<float>(i) / static_cast<float>(path.size() - 1));

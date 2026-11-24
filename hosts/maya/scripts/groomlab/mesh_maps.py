@@ -3,8 +3,10 @@
 (its scalpMaps) written as a color set of that name on the scalps it spans, so Maya's Color Set
 Editor lists it and Arnold (aiUserDataColor, a color set's name) and other tools read it there.
 
-The groom's scalpMaps stay the maps' source: the color sets are a copy, written again when painting
-ends (another tool than the Paint brush), when the scene is saved, and by maps_to_mesh. A deformed
+The groom's scalpMaps stay the maps' source: the color sets are a copy, written again whenever a
+groom's maps change (a stroke of any tool that paints them, a map made, removed or renamed, undo:
+a change callback on its scalpMaps, run once the change is done), when the scene is saved, and by
+maps_to_mesh; an open Color Set Editor is refreshed to show them. A deformed
 scalp gets them on its original (Orig) shape, so they come through its deformers. A scalp with
 other construction history (a polySphere, a Combine kept live) cannot keep data of its own: it is
 skipped with a warning (delete its non-deformer history to keep the maps on it). The sets this
@@ -20,7 +22,9 @@ from maya.api import OpenMaya as om2
 from groomlab.base import _original_shape, no_undo
 
 OWNED_ATTR = "groomLabMapSets"  # on a mesh: the color sets GroomLab wrote there (a JSON list)
-_callbacks = []
+_callbacks = []       # the scene callbacks (save, grooms added)
+_node_callbacks = {}  # a groom shape's MObjectHandle hash -> its scalpMaps change callback
+_pending = {}         # grooms whose maps changed (hash -> MObjectHandle), written when the change is done
 _warned = set()
 
 
@@ -107,6 +111,25 @@ def maps_to_mesh(groom, names=None):
         if _write(shape, name, rgba):
             owned.setdefault(shape, set(_owned(shape))).add(name)
             written.append((shape, name))
+    if names is None:
+        # (All written: the sets GroomLab wrote for maps the groom no longer has, a map undone or
+        # removed elsewhere, taken off; never a color set of yours.)
+        kept = {name for _scalp, name, _rgba in sets}
+        for mesh in meshes.values():
+            if not mesh or not cmds.objExists(mesh):
+                continue
+            shape = _target(mesh)
+            gone = [n for n in _owned(shape) if n not in kept]
+            if not gone:
+                continue
+            sel = om2.MSelectionList()
+            sel.add(shape)
+            fn = om2.MFnMesh(sel.getDagPath(0))
+            present = set(fn.getColorSetNames())
+            for n in gone:
+                if n in present:
+                    fn.deleteColorSet(n)
+            owned[shape] = set(owned.get(shape, set(_owned(shape)))) - set(gone)
     with no_undo():  # (bookkeeping of a copy: no undo step)
         for shape, names_on in owned.items():
             if set(names_on) != set(_owned(shape)):
@@ -151,12 +174,85 @@ def all_maps_to_mesh():
             maps_to_mesh(groom)
         except Exception as e:  # a save must never fail on this
             cmds.warning("GroomLab: maps of %s not kept on its scalp: %s" % (groom, e))
+    refresh_editor()
+
+
+def refresh_editor():
+    """Maya's Color Set Editor, when open, listing the sets as they are now (it does not see sets
+    written through the API on its own)."""
+    try:
+        if cmds.window("colorSetEditor", exists=True):
+            from maya import mel
+            mel.eval("updateColorSetEditor")
+    except Exception:
+        pass
+
+
+def _flush():
+    handles = list(_pending.values())
+    _pending.clear()
+    for handle in handles:
+        if not handle.isValid() or not handle.isAlive():
+            continue
+        try:
+            groom = om2.MFnDagNode(handle.object()).partialPathName()
+            maps_to_mesh(groom)
+        except Exception as e:
+            cmds.warning("GroomLab: painted maps not kept on the scalp: %s" % e)
+    refresh_editor()
+
+
+def _maps_changed(msg, plug, _other, handle):
+    if not msg & om2.MNodeMessage.kAttributeSet or plug.partialName(useLongNames=True) != "scalpMaps":
+        return
+    if not _pending:
+        cmds.evalDeferred(_flush, lowestPriority=True)  # (once the stroke, undo or edit is done)
+    _pending[handle.hashCode()] = handle
+
+
+def _watch(node):
+    """A groom shape's scalpMaps watched: its maps written to its scalps whenever they change."""
+    try:
+        if om2.MFnDependencyNode(node).typeName != "groomLabShape":
+            return
+        handle = om2.MObjectHandle(node)
+        if handle.hashCode() in _node_callbacks:
+            return
+        _node_callbacks[handle.hashCode()] = om2.MNodeMessage.addAttributeChangedCallback(node, _maps_changed, handle)
+    except RuntimeError:
+        pass
+
+
+def _unwatch_all():
+    while _node_callbacks:
+        try:
+            om2.MMessage.removeCallback(_node_callbacks.popitem()[1])
+        except RuntimeError:
+            pass
+
+
+def _watch_scene(*_):
+    """Every groom in the scene watched (after a scene is opened or made, and at start)."""
+    _unwatch_all()
+    shapes = cmds.ls(type="groomLabShape") or []
+    if shapes:
+        sel = om2.MSelectionList()
+        for shape in shapes:
+            sel.add(shape)
+        for i in range(sel.length()):
+            _watch(sel.getDependNode(i))
 
 
 def start():
-    """Write the maps onto the meshes before every save (GroomLab's menu installs this)."""
-    if not _callbacks:
-        _callbacks.append(om2.MSceneMessage.addCallback(om2.MSceneMessage.kBeforeSave, lambda *_: all_maps_to_mesh()))
+    """Write the maps onto the meshes whenever they change and before every save (GroomLab's menu
+    installs this)."""
+    if _callbacks:
+        return
+    _callbacks.append(om2.MSceneMessage.addCallback(om2.MSceneMessage.kBeforeSave, lambda *_: all_maps_to_mesh()))
+    _callbacks.append(om2.MDGMessage.addNodeAddedCallback(lambda node, *_: _watch(node), "groomLabShape"))
+    for message in (om2.MSceneMessage.kAfterOpen, om2.MSceneMessage.kAfterNew, om2.MSceneMessage.kAfterImport):
+        _callbacks.append(om2.MSceneMessage.addCallback(message, _watch_scene))
+    _watch_scene()
 
 
 def stop():
@@ -165,3 +261,5 @@ def stop():
             om2.MMessage.removeCallback(_callbacks.pop())
         except RuntimeError:
             pass
+    _unwatch_all()
+    _pending.clear()
