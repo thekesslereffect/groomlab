@@ -118,7 +118,7 @@ struct ClumpCenter {
 // A Clump after a Braid (alongBraid): each section keeps its tube's thickness as its locks gather.
 // At each station along a section (a share of its strands' points), every clumped point's offset
 // from the section's middle there (its strands' mean as they came) becomes its lock center's
-// offset times k plus its own offset from that center as clumped (tightened: (1 - w)^2 of what it
+// offset times k plus its own offset from that center as clumped (tightened: (1 - w)^4 of what it
 // came with, w the strength's share there): k (one a station, eased along
 // the section) gives the offsets the mean square they had, the tube as thick, and a point that
 // would lie farther out than the farthest did is drawn back to that (the tube's wall). The locks spread out to fill the tube as they
@@ -172,14 +172,18 @@ void keepTubeThickness(const StrandSet& in, StrandSet& out, const std::vector<fl
                 const Vec3f m = pointAt(middle.data(), stations, u);
                 const Vec3f c = pointAt(in.strandPoints(cs), in.strandPointCount(cs), u);
                 const Vec3f a = c - m, d = before[i] - m;
-                // Its offset from its lock's center as clumped (the strength's share gone), that
-                // share taken again: a lock (1 - w)^2 as wide, not 1 - w. Small locks side by side
-                // fill a tube whatever their width until they are thin, so this shows them as the
-                // strength rises, not only near 1.
+                // Its offset from its lock's center as clumped (1 - w of what it came with), that
+                // share taken three times more: a lock (1 - w)^4 as wide, not 1 - w. Small locks side
+                // by side fill a tube whatever their width until they are thin: narrowed evenly
+                // they only thin the tube out, so they narrow fast from the slider's start (0.66 as
+                // wide at 0.1, 0.41 at 0.2, 0.06 at 0.5) and the gaps between them open at once.
                 const Vec3f came = before[i] - c;
                 Vec3f b = after[i] - c;
                 const float c2 = came.dot(came);
-                if (c2 > 1e-20f) b = b * std::clamp(b.dot(came) / c2, 0.0f, 1.0f);
+                if (c2 > 1e-20f) {
+                    const float kept = std::clamp(b.dot(came) / c2, 0.0f, 1.0f);
+                    b = b * (kept * kept * kept);
+                }
                 aa[j] += a.dot(a);
                 ab[j] += a.dot(b);
                 bb[j] += b.dot(b);
