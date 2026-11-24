@@ -810,6 +810,10 @@ def draw_pinned_actions(layout, context, node):
     from . import actions, menu
     state, values = node_state(node)
     state.add("type." + node.gl_type)
+    if node.gl_type == "Braid":  # its sections brushed (Sculpt Sections): Done Sculpting Sections
+        from . import tools
+        if tools.sculpted_braid(_node_scalp(node)) == node.gl_name:
+            state.add("braid.sculpting")
     container = graph_ui.get("graph/nodeActions", {}) or {}
     items = [i for i in graph_ui.resolve(container.get("items", []), state, values) if i["kind"] == "action"]
     items = [i for i in items if i["id"] in graph_ui.ACTIONS or i["id"] in actions.BINDINGS]

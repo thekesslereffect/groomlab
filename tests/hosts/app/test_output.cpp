@@ -324,6 +324,18 @@ TEST(AppOutput, FeathersAndBraidsAskInThePrompt) {
     EXPECT_FALSE(again.made);
     EXPECT_EQ(again.sculpt, sculpt);
     EXPECT_FALSE(window.sculptBraidSections("guides"));
+    // Done Sculpting Sections in Sculpt Sections' place on the Braid while its sections are brushed;
+    // triggered (Esc in the brush tool too: leaveSculptNode), the guides brushed again.
+    EXPECT_TRUE(AppActions::nodeState(window, four).count("braid.sculpting"));
+    EXPECT_FALSE(AppActions::nodeState(window, braid).count("braid.sculpting"));
+    bindings.at("braid.doneSculptSections").trigger(nullptr, false);
+    EXPECT_EQ(doc->sculptTarget(), "");
+    EXPECT_FALSE(AppActions::nodeState(window, four).count("braid.sculpting"));
+    EXPECT_FALSE(window.leaveSculptNode());
+    ASSERT_TRUE(window.sculptBraidSections(four));
+    EXPECT_EQ(doc->sculptTarget(), sculpt);
+    EXPECT_TRUE(window.leaveSculptNode());
+    EXPECT_EQ(doc->sculptTarget(), "");
 
     // Add > Bun: the prompt's Twisted, a Braid of rope style whose paths a Bun node coils, the buns group made.
     bindings.at("add.bun").trigger(nullptr, false);

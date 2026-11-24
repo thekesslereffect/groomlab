@@ -1256,6 +1256,14 @@ class GraphModel(object):
             self._take(edit)
         return made
 
+    def braid_sculpt_node(self, braid):
+        """The Sculpt node Sculpt Sections made on Braid `braid`, or None (graph_inserts.h braidSculptNode)."""
+        return self._query().braid_sculpt_node(braid) or None
+
+    def sculpted_braid(self, sculpt):
+        """The Braid whose sections Sculpt node `sculpt` brushes, or None (graph_inserts.h sculptedBraid)."""
+        return self._query().sculpted_braid(sculpt or "") or None
+
     def set_output(self, name):
         self._node(name)
         self.output = name

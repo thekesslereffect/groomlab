@@ -183,6 +183,7 @@ MainWindow::MainWindow() {
         }
     });
     connect(viewport_, &Viewport::deleteRequested, this, [this] { guidesPanel_->deleteSelected(); });
+    connect(viewport_, &Viewport::leaveSculptNodeRequested, this, [this] { leaveSculptNode(); });
     connect(viewport_, &Viewport::message, this, [this](const QString& text) { report(text); });
     connect(viewport_, &Viewport::toolModeChanged, this, [this](Viewport::ToolMode mode) {
         if (mode != Viewport::ToolMode::Select) brush_.selectHides = false;  // (the radial menu's Visibility > Select)

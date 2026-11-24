@@ -87,6 +87,9 @@ public:
     // turn of the event loop (never under an editor's own signal), once no drag is live.
     void refresh();
     void rebuildNow();  // the same at once (tests; never from an editor's handler)
+    // The shown node's actions again (what they need changed: the brushes' target, say), on the
+    // next turn of the loop (one may be the button whose click got here).
+    void refreshActions();
     // A param's right-click menu (a param that takes an input port): the host fills it (the
     // shared definitions' paramMenu, AppActions::fillParamMenu); without a filler, Expose as
     // Input alone. fillParamMenu fills `menu` for the shown node's param without showing it.

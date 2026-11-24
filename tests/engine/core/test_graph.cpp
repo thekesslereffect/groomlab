@@ -1079,6 +1079,13 @@ TEST(GraphInserts, BraidsAndFeathersLandAlikeInEveryHost) {
     EXPECT_EQ(again.sculpt, sculpted.sculpt);
     EXPECT_EQ(again.follow, sculpted.follow);
     EXPECT_THROW(insertBraidSculpt(edit, "guides"), GraphError);
+    // Done Sculpting Sections: the Braid's sections' Sculpt node and the Braid it sculpts, both ways.
+    EXPECT_EQ(braidSculptNode(edit, second), sculpted.sculpt);
+    EXPECT_EQ(sculptedBraid(edit, sculpted.sculpt), second);
+    EXPECT_EQ(braidSculptNode(edit, braid), "");  // (a Braid with none)
+    EXPECT_EQ(braidSculptNode(edit, "guides"), "");  // (not a Braid)
+    EXPECT_EQ(sculptedBraid(edit, sculpted.follow), "");  // (not a Sculpt)
+    EXPECT_EQ(sculptedBraid(edit, ""), "");
 
 
     // Two designs sharing scattered shafts through a Split, merged with the hair before the output.

@@ -359,8 +359,23 @@ bool MainWindow::sculptBraidSections(const std::string& braid) {
     }
     if (made.made) graphEdited();
     correctives_->setTargetNode(made.sculpt);
-    notify(tr("Brush %1's sections: %2 keeps the strokes, %3 carries the hair along them")
+    notify(tr("Brush %1's sections: %2 keeps the strokes, %3 carries the hair along them (Esc or Done Sculpting "
+              "Sections: the guides again)")
                .arg(QString::fromStdString(braid), QString::fromStdString(made.sculpt), QString::fromStdString(made.follow)));
+    return true;
+}
+
+bool MainWindow::leaveSculptNode() {
+    if (!document_ || document_->sculptTarget().empty()) return false;
+    const std::string node = document_->sculptTarget();
+    std::string braid;
+    try {
+        braid = sculptedBraid(GraphEdit(document_->graph().dump()), node);
+    } catch (const std::exception&) {
+    }
+    correctives_->setTargetNode({});
+    notify(braid.empty() ? tr("Brushing the guides again")
+                         : tr("Brushing the guides again: done sculpting %1's sections").arg(QString::fromStdString(braid)));
     return true;
 }
 

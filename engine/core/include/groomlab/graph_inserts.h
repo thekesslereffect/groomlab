@@ -215,6 +215,13 @@ struct BraidSculptNodes {
     bool made = false;  // whether they are new
 };
 BraidSculptNodes insertBraidSculpt(GraphEdit& edit, const std::string& braid, std::optional<double> groomSize = std::nullopt);
+// The Sculpt node Sculpt Sections made on Braid node `braid` (a Sculpt reading its sections that
+// feeds a FollowGuides' guides), "" none (or no such Braid).
+std::string braidSculptNode(const GraphEdit& edit, const std::string& braid);
+// The Braid whose sections Sculpt node `sculpt` brushes (braidSculptNode's), "" for any other node:
+// while the brushes shape it (the session's sculpt target) the hosts show Done Sculpting Sections
+// on that Braid, and Esc in the brush tool goes back to the guides (the braid's path among them).
+std::string sculptedBraid(const GraphEdit& edit, const std::string& sculpt);
 
 // A feather design: its name (contour, down, ...) and the graph of its preset feathers_<name>,
 // fitted to the scalp (presetGraphJson): its Compound node grows the barbs, its Scatter's

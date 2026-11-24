@@ -738,7 +738,8 @@ class GraphEditorTest(unittest.TestCase):
 
     def test_node_actions(self):
         # Braid: Sculpt Sections makes its sections a Sculpt node's guides the brushes shape, its hair
-        # through a FollowGuides after it; clicked again, the same nodes.
+        # through a FollowGuides after it; Done Sculpting Sections in its place then, back to the
+        # guides; Sculpt Sections again: the same nodes. Esc in the brush tool (sculpts.leave) too.
         from groomlab import sculpts
         braid = self.editor.add_node("Braid")
         self.editor.link("width", braid, "strands")
@@ -754,7 +755,19 @@ class GraphEditorTest(unittest.TestCase):
             self.assertEqual(model.source_of(follow[0], "strands"), braid)
             self.assertEqual(model.source_of(sculpt, "guides"), braid)
             self.assertEqual(sculpts.target(self.groom), sculpt, self.editor.status.text())
-        self.editor.target_sculpt(None)
+            self.assertEqual(model.sculpted_braid(sculpt), braid)
+            self._action("Done Sculpting Sections").click()
+            wait(50)
+            self.assertIsNone(sculpts.target(self.groom), self.editor.status.text())
+            self._action("Sculpt Sections")  # (in its place again)
+        self._action("Sculpt Sections").click()
+        wait(50)
+        self.assertEqual(sculpts.target(self.groom), sculpt)
+        self.assertEqual(sculpts.leave(self.groom), sculpt)  # (Esc in the brush tool)
+        self.assertIsNone(sculpts.target(self.groom))
+        self.editor.refresh_node_actions()  # (the docked editor's: graph_editor.sculpt_target_changed)
+        self._action("Sculpt Sections")
+        self.assertIsNone(sculpts.leave(self.groom))  # (nothing to leave)
 
         # Instance: the selected mesh becomes the prototype.
         instance = self.editor.add_node("Instance")

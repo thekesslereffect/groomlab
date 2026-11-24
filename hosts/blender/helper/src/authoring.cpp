@@ -452,7 +452,17 @@ json layerJson(const Session& s, const CorrectiveLayer& l) {
 
 json targetJson(Session& s) {
     const std::string node = s.groom->sculptTarget(), layer = shotLayer(s);
-    if (!node.empty()) return {{"kind", "node"}, {"name", node}};
+    if (!node.empty()) {
+        // A Braid's sections' Sculpt node (Sculpt Sections): that Braid, for Done Sculpting Sections.
+        std::string braid;
+        try {
+            braid = sculptedBraid(GraphEdit(graphTextOf(*s.groom)), node);
+        } catch (const std::exception&) {
+        }
+        json target = {{"kind", "node"}, {"name", node}};
+        if (!braid.empty()) target["braid"] = braid;  // (left out for any other Sculpt node)
+        return target;
+    }
     if (!layer.empty()) return {{"kind", "corrective"}, {"name", layer}};
     return {{"kind", "base"}, {"name", nullptr}};
 }

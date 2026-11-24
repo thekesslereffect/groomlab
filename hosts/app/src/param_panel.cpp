@@ -1167,6 +1167,10 @@ void ParamPanel::showPresets() {
     emit edited();
 }
 
+void ParamPanel::refreshActions() {
+    QTimer::singleShot(0, this, [this] { buildActions(); });
+}
+
 void ParamPanel::buildActions() {
     for (auto& [id, b] : actionButtons_) {
         actionsGrid_->removeWidget(b);

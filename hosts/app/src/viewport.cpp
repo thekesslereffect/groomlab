@@ -15,6 +15,7 @@
 #include <QWheelEvent>
 
 #include "brush_session.h"
+#include "groom_document.h"
 #include "groomlab/editor/tool_settings.h"
 
 namespace groomlab::app {
@@ -493,6 +494,11 @@ void Viewport::keyPressEvent(QKeyEvent* event) {
                 session_->leaveRoots();
                 refreshOverlay();
                 emit brushSettingsChanged();
+                event->accept();
+                return;
+            }
+            if (session_ && mode_ == ToolMode::Brush && session_->document() && !session_->document()->sculptTarget().empty()) {
+                emit leaveSculptNodeRequested();  // (the guides brushed again: MainWindow::leaveSculptNode)
                 event->accept();
                 return;
             }

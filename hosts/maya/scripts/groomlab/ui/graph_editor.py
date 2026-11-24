@@ -4334,9 +4334,24 @@ class GraphEditor(QtWidgets.QWidget):
         if self.groom and not self.live and not self.apply():
             return None
         self.target_sculpt(made["sculpt"])
-        self.report("brush %s's sections: %s keeps the strokes, %s carries the hair along them"
-                    % (name, made["sculpt"], made["follow"]))
+        self.refresh_node_actions()  # (Done Sculpting Sections in its place)
+        self.report("brush %s's sections: %s keeps the strokes, %s carries the hair along them (Esc or Done "
+                    "Sculpting Sections: the guides again)" % (name, made["sculpt"], made["follow"]))
         return made["sculpt"]
+
+    def done_sculpt_sections(self, name):
+        """Done Sculpting Sections on Braid node `name`: brushes shape the guides again (the braid's
+        path among them), the sections' strokes kept in their Sculpt node."""
+        self.target_sculpt(None)
+        self.refresh_node_actions()
+        self.report("brushing the guides again: done sculpting %s's sections (Sculpt Sections brushes them again)" % name)
+
+    def refresh_node_actions(self):
+        """The shown node's panel again: its actions follow what the brushes shape (a Braid's Sculpt
+        Sections, or Done Sculpting Sections while they shape its sections)."""
+        name = getattr(self.params, "node", None)
+        if name is not None and name in self.model.nodes:
+            self.params.show_node(name)
 
     def clear_sculpt_edits(self, name):
         """Drop Sculpt node `name`'s strokes (one undo step)."""
@@ -6238,6 +6253,16 @@ def _same_node(a, b):
     """Whether two names (short or long) are the same node: False when either is missing."""
     ua = _uuid(a) if a else None
     return ua is not None and ua == (_uuid(b) if b else None)
+
+
+def sculpt_target_changed(groom, text=None):
+    """The brushes' target changed outside the editor (Esc in the brush tool: sculpts.leave): the open
+    editor on `groom` shows it in its panel (a Braid's Done Sculpting Sections goes) and says `text`."""
+    if _window is None or not widgets.alive(_window) or not _same_node(_window.groom, groom):
+        return
+    _window.refresh_node_actions()
+    if text:
+        _window.report(text)
 
 
 def show(groom=None):

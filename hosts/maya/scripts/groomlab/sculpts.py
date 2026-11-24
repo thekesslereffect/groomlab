@@ -69,6 +69,36 @@ def set_target(groom, node):
         cmds.setAttr(groom + ".sculptNode", node or "", type="string")
 
 
+def leave(groom):
+    """Brushes shape the guides again, not a Sculpt node (Esc in the brush tool: Sculpt Sections
+    left, the braid's path brushed among the guides); the Graph Editor's panel follows. Returns the
+    node left, or None."""
+    node = target(groom)
+    if not node:
+        return None
+    braid = sculpted_braid(groom, node)
+    from groomlab.base import no_undo
+    with no_undo():  # (what brushes shape is a tool setting: no undo step, as the Graph Editor's)
+        set_target(groom, None)
+    text = "brushing the guides again" + (" (done sculpting %s's sections)" % braid if braid else "")
+    from maya.api import OpenMaya as om
+    om.MGlobal.displayInfo("GroomLab: " + text)
+    try:
+        from groomlab.ui import graph_editor
+        graph_editor.sculpt_target_changed(groom, text)
+    except ImportError:
+        pass
+    return node
+
+
+def sculpted_braid(groom, node):
+    """The Braid whose sections Sculpt node `node` brushes (Sculpt Sections; graph_inserts.h
+    sculptedBraid), or None."""
+    from groomlab.params import get_graph
+    edit = groomlab_core.GraphEdit(json.dumps(get_graph(groom)))
+    return edit.sculpted_braid(node or "") or None
+
+
 @undoable("clear sculpt edits")
 def clear_edits(groom, node):
     """Drop Sculpt node `node`'s edits: its guides as it is fed them. One undo step."""

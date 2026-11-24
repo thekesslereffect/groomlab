@@ -96,6 +96,9 @@ signals:
     void brushReadout(const QPoint& at, const QString& text);
     // Delete was pressed over the viewport (the host removes the selected guides).
     void deleteRequested();
+    // Esc in the brush tool while the brushes shape a Sculpt node (Sculpt Sections): the host has
+    // them shape the guides again (MainWindow::leaveSculptNode); again, Esc leaves the brush.
+    void leaveSculptNodeRequested();
     // Something went wrong in a stroke (the host says so; the stroke was dropped).
     void message(const QString& text);
     // Y held and the left button pressed (in any tool): the host opens the marking menu at `at`

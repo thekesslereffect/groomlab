@@ -435,7 +435,14 @@ class PipelineOpsTest(unittest.TestCase):
         self.assertEqual(process.call("node_status", session=rt.session).get("graphError", ""), "")
         again = pipeline.sculpt_braid_sections(head, braid)
         self.assertEqual((again["made"], again["sculpt"], again["follow"]), (False, made["sculpt"], made["follow"]))
-        tools.sculpt_target(head, base=True)
+        # Done Sculpting Sections (Esc in the brush tool too): the guides brushed again, the Braid's
+        # panel showing it by the target's braid (graph_inserts.h sculptedBraid).
+        self.assertEqual(tools.sculpt_target(head)["target"].get("braid"), braid)
+        self.assertEqual(tools.sculpted_braid(head), braid)
+        self.assertEqual(pipeline.done_sculpt_sections(head), {"node": made["sculpt"], "braid": braid})
+        self.assertEqual(tools.sculpt_target(head)["target"]["kind"], "base")
+        self.assertEqual(tools.sculpted_braid(head), "")
+        self.assertEqual(pipeline.done_sculpt_sections(head), {"node": None, "braid": None})
         # Add > Bun (graph_inserts.h insertBun): the buns group placing them, a Bun node the Braid's paths.
         made = pipeline.add_bun(head, style="rope", shape="coil")
         self.assertEqual(link(head, made["braid"], "braids"), made["bun"])

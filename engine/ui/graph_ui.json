@@ -79,7 +79,8 @@
         {"id": "node.prototypeFromSelection", "needs": ["type.Scales"], "hosts": ["blender"]},
         {"id": "node.bake", "needs": ["type.ToGuides"]},
         {"id": "sculpt.clearEdits", "needs": ["type.Sculpt"]},
-        {"id": "braid.sculptSections", "needs": ["type.Braid"]},
+        {"id": "braid.sculptSections", "needs": ["type.Braid", "!braid.sculpting"]},
+        {"id": "braid.doneSculptSections", "needs": ["type.Braid", "braid.sculpting"]},
         {"id": "compound.ungroup", "label": "Ungroup Compound", "needs": ["type.Compound"]},
         {"id": "compound.saveAsNode", "needs": ["type.Compound"]},
         {"id": "compound.saveToLibrary", "needs": ["type.Compound", "node.library"]}

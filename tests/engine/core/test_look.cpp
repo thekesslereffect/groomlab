@@ -36,6 +36,7 @@
 #include "groomlab/operators.h"
 #include "groomlab/point_index.h"
 #include "groomlab/random.h"
+#include "groomlab/sculpt.h"
 #include "test_helpers.h"
 
 namespace groomlab {
@@ -2775,6 +2776,135 @@ TEST(Braid, FollowGuidesCarriesASculptedSectionsHair) {
     for (std::size_t p = 0; p < hair->positions().size(); ++p) {
         ASSERT_LT((same->positions()[p] - hair->positions()[p]).length(), 1e-5f) << p;
     }
+}
+
+TEST(Braid, SculptSectionsShowsACurvedBraidsSectionsWhereTheyAre) {
+    // A path rising from the plane and bending over to +x (an arc): the sections output weaves
+    // round it all along, and Sculpt Sections shows and brushes them where the Braid has them
+    // (sculptHierarchy on the scalp). They start where the weave does, off the scalp: rooted
+    // rigidly onto it they slid down to the scalp, along a straight path (unseen) but off a bending
+    // one, the sections offset from the braid and its hair.
+    std::vector<Vec3f> arc;
+    for (int i = 0; i <= 24; ++i) {
+        const float a = 2.1f * static_cast<float>(i) / 24.0f;  // (up to 120 degrees round)
+        arc.push_back({1.0f - 0.5f * std::cos(a), 0.5f * std::sin(a), 0.5f});
+    }
+    BraidScene scene("three", arc);
+    scene.setParam("region", 0.3);
+    scene.setParam("end", std::string("bound"));
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    const GuidesPtr sections = valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 3, ctx));
+    ASSERT_TRUE(sections && sections->size() == 3u);
+    const double width = scene.lg.g.node(scene.braid).params().getDouble("width");
+    const auto offPath = [&](const Vec3f& p) {
+        float best = 1e9f;
+        for (std::size_t i = 1; i < arc.size(); ++i) {
+            const Vec3f d = arc[i] - arc[i - 1];
+            const float t = std::clamp((p - arc[i - 1]).dot(d) / d.dot(d), 0.0f, 1.0f);
+            best = std::min(best, (p - (arc[i - 1] + d * t)).length());
+        }
+        return best;
+    };
+    for (const Guide& g : sections->guides()) {
+        EXPECT_GT(g.points.front().y, 0.05f);  // (off the scalp: where the weave starts)
+        for (const Vec3f& p : g.points) ASSERT_LT(offPath(p), 0.75f * width) << p.x << " " << p.y << " " << p.z;
+    }
+    const MeshPtr scalp = valueAs<MeshPtr>(scene.lg.ext.find("scalp")->value);
+    ASSERT_TRUE(scalp);
+    const auto h = sculptHierarchy(*sections, "braidSculpt", scalp.get());
+    const auto samePlace = [&](const GuideHierarchy& shown, const GuideSet& want, const char* when) {
+        for (const Guide& g : want.guides()) {
+            const HierarchyGuide* s = shown.guide(g.id);
+            ASSERT_TRUE(s && s->points.size() == g.points.size()) << when;
+            for (std::size_t i = 0; i < g.points.size(); ++i) {
+                ASSERT_LT((s->points[i] - g.points[i]).length(), 1e-4f) << when << ": guide " << g.id << " point " << i;
+            }
+        }
+    };
+    samePlace(*h, *sections, "shown");
+    // Brushed (its points set, the root's stay) and evaluated on the scalp again, as a stroke does:
+    // it stays where the brush left it, bound to the scalp where it is.
+    GuideSet brushed = *sections;
+    Guide& first = brushed.guides().front();
+    for (std::size_t i = first.points.size() / 2; i < first.points.size(); ++i) first.points[i] += Vec3f{0.0f, 0.0f, 0.05f};
+    h->setPoints(first.id, first.points);
+    h->evaluateSubtrees(scalp.get(), {first.id});
+    samePlace(*h, brushed, "brushed");
+    h->evaluate(scalp.get());
+    samePlace(*h, brushed, "evaluated again");
+}
+
+TEST(Braid, SculptedSectionsRideAlongWhenThePathBends) {
+    // A section brushed aside (across the braid in the path's frame, over the middle of the braid),
+    // then the braid's path bent from standing straight to an arc of the same length (Sculpt
+    // Sections left, the main guide moved): the stroke rides along with the path, the sculpted
+    // section the bent braid's own with the same push in its frame. Kept as turns along the section
+    // alone (its own frames, no path), the stroke lands elsewhere once the section twists another way.
+    const auto sectionsOf = [](std::vector<Vec3f> path) {
+        BraidScene scene("three", std::move(path));
+        scene.setParam("region", 0.3);
+        scene.setParam("end", std::string("bound"));
+        EvalContext ctx;
+        ctx.externals = &scene.lg.ext;
+        return valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 3, ctx));
+    };
+    constexpr int kSegments = 48;
+    constexpr float kRadius = 0.8f, kAngle = 1.25f;  // (an arc 1 long)
+    std::vector<Vec3f> straight, arc;
+    for (int i = 0; i <= kSegments; ++i) {
+        const float u = static_cast<float>(i) / kSegments;
+        straight.push_back({0.5f, u, 0.5f});
+        arc.push_back({0.5f + kRadius * (1.0f - std::cos(u * kAngle)), kRadius * std::sin(u * kAngle), 0.5f});
+    }
+    const GuidesPtr before = sectionsOf(straight), after = sectionsOf(arc);
+    ASSERT_TRUE(before && after && before->size() == 3u && after->size() == 3u);
+    const Guide& was = before->guides()[1];
+    const Guide* now = nullptr;
+    for (const Guide& g : after->guides()) now = g.id == was.id ? &g : now;
+    ASSERT_TRUE(now);
+    ASSERT_EQ(now->points.size(), was.points.size());
+    const auto frameAt = [](const Guide& g, std::size_t j) {
+        const auto v = [&](std::size_t k) {
+            return Vec3f{g.pointAttributes.at(kPathFrameLayers[k])[j], g.pointAttributes.at(kPathFrameLayers[k + 1])[j],
+                         g.pointAttributes.at(kPathFrameLayers[k + 2])[j]};
+        };
+        Frame f;
+        f.normal = v(4);
+        f.tangent = v(7);
+        f.binormal = f.tangent.cross(f.normal);
+        return f;
+    };
+    // The push: up to 0.04 across the braid (the frame's binormal), eased in and out over the middle.
+    const std::size_t m = was.points.size();
+    const auto push = [&](std::size_t j) {
+        const float u = static_cast<float>(j) / static_cast<float>(m - 1);
+        const float s = u < 0.3f || u > 0.7f ? 0.0f : std::sin(3.14159265f * (u - 0.3f) / 0.4f);
+        return Vec3f{0.0f, 0.04f * s * s, 0.0f};
+    };
+    std::vector<Vec3f> brushed = was.points;
+    for (std::size_t j = 0; j < m; ++j) brushed[j] += frameAt(was, j).toWorld(push(j));
+    const GuideSculpt edit = recordSculpt(was, brushed, 1.0f, nullptr);
+    // As brushed, on the path it was brushed on.
+    const std::vector<Vec3f> same = applySculpt(was, edit, 1.0f, nullptr);
+    for (std::size_t j = 0; j < m; ++j) ASSERT_LT((same[j] - brushed[j]).length(), 1e-3f) << j;
+    // On the bent path: the bent section with the same push in the bent path's frame.
+    const auto worst = [&](const Guide& fed, const GuideSculpt& e) {
+        const std::vector<Vec3f> out = applySculpt(fed, e, 1.0f, nullptr);
+        float most = 0.0f;
+        for (std::size_t j = 0; j < m; ++j) {
+            most = std::max(most, (out[j] - (now->points[j] + frameAt(*now, j).toWorld(push(j)))).length());
+        }
+        return most;
+    };
+    const float riding = worst(*now, edit);
+    EXPECT_LT(riding, 0.006f);
+    // Without the path's frames (the section's own form, recorded and applied so): off by far more.
+    Guide plainWas = was, plainNow = *now;
+    plainWas.pointAttributes.clear();
+    plainNow.pointAttributes.clear();
+    const float plain = worst(plainNow, recordSculpt(plainWas, brushed, 1.0f, nullptr));
+    EXPECT_GT(plain, 3.0f * riding + 0.01f) << riding;
 }
 
 TEST(Bun, EachGuideBecomesAPathWindingRoundItsStem) {

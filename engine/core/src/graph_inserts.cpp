@@ -831,15 +831,37 @@ BunNodes insertBun(GraphEdit& edit, const std::string& group, const std::string&
     return out;
 }
 
+std::string braidSculptNode(const GraphEdit& edit, const std::string& braid) {
+    const json g = graphOf(edit);
+    if (typeOf(g, braid) != "Braid") return {};
+    for (const Link& l : linksFrom(g, braid)) {
+        if (l.output != "sections" || typeOf(g, l.to) != "Sculpt") continue;
+        for (const Link& f : linksFrom(g, l.to)) {
+            if (typeOf(g, f.to) == "FollowGuides" && f.input == "guides") return l.to;
+        }
+    }
+    return {};
+}
+
+std::string sculptedBraid(const GraphEdit& edit, const std::string& sculpt) {
+    const json g = graphOf(edit);
+    if (sculpt.empty() || typeOf(g, sculpt) != "Sculpt") return {};
+    for (const json& c : g.value("connections", json::array())) {
+        if (!c.is_object() || c.value("to", std::string()) != sculpt || c.value("output", std::string()) != "sections") continue;
+        const std::string braid = c.value("from", std::string());
+        if (braidSculptNode(edit, braid) == sculpt) return braid;
+    }
+    return {};
+}
+
 BraidSculptNodes insertBraidSculpt(GraphEdit& edit, const std::string& braid, std::optional<double> groomSize) {
     const json g = graphOf(edit);
     if (typeOf(g, braid) != "Braid") throw GraphError("no Braid node '" + braid + "' to sculpt the sections of");
     BraidSculptNodes out;
     // Already there: a FollowGuides fed the Braid's hair, its guides from a Sculpt of its sections.
-    for (const Link& l : linksFrom(g, braid)) {
-        if (l.output != "sections" || typeOf(g, l.to) != "Sculpt") continue;
-        for (const Link& f : linksFrom(g, l.to)) {
-            if (typeOf(g, f.to) == "FollowGuides" && f.input == "guides") return {l.to, f.to, false};
+    if (const std::string sculpt = braidSculptNode(edit, braid); !sculpt.empty()) {
+        for (const Link& f : linksFrom(g, sculpt)) {
+            if (typeOf(g, f.to) == "FollowGuides" && f.input == "guides") return {sculpt, f.to, false};
         }
     }
     const std::vector<Link> fed = linksFrom(g, braid);  // (before the follow is made)

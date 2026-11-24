@@ -55,6 +55,12 @@ struct HierarchyGuide {
     GroupId group = kNoGroup;
     GuideId parent = kNoGuide;  // kNoGuide for primary guides
     bool locked = false;        // locked children keep their own world shape (GH-6)
+    // A primary that stays where it is when (re)bound to the scalp: bound to its root (the closest
+    // scalp point to its first point when it has none) with its first point where it lies, never
+    // shifted rigidly onto the scalp nor turned tip-first. A Sculpt node's guides (sculptHierarchy):
+    // shown and brushed as the node outputs them, a Braid's sections starting off the scalp where
+    // the weave does. Not saved.
+    bool keepsPlace = false;
     // Resampled on its own (picked guides, not its whole group): its segments are its own, kept
     // when its group's are set (resample with groupWide skips it). Saved.
     bool ownSegments = false;
@@ -280,6 +286,9 @@ public:
     std::vector<GuideId> addBakedGuides(const std::string& name, const GuideSet& guides, TubeProfile tube = {});
     const std::vector<HierarchyGuide>& guides() const { return guides_; }
     const HierarchyGuide* guide(GuideId id) const;
+    // Primary `id` keeps its place when bound (HierarchyGuide::keepsPlace); unbinds it so the next
+    // evaluate binds it so. std::invalid_argument for an unknown guide.
+    void setKeepsPlace(GuideId id, bool keeps = true);
     std::vector<GuideId> guidesInGroup(GroupId group) const;
     std::vector<GuideId> childrenOf(GuideId parent) const;
 

@@ -11,6 +11,7 @@
 
 #include "groomlab/brush.h"
 #include "groomlab/curve.h"
+#include "groomlab/frames.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/groom.h"
 #include "groomlab/groom_file.h"
@@ -217,6 +218,57 @@ TEST(SculptNode, AStrokesRecordKeptDabAfterDabIsTheWholeRecord) {
         // Cleared: recorded whole again.
         record.clear();
         check("after clear");
+    }
+}
+
+TEST(SculptNode, BrushedShapesRideOnTheInputWhenItIsPosedMovedOrBent) {
+    // A stretch of a guide brushed aside (its middle pushed out of the guide's way, the tip back in
+    // line), then the guide fed again otherwise upstream: a simulation's pose swinging it about its
+    // root, the groom moved, a primary form reshaped (bent). The push rides on the input: posed or
+    // moved, the brushed shape moves with it; bent, the push stays the same push off the guide in
+    // its frame (out of the bend's plane to the bit, in it to within a quarter of the push).
+    const auto plane = test::makePlane(8, 2.0f);
+    const Vec3f root{1.0f, 0.0f, 1.0f};
+    const Guide straight = planeGuide(5, root, 15, 1.0f, 0.0f, *plane);
+    const std::size_t n = straight.points.size();
+    const auto bump = [&](std::size_t k) {
+        const float u = static_cast<float>(k) / static_cast<float>(n - 1);
+        const float s = u < 0.3f || u > 0.7f ? 0.0f : std::sin(kPi * (u - 0.3f) / 0.4f);
+        return 0.05f * s * s;
+    };
+    for (const Vec3f& across : {Vec3f{1.0f, 0.0f, 0.0f}, Vec3f{0.0f, 0.0f, 1.0f}}) {  // (out of the bend's plane, in it)
+        std::vector<Vec3f> brushed = straight.points;
+        for (std::size_t k = 0; k < n; ++k) brushed[k] += across * bump(k);
+        const GuideSculpt edit = recordSculpt(straight, brushed, 1.0f, plane.get());
+        ASSERT_LT(maxDistance(applySculpt(straight, edit, 1.0f, plane.get()), brushed), 1e-5f);
+        // Posed: swung about its root (a simulation's frame), the scalp as it was: swung the same.
+        for (const Vec3f& axis : {Vec3f{0.0f, 0.0f, 1.0f}, Vec3f{1.0f, 0.0f, 0.0f}, Vec3f{0.6f, 0.0f, 0.8f}}) {
+            Guide posed = straight;
+            std::vector<Vec3f> expected = brushed;
+            for (Vec3f& p : posed.points) p = root + rotateAxisAngle(p - root, axis, 0.6f);
+            for (Vec3f& p : expected) p = root + rotateAxisAngle(p - root, axis, 0.6f);
+            EXPECT_LT(maxDistance(applySculpt(posed, edit, 1.0f, plane.get()), expected), 1e-5f);
+        }
+        // Moved with the groom (no scalp connected: the edit in world axes, moved along).
+        const GuideSculpt free = recordSculpt(straight, brushed, 1.0f, nullptr);
+        Guide moved = straight;
+        std::vector<Vec3f> expected = brushed;
+        for (Vec3f& p : moved.points) p += Vec3f{0.3f, -0.2f, 0.5f};
+        for (Vec3f& p : expected) p += Vec3f{0.3f, -0.2f, 0.5f};
+        EXPECT_LT(maxDistance(applySculpt(moved, free, 1.0f, nullptr), expected), 1e-5f);
+        // Bent upstream (toward +Z, a radian over its length): the bent guide pushed the same way off
+        // it, in its frame there (out of the plane: +X still; in it: square to the bent guide).
+        const Guide bent = planeGuide(5, root, 15, 1.0f, 1.0f, *plane);
+        const std::vector<Vec3f> out = applySculpt(bent, edit, 1.0f, plane.get());
+        float worst = 0.0f;
+        for (std::size_t k = 0; k < n; ++k) {
+            const Vec3f tangent = centralTangent(bent.points, k);
+            const Vec3f off = across.x > 0.5f ? across : Vec3f{1.0f, 0.0f, 0.0f}.cross(tangent).normalized();
+            worst = std::max(worst, (out[k] - (bent.points[k] + off * bump(k))).length());
+        }
+        // (In the plane the push's turns ride on a turning guide: kept as bends, not as offsets, so
+        // over a radian of bend under the push it lands within a quarter of it, about a fifth.)
+        EXPECT_LT(worst, across.x > 0.5f ? 1e-5f : 0.25f * 0.05f) << "push along " << across.x << " " << across.z;
     }
 }
 
