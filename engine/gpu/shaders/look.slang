@@ -7572,6 +7572,112 @@ void TangleCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
+// ---- SculptStrands: a thread a strand ---------------------------------------------------------------
+//
+// sculpt_strands.cpp applyResolvedStrandSculpts (sculpt.cpp applySculptPts over segmentFramesFrom):
+// each strand's relative form, resolved on the CPU (its own edit, or its neighbours' fill). gAux0:
+// two words a strand, its samples' first index and count in gAux1 (count 0: none); gAux1: the
+// samples, four floats each (t, ax, ay, scale); gAux2: eight floats a strand, its root frame's
+// normal (xyz, 0) and its direction across the scalp (xyz, 0). The segments' frames are carried
+// from the root frame by Rotation(the segment before, this one); each segment is turned by its
+// sample (read at its middle's normalized arc length) at gValue.x's share and scaled, the points
+// walked from the root. gValue.x: strength.
+
+// sculpt.cpp GuideSculpt::at: the sample at t, linear between the two around it, the end ones held.
+float4 sculptSampleAt(uint first, uint count, float t) {
+    const float4 lo = asfloat(gAux1.Load4(first * 16));
+    if (t <= lo.x) return lo;
+    const float4 hi = asfloat(gAux1.Load4((first + count - 1) * 16));
+    if (t >= hi.x) return hi;
+    uint a = 0, b = count - 1;  // samples a and b round t: a's t <= t < b's
+    while (b - a > 1) {
+        const uint m = (a + b) / 2;
+        if (asfloat(gAux1.Load((first + m) * 16)) <= t) a = m;
+        else b = m;
+    }
+    const float4 sa = asfloat(gAux1.Load4((first + a) * 16)), sb = asfloat(gAux1.Load4((first + b) * 16));
+    const float span = sb.x - sa.x;
+    const float w = span > 0.0f ? (t - sa.x) / span : 0.0f;
+    if (w == 0.0f) return sa;
+    return float4(t, sa.y + (sb.y - sa.y) * w, sa.z + (sb.z - sa.z) * w, sa.w + (sb.w - sa.w) * w);
+}
+
+// sculpt.cpp turnedZ: z turned by the axis-angle (ax, ay, 0).
+float3 sculptTurnedZ(float ax, float ay) {
+    const float angle = sqrt(ax * ax + ay * ay);
+    if (angle < 1e-12f) return float3(0.0f, 0.0f, 1.0f);
+    const float sn = sin(angle) / angle;
+    return float3(ay * sn, -ax * sn, cos(angle));
+}
+
+[shader("compute")]
+[numthreads(GROUP_SIZE, 1, 1)]
+void SculptStrandsCS(uint3 id : SV_DispatchThreadID) {
+    const uint s = threadIndex(id, GROUP_SIZE);
+    if (s >= gStrandCount) return;
+    const uint begin = strandBegin(s), n = strandCountOf(s);
+    const uint2 range = gAux0.Load2(s * 8);
+    const float strength = gValue.x;
+    if (n < 2 || range.y == 0u || strength == 0.0f) {
+        copyStrand(begin, n);
+        return;
+    }
+    float total = 0.0f;
+    for (uint j = 0; j + 1 < n; ++j) total += len3(loadPoint(begin + j + 1) - loadPoint(begin + j));
+    if (!(total > 0.0f)) {
+        copyStrand(begin, n);
+        return;
+    }
+    const float3 normal = asfloat(gAux2.Load3(s * 32));
+    const float3 across = asfloat(gAux2.Load3(s * 32 + 16));
+    float3 nrm = across - normal * dot(across, normal);
+    const float el = len3(nrm);
+    nrm = el > 1e-12f ? nrm / el : anyPerpendicular(normal);
+    float3 tangent = normal;  // the direction before the first segment: the normal
+    float3 previous = loadPoint(begin);
+    float3 out = previous;
+    storePoint(gOut, begin, out);
+    float along = 0.0f;
+    for (uint j = 0; j + 1 < n; ++j) {
+        const float3 next = loadPoint(begin + j + 1);
+        const float3 d = next - previous;
+        const float len = len3(d);
+        const float3 t = len > 0.0f ? d / len : tangent;
+        // Rotation(tangent, t) applied to the normal, as frames.h builds it.
+        const float c = exactDot(tangent, t);
+        uint kind = 0;
+        float3 axis = float3(0.0f, 0.0f, 0.0f);
+        float invTurn = 0.0f;
+        if (c > 1.0f - 1e-6f) {
+            kind = 0;
+        } else if (c < -1.0f + 1e-6f) {
+            kind = 1;
+            axis = anyPerpendicular(tangent);
+        } else {
+            kind = 2;
+            axis = exactCross3(tangent, t);
+            PRECISE float onePlus = 1.0f + c;
+            invTurn = divExact(1.0f, onePlus);
+        }
+        nrm = turnBy(kind, axis, c, invTurn, nrm);
+        nrm = nrm - t * dot(nrm, t);
+        const float nl = len3(nrm);
+        nrm = nl > 1e-12f ? nrm / nl : anyPerpendicular(t);
+        const float3 bin = cross(t, nrm);
+        tangent = t;
+        if (len > 0.0f) {
+            const float middle = (along + 0.5f * len) / total;
+            along += len;
+            const float4 sample = sculptSampleAt(range.x, range.y, middle);
+            const float3 local = sculptTurnedZ(sample.y * strength, sample.z * strength);
+            const float scale = max(0.0f, 1.0f + (sample.w - 1.0f) * strength);
+            out = out + (nrm * local.x + bin * local.y + t * local.z) * (len * scale);
+        }
+        storePoint(gOut, begin + j + 1, out);
+        previous = next;
+    }
+}
+
 // ---- Flow: a thread a strand ----------------------------------------------------------------------
 //
 // cinematic_ops.cpp FlowOp: each strand traced along the flow over the skin from its root, step by

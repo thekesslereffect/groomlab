@@ -46,6 +46,7 @@ GROOMLAB_OPERATOR(Mirror)                // Curves -> Curves (mirrored across a 
 GROOMLAB_OPERATOR(RestoreLength)         // Curves (+ Curves reference) -> Curves (segment lengths restored)
 GROOMLAB_OPERATOR(Sculpt)                // Guides (+ Mesh scalp) -> Guides (brush strokes kept in the node: sculpt.h)
 GROOMLAB_OPERATOR(Subdivide)             // Curves -> Curves (segments doubled per level along a smooth curve; viewport/render levels)
+GROOMLAB_OPERATOR(SculptStrands)         // Strands -> Strands (brushed on the strands themselves; edits kept by strand ID, filled into new ones)
 // [deform]
 GROOMLAB_OPERATOR(Bend)                  // Curves -> Curves (bent toward a direction between a start and an end)
 GROOMLAB_OPERATOR(Transform)             // Curves -> Curves (moved, turned, scaled about each root or a pivot)

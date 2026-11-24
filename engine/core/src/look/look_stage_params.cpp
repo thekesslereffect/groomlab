@@ -323,6 +323,10 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->ramp = r.ramp("profile");
             s->tabled = true;
             return true;
+        case StageKind::SculptStrands:
+            // How much of each strand's edit (its turns and length factors that share of it).
+            s->value[0] = static_cast<float>(number("strength"));  // (a drag's value)
+            return true;
         case StageKind::Tangle:
             if (!mappable("strength", &s->value[0]) || !mappable("start", &s->value[1]) || !mappable("span", &s->value[2]) ||
                 !mappable("reach", &s->value[3])) {

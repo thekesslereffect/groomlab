@@ -49,7 +49,9 @@ void scaleOverrides(const GraphDocument& doc, double k, Overrides& own) {
 }  // namespace
 
 bool strokeShapesGuides(const GroomSession& session) {
-    return session.previewHierarchy() != nullptr || (session.hasPreviewSculpt() && !session.hasPreviewOverlays());
+    // (A SculptStrands node's stroke shapes strands after the guides: the CPU's, not a guide stroke.)
+    return session.previewHierarchy() != nullptr ||
+           (session.hasPreviewSculpt() && !session.previewSculptsStrands() && !session.hasPreviewOverlays());
 }
 
 bool LookPreview::plan(const GroomSession& session, const Shown& shown, const Overrides& asked, const LookStart& start,

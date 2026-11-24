@@ -199,7 +199,9 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
     // Mask Brush are the Select and Freeze tools.
     b["mask.full"] = {run([m] {
                           if (!m->document_) return;
-                          m->document_->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });
+                          if (!m->brush().sculptFreeze("unfreeze_all")) {
+                              m->document_->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });
+                          }
                           m->guidesEdited();
                       }),
                       {}, groomOpen, {}, {}, QStringLiteral("maskFull")};

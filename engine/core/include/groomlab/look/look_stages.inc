@@ -78,6 +78,9 @@ GROOMLAB_STAGE(Smooth, "smooth", "strength", "profile", "", "affect strength sca
 GROOMLAB_STAGE(RestoreLength, "restoreLength", "", "", "", "affect")
 GROOMLAB_STAGE(BlendNeighbors, "blendNeighbors", "strength", "profile", "", "affect strength")
 GROOMLAB_STAGE(Tangle, "tangle", "strength start span reach", "", "", "affect strength start span reach")
+// SculptStrands (sculpt_strands.h): each strand's relative form, resolved on the CPU (its own edit, or
+// its neighbours' fill) and uploaded once while the edits, strands and scalp stay.
+GROOMLAB_STAGE(SculptStrands, "sculptStrands", "", "", "", "affect strength")
 GROOMLAB_STAGE(Flow, "flow", "lift bend rollRandom", "", "", "affect lift bend rollRandom seed")
 // Jiggle with motion (motion_ops.cpp JiggleOp; its history: the frames the host sampled for it
 // read again, more refused: readLookParams); MeshCut (mesh_cut_op.cpp).

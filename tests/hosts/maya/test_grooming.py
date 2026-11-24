@@ -80,6 +80,18 @@ SCULPT_GRAPH = {
 }
 
 
+# Scatter -> SculptStrands -> Output: brushes shaping the strands themselves (sculpt_strands.h).
+STRANDS_SCULPT_GRAPH = {
+    "version": 1, "output": "output",
+    "nodes": [{"name": "scalp", "type": "Scalp"},
+              {"name": "roots", "type": "Scatter", "params": {"density": 60.0, "length": 0.6, "previewAll": True}},
+              {"name": "fix", "type": "SculptStrands"}, {"name": "output", "type": "Output"}],
+    "connections": [{"from": "scalp", "to": "roots", "input": "scalp"},
+                    {"from": "roots", "to": "fix", "input": "strands"},
+                    {"from": "fix", "to": "output", "input": "strands"}],
+}
+
+
 def guide_points(groom):
     """{guide id: evaluated points} of every guide."""
     out = {}
@@ -710,6 +722,56 @@ class GroomingTest(unittest.TestCase):
         self.assertAlmostEqual(curve[0][1], 0.0, places=4)
         self.assertNotIn("weightCurve", saved["sculpt3"])  # unkeyed: its value
         self.assertAlmostEqual(saved["sculpt3"]["weight"], 0.5, places=4)
+
+    def test_sculpt_strands_node_strokes_shape_the_strands(self):
+        # A SculptStrands node targeted: scripted strokes shape its strands (sculptData's "strands"),
+        # one undo step each; the view's guides are its strands, one a strand.
+        from groomlab import sculpts
+        groomlab.set_graph(self.groom, STRANDS_SCULPT_GRAPH)
+        self.assertEqual(groomlab.errors(self.groom), [])
+        count = cmds.getAttr(self.groom + ".outStrandCount")
+        self.assertGreater(count, 20)
+        self.assertEqual(sculpts.sculpt_nodes(self.groom), ["fix"])
+        self.assertEqual(sculpts.node_type(self.groom, "fix"), "SculptStrands")
+        sculpts.set_target(self.groom, "fix")
+        groomlab.brush_stroke(self.groom, "comb", [(-0.4, 1.3, 0.0), (0.0, 1.35, 0.2), (0.4, 1.3, 0.4)], radius=0.6)
+        data = json.loads(cmds.getAttr(self.groom + ".sculptData"))
+        self.assertIn("strands", data["fix"])
+        edited = sculpts.edited_guides(self.groom, "fix")
+        self.assertGreater(edited, 3)
+        self.assertLess(edited, count)
+        self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), count)
+        self.assertEqual(groomlab.errors(self.groom), [])
+        with self.assertRaises(RuntimeError):  # Place, Draw, Erase, Paint are not for it
+            groomlab.brush_stroke(self.groom, "erase", [(0.0, 1.3, 0.0)], radius=0.6)
+        # The exported groom sculpts the strands too (procedural, groomlab-cli): the node's output
+        # differs from its input where it was brushed.
+        path = os.path.join(tempfile.mkdtemp(), "strands.groom")
+        groomlab.export_groom(self.groom, path)
+        session = groomlab_core.GroomSession(groomlab_core.read_groom_file(path).data)
+        session.evaluate()
+        fed = session.sculpt_input("fix")
+        self.assertIsNone(fed["guides"])
+        self.assertEqual(fed["strands"].strand_count, count)
+        cmds.undo()
+        self.assertFalse(cmds.getAttr(self.groom + ".sculptData"))
+        cmds.redo()
+        self.assertEqual(sculpts.edited_guides(self.groom, "fix"), edited)
+        # Freeze on the node: painted, inverted, cleared (each one undo step), kept in its edits; the
+        # groom's own guides untouched.
+        groomlab.brush_stroke(self.groom, "paint", [(0.0, 1.3, 0.0)], radius=0.5, attribute="freeze")
+        frozen = json.loads(cmds.getAttr(self.groom + ".sculptData"))["fix"].get("frozen", {})
+        self.assertGreater(len(frozen), 3)
+        groomlab.invert_frozen(self.groom)
+        inverted = json.loads(cmds.getAttr(self.groom + ".sculptData"))["fix"].get("frozen", {})
+        self.assertTrue(all(k not in inverted for k, v in frozen.items() if v >= 0.99))
+        self.assertGreater(len(inverted), len(frozen))
+        groomlab.unfreeze_all(self.groom)
+        self.assertNotIn("frozen", json.loads(cmds.getAttr(self.groom + ".sculptData"))["fix"])
+        cmds.undo()
+        self.assertEqual(json.loads(cmds.getAttr(self.groom + ".sculptData"))["fix"].get("frozen", {}), inverted)
+        sculpts.leave(self.groom)
+        self.assertIsNone(sculpts.target(self.groom))
 
     def test_sculpt_node_strokes_follow_the_guides_upstream(self):
         from groomlab import sculpts, shots

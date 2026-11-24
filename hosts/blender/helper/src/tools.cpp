@@ -584,7 +584,7 @@ void pruneTargets(ToolState& t) {
         bool sculpt = false;
         try {
             const GraphEdit edit(g.data().graphJson);
-            sculpt = edit.hasNode(node) && edit.nodeType(node) == "Sculpt";
+            sculpt = edit.hasNode(node) && (edit.nodeType(node) == "Sculpt" || edit.nodeType(node) == "SculptStrands");
         } catch (const std::exception&) {
         }
         if (!sculpt) g.setSculptTarget({});
@@ -1161,6 +1161,14 @@ json guidesEdit(ToolState& t, const json& args) {
         "invert_frozen", "remove_layer", "mirror_all", "mirror_group", "mirror_shapes", "move_to_group", "duplicate_to_group",
         "new_group_from", "paste_guides", "promote_group", "demote_group", "reparent", "resample", "set_group_segments",
         "reset_group_segments"};
+    // A Sculpt or SculptStrands node targeted: Unfreeze All and Invert Frozen are its own (its frozen
+    // guides or strands, kept in the node: stroke.h sculptFreezeEdit, one undo step).
+    if (op == "unfreeze_all" || op == "invert_frozen") {
+        if (sculptFreezeEdit(t.host, op == "invert_frozen" ? "invert" : "unfreeze_all")) {
+            r["sculptNode"] = t.host.sculptNode();
+            return r;
+        }
+    }
     if (kGuideOps.count(op)) {
         GuideOp g;
         g.op = op == "invert_frozen" ? std::string("invert_layer") : op;

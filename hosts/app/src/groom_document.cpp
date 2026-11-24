@@ -719,7 +719,8 @@ std::vector<std::string> GroomDocument::sculptNodes() const {
     std::vector<std::string> names;
     if (!graph_.contains("nodes")) return names;
     for (const json& n : graph_["nodes"]) {
-        if (n.value("type", std::string()) == op::kSculpt) names.push_back(n.value("name", std::string()));
+        const std::string type = n.value("type", std::string());
+        if (type == op::kSculpt || type == op::kSculptStrands) names.push_back(n.value("name", std::string()));  // (what brushes can shape)
     }
     return names;
 }
@@ -737,7 +738,7 @@ std::size_t GroomDocument::sculptedGuides(const std::string& node) const {
     try {
         const SculptSet set = SculptSet::fromJson(storedText(StrokeField::Sculpts));
         const SculptEdits* edits = set.node(node);
-        return edits ? edits->guides.size() : 0;
+        return edits ? edits->guides.size() + edits->strands.size() : 0;  // (a SculptStrands node's: its strands)
     } catch (const std::exception&) {
         return 0;
     }
@@ -1297,7 +1298,7 @@ std::string GroomDocument::pasteNodes(const std::string& text, float dx, float d
         for (const auto& [name, from] : edit.pasteNodes(text, dx, dy)) {
             names.push_back(name);
             const std::string type = edit.nodeType(name);
-            if ((type == op::kSculpt || type == "Compound") && nodeJson(from)) copiedSculpts[name] = from;
+            if ((type == op::kSculpt || type == op::kSculptStrands || type == "Compound") && nodeJson(from)) copiedSculpts[name] = from;
         }
         g = json::parse(edit.toJson());
     }, {}, copiedSculpts);
@@ -1360,7 +1361,7 @@ std::string GroomDocument::duplicateNodes(const std::vector<std::string>& nodes,
         for (const auto& [copy, source] : edit.duplicateNodes(nodes, dx, dy)) {
             names.push_back(copy);
             const std::string type = edit.nodeType(copy);
-            if (type == op::kSculpt || type == "Compound") copied[copy] = source;
+            if (type == op::kSculpt || type == op::kSculptStrands || type == "Compound") copied[copy] = source;
         }
         g = json::parse(edit.toJson());
     }, {}, copied);

@@ -100,6 +100,7 @@ KernelSet kernelsOf(const LookParams& params, const std::vector<StageInputs>& in
             case StageKind::RestoreLength: set |= bit(K::RestoreLength); break;
             case StageKind::BlendNeighbors: set |= bit(K::BlendNeighbors); break;
             case StageKind::Tangle: set |= bit(K::Tangle); break;
+            case StageKind::SculptStrands: set |= bit(K::SculptStrands); break;
             case StageKind::Flow: set |= bit(K::Flow); break;
             case StageKind::Jiggle: set |= bit(K::Jiggle); break;
             case StageKind::MeshCut: set |= bit(K::MeshCut); break;
@@ -593,7 +594,8 @@ void LookEngine::putStrandData(const LookRun& run, bool frames) {
                 case StageKind::Smooth:
                 case StageKind::RestoreLength:
                 case StageKind::BlendNeighbors:
-                case StageKind::Tangle: break;
+                case StageKind::Tangle:
+                case StageKind::SculptStrands: break;
                 case StageKind::Flow:
                     // FlowOp's turn of the strand off the flow: its draw (times rollRandom, -1 to 1).
                     d[0] = 2.0f * unitFloat(hashCombine(id, seed ^ 0xF70)) - 1.0f;
@@ -1447,6 +1449,31 @@ void LookEngine::putShaperInputs(std::size_t k, const StageParams& stage, const 
             held.keep = in->neighbors;
             runUploadMegabytes_ += static_cast<double>((data->offsets.size() + 2 * data->neighbors.size()) * 4) / 1e6;
         }
+    } else if (stage.stage.kind == StageKind::SculptStrands) {
+        // Each strand's edit and root frame as its operator resolved them (look.slang SculptStrandsCS):
+        // aux 0 two words a strand, aux 1 the samples, aux 2 eight floats a strand (on the CPU the very
+        // arrays, kept alive while held).
+        const ResolvedStrandSculpts* data = in ? in->sculpts.get() : nullptr;
+        if (!data || data->strandCount() != stageN || data->frames.size() != stageN * 8) {
+            throw std::runtime_error("GPU preview: SculptStrands' edits are for other strands");
+        }
+        if (held.a != data || !has(auxBuffer(k, 0))) {
+            auto put = [&](int buffer, const void* from, std::size_t bytes) {
+                if (bytes) {
+                    share(buffer, from, bytes);
+                } else {
+                    const std::uint32_t none[4] = {};
+                    write(buffer, none, 16, false);
+                }
+            };
+            put(auxBuffer(k, 0), data->ranges.data(), data->ranges.size() * 4);
+            put(auxBuffer(k, 1), data->samples.data(), data->samples.size() * sizeof(SculptSample));
+            put(auxBuffer(k, 2), data->frames.data(), data->frames.size() * 4);
+            held.a = data;
+            held.keep = in->sculpts;
+            runUploadMegabytes_ +=
+                static_cast<double>(data->ranges.size() * 4 + data->samples.size() * sizeof(SculptSample) + data->frames.size() * 4) / 1e6;
+        }
     } else if (stage.stage.kind == StageKind::Tangle) {
         // Its partners (look.slang TangleCS): aux 0, 4 words a strand (TangleInputs).
         const TangleInputs* data = in ? in->tangle.get() : nullptr;
@@ -1513,6 +1540,11 @@ LookEngine::Kernel LookEngine::shaperKernel(std::size_t k, const StageParams& st
             b->aux[2] = auxBuffer(k, 2);
             return Kernel::BlendNeighbors;
         case StageKind::Tangle: b->aux[0] = auxBuffer(k, 0); return Kernel::Tangle;
+        case StageKind::SculptStrands:
+            b->aux[0] = auxBuffer(k, 0);
+            b->aux[1] = auxBuffer(k, 1);
+            b->aux[2] = auxBuffer(k, 2);
+            return Kernel::SculptStrands;
         case StageKind::Flow: {
             // gFlag: arrows, the field's vertices, its pins; gFlag2: its sinks, a scalp (look.slang FlowCS).
             const FlowInputs* flow = in ? in->flow.get() : nullptr;
@@ -2390,6 +2422,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::RestoreLength:
             case StageKind::BlendNeighbors:
             case StageKind::Tangle:
+            case StageKind::SculptStrands:
             case StageKind::Flow: kernel = shaperKernel(k, p, k < r.inputs.size() ? &r.inputs[k] : nullptr, input2, &b, &groups, &c); break;
             // ---- Jiggle and MeshCut ----
             case StageKind::Jiggle:

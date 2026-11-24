@@ -415,6 +415,13 @@ struct TangleState {
 };
 bool tangleState(const Operator& op, const StrandsPtr& output, std::shared_ptr<const TangleState>* state);
 
+// The table SculptStrands laid on the strands of `output` (its last evaluation): each strand's edit
+// and root frame (sculpt_strands.h ResolvedStrandSculpts). It goes by the edits, the strands' IDs and
+// roots, the scalp and the fill. False when `op` is not a SculptStrands or kept nothing for `output`
+// (as blendNeighborsState).
+struct ResolvedStrandSculpts;
+bool sculptStrandsState(const Operator& op, const StrandsPtr& output, std::shared_ptr<const ResolvedStrandSculpts>* state);
+
 // The flow field Flow laid the strands of `output` along (its last evaluation's "flow" external:
 // null without arrows) and the scalp it traced them over (its "scalp" external, by address alone:
 // null without one). False when `op` is not a Flow or kept nothing for `output` (as

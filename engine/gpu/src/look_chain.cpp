@@ -856,6 +856,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
             case StageKind::Smooth:
             case StageKind::BlendNeighbors:
             case StageKind::Tangle:
+            case StageKind::SculptStrands:
             case StageKind::Flow:
             case StageKind::Curl:
             case StageKind::SelfCollide:
@@ -2281,7 +2282,8 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
         if (stage.kind == StageKind::Gravity || stage.kind == StageKind::Flyaway || stage.kind == StageKind::Collide ||
             stage.kind == StageKind::Wind || stage.kind == StageKind::SelfCollide || stage.kind == StageKind::Static ||
             stage.kind == StageKind::Bend || stage.kind == StageKind::Direction ||
-            stage.kind == StageKind::Transform || stage.kind == StageKind::Jiggle || readsNeighbours(stage.kind)) {
+            stage.kind == StageKind::Transform || stage.kind == StageKind::Jiggle || stage.kind == StageKind::SculptStrands ||
+            readsNeighbours(stage.kind)) {
             // How far from its root a point the node moves can go: the longest strand it took.
             const StrandsPtr in = inputStrands(graph, id);
             if (!in) {
@@ -2419,7 +2421,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             if (!twistAxes(doc, id, stands, &out[k], why)) return false;
         }
         if ((stage.kind == StageKind::RestoreLength || stage.kind == StageKind::BlendNeighbors || stage.kind == StageKind::Tangle ||
-             stage.kind == StageKind::Flow) &&
+             stage.kind == StageKind::SculptStrands || stage.kind == StageKind::Flow) &&
             !readShaper(doc, chain, k, before, rebound, groomScalp, scalpMesh, &out[k], why)) {
             return false;
         }
@@ -2875,6 +2877,17 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
             out->neighbors = std::move(state);
             return true;
         }
+        case StageKind::SculptStrands: {
+            // Each strand's edit and root frame as the node resolved them (by the edits, IDs, roots,
+            // scalp: none of them the run's), laid on the shapes the run hands it.
+            std::shared_ptr<const ResolvedStrandSculpts> state;
+            if (!sculptStrandsState(graph.node(id), cachedStrands(graph, id), &state) || state->strandCount() != in->strandCount()) {
+                *why = name + " keeps no edits for its result";
+                return false;
+            }
+            out->sculpts = std::move(state);
+            return true;
+        }
         case StageKind::Tangle: {
             std::shared_ptr<const TangleState> state;
             if (!tangleState(graph.node(id), cachedStrands(graph, id), &state) || state->partners.size() != in->strandCount() ||
@@ -3171,6 +3184,7 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
             case StageKind::RestoreLength:
             case StageKind::BlendNeighbors:
             case StageKind::Tangle:
+            case StageKind::SculptStrands:
             case StageKind::Flow:
             case StageKind::Jiggle: {
                 // Each segment turned (Part, Gravity, Wind, Static, Jiggle) or pushed and walked from the root
@@ -3207,6 +3221,16 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
                 // Flow lays a strand along the skin and lifts it off it: within its length of its
                 // root along the skin and as far off it, sqrt 2 of it at most (twice, rounded up).
                 if (s.stage.kind == StageKind::Flow) reach *= 2.0f;
+                // SculptStrands turns segments from the root and scales them: within its longest
+                // length factor (at its strength) of the strand's length.
+                if (s.stage.kind == StageKind::SculptStrands) {
+                    const ResolvedStrandSculpts* sculpts = k < inputs.size() ? inputs[k].sculpts.get() : nullptr;
+                    float most = 1.0f;
+                    for (std::size_t m = 0; sculpts && m < sculpts->samples.size(); ++m) {
+                        most = std::max(most, 1.0f + (sculpts->samples[m].scale - 1.0f) * std::max(s.value[0], 0.0f));
+                    }
+                    reach *= most;
+                }
                 grow(reach * slack);
                 break;
             }

@@ -62,19 +62,41 @@ struct GuideSculpt {
     bool operator==(const GuideSculpt& o) const { return samples == o.samples; }
 };
 
-// One Sculpt node's edits, by guide ID.
+// One strand's edit in a SculptStrands node (sculpt_strands.h): the guides' relative form, plus
+// where the strand grew and how far apart the strands were there when it was recorded, so strands
+// with no edit of their own (density raised, the render's strands past a thinned preview's) take
+// their neighbours' (sculpt_strands.h's fill). An empty edit: brushed over but left as it was (its
+// neighbours with none read it as none, not as missing).
+struct StrandSculpt {
+    StrandRoot root;       // the strand's root when recorded (its rest-pose place: the fill's)
+    float spacing = 0.0f;  // the distance to the nearest other strand's root then, on the rest pose
+    GuideSculpt edit;
+
+    bool operator==(const StrandSculpt& o) const {
+        return root.face == o.root.face && root.u == o.root.u && root.v == o.root.v && spacing == o.spacing && edit == o.edit;
+    }
+};
+
+// One Sculpt node's edits, by guide ID; a SculptStrands node's, by strand ID.
 struct SculptEdits {
     std::map<GuideId, GuideSculpt> guides;
+    std::map<std::uint64_t, StrandSculpt> strands;
+    // The node's guides (or strands) frozen for its brushes, by ID: their freeze value (0-1; none
+    // left out). The freeze brush, Unfreeze All and Invert Frozen set it while the node is targeted.
+    std::map<std::uint64_t, float> frozen;
 
-    bool empty() const { return guides.empty(); }
+    bool empty() const { return guides.empty() && strands.empty() && frozen.empty(); }
     std::uint64_t contentHash() const;
-    bool operator==(const SculptEdits& o) const { return guides == o.guides; }
+    bool operator==(const SculptEdits& o) const { return guides == o.guides && strands == o.strands && frozen == o.frozen; }
 };
 using SculptPtr = std::shared_ptr<const SculptEdits>;
 
 // The groom's sculpts by Sculpt node name ("compound/inner" inside a compound):
-// {"<node>": {"guides": {"<guide id>": [t, ax, ay, scale, t, ax, ay, scale, ...]}}}. Empty text:
-// none. A node with no guides is left out of the text.
+// {"<node>": {"guides": {"<guide id>": [t, ax, ay, scale, t, ax, ay, scale, ...]}}}; a SculptStrands
+// node's under "strands": {"<strand id>": [face, u, v, spacing, t, ax, ay, scale, ...]}; what is
+// frozen for its brushes under "frozen": {"<id>": value} (builds before read the guides alone and
+// leave the others out). Empty text: none. A node with no
+// edits is left out of the text.
 class SculptSet {
 public:
     std::map<std::string, SculptEdits> nodes;
@@ -117,6 +139,14 @@ std::vector<Vec3f> applySculpt(const Guide& input, const GuideSculpt& edit, floa
 // edit, strength) gives `sculpted` back (its root at the input's). Throws std::invalid_argument
 // when strength is about 0 (nothing could be recorded) or the point counts differ.
 GuideSculpt recordSculpt(const Guide& input, const std::vector<Vec3f>& sculpted, float strength, const ScalpMesh* scalp);
+// The same relative form with the root frame given (a unit normal, and a direction across the
+// surface there, laid flat on it) in place of the scalp's at the root's triangle: SculptStrands'
+// (sculpt_strands.h), one frame shared by neighbouring strands (ScalpMesh::acrossAt) so their edits
+// mean the same turns and blend.
+std::vector<Vec3f> applySculptFramed(const std::vector<Vec3f>& points, const GuideSculpt& edit, float strength, const Vec3f& normal,
+                                     const Vec3f& across);
+GuideSculpt recordSculptFramed(const std::vector<Vec3f>& points, const std::vector<Vec3f>& sculpted, float strength, const Vec3f& normal,
+                               const Vec3f& across);
 // Every guide of `input` with its edit applied (by ID), the others as they are; `input` itself
 // when no edit reaches it.
 std::shared_ptr<const GuideSet> applySculpts(const std::shared_ptr<const GuideSet>& input, const SculptEdits& edits,
@@ -154,7 +184,15 @@ struct SculptInput {
     std::shared_ptr<const ScalpMesh> scalp;
     float strength = 1.0f;
     SculptEdits edits;
+    // A SculptStrands node's (sculpt_strands.h): the strands it is fed (`guides` then null), and its fill.
+    std::shared_ptr<const StrandSet> strands;
+    bool fill = true;
 };
+
+// A node's frozen guides (SculptEdits::frozen) laid on `h` as their `freeze` attribute, and read
+// back from it (the guides with some freeze, by ID).
+void layFrozen(GuideHierarchy& h, const SculptEdits& edits, const std::string& freeze = "freeze");
+std::map<std::uint64_t, float> frozenOf(const GuideHierarchy& h, const std::string& freeze = "freeze");
 
 // The guides of `guides` as an editable hierarchy (one root group named `group`), rooted on
 // `scalp` when given: what brushes shape for a Sculpt node (its output).

@@ -210,12 +210,13 @@ void MainWindow::buildPanels() {
     });
     connect(groomTools_, &GroomTools::unfreezeAllRequested, this, [this] {
         if (!document_) return;
-        document_->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });
+        // (A Sculpt or SculptStrands node targeted: its own frozen guides or strands.)
+        if (!brush_.sculptFreeze("unfreeze_all")) document_->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });
         guidesEdited();
     });
     connect(groomTools_, &GroomTools::invertFrozenRequested, this, [this] {
         if (!document_) return;
-        document_->editGuides("invert frozen", [](GuideHierarchy& h) { invertFrozen(h); });
+        if (!brush_.sculptFreeze("invert")) document_->editGuides("invert frozen", [](GuideHierarchy& h) { invertFrozen(h); });
         guidesEdited();
     });
     connect(groomTools_, &GroomTools::clearFlowRequested, this, [this] { guidesPanel_->clearFlow(); });

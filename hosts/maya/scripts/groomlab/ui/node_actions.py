@@ -207,14 +207,15 @@ def node_actions(self, name):
         buttons.append(("Save to Library", "Write this script node to your node library (Add Node, Tab search; "
                         "the standalone app and Blender too), one version up when the library has it",
                         lambda _=False: later(lambda: self.editor.save_script_to_library(name))))
-    elif node_type == "Sculpt" and groom:
+    elif node_type in ("Sculpt", "SculptStrands") and groom:
         from groomlab import sculpts
         edited = sculpts.edited_guides(groom, name)
         brushing = sculpts.target(groom) == name
+        what = "strands" if node_type == "SculptStrands" else "guides"
         buttons.append(QtWidgets.QLabel(
-            "%s. %s" % ("%d guides sculpted" % edited if edited else "No strokes yet",
-                        "Brushes shape this node's guides (shaping brushes)" if brushing else
-                        "Select this node (or its row in Sculpt > Correctives) to brush its guides")))
+            "%s. %s" % ("%d %s sculpted" % (edited, what) if edited else "No strokes yet",
+                        "Brushes shape this node's %s (shaping brushes; Esc in the brush tool: done)" % what if brushing else
+                        "Select this node (or its row in Sculpt > Correctives) to brush its %s" % what)))
     elif node_type == "Simulate":
         # One click to a preset's settings (the core's, every host's), into the editor's graph.
         from groomlab import sim

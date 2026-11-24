@@ -654,6 +654,8 @@ std::vector<Case> cases() {
         // Debug: an expression along each strand, colored on the ramp over its own range.
         {"Debug", "op", R"({"name": "op", "type": "Debug", "params": {"show": "value", "value": {"expression": "$t * $rand"}}})",
          link("interp", "op", "strands")},
+        // SculptStrands with no strokes: the strands as fed (its strokes: test_sculpt_strands.cpp).
+        {"SculptStrands", "op", R"({"name": "op", "type": "SculptStrands"})", link("interp", "op", "strands")},
     };
 }
 
@@ -991,6 +993,8 @@ TEST_P(Golden, MappedParamsAreReadPerStrand) {
         "InstanceFitStrand.scale", "InstanceDeform.variant", "InstanceDeform.scale",
         // Strands within the radius take the guides as they are.
         "InterpolateRadius.guideWeight",
+        // No strokes: the strands pass through, affect blends them with themselves (test_sculpt_strands.cpp brushes them).
+        "SculptStrands.affect",
         // Its strength fed by a port: the clumps it leaves alone stay alone.
         "ExpressionClump.volumize", "ExpressionClump.affect",
         // Noise finer than the strands' 7 segments draw fades out (NoiseOp's note).

@@ -51,6 +51,8 @@ def unfreeze_all(groom=None):
         groom = active_groom()
         if not groom:
             raise ValueError("select a groom to unfreeze")
+    if _sculpt_freeze(groom, "unfreeze_all"):
+        return
     if "freeze" in list_maps(groom):
         remove_map(groom, "freeze")
 
@@ -64,7 +66,19 @@ def invert_frozen(groom=None):
         groom = active_groom()
         if not groom:
             raise ValueError("select a groom to invert its frozen guides")
+    if _sculpt_freeze(groom, "invert"):
+        return
     cmds.groomLabGuides(groom, invertAttribute="freeze")
+
+
+def _sculpt_freeze(groom, op):
+    """With a Sculpt or SculptStrands node targeted (sculpts.target): Unfreeze All or Invert Frozen
+    on its guides or strands, kept in the node (one undo step); False otherwise."""
+    from groomlab import sculpts
+    if not sculpts.target(groom):
+        return False
+    cmds.groomLabBrushStroke(groom, sculptFreeze=op)
+    return True
 
 
 def freeze_tool(value=1.0, **brush_options):

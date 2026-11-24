@@ -31,6 +31,7 @@
 #include "groomlab/length_key_tool.h"
 #include "groomlab/root_tube_tool.h"
 #include "groomlab/parts.h"
+#include "groomlab/sculpt_strands.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
 #include "groomlab/sculpt.h"
@@ -798,11 +799,13 @@ private:
     SculptInput sculptIn_;
     SculptEdits sculptEdits_;
     SculptStrokeRecord sculptRecord_;  // the guides' points at the last preview: a dab records the ones it changed
+    StrandStrokeRecord strandRecord_;  // a SculptStrands node's (sculptIn_.strands): the strands each dab changed
     // Ctrl+Shift with a Shape brush: the selection painted (StrokeHost::paintSelection). The
     // selection when it began, the guides the circle has passed over (in order), and whether it
     // moved (a drag over nothing clears; a click on nothing does not).
     void paintSelectionAt(StrokeHost& host, const ToolView& view, float x, float y);
     bool selecting_ = false, selectMoved_ = false;
+    bool selectSculpt_ = false;  // painting a targeted node's strands or guides (its freeze, not the groom's selection)
     std::vector<GuideId> selectBase_, selectPicked_;
     std::set<GuideId> selectSeen_;
     // Shift: pending until a drag (smoothing) or a release (a click: pick the level).
@@ -826,6 +829,15 @@ private:
 };
 
 // ---- Scripted strokes ------------------------------------------------------------------------------
+
+// Unfreeze All ("unfreeze_all") or Invert Frozen ("invert") on the Sculpt or SculptStrands node the
+// host's brushes shape (StrokeHost::sculptNode): its frozen guides or strands (SculptEdits::frozen),
+// one committed edit when they change. False when no node is targeted (the caller edits the groom's
+// guides instead). Throws std::invalid_argument for another op, as sculptInput for a bad node.
+bool sculptFreezeEdit(StrokeHost& host, const std::string& op, const std::string& freeze = "freeze");
+// Ctrl+Shift's solo on the targeted node: every one of its guides or strands frozen but `keep`
+// (none kept: every one unfrozen), one committed edit when it changes. False when no node is targeted.
+bool sculptFreezeToSelection(StrokeHost& host, const std::vector<GuideId>& keep, const std::string& freeze = "freeze");
 
 // A stroke along world points (groomLabBrushStroke -point, groomlab.brush_stroke): brush spheres
 // of s.brush.radius along `path` (applyBrushStroke's spacing for guides, a quarter radius for

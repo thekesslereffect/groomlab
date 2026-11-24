@@ -89,6 +89,10 @@ public:
     // threw (lastError says). The overlay draws its keys while it is the tool.
     LengthKeyTool& lengths() { return tool_.lengths(); }
     bool editLengths(const char* what, const std::function<void(LengthKeyTool&, StrokeHost&, const BrushToolSettings&)>& fn);
+    // Unfreeze All ("unfreeze_all") or Invert Frozen ("invert") on the Sculpt or SculptStrands node
+    // the brushes shape (stroke.h sculptFreezeEdit: kept in the node, one undo step); false when no
+    // node is targeted (the caller unfreezes the groom's guides) or it threw (lastError says).
+    bool sculptFreeze(const std::string& op);
     // The Tube tool's root mode (Tool::Roots, root_tube_tool.h): its buttons through the
     // session's host (start, Finish edit, Undo CV, Duplicate, Delete...), false when no groom is
     // open or it threw (lastError says); the overlay's root outlines follow. startRoots makes it
