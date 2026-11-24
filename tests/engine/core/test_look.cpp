@@ -6223,6 +6223,85 @@ TEST(Clump, AfterABraidItClumpsAlongEachSectionOfEachBraid) {
     EXPECT_GT(mixed(picked).first, 0u) << "pick clumps across the braids";
 }
 
+TEST(Clump, PastTipNearestKeepsAStrandWithTheStretchOfItsCenterItWindsWith) {
+    // A strand winding with its center (a braid's section, a rope's ply) but longer before it
+    // joins it (gathered from farther out): by its share of its length (fit) its points are pulled
+    // to stretches of the center turns away (across the braid); pastTip nearest walks along the
+    // center with the strand, each point pulled to the center's nearest point beside it.
+    constexpr float kTurns = 6.0f, kHeight = 2.0f;
+    auto helix = [&](float r, float y) {
+        const float a = 6.2831853f * kTurns * y / kHeight;
+        return Vec3f(r * std::cos(a), y, r * std::sin(a));
+    };
+    std::vector<Vec3f> center;
+    for (int k = 0; k <= 240; ++k) center.push_back(helix(0.05f, kHeight * static_cast<float>(k) / 240.0f));
+    auto centers = std::make_shared<GuideSet>();
+    centers->add(1, center);
+    std::vector<Vec3f> strand;
+    for (int k = 0; k < 30; ++k) strand.push_back(Vec3f(0.15f + 0.03f * static_cast<float>(k), 0.0f, 0.0f));  // out
+    for (int k = 30; k > 0; --k) strand.push_back(Vec3f(0.15f + 0.03f * static_cast<float>(k), 0.0f, 0.001f));  // and back
+    for (int k = 0; k <= 300; ++k) strand.push_back(helix(0.15f, kHeight * static_cast<float>(k) / 300.0f));
+    auto strands = std::make_shared<StrandSet>();
+    strands->addStrand(1, strand);
+    auto clump = OperatorRegistry::instance().create(op::kClump);
+    clump->params().set("strength", 1.0);
+    clump->params().set("profile", Ramp::constant(1.0f));
+    clump->params().set("centersFrom", std::string("inputCurves"));
+    auto worstSlide = [&](const std::string& pastTip) {
+        clump->params().set("pastTip", pastTip);
+        const StrandsPtr out = valueAs<StrandsPtr>(clump->evaluate(EvalContext{}, {Value(StrandsPtr(strands)), Value(GuidesPtr(centers))}));
+        float worst = 0.0f;
+        for (std::size_t i = 60; i < strand.size(); ++i) {  // (the winding part)
+            const Vec3f q = out->strandPoints(0)[i];
+            EXPECT_LT(std::hypot(q.x, q.z), 0.06f) << pastTip << ": onto the center";
+            worst = std::max(worst, std::abs(q.y - strand[i].y));
+        }
+        return worst;
+    };
+    EXPECT_LT(worstSlide("nearest"), 0.06f) << "nearest: beside where it was (a turn is 0.33 high)";
+    EXPECT_GT(worstSlide("fit"), 0.2f) << "fit: pulled turns along the center";
+}
+
+TEST(Clump, UpstreamClumpCurvesShapesClumpsInsideEachUpstreamClump) {
+    // centersFrom upstreamClumpCurves: the curves linked to centers shape the clumps, each strand
+    // gathering only toward a curve inside its own upstream clump (here a braid's section), never
+    // across; inputCurves alone pulls across them.
+    std::vector<float> xs;
+    for (int i = 0; i < 72; ++i) xs.push_back((static_cast<float>(i) + 0.5f) / 72.0f);
+    auto in = uprights(xs);
+    std::vector<float>& braidIds = in->addStrandChannel("braidId", -1.0f);
+    std::vector<float>& sections = in->addStrandChannel("braidSection", -1.0f);
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+        braidIds[i] = static_cast<float>((i / 2) % 2);
+        sections[i] = static_cast<float>(i % 3);
+    }
+    auto centers = std::make_shared<GuideSet>();
+    for (int c = 0; c < 18; ++c) {
+        const float x = (static_cast<float>(c) + 0.5f) / 18.0f;
+        centers->add(static_cast<GuideId>(c + 1), test::straightCurve({x, 0.0f, 0.5f}, {0, 1, 0}, 4));
+    }
+    auto op = OperatorRegistry::instance().create(op::kClump);
+    op->params().set("centersFrom", std::string("upstreamClumpCurves"));
+    op->params().set("upstreamChannel", std::string("braidSection"));
+    auto mixed = [&](const StrandsPtr& out) {
+        std::map<int, std::set<std::pair<int, int>>> groupsOf;
+        const std::vector<float>& ids = *out->strandChannel("clumpId");
+        for (std::size_t s = 0; s < ids.size(); ++s) {
+            if (ids[s] >= 0.0f) groupsOf[static_cast<int>(ids[s])].insert({static_cast<int>(braidIds[s]), static_cast<int>(sections[s])});
+        }
+        std::size_t across = 0;
+        for (const auto& [id, groups] : groupsOf) across += groups.size() > 1;
+        return std::make_pair(across, groupsOf.size());
+    };
+    const StrandsPtr out = valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value(GuidesPtr(centers))}));
+    ASSERT_TRUE(out);
+    const auto [across, clumps] = mixed(out);
+    EXPECT_EQ(across, 0u) << "a curve's clump takes strands of two braids' sections";
+    EXPECT_GE(clumps, 6u);
+    op->params().set("centersFrom", std::string("inputCurves"));
+    EXPECT_GT(mixed(valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value(GuidesPtr(centers))}))).first, 0u);
+}
+
 TEST(ClumpCenters, StrandsWithoutPointsAreNeverCentersNorRead) {
     // Strands of no points (an empty guide's, a cut to nothing) among the rest: no read past their
     // points, never a center; Merge's seam blend skips them the same way.

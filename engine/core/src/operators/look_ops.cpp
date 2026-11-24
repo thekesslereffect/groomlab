@@ -930,9 +930,13 @@ public:
                       "clump (upstreamChannel, the clump number that Clump writes), so the big clumps keep their shape "
                       "and split into smaller ones, a big clump with no center of its own left as it is; after a "
                       "Braid, its sections (upstreamChannel braidSection): clumps along each section of each braid, "
-                      "never across braids. Connecting centers in the Graph Editor sets inputPoints (a Guides node: "
-                      "inputCurves; a Clump: upstreamClump); wiring it after a Clump or a Braid sets upstreamClump",
-                      "", {"pick", "inputPoints", "inputCurves", "upstreamClump"}},
+                      "never across braids; upstreamClumpCurves: the centers input's curves as inputCurves takes them, "
+                      "each strand gathering only toward the curves inside its own upstream clump (a curve belongs to "
+                      "the upstream clump of the strand rooted nearest it), so groomed curves shape the clumps within "
+                      "each big clump or braid section and never pull across them. Connecting centers in the Graph "
+                      "Editor sets inputPoints (a Guides node: inputCurves; a Clump: upstreamClump; to an "
+                      "upstreamClump one: upstreamClumpCurves); wiring it after a Clump or a Braid sets upstreamClump",
+                      "", {"pick", "inputPoints", "inputCurves", "upstreamClump", "upstreamClumpCurves"}},
             ParamSpec{"upstreamChannel", std::string("clumpId"),
                       "centersFrom upstreamClump: the per-strand channel numbering the upstream Clump's clumps (its "
                       "clumpChannel; any Clump before this one in the chain, or the one linked to centers), or a "
@@ -940,7 +944,7 @@ public:
                       "numbered within their braid; braidId alone: clumps across a whole braid). Give this Clump's own "
                       "clumpChannel another name (subClumpId) to keep both"}
                 .readsChannel(true)
-                .when("centersFrom", {"upstreamClump"}),
+                .when("centersFrom", {"upstreamClump", "upstreamClumpCurves"}),
             ParamSpec{"clumpBy", std::string("count"),
                       "The clumps it picks among the strands: count: about `count` of them, whatever the scalp's size "
                       "(re-fitted to the scalp's area: an edit that changes it by more than 1% moves every clump); size: "
@@ -975,8 +979,11 @@ public:
                       "How a strand lies along its clump's axis. fit: tip to tip, each point at the same share of the "
                       "axis's length as of its own, so the strand takes the axis's length as much as it clumps; "
                       "extend: each point as far along the axis as along the strand, and past a shorter axis's tip on "
-                      "along its last direction, so the strand keeps its own length",
-                      "", {"fit", "extend"}},
+                      "along its last direction, so the strand keeps its own length; nearest: each point toward the "
+                      "axis's nearest point, walking along the axis with the strand, so strands winding with their axis "
+                      "(a braid's sections, a rope's plies) stay with the same stretch of it however long each is "
+                      "(wiring a Clump after a Braid sets it)",
+                      "", {"fit", "extend", "nearest"}},
             ParamSpec{"clumpChannel", std::string("clumpId"),
                       "Per-strand channel receiving the clump's number, from its center's ID (the same while that center "
                       "is; empty: none). Chained Clumps each want their own (lockId, then clumpId), for a Twist, Cards or "
@@ -1217,10 +1224,14 @@ private:
         const std::string from = params().getString("centersFrom");
         // upstreamClump: centers of its own, as pick, each strand clumping only within its upstream
         // clump (below, by regions).
-        const bool upstream = from == "upstreamClump";
-        const bool own = from == "pick" || upstream;
-        if (!own && from != "inputPoints" && from != "inputCurves") {
-            throw GraphError("Clump: unknown centersFrom '" + from + "' (pick, inputPoints, inputCurves or upstreamClump)");
+        // upstreamClumpCurves: the centers input's curves (as inputCurves), each strand clumping
+        // only toward those inside its upstream clump (the same regions).
+        const bool upstreamCurves = from == "upstreamClumpCurves";
+        const bool upstream = from == "upstreamClump" || upstreamCurves;
+        const bool own = from == "pick" || from == "upstreamClump";
+        if (!own && from != "inputPoints" && from != "inputCurves" && !upstreamCurves) {
+            throw GraphError("Clump: unknown centersFrom '" + from +
+                             "' (pick, inputPoints, inputCurves, upstreamClump or upstreamClumpCurves)");
         }
         const bool linked = inputs.at(1).index() != 0;
         const std::string regionName = params().getString("regionChannel");
@@ -2016,7 +2027,8 @@ private:
             // right (a dab moving a guide makes all its strands again). Otherwise across the scalp's U
             // there (its UV layout; none, any way along the scalp): the surface's, so a brush moving
             // an axis strand never turns it.
-            const bool alongGuides = params().getString("centersFrom") == "inputCurves";
+            const bool alongGuides = params().getString("centersFrom") == "inputCurves" ||
+                                     params().getString("centersFrom") == "upstreamClumpCurves";
             const std::vector<Vec3f>& centerCurves = *curvesMade;
             acrossOf.assign(roots.size(), Vec3f());
             for (std::size_t c = 0; c < roots.size(); ++c) {

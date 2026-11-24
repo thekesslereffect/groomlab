@@ -1776,6 +1776,11 @@ TEST(GraphEdit, AClumpWiredAfterAClumpClumpsInsideItsClumps) {
         const nlohmann::json p = params(edit, after);
         EXPECT_EQ(p.value("centersFrom", std::string()), "upstreamClump");
         EXPECT_EQ(p.value("upstreamChannel", std::string()), "braidSection");
+        EXPECT_EQ(p.value("pastTip", std::string()), "nearest") << "each strand with its stretch of the braid";
+        // Curves then linked to its centers by hand: they shape the clumps inside the sections.
+        const std::string curves = edit.addNode("Guides", "curves");
+        EXPECT_TRUE(edit.connectByHand(curves, after, "centers"));
+        EXPECT_EQ(params(edit, after).value("centersFrom", std::string()), "upstreamClumpCurves");
     }
 }
 

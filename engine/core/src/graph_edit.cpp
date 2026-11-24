@@ -860,6 +860,19 @@ bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, co
         }
         return false;
     }
+    // Curves (not a Clump) linked to the centers of a Clump clumping inside upstream clumps: those
+    // curves shape the clumps within each upstream clump (upstreamClumpCurves).
+    if (input == "centers" && nodeType(dst) == op::kClump) {
+        for (json& n : impl_->nodes()) {
+            if (!n.is_object() || n.value("name", std::string()) != dst || !n.contains("params") || !n["params"].is_object()) continue;
+            json& params = n["params"];
+            const auto it = params.find("centersFrom");
+            if (it != params.end() && it->is_string() && it->get<std::string>() == "upstreamClump") {
+                params["centersFrom"] = "upstreamClumpCurves";
+                return true;
+            }
+        }
+    }
     struct Switch {
         const char *type, *input, *param, *from, *to, *toForGuides;
     };
@@ -906,6 +919,7 @@ bool GraphEdit::adoptUpstreamClump(const std::string& node) {
         // After a Braid: clumps along each section of each braid (its braidSection, with braidId).
         params["centersFrom"] = "upstreamClump";
         params["upstreamChannel"] = "braidSection";
+        params["pastTip"] = "nearest";  // (each strand with the stretch of braid it is in)
         return true;
     }
     std::string upChannel = "clumpId";

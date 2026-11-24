@@ -2078,7 +2078,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             // nothing (the CPU's).
             const std::string centersFrom = clumpParams.getString("centersFrom");
             // (upstreamClump, smaller clumps inside an earlier Clump's by regions: the CPU's.)
-            if (centersFrom == "upstreamClump") {
+            if (centersFrom == "upstreamClump" || centersFrom == "upstreamClumpCurves") {
                 *why = name + " clumps inside an upstream Clump's clumps";
                 return false;
             }
