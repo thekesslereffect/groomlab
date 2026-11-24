@@ -981,8 +981,9 @@ public:
                       "extend: each point as far along the axis as along the strand, and past a shorter axis's tip on "
                       "along its last direction, so the strand keeps its own length; nearest: each point toward the "
                       "axis's nearest point, walking along the axis with the strand, so strands winding with their axis "
-                      "(a braid's sections, a rope's plies) stay with the same stretch of it however long each is "
-                      "(wiring a Clump after a Braid sets it)",
+                      "(a rope's plies, coils) stay with the same stretch of it however long each is. After a Braid "
+                      "(centersFrom upstreamClump by braidSection) fit takes each point toward its center's point at the "
+                      "same spot along the braid, so the clumps gather across each section and keep inside its tube",
                       "", {"fit", "extend", "nearest"}},
             ParamSpec{"clumpChannel", std::string("clumpId"),
                       "Per-strand channel receiving the clump's number, from its center's ID (the same while that center "
@@ -1229,6 +1230,16 @@ private:
         const bool upstreamCurves = from == "upstreamClumpCurves";
         const bool upstream = from == "upstreamClump" || upstreamCurves;
         const bool own = from == "pick" || from == "upstreamClump";
+        // Clumps along a Braid's sections (upstreamClump by braidSection, its centers its own
+        // strands, pastTip fit): a braided strand's points lie where its index share says along the
+        // braid (Braider::braidAlong: the same station for the same share, whatever its length), so
+        // each point gathers toward its center's point at the same share of its points (look.slang
+        // ClumpCS byPoint), the centers' curves resampled evenly over their points and never moved
+        // off them: a strand moves only across its section there, never along the braid or out of
+        // the section's tube.
+        const bool alongBraid = from == "upstreamClump" && params().getString("upstreamChannel") == "braidSection" &&
+                                params().getString("pastTip") == "fit" && in->strandChannel("braidSection") &&
+                                in->strandChannel("braidId");
         if (!own && from != "inputPoints" && from != "inputCurves" && !upstreamCurves) {
             throw GraphError("Clump: unknown centersFrom '" + from +
                              "' (pick, inputPoints, inputCurves, upstreamClump or upstreamClumpCurves)");
@@ -1353,7 +1364,7 @@ private:
                 strandCenters(in, now, &nowIds);
                 // Each axis its strand moved from the strand's root to the center's spot (its curve
                 // resampled, then moved: as look.slang CentersCS makes it).
-                if (pick->onSpots) axisOffsets = clumpAxisOffsets(*in, scalpOf(ctx), now, pickedAt, planned);
+                if (pick->onSpots && !alongBraid) axisOffsets = clumpAxisOffsets(*in, scalpOf(ctx), now, pickedAt, planned);
                 for (ClumpCenter& c : given) c.region = c.feather = c.side = std::numeric_limits<float>::quiet_NaN();  // (a pick's carry none)
                 if (pick->byRoots && !tubeIds) chosen = now;
                 picked = now;
@@ -1409,6 +1420,10 @@ private:
                 return std::make_pair(g.points, g.count);
             });
         }
+        if (alongBraid) {  // (a sample a point at least: the centers' points themselves)
+            for (const std::size_t k : centerGuides) samples = std::max(samples, given[k].count);
+            samples = std::min(samples, kClumpCenterSamplesMost);
+        }
         // Incrementally, what the last run made (its result checked below), and the centers (strands)
         // the centers input left as they were: their search roots and curves as it made them (when
         // no copyAmount shares the curves out).
@@ -1453,6 +1468,13 @@ private:
                 resampled.resize(samples);
                 if (!centerStrands) {
                     clumpGuideCurve(g.points, g.count, resampled.data(), samples);  // (a guide: its smooth curve)
+                } else if (alongBraid) {  // evenly over its points (ClumpCS byPoint)
+                    for (std::size_t j = 0; j < samples; ++j) {
+                        const double x = static_cast<double>(j) * static_cast<double>(g.count - 1) / static_cast<double>(samples - 1);
+                        const std::size_t a = std::min(static_cast<std::size_t>(x), g.count - 2);
+                        const float f = static_cast<float>(x - static_cast<double>(a));
+                        resampled[j] = g.points[a] * (1.0f - f) + g.points[a + 1] * f;
+                    }
                 } else {
                     resampleByArcLengthInto(g.points, g.count, resampled.data(), samples);
                 }
@@ -1980,13 +2002,19 @@ private:
         std::vector<StrandId> ids(used.size());
         for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
         gpu::StageInputs taken;
+        ParamSet paired;  // (along a braid: ClumpCS's byPoint)
+        if (alongBraid) {
+            paired = params();
+            paired.set("pastTip", std::string("byPoint"));
+        }
+        const ParamSet& stageParams = alongBraid ? paired : params();
         if (!last) {
             auto inputs = gpu::clumpInputs(assigned, curvesMade, normalsMade, ids, seed);
             inputs->spots = !axisOffsets.empty();  // centers on the scalp (ClumpInputs::spots)
             inputs->samples = samples;
             taken.clump = std::move(inputs);
             phase.next("clump.run");
-            gpu::runStageInto(gpu::StageKind::Clump, params(), in, scalp, *out, std::move(taken));
+            gpu::runStageInto(gpu::StageKind::Clump, stageParams, in, scalp, *out, std::move(taken));
             phase.next("clump.channel");
             if (clumpIds) {
                 parallelFor(0, assigned->size(), [&](std::size_t s) {
@@ -2001,7 +2029,7 @@ private:
             inputs->spots = !axisOffsets.empty();  // centers on the scalp (ClumpInputs::spots)
             inputs->samples = samples;
             taken.clump = std::move(inputs);
-            gpu::runStageOnStrands(gpu::StageKind::Clump, params(), in, dirty, scalp, *out, std::move(taken));
+            gpu::runStageOnStrands(gpu::StageKind::Clump, stageParams, in, dirty, scalp, *out, std::move(taken));
             if (clumpIds) {
                 for (const std::uint32_t s : dirty) (*clumpIds)[s] = (*assigned)[s] != kNoCenter ? (*numbers)[(*assigned)[s]] : -1.0f;
             }

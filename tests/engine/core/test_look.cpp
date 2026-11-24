@@ -6223,6 +6223,73 @@ TEST(Clump, AfterABraidItClumpsAlongEachSectionOfEachBraid) {
     EXPECT_GT(mixed(picked).first, 0u) << "pick clumps across the braids";
 }
 
+TEST(Clump, AfterABraidItsClumpsGatherAcrossEachSectionAndKeepInsideItsTube) {
+    // A Clump after a Braid (upstreamClump by braidSection, pastTip fit): a braided strand's point
+    // gathers toward its center's point at the same spot along the braid (the same share of its
+    // points), so every woven point stays inside its section's tube there (no farther from the
+    // section's middle than its farthest strand was) and the clumps gather across it.
+    BraidScene scene("three");
+    const NodeId clump = scene.lg.add(op::kClump, scene.braid);
+    ParamSet& p = scene.lg.g.node(clump).params();
+    p.set("centersFrom", std::string("upstreamClump"));
+    p.set("upstreamChannel", std::string("braidSection"));
+    p.set("count", std::int64_t{400});
+    p.set("strength", 1.0);
+    p.set("profile", Ramp::constant(0.9f));
+    const StrandsPtr before = scene.lg.eval(scene.braid);
+    auto inTube = [&](const std::string& pastTip, float* gathered) {
+        p.set("pastTip", pastTip);
+        const StrandsPtr after = scene.lg.eval(clump);
+        const std::vector<float>& braid = *before->strandChannel("braidId");
+        const std::vector<float>& section = *before->strandChannel("braidSection");
+        const std::vector<float>& woven = *before->pointChannel("braidWoven");
+        const std::vector<float>& tail = *before->pointChannel("braidTail");
+        const std::vector<float>& ids = *after->strandChannel("clumpId");
+        std::map<std::pair<int, int>, std::vector<std::size_t>> groups;
+        for (std::size_t s = 0; s < before->strandCount(); ++s) {
+            if (braid[s] >= 0.0f) groups[{static_cast<int>(braid[s]), static_cast<int>(section[s])}].push_back(s);
+        }
+        std::size_t points = 0, outside = 0;
+        double spreadBefore = 0.0, spreadAfter = 0.0;
+        for (const auto& [key, members] : groups) {
+            const std::size_t n = before->strandPointCount(members.front());
+            for (std::size_t i = 1; i < n; ++i) {
+                Vec3f middle;
+                for (const std::size_t s : members) middle = middle + before->strandPoints(s)[i] / static_cast<float>(members.size());
+                float radius = 0.0f;
+                for (const std::size_t s : members) radius = std::max(radius, (before->strandPoints(s)[i] - middle).length());
+                std::map<float, std::pair<Vec3f, Vec3f>> clumpMiddles;  // per clump: its points' sums before and after
+                for (const std::size_t s : members) {
+                    if (before->strandPointCount(s) != n) continue;
+                    const std::size_t at = before->strandBegin(s) + i;
+                    if (woven[at] < 0.99f || tail[at] > 0.01f) continue;
+                    ++points;
+                    if ((after->strandPoints(s)[i] - middle).length() > 1.02f * radius + 1e-5f) ++outside;
+                    auto& m = clumpMiddles[ids[s]];
+                    m.first = m.first + before->strandPoints(s)[i];
+                    m.second = m.second + after->strandPoints(s)[i];
+                }
+                for (const std::size_t s : members) {
+                    const std::size_t at = before->strandBegin(s) + i;
+                    if (before->strandPointCount(s) != n || woven[at] < 0.99f || tail[at] > 0.01f) continue;
+                    std::size_t count = 0;
+                    for (const std::size_t o : members) count += ids[o] == ids[s];
+                    const auto& m = clumpMiddles[ids[s]];
+                    spreadBefore += (before->strandPoints(s)[i] - m.first / static_cast<float>(count)).length();
+                    spreadAfter += (after->strandPoints(s)[i] - m.second / static_cast<float>(count)).length();
+                }
+            }
+        }
+        EXPECT_GT(points, 1000u);
+        if (gathered) *gathered = static_cast<float>(spreadAfter / std::max(spreadBefore, 1e-12));
+        return static_cast<float>(outside) / static_cast<float>(std::max<std::size_t>(points, 1));
+    };
+    float gathered = 1.0f;
+    EXPECT_LT(inTube("fit", &gathered), 0.002f) << "woven points out of their section's tube";
+    EXPECT_LT(gathered, 0.3f) << "the clumps gather across their section";
+    EXPECT_GT(inTube("extend", nullptr), 0.02f) << "by length from the root, strands leave their tube";
+}
+
 TEST(Clump, PastTipNearestKeepsAStrandWithTheStretchOfItsCenterItWindsWith) {
     // A strand winding with its center (a braid's section, a rope's ply) but longer before it
     // joins it (gathered from farther out): by its share of its length (fit) its points are pulled

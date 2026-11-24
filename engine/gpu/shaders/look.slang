@@ -2650,12 +2650,16 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
     // along its strand, and past the center's tip on along its last way (the strand keeps its own).
     // (CentersCS made them, at word gAux.w: centerArc.)
     // nearest (gFlag.y 2): toward the center's nearest point, walked along it (centerNearestFrom).
+    // byPoint (gFlag.y 3: a Braid's strands, the centers' samples spread evenly over their points):
+    // toward the center's point at the same share of its points as the point is of its strand's,
+    // which on a braid is the same spot along it, so a strand gathers across its section only.
     const uint samples = clumpSamples();
     const float centerLength = centerArc(c, samples - 1);
     const bool extend = gFlag.y == 1u;
     const bool nearest = gFlag.y == 2u;
+    const bool byPoint = gFlag.y == 3u;
     float strandLength = 0.0f;  // (fit: the strand's length as it came)
-    if (!extend && !nearest) {
+    if (!extend && !nearest && !byPoint) {
         for (uint i = 1; i < n; ++i) strandLength += len3(loadPoint(begin + i) - loadPoint(begin + i - 1));
     }
     const float fitScale = strandLength > 0.0f ? centerLength / strandLength : 0.0f;
@@ -2703,6 +2707,10 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
             float f = 0.0f;
             if (nearest) {
                 centerNearestFrom(c, p, 3.0f * step, k, f);
+            } else if (byPoint) {
+                const float g = paramAt(i, n) * float(samples - 1);
+                k = min(uint(floor(g)), samples - 2);
+                f = clamp(g - float(k), 0.0f, 1.0f);
             } else {
                 const float along = extend ? arc : min(arc * fitScale, centerLength);  // (fit: by share)
                 centerSampleAt(c, along, k, f);

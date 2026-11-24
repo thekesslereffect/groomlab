@@ -919,7 +919,6 @@ bool GraphEdit::adoptUpstreamClump(const std::string& node) {
         // After a Braid: clumps along each section of each braid (its braidSection, with braidId).
         params["centersFrom"] = "upstreamClump";
         params["upstreamChannel"] = "braidSection";
-        params["pastTip"] = "nearest";  // (each strand with the stretch of braid it is in)
         return true;
     }
     std::string upChannel = "clumpId";
