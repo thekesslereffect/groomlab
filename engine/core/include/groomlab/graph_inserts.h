@@ -88,6 +88,13 @@ void insertNodesOnLink(GraphEdit& edit, const std::string& src, const std::strin
 std::string insertPart(GraphEdit& edit, const std::string& paramsJson = {}, const std::string& after = {},
                        std::optional<double> groomSize = std::nullopt, bool* made = nullptr);
 
+// A Flow node so drawn flow arrows lay the strands (every host's Flow tool, issue #112, as
+// insertPart for parts): the graph's first Flow node, or with none one with `paramsJson` over its
+// defaults after `after` ("": the first Interpolate, else Scatter). Returns its name; `made` says
+// whether it is new. GraphError for a graph with no strands to lay.
+std::string insertFlow(GraphEdit& edit, const std::string& paramsJson = {}, const std::string& after = {},
+                       std::optional<double> groomSize = std::nullopt, bool* made = nullptr);
+
 // Add > Wind / Jiggle (every host's): a node of `type` (Wind, Jiggle) with `paramsJson` over its
 // spec's defaults, just before the output but before the Collide and Cards nodes ending its chain
 // (motionAnchor), so the strands collide where they moved to and the cards (every export and render)

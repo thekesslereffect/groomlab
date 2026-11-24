@@ -128,8 +128,10 @@ RootAnchor rootAnchor(const HierarchyGuide& parent) {
 // guide, so the guide rises over the scalp in one smooth curve. Pressing each point onto its own closest scalp point (as it
 // was) crumpled a tube's base where a combed parent's sections dip into the head (issue #110), and
 // took a point hanging past the open edge of a scalp up to that edge (issue #111). The root stays.
-// False when no point was under the scalp.
-bool liftOffScalp(std::vector<Vec3f>& points, const ScalpMesh& scalp, float reach, const std::function<float(float)>& clearance) {
+// Only the points `counts(i)` allows are lifted from (the others left to clip, as their parent
+// does). False when no point was under the scalp.
+bool liftOffScalp(std::vector<Vec3f>& points, const ScalpMesh& scalp, float reach, const std::function<float(float)>& clearance,
+                  const std::function<bool(std::size_t)>& counts) {
     const std::size_t n = points.size();
     if (n < 2 || !(reach > 0.0f)) return false;
     std::vector<float> depth(n, 0.0f), arc(n, 0.0f);
@@ -140,7 +142,7 @@ bool liftOffScalp(std::vector<Vec3f>& points, const ScalpMesh& scalp, float reac
         const SurfacePoint sp = scalp.closestPoint(points[i]);
         if (sp.root.face < 0) continue;
         normal[i] = sp.normal.normalized();
-        if (!belowScalpAt(points[i], sp)) continue;
+        if (!belowScalpAt(points[i], sp) || (counts && !counts(i))) continue;
         const float above = clearance ? clearance(static_cast<float>(i) / static_cast<float>(n - 1)) : 0.0f;
         depth[i] = above - (points[i] - sp.position).dot(normal[i]);
         any = any || depth[i] > 0.0f;
@@ -971,9 +973,28 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
         // rather than half in it.)
         const auto clearance = [&](float t) { return child.tube.widthAt(t) * std::min(1.0f, child.tube.aspectAt(t)) * scale_; };
         const float reach = 3.0f * parent.tube.widthAt(0.0f) * std::max(1.0f, parent.tube.aspectAt(0.0f)) * scale_;
-        for (int pass = 0; pass < 3; ++pass) {  // (a lift can bring a point over another part of a curved scalp)
-            if (!liftOffScalp(child.points, *scalp, reach, clearance)) break;
+        // (Its root zone, the first `reach` along it, always comes out clear of the scalp. Past it a
+        // slice keeps clear of the scalp only where its parent does: a parent let clip the scalp
+        // (Keep off scalp off) takes its slices in with it, and a slice is never pushed about by
+        // a scalp its parent passes through (issue #111).)
+        std::vector<float> along(n, 0.0f);
+        for (std::size_t i = 1; i < n; ++i) along[i] = along[i - 1] + (child.points[i] - child.points[i - 1]).length();
+        const auto rootZone = [&](std::size_t i) {
+            const float k = std::clamp(1.0f - along[i] / reach, 0.0f, 1.0f);
+            return k * k * (3.0f - 2.0f * k);
+        };
+        std::vector<char> parentClear(n, 1);
+        for (std::size_t i = 1; i < n; ++i) {
+            const SurfacePoint sp = scalp->closestPoint(parent.points[i]);
+            parentClear[i] = !(sp.root.face >= 0 && belowScalpAt(parent.points[i], sp));
         }
+        const auto counts = [&](std::size_t i) { return rootZone(i) > 0.0f || parentClear[i] != 0; };
+        const auto lift = [&] {
+            for (int pass = 0; pass < 3; ++pass) {  // (a lift can bring a point over another part of a curved scalp)
+                if (!liftOffScalp(child.points, *scalp, reach, clearance, counts)) break;
+            }
+        };
+        lift();  // (idempotent: a slice clear of the scalp is left as it is; root_tubes.cpp smooths a new split's roots once)
         child.root = scalp->closestPoint(child.points[0]).root;
     }
     // A plain tube's children rooted round its root as it stands on the scalp (rootAnchor), not as

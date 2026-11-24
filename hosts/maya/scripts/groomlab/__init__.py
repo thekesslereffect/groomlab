@@ -79,9 +79,10 @@ from groomlab.painting import (  # noqa: F401
     set_map_channels, set_map_texture, setting_targets, show_map_on_scalp, texture_map, unfreeze_all, invert_frozen, use_map, view_map,
     _map_texture_default)
 from groomlab.flow import (  # noqa: F401
-    FLOW_SINKS, add_flow_node, add_part, add_part_node, clear_flow, clear_parts, draw_part_tool, flow_arrows, flow_counts,
+    FLOW_SINKS, add_flow_node, add_part, add_part_node, clear_flow, clear_parts, draw_part_tool, ensure_flow_node, flow_arrows, flow_counts,
     flow_sink, flow_sinks, flow_stroke, flow_tool, list_parts, mirror_flow, mirror_parts, remove_part)
 from groomlab.motion import add_jiggle, add_wind, motion_anchor  # noqa: F401
+from groomlab.mesh_maps import maps_to_mesh  # noqa: F401
 from groomlab.drivers import (add_drivers, attach_guides, attached_guides, bind_drivers, bind_frame, clear_bind,  # noqa: F401
                               create_drivers, detach_guides, driver_curves, remove_drivers)
 from groomlab.shading import (  # noqa: F401

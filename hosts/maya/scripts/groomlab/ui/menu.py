@@ -2457,6 +2457,11 @@ def install():
         redshift_hook.start()
     except Exception as e:
         cmds.warning("GroomLab: Redshift proxies not watched: %s" % e)
+    try:  # painted vertex maps kept on the scalp meshes as color sets when saving (issue #113)
+        from groomlab import mesh_maps
+        mesh_maps.start()
+    except Exception as e:
+        cmds.warning("GroomLab: painted maps not kept on the scalp meshes: %s" % e)
     try:  # Tubes to Curves' live links: the linked meshes watched, in this scene and the next ones
         from groomlab import tube_links
         tube_links.start()
@@ -2499,6 +2504,11 @@ def uninstall():
     try:
         from groomlab import tube_links
         tube_links.stop()
+    except Exception:
+        pass
+    try:
+        from groomlab import mesh_maps
+        mesh_maps.stop()
     except Exception:
         pass
     if _SIMS_SCENE_JOBS:

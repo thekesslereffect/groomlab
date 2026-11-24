@@ -2564,6 +2564,7 @@ class ToolPalette(QtWidgets.QWidget):
         tool's own, Applies to (Paint: its own block, then Brush, titled)."""
         self.sync_brush()
         tool = self.card_tool()
+        self.keep_scroll(tool)
         uses = TOOL_SETTINGS.get(tool, set())
         photos = self.current_tab() == "photos"
         self.settings.setVisible(not photos and tool is not None)
@@ -2639,6 +2640,30 @@ class ToolPalette(QtWidgets.QWidget):
             self.strength.setRange(-span["soft_max"] if signed else span["soft_min"], span["soft_max"])
             self.strength.setValue(self.strengths[tool])
             self.strength.setLabel("Strength (±)" if signed else "Strength")
+
+    def keep_scroll(self, tool):
+        """Each tool's card scrolled where it was left (issue #114): the panel's scroll position kept
+        for the tool shown so far, the new one's put back once its card is laid out (a tool not
+        shown before stays where the panel is)."""
+        shown = getattr(self, "_scroll_tool", False)
+        if tool == shown:
+            return
+        bar = self.scroll.verticalScrollBar()
+        scrolls = self.__dict__.setdefault("_scrolls", {})
+        if shown is not False:
+            scrolls[shown] = bar.value()
+        self._scroll_tool = tool
+        want = scrolls.get(tool)
+        if want is None:
+            return
+
+        def restore():
+            if getattr(self, "_scroll_tool", False) == tool:
+                bar.setValue(min(want, bar.maximum()))
+        # (Twice: the card's height settles after its blocks show or hide, the second for blocks
+        # that refill a moment later.)
+        QtCore.QTimer.singleShot(0, restore)
+        QtCore.QTimer.singleShot(60, restore)
 
     # -- Each brush's own settings ----------------------------------------------------
     # Radius, falloff and the two curves are kept per brush (strength too: self.strengths), so a

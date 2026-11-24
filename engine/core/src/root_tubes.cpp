@@ -1365,6 +1365,46 @@ TubeLevels tubeLevels(const GuideHierarchy& h, const std::vector<GuideId>& guide
     return out;
 }
 
+namespace {
+// A new split's slices with clean roots (issue #110): where a slice's first few parent root
+// widths turn sharply (its parent combed down onto the scalp or into it there, its slices
+// gathered on the scalp otherwise than in its sections), that stretch smoothed out, fading to
+// nothing past it, and the guide bound so (GuideHierarchy::setPoints: its offsets in its parent's
+// sections), once, as it is made: what a brush does to it later stays as it is left.
+void smoothSliceRoots(GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<GuideId>& slices) {
+    for (const GuideId id : slices) {
+        const HierarchyGuide* g = h.guide(id);
+        const HierarchyGuide* parent = g ? h.guide(g->parent) : nullptr;
+        if (!parent || g->points.size() < 3) continue;
+        std::vector<Vec3f> pts = g->points;
+        const std::size_t n = pts.size();
+        const float reach = 3.0f * parent->tube.widthAt(0.0f) * std::max(1.0f, parent->tube.aspectAt(0.0f)) * h.scale();
+        if (!(reach > 0.0f)) continue;
+        std::vector<float> along(n, 0.0f);
+        for (std::size_t i = 1; i < n; ++i) along[i] = along[i - 1] + (pts[i] - pts[i - 1]).length();
+        const auto zone = [&](std::size_t i) {
+            const float k = std::clamp(1.0f - along[i] / reach, 0.0f, 1.0f);
+            return k * k * (3.0f - 2.0f * k);
+        };
+        bool sharp = false;
+        for (std::size_t i = 1; i + 1 < n && !sharp && zone(i) > 0.0f; ++i) {
+            const Vec3f a = (pts[i] - pts[i - 1]).normalized(), b = (pts[i + 1] - pts[i]).normalized();
+            sharp = a.dot(b) < 0.7f;  // (over 45 degrees)
+        }
+        if (!sharp) continue;
+        for (int pass = 0; pass < 4; ++pass) {
+            const std::vector<Vec3f> was = pts;
+            for (std::size_t i = 1; i + 1 < n; ++i) {
+                const float w = 0.5f * zone(i);
+                if (w > 0.0f) pts[i] = was[i] + ((was[i - 1] + was[i + 1]) * 0.5f - was[i]) * w;
+            }
+        }
+        h.setPoints(id, std::move(pts));
+    }
+    h.evaluate(&scalp);
+}
+}  // namespace
+
 std::size_t addTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::vector<GuideId>& guides, const std::string& picked) {
     const TubeLevels info = tubeLevels(h, guides, picked);
     if (info.base.empty()) throw std::invalid_argument("the groom has no guides to split");
@@ -1426,9 +1466,17 @@ std::size_t addTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::v
         // A drawn root's tubes: each split is its parent's root shape sliced in two (sliceChildren).
         if (scalp) {
             h.evaluate(scalp);
+            std::vector<GuideId> slices;
             for (const GuideId p : parents) {
                 const HierarchyGuide* g = h.guide(p);
-                if (g && isRootTube(g->tube, 0)) sliceChildren(h, *scalp, p, h.childrenOf(p));
+                if (!g || !isRootTube(g->tube, 0)) continue;
+                const std::vector<GuideId> kids = h.childrenOf(p);
+                sliceChildren(h, *scalp, p, kids);
+                slices.insert(slices.end(), kids.begin(), kids.end());
+            }
+            if (!slices.empty()) {
+                h.evaluate(scalp);
+                smoothSliceRoots(h, *scalp, slices);
             }
         }
     }

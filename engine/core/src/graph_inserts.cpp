@@ -263,6 +263,25 @@ std::string insertPart(GraphEdit& edit, const std::string& paramsJson, const std
     return node;
 }
 
+std::string insertFlow(GraphEdit& edit, const std::string& paramsJson, const std::string& after, std::optional<double> groomSize,
+                       bool* made) {
+    if (made) *made = false;
+    const json g = graphOf(edit);
+    const std::vector<std::string> flows = ofType(g, "Flow");
+    if (!flows.empty()) return flows.front();
+    std::string anchor = !after.empty() && edit.hasNode(after) ? after : std::string();
+    for (const char* kind : {"Interpolate", "Scatter"}) {
+        if (!anchor.empty()) break;
+        const std::vector<std::string> found = ofType(g, kind);
+        if (!found.empty()) anchor = found.front();
+    }
+    if (anchor.empty()) throw GraphError("the graph has no strands to lay along the flow (no Scatter)");
+    const std::string node = edit.addNode("Flow", {}, paramsJson, std::nullopt, std::nullopt, groomSize);
+    insertAfter(edit, anchor, node);
+    if (made) *made = true;
+    return node;
+}
+
 std::string motionAnchor(const GraphEdit& edit) {
     std::string anchor = edit.outputNode();
     if (anchor.empty()) return anchor;

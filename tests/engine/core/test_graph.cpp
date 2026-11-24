@@ -754,6 +754,22 @@ TEST(GraphInserts, PartsOpenTheHairAndTheStarterCountsTheGroomsOwnLook) {
     EXPECT_TRUE(starterLookGiven(curled.toJson(), looks));
 }
 
+TEST(GraphInserts, DrawingFlowMakesTheFlowNodeOnce) {
+    // Issue #112, insertFlow: every host's Flow tool gives a graph without one a Flow node after
+    // its Interpolate, one only, as insertPart does for parts.
+    GraphEdit edit(defaultGraphJson());
+    for (const std::string& n : edit.nodeNames()) {
+        if (edit.nodeType(n) == "Flow") edit.removeNode(n);
+    }
+    bool made = false;
+    const std::string flow = insertFlow(edit, {}, {}, std::nullopt, &made);
+    EXPECT_TRUE(made);
+    EXPECT_EQ(edit.nodeType(flow), "Flow");
+    EXPECT_EQ(insertFlow(edit, {}, {}, std::nullopt, &made), flow);
+    EXPECT_FALSE(made) << "one there: kept";
+    EXPECT_NO_THROW(loadGraphJson(edit.toJson()));
+}
+
 TEST(GuideHierarchy, EveryHostsGuideEditsAlike) {
     // childGroupFor: Generate Children adds to the group's own child group, else a new one.
     GuideHierarchy h;
@@ -793,6 +809,39 @@ TEST(ScalpMaps, VertexMapsFollowTheScalpsJoiningOrLeaving) {
     EXPECT_EQ(mapKindOf(maps, nullptr, "dens"), "vertices");
     EXPECT_EQ(mapChannelsOf(maps, nullptr, "tint"), kColorMap);
     EXPECT_EQ(mapChannelsOf(maps, nullptr, "nope"), 0);
+}
+
+TEST(ScalpMaps, VertexMapsGoOnTheScalpMeshesAsColorSets) {
+    // Issue #113, vertexMapColorSets: each vertex map split over the scalps it spans, r g b a per
+    // vertex; a gray one r = g = b, alpha 1; one painted before a scalp joined leaves it 0.
+    ScalpMaps maps;
+    ScalpMapEntry gray;
+    gray.kind = "vertices";
+    gray.values = {0.1f, 0.2f, 0.3f};  // the groom's own 3 vertices only
+    maps.maps["dens"] = gray;
+    ScalpMapEntry color;
+    color.kind = "vertices";
+    color.channels = kColorMap;
+    for (int v = 0; v < 5; ++v) color.values.insert(color.values.end(), {0.5f, 0.25f, 0.0f, 0.75f});
+    maps.maps["tint"] = color;
+    ScalpMapEntry odd;
+    odd.kind = "vertices";
+    odd.values = {1, 2};  // fits no layout
+    maps.maps["odd"] = odd;
+    const ScalpCounts scalps{{"scalp", 3}, {"patch", 2}};
+    const std::vector<MeshColorSet> sets = vertexMapColorSets(maps, scalps);
+    ASSERT_EQ(sets.size(), 4u);
+    auto find = [&](const std::string& scalp, const std::string& name) {
+        for (const MeshColorSet& s : sets) {
+            if (s.scalp == scalp && s.name == name) return s.rgba;
+        }
+        return std::vector<float>{};
+    };
+    EXPECT_EQ(find("scalp", "dens"), (std::vector<float>{0.1f, 0.1f, 0.1f, 1, 0.2f, 0.2f, 0.2f, 1, 0.3f, 0.3f, 0.3f, 1}));
+    EXPECT_EQ(find("patch", "dens"), (std::vector<float>{0, 0, 0, 1, 0, 0, 0, 1}));
+    EXPECT_EQ(find("patch", "tint"), (std::vector<float>{0.5f, 0.25f, 0.0f, 0.75f, 0.5f, 0.25f, 0.0f, 0.75f}));
+    EXPECT_TRUE(find("scalp", "odd").empty()) << "a map fitting no layout is left out";
+    EXPECT_EQ(vertexMapColorSets(maps, scalps, {"tint"}).size(), 2u) << "only the maps asked for";
 }
 
 TEST(GraphInserts, AGuideGroupsReadersFollowItsRename) {

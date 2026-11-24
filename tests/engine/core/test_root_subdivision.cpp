@@ -872,6 +872,18 @@ TEST(RootSlices, SlicesOfALeaningTubeRiseOverTheScalpSmoothly) {
         EXPECT_LT(sharpestTurn(g->points), 60.0f) << "slice " << k << " crumpled or folded back";
     }
     EXPECT_EQ(slices, 6u);
+    // (Smoothed once, as split: a brush giving a slice back its own points moves nothing.)
+    GuideHierarchy again = h;
+    for (const HierarchyGuide& g : h.guides()) {
+        if (g.isChild()) again.setPoints(g.id, g.points);
+    }
+    again.evaluate(scalp.get());
+    for (const HierarchyGuide& g : h.guides()) {
+        if (!g.isChild()) continue;
+        for (std::size_t i = 0; i < g.points.size(); ++i) {
+            EXPECT_LT((again.guide(g.id)->points[i] - g.points[i]).length(), 1e-3f) << "slice " << g.id << " point " << i << " moved";
+        }
+    }
 }
 
 TEST(RootSlices, ASliceHangingPastAnOpenScalpsEdgeStaysWithItsParent) {
@@ -904,6 +916,39 @@ TEST(RootSlices, ASliceHangingPastAnOpenScalpsEdgeStaysWithItsParent) {
         for (std::size_t i = 0; i < g->points.size(); ++i) farthest = std::max(farthest, (g->points[i] - parent->points[i]).length());
         EXPECT_LT(farthest, reach) << "slice " << k << " left its parent (pulled to the rim?)";
         EXPECT_LT(g->points.back().y, -1.0f) << "slice " << k << "'s tip taken up to the rim";
+    }
+}
+
+TEST(RootSlices, SlicesGoIntoTheScalpWithTheirParent) {
+    // Issue #111: a parent combed into the head mid-length (Keep off scalp off) takes its slices
+    // in with it there: they keep to its tube, never pushed off a scalp it passes through.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootTubeOptions o;
+    o.segments = 16;
+    const std::vector<Vec3f> path{{0, 1, 0}, {0.45f, 1.12f, 0}, {0.85f, 0.75f, 0}, {0.8f, 0.3f, 0}, {0.95f, -0.3f, 0}, {1.0f, -0.8f, 0}};
+    const GuideId root = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.12f, 10), path, o);
+    addTubeLevel(h, scalp.get(), {root});
+    // (Combed into the head along its middle, as a brush with Keep off scalp off leaves it.)
+    std::vector<Vec3f> into = h.guide(root)->points;
+    for (std::size_t i = 0; i < into.size(); ++i) {
+        const float w = std::sin(kPi * static_cast<float>(i) / static_cast<float>(into.size() - 1));
+        into[i] = into[i] * (1.0f - 0.2f * w * w);
+    }
+    h.setPoints(root, into);
+    h.evaluate(scalp.get());
+    const HierarchyGuide* parent = h.guide(root);
+    std::size_t inside = 0;
+    for (std::size_t i = 0; i < parent->points.size(); ++i) inside += underScalp(*scalp, parent->points[i]) ? 1 : 0;
+    ASSERT_GT(inside, 0u) << "the parent goes into the head";
+    const float reach = 3.0f * parent->tube.widthAt(0.0f) * h.scale();
+    for (const GuideId k : h.childrenOf(root)) {
+        const HierarchyGuide* g = h.guide(k);
+        ASSERT_EQ(g->points.size(), parent->points.size());
+        for (std::size_t i = 0; i < g->points.size(); ++i) {
+            EXPECT_LT((g->points[i] - parent->points[i]).length(), reach) << "slice " << k << " point " << i << " pushed off its parent";
+        }
+        EXPECT_LT(sharpestTurn(g->points), 60.0f) << "slice " << k << " kinked";
     }
 }
 

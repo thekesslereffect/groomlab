@@ -249,6 +249,8 @@ def remove_map(groom, name, delete_file=False):
         raise RuntimeError("no map named %r" % name)
     with undo_chunk("remove map"):
         flat = cmds.groomLabScalpMaps(groom, remove=name, **({"deleteFile": True} if delete_file else {})) or []
+        from groomlab.mesh_maps import remove_mesh_map
+        remove_mesh_map(groom, name)  # (its color set on the scalp meshes, issue #113)
         changed = [(flat[i], flat[i + 1]) for i in range(0, len(flat) - 1, 2)]
         if cmds.getAttr(groom + ".strandColorSource") == name and cmds.getAttr(groom + ".strandColorMode") == 2:
             cmds.setAttr(groom + ".strandColorMode", 0)
@@ -267,6 +269,8 @@ def rename_map(groom, old, new):
     same step)."""
     with undo_chunk("rename map"):
         cmds.groomLabScalpMaps(groom, rename=(old, new))
+        from groomlab.mesh_maps import rename_mesh_map
+        rename_mesh_map(groom, old, new)  # (its color set on the scalp meshes, issue #113)
         if cmds.getAttr(groom + ".strandColorSource") == old:
             cmds.setAttr(groom + ".strandColorSource", new, type="string")
         if cmds.getAttr(groom + ".scalpMapDisplay") == old:
@@ -365,7 +369,14 @@ def end_paint_view(from_job=False):
         cmds.evalDeferred(lambda: _kill_job(job))
     else:
         _kill_job(job)
-    if not view or not groom or not cmds.objExists(groom):
+    if not groom or not cmds.objExists(groom):
+        return
+    try:  # what was painted kept on the scalp meshes too, as color sets (issue #113)
+        from groomlab.mesh_maps import maps_to_mesh
+        maps_to_mesh(groom)
+    except Exception as e:
+        cmds.warning("GroomLab: painted maps not kept on the scalp: %s" % e)
+    if not view:
         return
     with no_undo():  # a display, not an edit: no undo step of its own
         for attr, kind, value in view:

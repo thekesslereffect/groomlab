@@ -58,12 +58,15 @@ def flow_tool(groom=None, radius=60, strength=1.0, symmetry=None):
     """
     if groom:
         cmds.select(groom)
-    return brush_tool("flow", radius=radius, strength=strength, symmetry=symmetry)
+    return brush_tool("flow", radius=radius, strength=strength, symmetry=symmetry)  # (makes the Flow node)
 
 
 def flow_stroke(groom, points, radius=0.25, strength=1.0, erase=False, symmetry=None):
     """Scripted flow stroke: arrows along `points` (world, projected onto the scalp) every radius / 2,
-    arrows within `radius` of the path turned toward it; `erase` removes those instead. One undo step."""
+    arrows within `radius` of the path turned toward it; `erase` removes those instead. One undo step.
+    A graph without a Flow node gets one, so the arrows lay the strands (issue #112)."""
+    if not erase:
+        ensure_flow_node(groom)
     return brush_stroke(groom, "flow", points, radius=radius, strength=-abs(strength) if erase else abs(strength),
                         symmetry=symmetry)
 
@@ -125,10 +128,21 @@ def clear_flow(groom):
 
 
 @undoable("flow node")
-def add_flow_node(groom, after="interpolate", lift=12.0, bend=0.6):
-    """Add a Flow node (strands laid along the arrows) after `after`; returns its name."""
+def add_flow_node(groom, after="interpolate", lift=12.0, bend=0.6, if_missing=False):
+    """Add a Flow node (strands laid along the arrows) after `after`; returns its name.
+    With if_missing, an existing Flow node is returned instead, and a graph without one gets it
+    after its first Interpolate (guideless: its Scatter) with the spec's defaults (every host's
+    Flow tool, graph_inserts.h insertFlow)."""
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
+    if if_missing:
+        edit = model._edit()
+        with gm._core_errors():
+            node, made = edit.insert_flow("", after if after in model.nodes else "", model.groom_size)
+        if made:
+            model._take(edit)
+            model.save(groom)
+        return node
     node = model.add_node("Flow", params={"lift": lift, "bend": bend})
     model.insert_after(after, node)
     model.save(groom)
@@ -162,6 +176,16 @@ def add_part_node(groom, width=0.1, strength=1.0, after="interpolate", if_missin
     model.insert_after(after, node)
     model.save(groom)
     return node
+
+
+def ensure_flow_node(groom):
+    """The groom's Flow node, made when its graph has none (drawing flow lays the strands, as
+    drawing a part opens them: issue #112). None when the graph has no strands to lay (no
+    Scatter) or the groom cannot be read; the tool still draws the arrows."""
+    try:
+        return add_flow_node(groom, if_missing=True)
+    except (RuntimeError, ValueError):
+        return None
 
 
 def draw_part_tool(groom, name="part", symmetry=None):
