@@ -324,6 +324,16 @@ void bindDisplay(py::module_& m) {
             return bufferDigest(info.ptr, static_cast<std::size_t>(info.size * info.itemsize));
         },
         py::arg("buffer"), "The core's hash of a buffer's bytes (as DisplayGeometry.digest hashes each stream).");
+    m.def(
+        "pick_working_group",
+        [](const std::vector<std::string>& hidden, const std::vector<std::string>& groups, const std::string& picked) {
+            const std::set<std::string> out = pickWorkingGroup({hidden.begin(), hidden.end()}, groups, picked);
+            return std::vector<std::string>(out.begin(), out.end());
+        },
+        py::arg("hidden"), py::arg("groups"), py::arg("picked"),
+        "The radial menu's Visibility > Groups (every host's): the hidden groups after `picked` is picked. "
+        "With every group shown it shows alone; a hidden one joins those shown; a shown one hides; the last "
+        "one shown shows them all again.");
     m.def("hair_highlight",
           [](float specular, float roughness) {
               HairLook look;

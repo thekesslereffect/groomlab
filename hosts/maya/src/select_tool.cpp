@@ -35,6 +35,7 @@ const char* kDebugLassoFlag[] = {"-dbl", "-debugLasso"};
 const char* kDebugModeFlag[] = {"-dbm", "-debugMode"};
 const char* kSoloSelectionFlag[] = {"-sos", "-soloSelection"};
 const char* kHideOthersFlag[] = {"-hdo", "-hideOthers"};
+const char* kAnyGroupFlag[] = {"-agr", "-anyGroup"};
 const char* kSymmetryFlag[] = {"-sym", "-symmetry"};
 
 std::string modeFor(const MEvent& event) {
@@ -97,8 +98,10 @@ MStatus GuideSelectContext::doRelease(MEvent&, MHWRender::MUIDrawManager&, const
 
 int GuideSelectContext::select(const std::vector<std::array<float, 2>>& lasso, const std::string& mode) {
     GuidePick pick;
-    pick.level = level;
-    pick.group = group;
+    // (The radial menu's Selects: any guide shown, whatever group or level the brushes work on.)
+    const bool any = hideOthers || anyGroup;
+    pick.level = any ? -1 : level;
+    pick.group = any ? std::string() : group;
     pick.rootsOnly = rootsOnly;
     pick.clickPixels = clickPixels;
     pick.solo = soloSelection;
@@ -153,7 +156,10 @@ bool applyGuideSelection(const std::vector<GuideId>& ids, const std::string& mod
     if (mode == "toggle") cmd += " -toggle";
     if (mode == "deselect") cmd += " -deselect";
     if (ids.empty()) cmd = "groomLabGuides -clearSelection";
-    if (solo) cmd += hide ? " -hideOthers" : " -freezeOthers";  // the rest frozen or hidden (nothing picked: none)
+    // The rest hidden (Visibility > Select: the selection left alone), or with solo frozen (nothing
+    // picked: none).
+    if (hide) cmd += " -hideOthers";
+    else if (solo) cmd += " -freezeOthers";
     for (const GuideId id : ids) cmd += MString(" -guide \"") + std::to_string(id).c_str() + "\"";
     cmd += MString(" \"") + groom.fullPathName() + "\"";
     MGlobal::executeCommand(cmd, false, undoable);
@@ -191,6 +197,7 @@ MStatus GuideSelectContextCmd::appendSyntax() {
     s.addFlag(kDebugModeFlag[0], kDebugModeFlag[1], MSyntax::kString);
     s.addFlag(kSoloSelectionFlag[0], kSoloSelectionFlag[1], MSyntax::kBoolean);
     s.addFlag(kHideOthersFlag[0], kHideOthersFlag[1], MSyntax::kBoolean);
+    s.addFlag(kAnyGroupFlag[0], kAnyGroupFlag[1], MSyntax::kBoolean);
     s.addFlag(kSymmetryFlag[0], kSymmetryFlag[1], MSyntax::kString);
     return MS::kSuccess;
 }
@@ -207,6 +214,7 @@ MStatus GuideSelectContextCmd::doEditFlags() {
         if (args.isFlagSet(kRootsOnlyFlag[0]) && args.getFlagArgument(kRootsOnlyFlag[0], 0, b)) context_->rootsOnly = b;
         if (args.isFlagSet(kSoloSelectionFlag[0]) && args.getFlagArgument(kSoloSelectionFlag[0], 0, b)) context_->soloSelection = b;
         if (args.isFlagSet(kHideOthersFlag[0]) && args.getFlagArgument(kHideOthersFlag[0], 0, b)) context_->hideOthers = b;
+        if (args.isFlagSet(kAnyGroupFlag[0]) && args.getFlagArgument(kAnyGroupFlag[0], 0, b)) context_->anyGroup = b;
         if (args.isFlagSet(kSymmetryFlag[0]) && args.getFlagArgument(kSymmetryFlag[0], 0, text)) {
             try {
                 BrushToolSettings check;
@@ -239,6 +247,7 @@ MStatus GuideSelectContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kRootsOnlyFlag[0])) setResult(context_->rootsOnly);
         else if (args.isFlagSet(kSoloSelectionFlag[0])) setResult(context_->soloSelection);
         else if (args.isFlagSet(kHideOthersFlag[0])) setResult(context_->hideOthers);
+        else if (args.isFlagSet(kAnyGroupFlag[0])) setResult(context_->anyGroup);
         else if (args.isFlagSet(kSymmetryFlag[0])) setResult(MString(context_->symmetry.c_str()));
         return MS::kSuccess;
     });

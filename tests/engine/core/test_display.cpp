@@ -1650,5 +1650,52 @@ TEST(Display, HiddenGuidesHaveNoTubeWire) {
     EXPECT_EQ(shown.front()->id, a);
 }
 
+// The radial menu's Visibility > Groups: the groups worked with.
+TEST(Display, PickingAWorkingGroupHidesTheOthers) {
+    const std::vector<std::string> groups{"bangs", "nape", "fringe"};
+    using Set = std::set<std::string>;
+    EXPECT_EQ(pickWorkingGroup({}, groups, "nape"), (Set{"bangs", "fringe"})) << "every group shown: it alone";
+    EXPECT_EQ(pickWorkingGroup({"bangs", "fringe"}, groups, "bangs"), Set{"fringe"}) << "a hidden one joins";
+    EXPECT_EQ(pickWorkingGroup({"fringe"}, groups, "bangs"), (Set{"bangs", "fringe"})) << "a shown one hides";
+    EXPECT_EQ(pickWorkingGroup({"bangs", "fringe"}, groups, "nape"), Set{}) << "the last one shown: all again";
+    EXPECT_EQ(pickWorkingGroup({"old"}, groups, "nape"), (Set{"old", "bangs", "fringe"})) << "other names kept";
+    EXPECT_EQ(pickWorkingGroup({"nape"}, groups, "nope"), Set{"nape"}) << "no such group: as it was";
+}
+
+// The guides' curves leave out a hidden group's guides and the guides hidden one by one (the radial
+// menu's Visibility: Groups, Select, Invert), each on its own and together.
+TEST(Display, HiddenGroupsAndHiddenGuidesAreNotDrawn) {
+    auto h = std::make_shared<GuideHierarchy>();
+    const GroupId bangs = h->addGroup("bangs");
+    const GroupId nape = h->addGroup("nape");
+    std::vector<GuideId> napes;
+    for (int i = 0; i < 3; ++i) {
+        const Vec3f at{0.3f * static_cast<float>(i), 1.0f, 0.0f}, up{0.0f, 0.5f, 0.0f};
+        h->addGuide(bangs, test::straightCurve(at, up));
+        napes.push_back(h->addGuide(nape, test::straightCurve(at + Vec3f{0.0f, 0.0f, 0.4f}, up)));
+    }
+    h->evaluate(nullptr);
+    std::uint64_t version = 1;
+    auto drawn = [&](const std::string& hiddenGroups) {
+        DisplayInputs in;
+        in.hierarchy = h;
+        in.hierarchyVersion = version++;
+        DisplaySettings s;
+        s.guideSmoothing = 1;
+        s.hiddenGuideGroups = hiddenGroups;
+        DisplayBuilder builder;
+        const auto& geometry = builder.update(in, s).item(DisplayItemId::Guides).geometry;
+        return geometry ? geometry->positions.size() / 3 : std::size_t{0};
+    };
+    const std::size_t all = drawn("");
+    ASSERT_GT(all, 0u);
+    const std::size_t perGuide = all / 6;
+    EXPECT_EQ(drawn("nape"), 3 * perGuide);
+    h->setAttribute(napes[0], kHiddenLayer, 1.0f);  // one nape guide hidden by itself
+    EXPECT_EQ(drawn(""), 5 * perGuide);
+    EXPECT_EQ(drawn("bangs"), 2 * perGuide);
+    EXPECT_EQ(drawn("bangs nape"), 0u);
+}
+
 }  // namespace
 }  // namespace groomlab

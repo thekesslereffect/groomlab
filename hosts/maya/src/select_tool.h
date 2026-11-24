@@ -23,7 +23,7 @@ struct GuidePick {
     bool rootsOnly = false;
     float clickPixels = 12.0f;
     bool solo = true;
-    bool hide = false;  // solo hides the rest instead of freezing it (groomLabGuides -hideOthers)
+    bool hide = false;  // the pick decides what shows, the selection left alone (groomLabGuides -hideOthers)
     std::string symmetry = "none";
 };
 // Selects the active groom's guides in a lasso (or, with one point, a click) in view coordinates,
@@ -64,8 +64,12 @@ public:
     // Solo: each pick freezes every guide not selected (nothing picked: all unfrozen), in the
     // selection's undo step (groomLabGuides -freezeOthers).
     bool soloSelection = true;
-    // Solo hides every guide not selected instead (kHiddenLayer: the radial menu's Visibility > Select).
+    // The radial menu's Visibility > Select: a pick of any group or level decides which guides show
+    // (the rest hidden, kHiddenLayer), the selection left alone.
     bool hideOthers = false;
+    // The radial menu's Selects (Masking, Quick Select): a pick takes any guide shown, whatever
+    // group or level the tool is set to (groomlab.select_tool sets it back).
+    bool anyGroup = false;
     // Symmetry ("none", "x" or "topology", as the brushes name it): a pick takes each picked
     // guide's mirror guide too.
     std::string symmetry = "none";
@@ -76,7 +80,7 @@ private:
 };
 
 // groomLabSelectCtx: creates and edits guide selection contexts.
-//   groomLabSelectCtx -e [-level l | -group g] [-rootsOnly b] [-soloSelection b] [-hideOthers b] [-symmetry s] ctxName
+//   groomLabSelectCtx -e [-level l | -group g] [-rootsOnly b] [-soloSelection b] [-hideOthers b] [-anyGroup b] [-symmetry s] ctxName
 //   groomLabSelectCtx -e -debugLasso "x y x y ..." [-debugMode add] ctxName   (tests)
 class GuideSelectContextCmd : public MPxContextCommand {
 public:

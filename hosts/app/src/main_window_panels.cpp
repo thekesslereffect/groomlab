@@ -542,6 +542,7 @@ void MainWindow::chooseTool(const QString& id) {
     if (tool == "select") {
         // The Select tool (freezing what it leaves out), or (picked again) the camera.
         brush_.selectHides = false;
+        brush_.selectAnyGroup = false;  // (the brushes' group and level, as the tile picks)
         viewport_->setToolMode(viewport_->toolMode() == Viewport::ToolMode::Select ? Viewport::ToolMode::Camera : Viewport::ToolMode::Select);
         return;
     }

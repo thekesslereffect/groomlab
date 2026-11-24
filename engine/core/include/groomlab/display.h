@@ -257,6 +257,13 @@ std::string guideGroupColorsText(const std::map<std::string, std::string>& color
 std::set<std::string> parseHiddenGuideGroups(const std::string& text);
 // parseHiddenGuideGroups' text of `groups` ("name name": a .groom's hiddenGuideGroups, Maya's attribute).
 std::string hiddenGuideGroupsText(const std::set<std::string>& groups);
+// The radial menu's Visibility > Groups, every host's: the groups worked with. `groups` the groom's
+// guide groups, `hidden` those hidden now. Picked while every group shows, a group shows alone (the
+// others hidden); a hidden group picked joins those shown; a shown one picked hides, and the last
+// one shown picked shows every group again. Returns the hidden groups after (names not in `groups`
+// kept as they were).
+std::set<std::string> pickWorkingGroup(const std::set<std::string>& hidden, const std::vector<std::string>& groups,
+                                       const std::string& picked);
 
 // ---- Strands ----------------------------------------------------------------------------------
 

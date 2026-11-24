@@ -7,7 +7,8 @@ RadialZ for ZBrush.
     Down        Masking: Full (every guide unfrozen), Empty (every guide frozen), Select (the
                 Select tool: the rest frozen), Quick Select (one pick, then back to the brush),
                 Mask Brush (the Freeze brush)
-    Left        Visibility: Select (lasso the guides to keep: the rest hide and lock), Show All,
+    Left        Visibility: Select (lasso the guides to keep, from any group: the rest hide and lock;
+                the selection is not changed), Show All,
                 Invert, Hide/Show Hair, Hide/Show Guides, Groups (the guide groups: one picked
                 hides or shows it)
     Up-left     Brushes A: Draw, Comb, Slide, Smooth, Tube, Flow, Place
@@ -95,7 +96,8 @@ def _select(hide):
     """The Select tool, its solo freezing the rest (Masking) or hiding it (Visibility)."""
     tool("select")
     if _ctx_exists(groomlab.SELECT_CONTEXT):
-        cmds.groomLabSelectCtx(groomlab.SELECT_CONTEXT, edit=True, hideOthers=bool(hide))
+        # (Any group or level: the radial menu's Selects, whatever the Guides panel picks for the brushes.)
+        cmds.groomLabSelectCtx(groomlab.SELECT_CONTEXT, edit=True, hideOthers=bool(hide), anyGroup=True)
     if hide:
         messages.say("lasso the guides to keep: every other guide hides (a pick of nothing shows them all)",
                      warning=False)
@@ -166,11 +168,23 @@ def quick_select():
 
 
 def show_all_guides():
+    """Every guide and every guide group shown (the Guides panel's eyes on too)."""
+    from groomlab import guides
     groom = _groom()
-    if "hidden" not in _layers(groom):
+    hidden = "hidden" in _layers(groom)
+    groups = guides.hidden_guide_groups(groom)
+    if not hidden and not groups:
         messages.say("no guide is hidden", warning=False)
         return
-    cmds.groomLabGuides(groom, removeAttribute="hidden")
+    cmds.undoInfo(openChunk=True, chunkName="show all guides")
+    try:
+        if groups:
+            cmds.setAttr(groom + ".hiddenGuideGroups", "", type="string")
+        if hidden:
+            cmds.groomLabGuides(groom, removeAttribute="hidden")
+    finally:
+        cmds.undoInfo(closeChunk=True)
+    _refresh_groups_panel()
 
 
 def invert_hidden():
@@ -423,7 +437,7 @@ def _guide_groups(submenu):
         shown = name not in hidden
         color = own.get(name) or group.get("color")
         rows.append(_item("option", "guideGroup", name, "", value=name, checkable=True, checked=shown,
-                          tip=("Hide %s (its hair still grows)" if shown else "Show %s") % name,
+                          tip=("Work with %s: the groups not picked hide (picked again: it hides)" if shown else "Show %s too") % name,
                           color=QtGui.QColor(color) if color else None))
 
     def fill(into, start):
@@ -441,10 +455,35 @@ def _guide_groups(submenu):
     fill(submenu, 0)
 
 
+def _refresh_groups_panel():
+    """The Guides panel's eyes as the groom's hidden groups now are."""
+    window = _palette()
+    tab = getattr(window, "guides_tab", None) if window is not None else None
+    if tab is not None:
+        QtCore.QTimer.singleShot(0, tab.refresh)
+
+
+def pick_group(name):
+    """Visibility > Groups: the groups worked with (the core's pick_working_group): picked while every
+    group shows, a group shows alone and the others hide; a hidden one joins those shown; a shown one
+    hides; the last one shown shows them all again. The Guides panel's eyes follow."""
+    import groomlab_core
+    from groomlab import guides
+    groom = _groom()
+    names = [g["name"] for g in guides.list_guide_groups(groom)]
+    hidden = groomlab_core.pick_working_group(guides.hidden_guide_groups(groom), names, name)
+    cmds.setAttr(groom + ".hiddenGuideGroups", " ".join(hidden), type="string")
+    _refresh_groups_panel()
+    shown = [n for n in names if n not in hidden]
+    messages.say("every guide group shown" if len(shown) == len(names) else "guide groups shown: " + ", ".join(shown),
+                 warning=False)
+
+
 def show_group(name, visible):
-    """A guide group of the current groom shown or hidden (the Guides panel's checkbox)."""
+    """A guide group of the current groom shown or hidden (the Guides panel's eye)."""
     from groomlab import guides
     guides.show_guide_group(_groom(), name, visible)
+    _refresh_groups_panel()
     messages.say("%s %s" % (name, "shown" if visible else "hidden"), warning=False)
 
 
@@ -494,7 +533,7 @@ def run(item):
         elif item["kind"] == "action":
             ACTIONS[item["id"]][0]()
         elif item["kind"] == "option" and item["id"] == "guideGroup":
-            show_group(item["value"], not item["checked"])
+            pick_group(item["value"])
         elif item["kind"] == "option":
             set_option(item["id"], item["value"])
     except (RuntimeError, ValueError) as e:

@@ -329,25 +329,33 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
     // only what the view shows, the mirror guides with symmetry.
     const BrushToolSettings& s = tool_.settings;
     GuidePick pick;
-    pick.level = s.brush.level;
-    pick.group = s.brush.group;
+    // (The radial menu's Selects: any guide shown, whatever group or level the brushes work on.)
+    const bool anyGroup = selectHides || selectAnyGroup;
+    pick.level = anyGroup ? -1 : s.brush.level;
+    pick.group = anyGroup ? std::string() : s.brush.group;
     pick.hiddenGroups = document_->hiddenGroups();
     const MeshPtr scalp = host_->scalp();
     pick.symmetry = StrokeSymmetry::of(s.brush, scalp.get());
     std::vector<std::array<float, 2>> pixels;
     for (const QPointF& p : lasso) pixels.push_back(port(p));
     const std::vector<GuideId> picked = pickGuidesInView(*h, view_, scalp, pixels, pick);
+    const std::shared_ptr<const GuideHierarchy> authored = document_->session().authoredHierarchy();
+    // Visibility > Select: the pick decides what shows (hideToPick), the selection left as it was.
+    if (selectHides) {
+        GuideHierarchy probe = authored ? *authored : GuideHierarchy{};
+        if (hideToPick(probe, picked, mode)) {
+            document_->editGuides("hide unpicked guides", [&](GuideHierarchy& g) { hideToPick(g, picked, mode); });
+        }
+        return picked.size();
+    }
     const std::vector<GuideId> selection = combineSelection(document_->selection(), picked, mode);
     document_->setSelection(selection);
     // Solo: every guide not selected frozen, an undo step when that changed anything (a pick of
     // nothing with a modifier changes nothing; a plain one unfreezes all).
     if (solo && pickSoloes(picked, mode)) {
-        const std::shared_ptr<const GuideHierarchy> authored = document_->session().authoredHierarchy();
         GuideHierarchy probe = authored ? *authored : GuideHierarchy{};
-        const std::string layer = selectHides ? std::string(kHiddenLayer) : std::string("freeze");
-        if (freezeToSelection(probe, selection, layer)) {
-            document_->editGuides(selectHides ? "hide unselected guides" : "solo selection",
-                                  [&](GuideHierarchy& g) { freezeToSelection(g, selection, layer); });
+        if (freezeToSelection(probe, selection)) {
+            document_->editGuides("solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
         }
     }
     return picked.size();
