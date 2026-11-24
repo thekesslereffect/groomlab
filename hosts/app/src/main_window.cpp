@@ -187,6 +187,7 @@ MainWindow::MainWindow() {
     connect(viewport_, &Viewport::message, this, [this](const QString& text) { report(text); });
     connect(viewport_, &Viewport::toolModeChanged, this, [this](Viewport::ToolMode mode) {
         if (mode != Viewport::ToolMode::Select) brush_.selectHides = false;  // (the radial menu's Visibility > Select)
+        if (mode != Viewport::ToolMode::Select) brush_.selectAnyGroup = false;  // (the radial menu's Selects)
         if (mode != Viewport::ToolMode::Select) quickSelectBack_ = -1;
         if (mode == Viewport::ToolMode::Brush && locked_ && locked_->isChecked()) {
             // A locked groom ignores brushes (Maya's locked attribute): the camera again.

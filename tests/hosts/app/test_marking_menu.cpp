@@ -464,13 +464,38 @@ TEST(AppMarkingMenu, VisibilityGroupsListTheGuideGroups) {
     ASSERT_TRUE(row);
     EXPECT_EQ(row->kind, Kind::Option);
     EXPECT_TRUE(row->checkable && row->checked) << "shown";
-    // Picked: hidden (as the Guides panel's eye), drawn unchecked the next time; picked again: shown.
-    AppActions::runMarkingMenuItem(window, *row);
-    EXPECT_TRUE(window.document()->hiddenGroups().count(first));
-    groups = groupsRing();
-    EXPECT_FALSE(find(groups.items, first)->checked);
-    AppActions::runMarkingMenuItem(window, *find(groups.items, first));
-    EXPECT_FALSE(window.document()->hiddenGroups().count(first));
+    // The groups worked with (pickWorkingGroup), set as the Guides panel's eyes are.
+    window.document()->editGuides("group", [](GuideHierarchy& g) { g.addGroup("second"); });
+    const std::size_t count = window.document()->session().authoredHierarchy()->groups().size();
+    ASSERT_LE(count, 8u);
+    auto hidden = [&]() -> std::set<std::string> { return window.document()->hiddenGroups(); };
+    auto pick = [&](const std::string& name) {
+        const Item ring = groupsRing();
+        const Item* at = find(ring.items, name);
+        ASSERT_TRUE(at) << name;
+        AppActions::runMarkingMenuItem(window, *at);
+    };
+    // Every group shown: the one picked shows alone, the others hide (drawn unchecked next time).
+    pick(first);
+    EXPECT_FALSE(hidden().count(first));
+    EXPECT_EQ(hidden().size(), count - 1);
+    EXPECT_TRUE(find(groupsRing().items, first)->checked);
+    EXPECT_FALSE(find(groupsRing().items, "second")->checked);
+    // A hidden one picked joins those shown; picked again it hides.
+    pick("second");
+    EXPECT_FALSE(hidden().count("second"));
+    EXPECT_EQ(hidden().size(), count - 2);
+    pick("second");
+    EXPECT_TRUE(hidden().count("second"));
+    // The last one shown picked: every group again.
+    pick(first);
+    EXPECT_TRUE(hidden().empty());
+    // Show All shows the hidden groups too.
+    pick(first);
+    ASSERT_FALSE(hidden().empty());
+    AppActions::bindings(window).at("visibility.showAll").trigger(nullptr, false);
+    EXPECT_TRUE(hidden().empty());
+    EXPECT_TRUE(find(groupsRing().items, "second")->checked);
     // Past eight groups the eighth place opens the rest.
     window.document()->editGuides("groups", [](GuideHierarchy& g) {
         for (int i = 0; i < 10; ++i) g.addGroup("extra" + std::to_string(i));

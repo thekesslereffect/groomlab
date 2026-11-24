@@ -17,6 +17,7 @@
 namespace groomlab {
 
 class ScalpMirror;
+enum class SelectMode;  // (guide_selection.h)
 
 // Grooming brushes (GT-1). Brushes are spheres in world space; a point's
 // weight falls off smoothly from 1 at the center to 0 at the radius.
@@ -383,6 +384,12 @@ bool invertHidden(GuideHierarchy& hierarchy);
 // other guide frozen (soloGuides); an empty selection unfreezes every guide. True when the
 // freeze layer changed.
 bool freezeToSelection(GuideHierarchy& hierarchy, const std::vector<GuideId>& selection, const std::string& freeze = "freeze");
+// The radial menu's Visibility > Select, every host's: a pick decides which guides show, and the
+// guide selection is left alone (hiding is not masking). Replace: the guides `picked` (and their
+// descendants) show and every other guide hides (kHiddenLayer: hidden and locked); a pick of
+// nothing shows every guide. Add / Toggle / Deselect: the picked guides combined with those shown now
+// (combineSelection). True when the hidden layer changed.
+bool hideToPick(GuideHierarchy& hierarchy, const std::vector<GuideId>& picked, SelectMode mode);
 
 // Place brush: adds a primary guide at scalp point `at`. Returns its ID.
 GuideId placeGuide(GuideHierarchy& hierarchy, const ScalpMesh& scalp, const PlaceSettings& settings,

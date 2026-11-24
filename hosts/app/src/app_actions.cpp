@@ -218,6 +218,7 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
                                  m->setUiMode(QStringLiteral("groom"));
                                  m->brush_.selectHides = false;
                                  m->viewport_->setToolMode(Viewport::ToolMode::Select);
+                                 m->brush_.selectAnyGroup = true;  // (any group or level: the radial menu's)
                                  m->quickSelectBack_ =
                                      static_cast<int>(from == Viewport::ToolMode::Select ? Viewport::ToolMode::Camera : from);
                                  const BrushEntry* e = brushEntry(m->brush_.toolId());
@@ -236,14 +237,25 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
                               }),
                               {}, groomOpen, {}, {}, QStringLiteral("visibilitySelect")};
     b["visibility.showAll"] = {run([m] {
+                                   // Every guide and every guide group shown (the Guides panel's eyes on).
                                    if (!m->document_) return;
                                    const auto h = m->document_->session().authoredHierarchy();
-                                   if (!h || !anyGuideHidden(*h)) {
+                                   const std::set<std::string> groups = m->document_->hiddenGroups();
+                                   const bool guides = h && anyGuideHidden(*h);
+                                   if (!guides && groups.empty()) {
                                        m->notify(QObject::tr("No guide is hidden"));
                                        return;
                                    }
-                                   m->document_->editGuides("show all guides", [](GuideHierarchy& g) { unfreezeAll(g, kHiddenLayer); });
-                                   m->guidesEdited();
+                                   if (!groups.empty()) {
+                                       for (const std::string& name : groups) m->document_->setGroupHidden(name, false);
+                                       m->settings_.hiddenGuideGroups = m->document_->hiddenGroupsText();
+                                       m->guidesPanel_->invalidate();
+                                       m->redisplay();
+                                   }
+                                   if (guides) {
+                                       m->document_->editGuides("show all guides", [](GuideHierarchy& g) { unfreezeAll(g, kHiddenLayer); });
+                                       m->guidesEdited();
+                                   }
                                }),
                                {}, groomOpen, {}, {}, QStringLiteral("visibilityShowAll")};
     b["visibility.invert"] = {run([m] {
@@ -763,7 +775,8 @@ std::vector<MarkingMenu::Item> AppActions::radialMenuItems(MainWindow& w) {
             row.label = QString::fromStdString(group.name);
             row.checkable = true;
             row.checked = !hidden.count(group.name);
-            row.tip = row.checked ? QObject::tr("Hide %1 (its hair still grows)").arg(row.label) : QObject::tr("Show %1").arg(row.label);
+            row.tip = row.checked ? QObject::tr("Work with %1: the groups not picked hide (picked again: it hides)").arg(row.label)
+                                  : QObject::tr("Show %1 too").arg(row.label);
             const auto own = colors.find(group.name);
             const auto a = automatic.find(group.id);
             row.color = own != colors.end() ? QColor(QString::fromStdString(own->second))
@@ -832,13 +845,25 @@ void AppActions::runMarkingMenuItem(MainWindow& w, const MarkingMenu::Item& item
         return;
     }
     if (item.kind == Kind::Option && item.id == "guideGroup") {
-        // Visibility > Groups: the group hidden or shown, as the Guides panel's eye does.
+        // Visibility > Groups: the groups worked with (pickWorkingGroup: picked with every group shown,
+        // the others hide), set as the Guides panel's eyes are.
         if (!w.document_) return;
-        w.document_->setGroupHidden(item.value, item.checked);
+        const auto h = w.document_->session().authoredHierarchy();
+        if (!h) return;
+        std::vector<std::string> names;
+        for (const GuideGroup& g : h->groups()) names.push_back(g.name);
+        const std::set<std::string> hidden = pickWorkingGroup(w.document_->hiddenGroups(), names, item.value);
+        QStringList shown;
+        for (const std::string& name : names) {
+            w.document_->setGroupHidden(name, hidden.count(name) > 0);
+            if (!hidden.count(name)) shown << QString::fromStdString(name);
+        }
         w.settings_.hiddenGuideGroups = w.document_->hiddenGroupsText();
         w.redisplay();
         w.guidesPanel_->invalidate();
-        w.notify(item.checked ? QObject::tr("%1 hidden").arg(item.label) : QObject::tr("%1 shown").arg(item.label));
+        w.notify(static_cast<std::size_t>(shown.size()) == names.size()
+                     ? QObject::tr("Every guide group shown")
+                     : QObject::tr("Guide groups shown: %1").arg(shown.join(QStringLiteral(", "))));
         return;
     }
     if (item.kind == Kind::Option) {
@@ -856,6 +881,7 @@ void AppActions::runMarkingMenuItem(MainWindow& w, const MarkingMenu::Item& item
     if (item.id == "select") {
         w.brush_.selectHides = false;
         w.viewport_->setToolMode(Viewport::ToolMode::Select);
+        w.brush_.selectAnyGroup = true;  // (the radial menu's: any group or level, as Visibility's)
     } else {
         w.chooseTool(QString::fromStdString(item.id));
     }

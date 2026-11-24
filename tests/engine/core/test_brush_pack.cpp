@@ -15,6 +15,7 @@
 #include "groomlab/curve.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph_io.h"
+#include "groomlab/guide_selection.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_maps.h"
@@ -690,6 +691,33 @@ TEST(BrushPack, FreezeToSelectionFollowsTheSelection) {
     EXPECT_TRUE(freezeToSelection(f.h, {})) << "nothing selected: every guide unfrozen";
     EXPECT_TRUE(f.h.attributeNames().empty());
     EXPECT_FALSE(freezeToSelection(f.h, {}));
+}
+
+// Visibility > Select (hideToPick): a pick decides what shows, combined with what shows now by the
+// modifiers; the freeze mask is not touched.
+TEST(BrushPack, HideToPickShowsThePickAndHidesTheRest) {
+    Field f;
+    const GuideId a = f.add(0.2f, 0.2f), b = f.add(0.5f, 0.5f), c = f.add(0.8f, 0.8f);
+    auto shown = [&] {
+        std::vector<GuideId> out;
+        for (const HierarchyGuide& g : f.h.guides()) {
+            if (!guideHidden(f.h, g)) out.push_back(g.id);
+        }
+        return out;
+    };
+    EXPECT_TRUE(hideToPick(f.h, {a}, SelectMode::Replace));
+    EXPECT_EQ(shown(), std::vector<GuideId>{a});
+    EXPECT_EQ(frozen(f.h, b), 0.0f) << "hiding is not masking";
+    EXPECT_FALSE(hideToPick(f.h, {a}, SelectMode::Replace)) << "the same: nothing changes";
+    EXPECT_TRUE(hideToPick(f.h, {c}, SelectMode::Add));
+    EXPECT_EQ(shown(), (std::vector<GuideId>{a, c}));
+    EXPECT_TRUE(hideToPick(f.h, {a}, SelectMode::Deselect));
+    EXPECT_EQ(shown(), std::vector<GuideId>{c});
+    EXPECT_FALSE(hideToPick(f.h, {}, SelectMode::Add)) << "a modifier pick of nothing: as it was";
+    EXPECT_TRUE(hideToPick(f.h, {c}, SelectMode::Deselect));
+    EXPECT_TRUE(shown().empty()) << "the last shown guide taken away: all hidden";
+    EXPECT_TRUE(hideToPick(f.h, {}, SelectMode::Replace)) << "a plain pick of nothing: every guide shows";
+    EXPECT_EQ(shown().size(), 3u);
 }
 
 TEST(BrushPack, SoloHonoursSymmetry) {

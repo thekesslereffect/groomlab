@@ -704,6 +704,26 @@ std::string hiddenGuideGroupsText(const std::set<std::string>& groups) {
     return out;
 }
 
+std::set<std::string> pickWorkingGroup(const std::set<std::string>& hidden, const std::vector<std::string>& groups,
+                                       const std::string& picked) {
+    std::set<std::string> out = hidden;
+    if (std::find(groups.begin(), groups.end(), picked) == groups.end()) return out;
+    std::size_t shown = 0;
+    for (const std::string& g : groups) shown += hidden.count(g) ? 0 : 1;
+    if (shown == groups.size()) {  // every group shows: the picked one alone
+        for (const std::string& g : groups) {
+            if (g != picked) out.insert(g);
+        }
+    } else if (hidden.count(picked)) {  // a hidden one joins those shown
+        out.erase(picked);
+    } else if (shown == 1) {  // the last one shown: every group again
+        for (const std::string& g : groups) out.erase(g);
+    } else {
+        out.insert(picked);
+    }
+    return out;
+}
+
 std::set<std::string> parseHiddenGuideGroups(const std::string& text) {
     std::set<std::string> names;
     std::string word;
@@ -2458,12 +2478,14 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             if (found == groupDraws.end()) continue;
             const GroupDraw& d = found->second;
             if (d.level < 0 || d.level >= kMaxDrawnGuideLevels) continue;
-            // (Mixed view decides guide by guide; else the group's hidden, found once.)
+            // (Mixed view decides guide by guide; else the group's hidden, found once. A guide hidden
+            // by itself, kHiddenLayer: the radial menu's Visibility, is hidden either way.)
+            const bool alone = hiddenLayer && groomlab::guideHidden(*hierarchy, g);
             const int mixedAt = mixed.on() ? mixed.shows(*hierarchy, g) : -1;
-            const bool guideHidden = mixedAt >= 0 ? mixedAt != 1 : d.hidden;
+            const bool guideHidden = alone || (mixedAt >= 0 ? mixedAt != 1 : d.hidden);
             // (Lock view: the tubes of that group alone, whatever guides show.)
             const GuideGroup* viewed = s.tubeViewGroup.empty() ? nullptr : hierarchy->group(g.group);
-            const bool tubeHidden = mixedAt >= 0 ? mixedAt == 0 : d.hidden;
+            const bool tubeHidden = alone || (mixedAt >= 0 ? mixedAt == 0 : d.hidden);
             const bool tubeShown = s.tubeViewGroup.empty() ? !tubeHidden : tubeDrawn(s.tubeViewGroup, viewed ? viewed->name : std::string(), tubeHidden);
             if (s.tubes && tubeShown) appendTubeSurface(tubes, g, hierarchy->scale());
             if (guideHidden) continue;

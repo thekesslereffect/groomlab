@@ -236,17 +236,21 @@ def set_soft_selection(groom, radius):
     cmds.setAttr(groom + ".softSelectRadius", radius)
 
 
-def select_tool(level=0, group="", roots_only=False, solo=True, symmetry=None, activate=True, hide=False):
+def select_tool(level=0, group="", roots_only=False, solo=True, symmetry=None, activate=True, hide=False,
+                any_group=False):
     """The lasso tool for guides of the selected groom (Shift: toggle, Ctrl: deselect, Ctrl+Shift: add).
     With `solo` every pick also freezes the guides not selected, in the same undo step, so the
-    brushes work on the selection; a pick of nothing unfreezes every guide. With `hide` it hides
-    them instead (the "hidden" layer: the radial menu's Visibility > Select; a pick of nothing shows
-    all). `symmetry` ("x" or "topology", as the brushes take it) picks each guide's mirror guide too."""
+    brushes work on the selection; a pick of nothing unfreezes every guide. With `hide` (the radial
+    menu's Visibility > Select) a pick of any group or level decides only which guides show: the rest
+    hide (the "hidden" layer), the selection is left alone, and a pick of nothing shows all.
+    `symmetry` ("x" or "topology", as the brushes take it) picks each guide's mirror guide too.
+    With `any_group` (the radial menu's Selects) a pick takes any guide shown, whatever `level` and
+    `group` say."""
     ensure_plugin()
     if not cmds.contextInfo(SELECT_CONTEXT, exists=True):
         cmds.groomLabSelectCtx(SELECT_CONTEXT)
     cmds.groomLabSelectCtx(SELECT_CONTEXT, edit=True, level=level, group=group, rootsOnly=roots_only,
-                           soloSelection=bool(solo), hideOthers=bool(hide),
+                           soloSelection=bool(solo), hideOthers=bool(hide), anyGroup=bool(any_group),
                            symmetry=symmetry or "none")
     if activate:
         cmds.setToolTo(SELECT_CONTEXT)

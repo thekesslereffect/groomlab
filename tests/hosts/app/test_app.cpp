@@ -1713,6 +1713,53 @@ TEST(AppBrush, PlacesErasesSelectsAndDeletesGuides) {
     EXPECT_EQ(f.doc->redoText(), "Redo delete guides");
 }
 
+TEST(AppBrush, VisibilitySelectHidesFromAnyGroupWithoutSelecting) {
+    // The radial menu's Visibility > Select (selectHides): the pick takes any shown guide, whatever
+    // group or level the brushes are on, and decides only what shows; the selection and the freeze
+    // mask stay as they were.
+    BrushFixture f;
+    const HierarchyGuide first = f.guide(0);
+    const std::string group = f.doc->session().hierarchy()->group(first.group)->name;
+    // A second group, its one guide beside the first one (in the view).
+    std::vector<Vec3f> beside = first.points;
+    for (Vec3f& p : beside) p = p + Vec3f{0.01f, 0.0f, 0.0f};
+    GuideId other = kNoGuide;
+    ASSERT_EQ(f.doc->editGuides("add", [&](GuideHierarchy& h) { other = h.addGuide(h.addGroup("other"), beside); }), "");
+    const std::size_t total = f.doc->session().hierarchy()->guides().size();
+    f.doc->setSelection({first.id});
+    BrushToolSettings& s = f.session.settings();
+    s.brush.group = group;  // the brushes on the first group's guides
+    s.brush.level = 0;
+    f.session.selectHides = true;
+    auto hidden = [&] {
+        std::size_t n = 0;
+        const auto h = f.doc->session().authoredHierarchy();
+        for (const HierarchyGuide& g : h->guides()) n += guideHidden(*h, g) ? 1 : 0;
+        return n;
+    };
+    // A box round the whole view: every guide, of both groups and every level, nothing hidden.
+    EXPECT_EQ(f.session.select({QPointF(0.0, 0.0), QPointF(f.w, f.h)}, SelectMode::Replace), total);
+    EXPECT_EQ(hidden(), 0u);
+    // A click on the other group's guide: it shows, the rest hide.
+    EXPECT_GE(f.session.select({f.widgetPoint(beside[0])}, SelectMode::Replace), 1u) << "the other group's guide picked";
+    EXPECT_GT(hidden(), 0u);
+    EXPECT_LT(hidden(), total);
+    EXPECT_FALSE(guideHidden(*f.doc->session().authoredHierarchy(), *f.doc->session().authoredHierarchy()->guide(other)));
+    EXPECT_EQ(f.doc->selection(), std::vector<GuideId>{first.id}) << "hiding is not selecting";
+    EXPECT_EQ(f.doc->undoText(), "Undo hide unpicked guides");
+    // A click on nothing: every guide shows again, the selection still as it was.
+    EXPECT_EQ(f.session.select({QPointF(1.0, 1.0)}, SelectMode::Replace), 0u);
+    EXPECT_EQ(hidden(), 0u);
+    EXPECT_EQ(f.doc->selection(), std::vector<GuideId>{first.id});
+    // Masking's Select from the radial menu (selectAnyGroup): any group or level too, selecting.
+    f.session.selectHides = false;
+    const std::size_t inGroup = f.session.select({QPointF(0.0, 0.0), QPointF(f.w, f.h)}, SelectMode::Replace);
+    EXPECT_LT(inGroup, total) << "the Select tool alone: the brushes' group and level";
+    f.session.selectAnyGroup = true;
+    EXPECT_EQ(f.session.select({QPointF(0.0, 0.0), QPointF(f.w, f.h)}, SelectMode::Replace), total);
+    EXPECT_EQ(f.doc->selection().size(), total);
+}
+
 TEST(AppBrush, FreezeHoldsGuidesBackAndCtrlUnfreezes) {
     // The rail's Freeze (the catalog's "freeze", Maya's freeze_tool): the Paint brush on the
     // guides' freeze mask toward 1, Ctrl toward 0. A comb leaves the frozen guides as they are

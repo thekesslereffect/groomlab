@@ -132,7 +132,8 @@ const char* kSetGroupSegments[] = {"-sgs", "-setGroupSegments"};
 const char* kResetGroupSegments[] = {"-rgs", "-resetGroupSegments"};
 const char* kOnlySelected[] = {"-osl", "-onlySelected"};
 const char* kFreezeOthers[] = {"-fzo", "-freezeOthers"};
-// As -freezeOthers, the rest hidden instead (kHiddenLayer: the radial menu's Visibility > Select).
+// The radial menu's Visibility > Select: the pick decides which guides show (hideToPick: the rest
+// hidden and locked, kHiddenLayer), the selection left alone; with -clearSelection every guide shows.
 const char* kHideOthers[] = {"-hdo", "-hideOthers"};
 const char* kReshape[] = {"-rsh", "-reshape"};  // <guide id> <curve>, multi-use
 // Guides given new points straight from JSON, as -reshape does from curves: {"<guide id>": [[x, y, z], ...]}
@@ -590,21 +591,30 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             for (const GuideId id : picked) {
                 if (!h->guide(id)) return fail(kName, MString("no guide ") + std::to_string(id).c_str());
             }
-            if (!db.isFlagSet(kClearSelection[0])) {
-                const SelectMode mode = db.isFlagSet(kAdd[0])        ? SelectMode::Add
-                                        : db.isFlagSet(kDeselect[0]) ? SelectMode::Deselect
-                                        : db.isFlagSet(kToggle[0])   ? SelectMode::Toggle
-                                                                     : SelectMode::Replace;
-                result = combineSelection(selectedIds, picked, mode);
-            }
-            MObject data = selectionData(result);
-            modifier_.newPlugValue(groomFn.findPlug("guideSelection", true), data);
-            // The Select tool's solo: every guide not selected frozen (none selected: all unfrozen),
-            // in the same undo step as the selection.
-            const bool hide = db.isFlagSet(kHideOthers[0]);
-            if ((hide || db.isFlagSet(kFreezeOthers[0])) && freezeToSelection(*h, result, hide ? kHiddenLayer : "freeze")) {
-                h->evaluate(scalp.get());
-                modifier_.newPlugValueString(dataPlug, MString(h->toJson().c_str()));
+            const bool clear = db.isFlagSet(kClearSelection[0]);
+            const SelectMode mode = clear                       ? SelectMode::Replace
+                                    : db.isFlagSet(kAdd[0])      ? SelectMode::Add
+                                    : db.isFlagSet(kDeselect[0]) ? SelectMode::Deselect
+                                    : db.isFlagSet(kToggle[0])   ? SelectMode::Toggle
+                                                                 : SelectMode::Replace;
+            if (db.isFlagSet(kHideOthers[0])) {
+                // Visibility > Select: the pick decides what shows (hideToPick, every host's); the
+                // selection is left as it is (hiding is not masking). -clearSelection: every guide shown.
+                if (hideToPick(*h, clear ? std::vector<GuideId>{} : picked, mode)) {
+                    h->evaluate(scalp.get());
+                    modifier_.newPlugValueString(dataPlug, MString(h->toJson().c_str()));
+                }
+                result = clear ? std::vector<GuideId>{} : picked;
+            } else {
+                if (!clear) result = combineSelection(selectedIds, picked, mode);
+                MObject data = selectionData(result);
+                modifier_.newPlugValue(groomFn.findPlug("guideSelection", true), data);
+                // The Select tool's solo: every guide not selected frozen (none selected: all
+                // unfrozen), in the same undo step as the selection.
+                if (db.isFlagSet(kFreezeOthers[0]) && freezeToSelection(*h, result)) {
+                    h->evaluate(scalp.get());
+                    modifier_.newPlugValueString(dataPlug, MString(h->toJson().c_str()));
+                }
             }
             MStringArray ids;
             for (const GuideId id : result) ids.append(std::to_string(id).c_str());

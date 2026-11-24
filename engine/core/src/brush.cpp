@@ -1617,6 +1617,20 @@ bool freezeToSelection(GuideHierarchy& h, const std::vector<GuideId>& selection,
     return false;
 }
 
+bool hideToPick(GuideHierarchy& h, const std::vector<GuideId>& picked, SelectMode mode) {
+    if (picked.empty() && mode != SelectMode::Replace) return false;  // (a modifier pick of nothing: as it was)
+    std::vector<GuideId> shown;
+    if (mode != SelectMode::Replace) {
+        for (const HierarchyGuide& g : h.guides()) {
+            if (!guideHidden(h, g)) shown.push_back(g.id);
+        }
+    }
+    std::vector<GuideId> keep = combineSelection(shown, picked, mode);
+    // Every shown guide taken away: all hidden (kNoGuide is no guide: soloGuides keeps none).
+    if (keep.empty() && !picked.empty()) keep.push_back(kNoGuide);
+    return freezeToSelection(h, keep, kHiddenLayer);
+}
+
 bool unfreezeAll(GuideHierarchy& h, const std::string& freeze) {
     const std::vector<std::string> names = h.attributeNames();
     if (std::find(names.begin(), names.end(), freeze) == names.end()) return false;
