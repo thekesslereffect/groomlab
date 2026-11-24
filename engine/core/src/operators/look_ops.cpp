@@ -115,6 +115,107 @@ struct ClumpCenter {
     float side = std::numeric_limits<float>::quiet_NaN();
 };
 
+// A Clump after a Braid (alongBraid): each section keeps its tube's thickness as its locks gather.
+// At each station along a section (a share of its strands' points), every clumped point's offset
+// from the section's middle there (its strands' mean as they came) becomes its lock center's
+// offset times k plus its own offset from that center as clumped (tightened: (1 - w)^2 of what it
+// came with, w the strength's share there): k (one a station, eased along
+// the section) gives the offsets the mean square they had, the tube as thick, and a point that
+// would lie farther out than the farthest did is drawn back to that (the tube's wall). The locks spread out to fill the tube as they
+// gather, gaps opening between them, instead of the tube shrinking onto its centers. `regions`:
+// each strand's section; `centerStrand(c)`: the strand that is center c (its points as they came).
+template <class CenterStrand>
+void keepTubeThickness(const StrandSet& in, StrandSet& out, const std::vector<float>& regions,
+                       const std::vector<std::uint32_t>& assigned, const CenterStrand& centerStrand) {
+    std::unordered_map<float, std::vector<std::uint32_t>> bySection;
+    for (std::size_t s = 0; s < assigned.size(); ++s) {
+        if (assigned[s] == kNoClumpCenter || in.strandPointCount(s) < 2 || !(regions[s] == regions[s])) continue;
+        bySection[regions[s]].push_back(static_cast<std::uint32_t>(s));
+    }
+    std::vector<const std::vector<std::uint32_t>*> sections;
+    for (const auto& entry : bySection) sections.push_back(&entry.second);
+    auto pointAt = [](const Vec3f* p, std::size_t n, float u) {
+        const float x = u * static_cast<float>(n - 1);
+        const std::size_t a = std::min(static_cast<std::size_t>(std::max(x, 0.0f)), n - 2);
+        const float f = std::clamp(x - static_cast<float>(a), 0.0f, 1.0f);
+        return p[a] * (1.0f - f) + p[a + 1] * f;
+    };
+    parallelFor(0, sections.size(), [&](std::size_t g) {
+        const std::vector<std::uint32_t>& list = *sections[g];
+        std::size_t stations = 2;
+        for (const std::uint32_t s : list) stations = std::max<std::size_t>(stations, in.strandPointCount(s));
+        std::vector<Vec3f> middle(stations, Vec3f());
+        for (std::size_t j = 0; j < stations; ++j) {
+            const float u = static_cast<float>(j) / static_cast<float>(stations - 1);
+            for (const std::uint32_t s : list) middle[j] = middle[j] + pointAt(in.strandPoints(s), in.strandPointCount(s), u);
+            middle[j] = middle[j] / static_cast<float>(list.size());
+        }
+        // Each clumped point (not its root): its station, its lock center's offset A and its own
+        // offset from that center B (as clumped); the offsets D as they came, summed a station.
+        struct Sample {
+            std::uint32_t s, i, j;
+            Vec3f m, a, b;  // the section's middle there, A, B
+        };
+        std::vector<Sample> samples;
+        std::vector<double> aa(stations, 0.0), ab(stations, 0.0), bb(stations, 0.0), dd(stations, 0.0);
+        std::vector<float> farthest(stations, 0.0f);
+        for (const std::uint32_t s : list) {
+            const std::size_t n = in.strandPointCount(s);
+            const std::size_t cs = centerStrand(assigned[s]);
+            if (cs >= in.strandCount() || in.strandPointCount(cs) < 2) continue;
+            const Vec3f* before = in.strandPoints(s);
+            const Vec3f* after = out.strandPoints(s);
+            for (std::size_t i = 1; i < n; ++i) {
+                const float u = static_cast<float>(i) / static_cast<float>(n - 1);
+                const float x = u * static_cast<float>(stations - 1);
+                const auto j = static_cast<std::uint32_t>(std::min<std::size_t>(static_cast<std::size_t>(x + 0.5f), stations - 1));
+                const Vec3f m = pointAt(middle.data(), stations, u);
+                const Vec3f c = pointAt(in.strandPoints(cs), in.strandPointCount(cs), u);
+                const Vec3f a = c - m, d = before[i] - m;
+                // Its offset from its lock's center as clumped (the strength's share gone), that
+                // share taken again: a lock (1 - w)^2 as wide, not 1 - w. Small locks side by side
+                // fill a tube whatever their width until they are thin, so this shows them as the
+                // strength rises, not only near 1.
+                const Vec3f came = before[i] - c;
+                Vec3f b = after[i] - c;
+                const float c2 = came.dot(came);
+                if (c2 > 1e-20f) b = b * std::clamp(b.dot(came) / c2, 0.0f, 1.0f);
+                aa[j] += a.dot(a);
+                ab[j] += a.dot(b);
+                bb[j] += b.dot(b);
+                dd[j] += d.dot(d);
+                farthest[j] = std::max(farthest[j], d.length());
+                samples.push_back({s, static_cast<std::uint32_t>(i), j, m, a, b});
+            }
+        }
+        // k at each station: the mean of |kA + B|^2 that of |D|^2 (k at least 1, at most 4).
+        std::vector<float> k(stations, 1.0f);
+        for (std::size_t j = 0; j < stations; ++j) {
+            if (!(aa[j] > 1e-20)) continue;
+            const double disc = ab[j] * ab[j] - aa[j] * (bb[j] - dd[j]);
+            const double root = (-ab[j] + std::sqrt(std::max(disc, 0.0))) / aa[j];
+            k[j] = static_cast<float>(std::clamp(root, 1.0, 4.0));
+        }
+        // Eased along the section (its neighbours' mean).
+        std::vector<float> eased(stations);
+        for (std::size_t j = 0; j < stations; ++j) {
+            float sum = 0.0f;
+            int count = 0;
+            for (std::size_t o = j >= 2 ? j - 2 : 0; o <= std::min(j + 2, stations - 1); ++o, ++count) sum += k[o];
+            eased[j] = sum / static_cast<float>(count);
+        }
+        // Each point spread with its lock, and drawn back onto the tube's wall where that would take
+        // it out past the farthest point there (a lock at the edge lies against the wall).
+        for (const Sample& q : samples) {
+            Vec3f* after = out.strandPoints(q.s);
+            Vec3f offset = q.a * eased[q.j] + q.b;
+            const float r = offset.length(), most = farthest[q.j];
+            if (r > most && r > 0.0f) offset = offset * (most / r);
+            after[q.i] = q.m + offset;
+        }
+    }, 1);
+}
+
 // The points each of a run's `count` centers' curves takes (clumpCenterSamples): the most any of
 // them does. `curveOf(c)`: center c's points and their count (none: no curve of its own).
 template <class CurveOf>
@@ -1240,6 +1341,7 @@ private:
         const bool alongBraid = from == "upstreamClump" && params().getString("upstreamChannel") == "braidSection" &&
                                 params().getString("pastTip") == "fit" && in->strandChannel("braidSection") &&
                                 in->strandChannel("braidId");
+        if (alongBraid && incremental) return false;  // (keepTubeThickness: a section at a time, in full)
         if (!own && from != "inputPoints" && from != "inputCurves" && !upstreamCurves) {
             throw GraphError("Clump: unknown centersFrom '" + from +
                              "' (pick, inputPoints, inputCurves, upstreamClump or upstreamClumpCurves)");
@@ -2021,6 +2123,10 @@ private:
                     const std::uint32_t c = (*assigned)[s];
                     if (c != kNoCenter) (*clumpIds)[s] = (*numbers)[c];
                 }, 4096);
+            }
+            if (alongBraid && strandRegions && !picked.empty()) {  // (each section as thick as it came)
+                phase.next("clump.tubes");
+                keepTubeThickness(*in, *out, *strandRegions, *assigned, [&](std::uint32_t c) { return picked[centerGuides[c]]; });
             }
         } else {
             auto theirs = std::make_shared<std::vector<std::uint32_t>>(dirty.size());

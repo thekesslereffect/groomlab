@@ -6227,7 +6227,8 @@ TEST(Clump, AfterABraidItsClumpsGatherAcrossEachSectionAndKeepInsideItsTube) {
     // A Clump after a Braid (upstreamClump by braidSection, pastTip fit): a braided strand's point
     // gathers toward its center's point at the same spot along the braid (the same share of its
     // points), so every woven point stays inside its section's tube there (no farther from the
-    // section's middle than its farthest strand was) and the clumps gather across it.
+    // section's middle than its farthest strand was) and the clumps gather across it, the locks
+    // spreading out to keep the tube as thick as it came (keepTubeThickness).
     BraidScene scene("three");
     const NodeId clump = scene.lg.add(op::kClump, scene.braid);
     ParamSet& p = scene.lg.g.node(clump).params();
@@ -6237,7 +6238,7 @@ TEST(Clump, AfterABraidItsClumpsGatherAcrossEachSectionAndKeepInsideItsTube) {
     p.set("strength", 1.0);
     p.set("profile", Ramp::constant(0.9f));
     const StrandsPtr before = scene.lg.eval(scene.braid);
-    auto inTube = [&](const std::string& pastTip, float* gathered) {
+    auto inTube = [&](const std::string& pastTip, float* gathered, float* thick = nullptr) {
         p.set("pastTip", pastTip);
         const StrandsPtr after = scene.lg.eval(clump);
         const std::vector<float>& braid = *before->strandChannel("braidId");
@@ -6251,6 +6252,7 @@ TEST(Clump, AfterABraidItsClumpsGatherAcrossEachSectionAndKeepInsideItsTube) {
         }
         std::size_t points = 0, outside = 0;
         double spreadBefore = 0.0, spreadAfter = 0.0;
+        double thickBefore = 0.0, thickAfter = 0.0;  // woven points' squared offsets from their section's middle
         for (const auto& [key, members] : groups) {
             const std::size_t n = before->strandPointCount(members.front());
             for (std::size_t i = 1; i < n; ++i) {
@@ -6265,6 +6267,8 @@ TEST(Clump, AfterABraidItsClumpsGatherAcrossEachSectionAndKeepInsideItsTube) {
                     if (woven[at] < 0.99f || tail[at] > 0.01f) continue;
                     ++points;
                     if ((after->strandPoints(s)[i] - middle).length() > 1.02f * radius + 1e-5f) ++outside;
+                    thickBefore += (before->strandPoints(s)[i] - middle).dot(before->strandPoints(s)[i] - middle);
+                    thickAfter += (after->strandPoints(s)[i] - middle).dot(after->strandPoints(s)[i] - middle);
                     auto& m = clumpMiddles[ids[s]];
                     m.first = m.first + before->strandPoints(s)[i];
                     m.second = m.second + after->strandPoints(s)[i];
@@ -6282,11 +6286,13 @@ TEST(Clump, AfterABraidItsClumpsGatherAcrossEachSectionAndKeepInsideItsTube) {
         }
         EXPECT_GT(points, 1000u);
         if (gathered) *gathered = static_cast<float>(spreadAfter / std::max(spreadBefore, 1e-12));
+        if (thick) *thick = static_cast<float>(std::sqrt(thickAfter / std::max(thickBefore, 1e-12)));
         return static_cast<float>(outside) / static_cast<float>(std::max<std::size_t>(points, 1));
     };
-    float gathered = 1.0f;
-    EXPECT_LT(inTube("fit", &gathered), 0.002f) << "woven points out of their section's tube";
+    float gathered = 1.0f, thick = 0.0f;
+    EXPECT_LT(inTube("fit", &gathered, &thick), 0.002f) << "woven points out of their section's tube";
     EXPECT_LT(gathered, 0.3f) << "the clumps gather across their section";
+    EXPECT_GT(thick, 0.9f) << "the tubes shrink onto their locks";
     EXPECT_GT(inTube("extend", nullptr), 0.02f) << "by length from the root, strands leave their tube";
 }
 
