@@ -1713,6 +1713,7 @@ class StatusLabel(QtWidgets.QLabel):
         if single_line:
             self.setWordWrap(False)
             self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
+            self.setProperty("quiet", True)
             self.fit_height()
         else:
             self.setWordWrap(True)
@@ -1729,6 +1730,12 @@ class StatusLabel(QtWidgets.QLabel):
             return
         self.full_text = " ".join(text.split())  # (one line)
         self.setToolTip(self.full_text)
+        # Nothing to say: the line keeps its room but shows no bar (QLabel[role="status"][quiet]).
+        quiet = not self.full_text
+        if self.property("quiet") != quiet:
+            self.setProperty("quiet", quiet)
+            self.style().unpolish(self)
+            self.style().polish(self)
         self._elide()
 
     def fit_height(self):

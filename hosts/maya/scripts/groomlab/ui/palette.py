@@ -1296,13 +1296,13 @@ class ToolPalette(QtWidgets.QWidget):
         self.level.setVisible(False)
         self.level.currentIndexChanged.connect(self.target_changed)
 
-        # (Made early: the tabs report into it.) One line, always there, above the scrolled column:
-        # in view however far the panel scrolls, and messages coming and going never move the tools
-        # under it (issue #114).
+        # (Made early: the tabs report into it.) One line, always there, under the scrolled column
+        # (the panel's foot, no bar while it has nothing to say): in view however far the panel
+        # scrolls, and messages coming and going never move the tools (issue #114).
         self.status = widgets.StatusLabel(single_line=True)
-        self.status.setContentsMargins(theme.px(12), theme.px(4), theme.px(12), 0)
+        self.status.setContentsMargins(theme.px(12), theme.px(2), theme.px(12), theme.px(4))
         self.status.fit_height()
-        frame.insertWidget(frame.indexOf(scroll), self.status)
+        frame.insertWidget(frame.indexOf(scroll) + 1, self.status)
 
         # No groom to work on: how to start one.
         self.empty = QtWidgets.QFrame()

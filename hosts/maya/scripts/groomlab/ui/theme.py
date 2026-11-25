@@ -742,6 +742,7 @@ QLabel[role="hint"] { color: %(muted)s; font-size: %(fs_small)dpx; }
 QLabel[role="title"] { color: %(text)s; font-size: %(fs_title)dpx; font-weight: 700; }
 QLabel[role="subheading"] { color: %(text)s; font-size: %(fs)dpx; font-weight: 600; }
 QLabel[role="status"] { color: %(warning)s; background: %(raised)s; border-radius: %(r)dpx; padding: {{5}}px {{8}}px; }
+QLabel[role="status"][quiet="true"] { background: transparent; }
 QLabel[role="count"] { color: %(muted)s; font-size: %(fs_small)dpx; }
 QLabel[role="block"] { color: %(dim)s; font-size: %(fs_small)dpx; font-weight: 600; }
 QToolButton[role="blockFold"], QToolButton[role="blockFold"]:hover, QToolButton[role="blockFold"]:pressed { border: none; background: transparent; padding: 0px; margin: 0px; }
