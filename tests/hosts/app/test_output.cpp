@@ -30,6 +30,7 @@
 #include <nlohmann/json.hpp>
 
 #include "glass.h"
+#include "groom_tools.h"
 #include "icon_rail.h"
 #include "app_actions.h"
 #include "app_shell.h"
@@ -653,15 +654,15 @@ TEST(AppOutput, ThemesSwitchLiveWithTheUsersFolder) {
 
     // A theme picked: worn at once (the window's sheet and the widgets' own), saved.
     const QString backdropBefore = theme::backdrop().name();
-    ASSERT_TRUE(window.chooseTheme(QStringLiteral("playful")));
-    EXPECT_EQ(theme::currentTheme(), QStringLiteral("playful"));
-    EXPECT_EQ(theme::savedTheme(), QStringLiteral("playful"));
+    ASSERT_TRUE(window.chooseTheme(QStringLiteral("charcoal")));
+    EXPECT_EQ(theme::currentTheme(), QStringLiteral("charcoal"));
+    EXPECT_EQ(theme::savedTheme(), QStringLiteral("charcoal"));
     EXPECT_EQ(window.styleSheet(), theme::styleSheet());
     if (theme::backdrop().name() != backdropBefore) {
         EXPECT_TRUE(window.overlay()->styleSheet().contains(theme::backdrop().name())) << window.overlay()->styleSheet().toStdString();
         EXPECT_FALSE(window.overlay()->styleSheet().contains(backdropBefore));
     }
-    EXPECT_TRUE(window.findChild<QAction*>(QStringLiteral("theme_playful"))->isChecked());
+    EXPECT_TRUE(window.findChild<QAction*>(QStringLiteral("theme_charcoal"))->isChecked());
 
     // New Theme from Current: its name asked in the prompt; a copy in the folder, worn.
     bindings.at("theme.new").trigger(nullptr, false);
@@ -823,19 +824,22 @@ TEST(AppOutput, FoldedDocksOpenForShortcutsFloatingAndTheNextStart) {
     EXPECT_FALSE(shell->folded(false));
     EXPECT_EQ(shell->propertiesTab(), AppShell::PropertiesTab::Export);
     EXPECT_TRUE(rail->button(rail->current())->isChecked());
-    // Floated, a folded dock opens (no 44 px window).
-    shell->leftRail()->button(shell->leftRail()->current())->click();
+    // The Groom Tools have no rail (their labeled tabs are the pages): folded, the dock is away; the
+    // fold again brings it back at its width.
+    EXPECT_FALSE(window.findChild<IconRail*>(QStringLiteral("leftRail")));
+    const int toolsWidth = shell->groomToolsDock()->width();
+    bindings.at("view.foldGroomTools").trigger(nullptr, true);
     QCoreApplication::processEvents();
     ASSERT_TRUE(shell->folded(true));
-    shell->groomToolsDock()->setFloating(true);
+    EXPECT_TRUE(shell->groomToolsDock()->isHidden());
+    bindings.at("view.foldGroomTools").trigger(nullptr, false);
     QCoreApplication::processEvents();
     EXPECT_FALSE(shell->folded(true));
-    EXPECT_GT(shell->groomToolsDock()->maximumWidth(), IconRail::railWidth());
-    shell->groomToolsDock()->setFloating(false);
-    QCoreApplication::processEvents();
-    // From the keyboard: View > Panels > Fold Properties (Ctrl+]) folds and opens; the left rail's
-    // pages on Shift+1..4, its open page's tooltip with the fold's key.
-    EXPECT_TRUE(shell->leftRail()->button(1)->toolTip().contains(keys(Qt::SHIFT | Qt::Key_2))) << shell->leftRail()->button(1)->toolTip().toStdString();
+    EXPECT_NEAR(shell->groomToolsDock()->width(), toolsWidth, 2);
+    // From the keyboard: View > Panels > Fold Properties (Ctrl+]) folds and opens; the Groom Tools'
+    // pages on Shift+1..4, in their tabs' tooltips; the Properties' open page's with the fold's key.
+    QTabBar* toolTabs = shell->groomTools()->tabBar();
+    EXPECT_TRUE(toolTabs->tabToolTip(1).contains(keys(Qt::SHIFT | Qt::Key_2))) << toolTabs->tabToolTip(1).toStdString();
     EXPECT_TRUE(rail->button(rail->current())->toolTip().contains(keys(Qt::CTRL | Qt::Key_BracketRight)));
     bindings.at("view.foldProperties").trigger(nullptr, true);
     EXPECT_TRUE(shell->folded(false));
@@ -843,7 +847,7 @@ TEST(AppOutput, FoldedDocksOpenForShortcutsFloatingAndTheNextStart) {
     bindings.at("view.foldProperties").trigger(nullptr, false);
     EXPECT_FALSE(shell->folded(false));
     shell->showToolsPage(2);
-    EXPECT_EQ(shell->leftRail()->current(), 2);
+    EXPECT_EQ(toolTabs->currentIndex(), 2);
     // The menu's check follows a fold made with the rail's icon.
     rail->button(rail->current())->click();
     EXPECT_TRUE(bindings.at("view.foldProperties").checked(nullptr));

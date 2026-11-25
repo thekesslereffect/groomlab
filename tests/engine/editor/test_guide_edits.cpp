@@ -4,9 +4,13 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <stdexcept>
 
+#include <nlohmann/json.hpp>
+
 #include "groomlab/editor/guide_edits.h"
+#include "groomlab/root_tubes.h"
 #include "../core/test_helpers.h"
 
 using namespace groomlab;
@@ -176,4 +180,76 @@ TEST(GuideEdits, TubesAndTheTubeShapeLibrary) {
     remove.name = "petal";
     EXPECT_EQ(editTubeShape(t.h, remove), 1u);
     EXPECT_EQ(t.h.tubeShape("petal"), nullptr);
+}
+
+// A root tube keeps its drawn root (issue: a Root profile turned it into a plain tube, its root
+// ring cleared): a Root profile given goes to the other guides, the rest of the edit to it too, and
+// the note says how many kept theirs; given to root tubes alone, it is refused.
+TEST(GuideEdits, ARootTubeKeepsItsDrawnRoot) {
+    const std::shared_ptr<const ScalpMesh> scalp = test::makeSphere(48, 96, 1.0f);
+    GuideHierarchy h;
+    std::vector<Vec3f> outline;
+    for (int k = 0; k < 5; ++k) {
+        const float t = 6.2831853f * static_cast<float>(k) / 5.0f;
+        outline.push_back(Vec3f(0.12f * std::cos(t), 1.0f, 0.12f * std::sin(t)).normalized());
+    }
+    const GuideId root = makeRootTube(h, *scalp, outline, {});
+    const GroupId primary = h.addGroup("primary");
+    const Vec3f at = Vec3f(0.6f, 0.8f, 0.0f).normalized();
+    const GuideId plain = h.addGuide(primary, {at, at * 1.2f, at * 1.4f});
+    h.evaluate(scalp.get());
+    const std::string drawn = h.guide(root)->tube.custom->name;
+    ASSERT_GE(h.guide(root)->rootRing.size(), 3u);
+    std::string note;
+    EXPECT_EQ(editTubes(h, {root, plain}, R"({"shape": "ribbon"})", &note), 1u) << "the plain guide only";
+    EXPECT_NE(note.find("1 root tube keeps its drawn root"), std::string::npos) << note;
+    EXPECT_EQ(h.guide(plain)->tube.shapeName(), "ribbon");
+    EXPECT_EQ(h.guide(root)->tube.custom->name, drawn);
+    h.evaluate(scalp.get());
+    EXPECT_TRUE(isRootTube(h.guide(root)->tube, 0));
+    EXPECT_GE(h.guide(root)->rootRing.size(), 3u) << "its root ring kept";
+    // The rest of an edit still applies to it.
+    EXPECT_EQ(editTubes(h, {root}, R"({"shape": "blade", "tipShape": "teardrop"})", &note), 1u);
+    EXPECT_EQ(h.guide(root)->tube.custom->name, drawn);
+    ASSERT_TRUE(h.guide(root)->tube.tipShape);
+    EXPECT_EQ(h.guide(root)->tube.tipShape->name(), "teardrop");
+    // A Root profile alone, to root tubes alone: refused, nothing changed.
+    EXPECT_THROW(editTubes(h, {root}, R"({"shape": "blade"})"), GuideEditError);
+    EXPECT_EQ(h.guide(root)->tube.custom->name, drawn);
+    note = "?";
+    EXPECT_EQ(editTubes(h, {root}, nlohmann::json{{"shape", drawn}}.dump(), &note), 1u) << "its own root again";
+    EXPECT_TRUE(note.empty());
+    // A new library shape given at once (Duplicate): the root tube keeps its root.
+    TubeShapeOp add;
+    add.op = "add";
+    add.name = "leaf";
+    add.points = std::vector<SectionPoint>{{-1.0f, 0.0f}, {0.0f, 0.5f}, {1.0f, 0.0f}, {0.0f, -0.5f}};
+    add.give = {root, plain};
+    EXPECT_EQ(editTubeShape(h, add), 1u);
+    EXPECT_EQ(h.guide(root)->tube.custom->name, drawn);
+    EXPECT_EQ(h.guide(plain)->tube.shapeName(), "leaf");
+    // Its drawn root is no library shape: the library's edits refuse it, the root tools' scripts
+    // (owned) make and fit theirs.
+    TubeShapeOp set;
+    set.op = "set";
+    set.name = drawn;
+    set.points = add.points;
+    EXPECT_THROW(editTubeShape(h, set), GuideEditError);
+    TubeShapeOp rename;
+    rename.op = "rename";
+    rename.name = drawn;
+    rename.to = "mine";
+    EXPECT_THROW(editTubeShape(h, rename), GuideEditError);
+    TubeShapeOp remove;
+    remove.op = "remove";
+    remove.name = drawn;
+    EXPECT_THROW(editTubeShape(h, remove), GuideEditError);
+    TubeShapeOp own;
+    own.op = "add";
+    own.name = std::string(kOwnedTubeShapePrefix) + "77";
+    own.points = add.points;
+    EXPECT_THROW(editTubeShape(h, own), GuideEditError) << "the name is kept for root tubes";
+    own.owned = true;
+    EXPECT_NO_THROW(editTubeShape(h, own));
+    EXPECT_TRUE(h.tubeShape(own.name));
 }

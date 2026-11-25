@@ -34,6 +34,11 @@
 #include "brush_session.h"
 #include "camera.h"
 #include "groomlab/root_tubes.h"
+#include "groomlab/tube.h"
+#include "tube_panel.h"
+#include "tube_shape_editor.h"
+#include <QComboBox>
+#include <QLabel>
 #include "card_preview.h"
 #include "gpu_preview.h"
 #include "graph_presets.h"
@@ -615,7 +620,7 @@ TEST(AppTheme, FontsBrushesAndColors) {
     EXPECT_EQ(theme::brush("clump"), nullptr) << "the Paint brush paints the clump attribute";
     EXPECT_EQ(theme::brush("no such brush"), nullptr);
     EXPECT_EQ(theme::brush("select"), nullptr) << "the rail's own tool";
-    // Playful's colors (the categories in the primaries; Charcoal, the default, tints its icons alike).
+    // Playful's colors, the default's (the categories in the primaries).
     ASSERT_TRUE(theme::setTheme(QStringLiteral("playful")));
     struct Restore {
         ~Restore() { theme::setTheme(theme::defaultTheme()); }
@@ -690,10 +695,10 @@ TEST(AppTheme, AThemeWithoutGraphColorsTakesEveryHostsFromTheUiDefinitions) {
 }
 
 TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
-    // Every theme file the Maya host ships is a resource; Charcoal is the app's default, solid:
-    // opaque panels with a thin edge, its own text tones, the selection tone for the chosen segment,
-    // the blue accent pill for the primary actions, minimal node headers on a dot grid; Playful (glass, round filled headers) is still the
-    // theme the others extend.
+    // Every theme file the Maya host ships is a resource; Playful is the app's default and the theme
+    // the others extend. Charcoal is solid: opaque panels with a thin edge, its own text tones, the
+    // selection tone for the chosen segment, the blue accent pill for the primary actions, tinted
+    // node headers on a dot grid; its file holds the components block every theme reads.
     const std::string folder = std::string(GROOMLAB_TEST_DATA) + "/../../engine/assets/themes";
     QStringList files;
     for (const auto& entry : std::filesystem::directory_iterator(folder)) {
@@ -704,7 +709,7 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_TRUE(theme::themeNames().contains(QStringLiteral("charcoal")));
     EXPECT_EQ(theme::themeLabel(QStringLiteral("charcoal")), QStringLiteral("Charcoal"));
     EXPECT_EQ(theme::themeLabel(QStringLiteral("my_theme")), QStringLiteral("My Theme"));
-    EXPECT_EQ(theme::defaultTheme(), QStringLiteral("charcoal"));
+    EXPECT_EQ(theme::defaultTheme(), QStringLiteral("playful"));
     ASSERT_EQ(theme::currentTheme(), theme::defaultTheme());
     EXPECT_FALSE(theme::glassy());
     // Playful: solid too (the one component system), its character in tokens: Charcoal's corners,
@@ -1532,13 +1537,33 @@ TEST(AppBrush, RootTubesDrawnByClicksWithTheirOverlayAndUndo) {
     EXPECT_TRUE(f.session.committedSincePress()) << "closed: the tube made on the press";
     EXPECT_EQ(rootTubesOf(*f.doc->session().authoredHierarchy()).size(), roots + 1);
     EXPECT_EQ(f.session.roots().outlineCvs(), 0u);
+    {
+        // The root tube as the Tube card sees it: its drawn root an owned shape, in no picker's
+        // library (libraryTubeShapes), "Drawn root" in the root picker, the Profile block's note.
+        const std::vector<GuideId> made = rootTubesOf(*f.doc->session().authoredHierarchy());
+        ASSERT_FALSE(made.empty());
+        f.doc->setSelection({made.back()});
+        const GroomDocument::TubeTargets targets = f.doc->tubeTargets();
+        EXPECT_EQ(targets.rootTubes, 1u);
+        ASSERT_EQ(targets.shapes.size(), 1u);
+        EXPECT_TRUE(isOwnedTubeShape(targets.shapes[0]));
+        EXPECT_TRUE(f.doc->ownedTubeShape(targets.shapes[0]).has_value());
+        for (const GroomDocument::TubeShapeInfo& s : f.doc->tubeShapes()) EXPECT_FALSE(isOwnedTubeShape(s.name)) << s.name;
+        TubePanel panel;
+        panel.setSession(&f.session);
+        panel.refresh(true);
+        EXPECT_EQ(panel.shapeBox()->currentText(), QStringLiteral("Drawn root"));
+        EXPECT_FALSE(panel.editor()->editable()) << "the Roots brush reshapes it";
+        EXPECT_TRUE(panel.profileNote()->text().contains(QStringLiteral("drawn root"))) << panel.profileNote()->text().toStdString();
+        f.doc->setSelection({});
+    }
     ASSERT_TRUE(f.doc->undo().empty());
     f.session.refreshRoots();
     EXPECT_EQ(rootTubesOf(*f.doc->session().authoredHierarchy()).size(), roots);
     EXPECT_EQ(f.session.roots().outlineCvs(), 5u) << "the outline back to close again";
     f.session.leaveRoots();
     EXPECT_TRUE(f.session.rootOverlay().empty());
-    EXPECT_EQ(f.session.toolId(), "shape");
+    EXPECT_EQ(f.session.toolId(), "roots") << "the root tool put away, the Roots brush still picked";
 }
 
 TEST(AppBrush, HoverRingAndPressure) {

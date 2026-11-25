@@ -923,7 +923,6 @@ void MainWindow::refreshGroomColor() {
         rgb("tipColor", color.tipColor);
     }
     shell_->lookCard()->setGroomColor(color);
-    refreshHairColorRows();  // the Properties' Hair Color rows
 }
 
 void MainWindow::graphEdited() {

@@ -23,7 +23,7 @@ _cache = {"stamp": None, "data": {}}
 
 
 def _theme_json():
-    """The active GroomLab theme's data (themes.py: GroomLab > Theme; Charcoal unless another was
+    """The active GroomLab theme's data (themes.py: GroomLab > Theme; Playful unless another was
     picked)."""
     return uikit.theme_data()
 

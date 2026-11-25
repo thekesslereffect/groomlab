@@ -8,11 +8,18 @@
 
 #include <QAction>
 #include <QFile>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QStringList>
+#include <QToolButton>
+#include <QWidgetAction>
 
 #include "groomlab/shortcuts.h"
+
+#include "glass.h"
+#include "theme.h"
 
 namespace groomlab::app::ui {
 
@@ -546,7 +553,10 @@ void build(QMenu* target, const std::vector<Item>& items, const std::shared_ptr<
                 if (!live.contains(k)) live.append(k);
             }
             if (keys.isEmpty() && !b.keys.isEmpty()) keys = b.keys.first().toString(QKeySequence::NativeText);
-            auto* action = new QAction(target);
+            // A destructive action (actions.json "destructive": Delete, Remove): its entry in the
+            // theme's error red with a trash glyph.
+            QAction* action = item.entry.value("destructive", false) ? dangerAction(target, escaped(item.label), {}, tip)
+                                                                     : new QAction(target);
             bool owner = false;
             if (ctx->options.liveShortcuts && !live.isEmpty() && ctx->options.shortcutOwners) {
                 QPointer<QAction>& slot = (*ctx->options.shortcutOwners)[item.id];
@@ -634,6 +644,64 @@ std::map<std::string, QAction*> fillMenuBar(QMenuBar* bar, const json& entries, 
         build(menu, item.items, ctx, holdsGenerator(definitions, own) ? nullptr : &made);
     }
     return made;
+}
+
+QAction* dangerAction(QMenu* menu, const QString& text, std::function<void()> slot, const QString& tip) {
+    // A QWidgetAction: a QAction's text takes the menu's color, so the entry is a flat button the
+    // width of the menu (its keys at the right) that closes the menus and triggers the action.
+    auto* action = new QWidgetAction(menu);
+    action->setProperty("destructive", true);
+    auto* button = new QToolButton();
+    button->setObjectName(QStringLiteral("dangerEntry"));
+    const QColor red = theme::errorText();
+    button->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_glyph_delete.svg"), red, 16, menu->devicePixelRatioF())));
+    button->setIconSize(QSize(16, 16));
+    button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    button->setAutoRaise(true);
+    button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    QColor hover = theme::uiColor("selection").isValid() ? theme::uiColor("selection") : theme::chip();
+    hover.setAlphaF(0.5);
+    button->setStyleSheet(QStringLiteral("QToolButton { color: %1; text-align: left; padding: 4px 28px 4px 8px; border: none; border-radius: %2px; "
+                                         "background: transparent; }"
+                                         "QToolButton:hover { background: %3; }"
+                                         "QToolButton:disabled { color: %4; }")
+                              .arg(red.name())
+                              .arg(theme::smallRadius())
+                              .arg(hover.name(QColor::HexArgb), theme::textDisabled().name()));
+    auto* keys = new QLabel(button);
+    keys->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    keys->setStyleSheet(QStringLiteral("color: %1; background: transparent;").arg(theme::textMuted().name()));
+    auto* row = new QHBoxLayout(button);
+    row->setContentsMargins(0, 0, 10, 0);
+    row->addStretch(1);
+    row->addWidget(keys);
+    // The button follows the action (its text with the keys after a tab, its tip, enabled).
+    auto follow = [action, button, keys] {
+        const QString t = action->text();
+        const int tab = t.indexOf(QLatin1Char('\t'));
+        // (A checkable one, Delete Its File Too: its check as a mark before the text.)
+        const QString mark = !action->isCheckable() ? QString() : action->isChecked() ? QStringLiteral("✓ ") : QStringLiteral("    ");
+        button->setText(mark + QString(tab < 0 ? t : t.left(tab)).replace(QStringLiteral("&&"), QStringLiteral("&")));
+        keys->setText(tab < 0 ? QString() : t.mid(tab + 1));
+        keys->setVisible(tab >= 0);
+        button->setToolTip(action->toolTip());
+        button->setEnabled(action->isEnabled());
+    };
+    QObject::connect(action, &QAction::changed, button, follow);
+    QObject::connect(action, &QAction::toggled, button, follow);
+    QObject::connect(button, &QToolButton::clicked, action, [action, menu] {
+        QMenu* top = menu;
+        while (auto* up = qobject_cast<QMenu*>(top->parentWidget())) top = up;
+        top->close();
+        action->trigger();
+    });
+    if (slot) QObject::connect(action, &QAction::triggered, action, [slot](bool) { slot(); });
+    action->setDefaultWidget(button);
+    action->setText(text);
+    if (!tip.isEmpty()) action->setToolTip(tip);
+    follow();
+    menu->addAction(action);
+    return action;
 }
 
 void refreshActions(QMenu* menu) {

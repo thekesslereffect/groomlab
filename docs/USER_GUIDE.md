@@ -101,7 +101,7 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
 
 | Section | Tools |
 | --- | --- |
-| Create | Place, Draw, Part, Flow |
+| Create | Place, Draw, Roots, Part, Flow |
 | Shape | Comb, Slide, Smooth, Lift, Swing, Attract, Tube |
 | Trim | Cut, Length, Length Keys, Erase |
 | Paint | Paint (on the Paint tab) |
@@ -114,7 +114,12 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
   three (**Straighten** relaxes guides toward the straight line along their root direction instead). **Lift** stands guides up, **Swing** turns
   them around their roots and **Attract** pulls tips together; a negative strength reverses the ones
   that work both ways. **Tube** paints guides' tubes near the brush: their width, their flatness or
-  their twist (negative: the opposite).
+  their twist (negative: the opposite); its card also holds the tube's **Profile** (root, mid and tip
+  outlines and the shape library) and the tube hierarchy's **Level** row.
+- **Roots** draws tubes root first: click the root's outline on the scalp CV by CV, click the first
+  CV to close it, then draw its guide. **Edit** drags a root's CVs, **Select** picks, moves,
+  duplicates, subdivides and deletes roots. A root tube keeps its drawn root: a Root profile picked in
+  Tube's Profile goes to the other guides.
 - **Cut** trims where the brush touches, **Length** grows or shortens evenly, and
   **Erase** removes guides (with their children), parts or flow arrows.
 - **Paint** paints the map picked in the Paint tab (see Paint maps in section 3). To paint how
@@ -179,9 +184,9 @@ resizes it too. Both are remembered.
 | --- | --- | --- |
 | Down | **Masking** | **Full** (every guide unfrozen), **Empty** (every guide frozen), **Select** (the Select tool: lasso the guides to work on, from any group or level, the rest freeze; it stays on to refine), **Quick Select** (the same, any group too, for one pick, then back to the brush you had), **Mask Brush** (the Freeze brush) |
 | Left | **Visibility** | **Select** (lasso the guides to keep shown, from any group: the rest hide; the selection and mask stay as they are), **Show All** (every guide and every guide group, the Guides panel's eyes on), **Invert** (hidden and shown swap), **Hide Hair** / **Show Hair**, **Hide Guides** / **Show Guides** (each says what it will do), **Groups** (the guide groups to work with, in their colors: pick one and the others hide; pick another to add it, a shown one again to hide it, the last one shown to show them all; the Guides panel's eyes follow; past eight, **More** holds the rest) |
-| Up-left | **Brushes A** | Draw, Comb, Slide, Smooth, Tube, Flow, Place |
+| Up-left | **Brushes A** | Draw, Comb, Slide, Smooth, Tube, Roots, Flow, Place |
 | Up-right | **Brushes B** | Lift, Swing, Attract, Part, Cut, Erase |
-| Right | **Brush Options** | The picked brush's options: Comb's **Stretch**; Smooth's **All**, **Length**, **Shape**, **Curve**; Tube's **Draw Root** (the Tube card's Draw root: click a root tube's outline on the scalp), **Edit Roots** (the root tubes' outlines to edit; again: Finish edit), **Width**, **Flatness**, **Twist**, **Always Visible** (the tubes shaded whatever the brush) |
+| Right | **Brush Options** | The picked brush's options: Comb's **Stretch**; Smooth's **All**, **Length**, **Shape**, **Curve**; Tube's **Width**, **Flatness**, **Twist**, **Always Visible** (the tubes shaded whatever the brush); Roots' **Draw Root** (click a root tube's outline on the scalp), **Edit Roots** (the root tubes' outlines to edit; again: Finish edit) |
 
 A **hidden** guide is not drawn, can't be selected and no brush touches it, but the hair it guides
 still grows. Hiding is saved with the groom and is one undo step, as freezing is. Blender keeps its

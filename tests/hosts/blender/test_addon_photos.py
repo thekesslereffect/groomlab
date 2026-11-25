@@ -66,6 +66,31 @@ class Layout(bu.FakeLayout):
         self.log.append(("menu", idname))
 
 
+def texts_of(menu_cls):
+    """A menu's entries' texts (their operators' labels where the menu gives none)."""
+
+    class Recording(bu.FakeLayout):
+        def _sub(self, *args, **kwargs):
+            return Recording(self.log)
+
+        row = column = box = split = _sub
+
+        def menu(self, idname, text="", **kwargs):
+            self.log.append(("text", text))
+
+        def operator(self, idname, text=None, **kwargs):
+            props = bu.FakeLayout.operator(self, idname, **kwargs)
+            cls = getattr(bpy.types, "GROOMLAB_OT_" + idname.split(".")[1], None)
+            self.log.append(("text", text if text is not None else getattr(cls, "bl_label", idname)))
+            return props
+
+    layout = Recording()
+    holder = types.SimpleNamespace(layout=layout, bl_idname=menu_cls.__name__, _entries=menu_cls._entries,
+                                   _key=menu_cls._key, _conditions=menu_cls._conditions)
+    menu_cls.draw(holder, bpy.context)
+    return [e[1] for e in layout.log if e[0] == "text"]
+
+
 def hcall(scalp, cmd, **args):
     return process.call(cmd, session=groom.ensure(scalp).session, **args)
 
@@ -223,18 +248,42 @@ class PhotosTest(unittest.TestCase):
         self.assertEqual(bpy.ops.groomlab.photo_rename(new_name="front"), {"FINISHED"})
         self.assertEqual(cam.name, "front")
         self.assertEqual(hcall(head, "reference_photos")["photos"][0]["name"], "front")
-        # The Photos tab draws (the photos, the pairs, Guides from Photos), its menus built from the files.
+        # The Photos page draws (one line a photo: its settings, in front / behind, eye, lock and
+        # menu; the pairs folded under the list), its menus built from the files. No Guides from Photos.
         lay = Layout()
         photos.draw_tab(lay, bpy.context, 40)
         ops = [e[1] for e in lay.log if e[0] == "operator"]
-        for idname in ("groomlab.photo_import", "groomlab.photo_rename", "groomlab.photo_remove",
-                       "groomlab.photo_look_through", "groomlab.photo_pick", "groomlab.photo_align",
-                       "groomlab.pairs_solve", "groomlab.pairs_clear",
-                       "groomlab.pairs_delete", "groomlab.photos_guides"):
+        for idname in ("groomlab.photo_import", "groomlab.photo_add_view", "groomlab.row_popup", "groomlab.photo_toggle",
+                       "groomlab.photo_pick", "groomlab.photo_align", "groomlab.pairs_solve", "groomlab.pairs_clear",
+                       "groomlab.pairs_delete"):
             self.assertIn(idname, ops)
-        self.assertIn(("menu", "GROOMLAB_MT_photo_context"), lay.log)
+        self.assertFalse(hasattr(bpy.types, "GROOMLAB_OT_photos_guides"))
         self.assertIn(("menu", "GROOMLAB_MT_pair_context"), lay.log)
-        self.assertIn(("prop", "alpha"), lay.log)
+        self.assertEqual(texts_of(bpy.types.GROOMLAB_MT_photo_context), ["Rename...", "Align Photo...", "Select Camera",
+                                                                        "Remove"])
+        settings = Layout()
+        bpy.types.GROOMLAB_PT_photo_settings.draw(types.SimpleNamespace(layout=settings), bpy.context)
+        self.assertIn(("prop", "alpha"), settings.log)
+        self.assertIn(("prop", "lens"), settings.log)
+        # The row's switches: behind the mesh and back, hidden and shown, locked and not.
+        bg = photos.background(cam)
+        self.assertEqual(bpy.ops.groomlab.photo_toggle(photo=cam.name, what="DEPTH"), {"FINISHED"})
+        self.assertEqual(bg.display_depth, "BACK")
+        bpy.ops.groomlab.photo_toggle(photo=cam.name, what="DEPTH")
+        self.assertEqual(bg.display_depth, "FRONT")
+        bpy.ops.groomlab.photo_toggle(photo=cam.name, what="VISIBLE")
+        self.assertFalse(bg.show_background_image)
+        bpy.ops.groomlab.photo_toggle(photo=cam.name, what="VISIBLE")
+        bpy.ops.groomlab.photo_toggle(photo=cam.name, what="LOCK")
+        self.assertTrue(p.locked and all(cam.lock_location))
+        bpy.ops.groomlab.photo_toggle(photo=cam.name, what="LOCK")
+        self.assertFalse(p.locked)
+        # A click on the row looks through the photo; a click again goes back.
+        index = list(bpy.data.objects).index(cam)
+        if photos.looking_through(bpy.context, cam):
+            photos.look_through(bpy.context, cam)
+        scene.groomlab_photos.photo_index = index
+        self.assertEqual(scene.camera, cam)
 
     def test_2_photos_travel_with_the_groom_file(self):
         head, scene = self.head, bpy.context.scene
@@ -272,10 +321,12 @@ class PhotosTest(unittest.TestCase):
             photos.remove_photo(c, scene)
         path = write_photo(os.path.join(bu.TMP, "strands_front.png"), 240, 300, stripes=True)
         self.assertEqual(bpy.ops.groomlab.photo_import(filepath=path), {"FINISHED"})
-        self.assertEqual(bpy.ops.groomlab.photos_guides(guide_count=60, symmetry="none"), {"FINISHED"})
+        # (Guides from Photos left the menus and the Photos page; the helper's command stays.)
+        r = photos.guides_from_photos(head, 60, "none")
+        self.assertEqual(r["group"], photos.GROUP)
+        self.assertGreater(r["guides"], 0)
         info = hcall(head, "guides_info")
         self.assertIn(photos.GROUP, [g["name"] for g in info["groups"]])
-        self.assertIn("guides in fromReference", scene.groomlab_photos.result)
         self.assertIn(photos.GROUP, [g.name for g in scene.groomlab_tools.groups])
 
 

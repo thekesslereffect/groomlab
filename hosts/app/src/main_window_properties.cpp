@@ -322,26 +322,34 @@ void MainWindow::buildProperties() {
         setReference->setToolTip(row->toolTip());
     }
 
-    // ---- Controls (the Control nodes' sliders) and Hair Color (the HairColor node's rows): built
-    // from the graph as it changes (refreshControlSliders, refreshHairColorRows).
+    // ---- Controls (the Control nodes' sliders): built from the graph as it changes
+    // (refreshControlSliders). The hair's color is the HairColor node's (the Graph Editor, the
+    // Look card): no rows of its own here (properties.json).
     controlsBlock_ = new QWidget();
     auto* controlsLayout = new QGridLayout(controlsBlock_);
     controlsLayout->setContentsMargins(0, 0, 0, 0);
     p->setBlock("controls", controlsBlock_);
-    hairColorBlock_ = new QWidget();
-    auto* colorLayout = new QGridLayout(hairColorBlock_);
-    colorLayout->setContentsMargins(0, 0, 0, 0);
-    p->setBlock("hairColor", hairColorBlock_);
+    // The display's own state the Attributes page no longer shows (properties.json: the guides'
+    // display is the Groom Tools' guides arrow's, the sculpting display the Correctives', the
+    // cards the Cards node's): kept, hidden, as the settings' holders.
+    auto* kept = new QWidget(p);
+    kept->setObjectName(QStringLiteral("displayKept"));
+    kept->hide();
+    auto keep = [&](const char* key, QWidget* control) {
+        if (p->setControl(key, control)) return;
+        control->setParent(kept);
+        if (control->objectName().isEmpty()) control->setObjectName(QStringLiteral("prop_") + QLatin1String(key));
+    };
 
     // ---- Display: what shows, the strand colors.
     guides_ = check(settings_.guides);
-    p->setControl("guides", guides_);
+    keep("guides", guides_);
     flow_ = check(settings_.flow);
-    p->setControl("flow", flow_);
+    keep("flow", flow_);
     tubes_ = check(settings_.tubes);
-    p->setControl("tubes", tubes_);
+    keep("tubes", tubes_);
     instances_ = check(settings_.instances);
-    p->setControl("instances", instances_);
+    keep("instances", instances_);
     scalp_ = check(true);
     p->setControl("scalp", scalp_);
     gpuPreview_ = check(gpu_.enabled());
@@ -385,24 +393,24 @@ void MainWindow::buildProperties() {
     scalpMapChannel_ = combo({QStringLiteral("rgb"), QStringLiteral("r"), QStringLiteral("g"), QStringLiteral("b"), QStringLiteral("a")});
     p->setControl("scalpMapChannel", scalpMapChannel_);
 
-    // ---- Display > Guides.
+    // ---- The guides' display (the Groom Tools' guides arrow: guideDisplayPopup).
     guideWidth_ = rowSlider(1.0, 12.0, 1, 0.5, theme::emerald());
     guideWidth_->setLimits(1.0, 16.0);
     guideWidth_->setValue(settings_.guideWidth);
-    p->setControl("guideWidth", guideWidth_);
+    keep("guideWidth", guideWidth_);
     guidePoints_ = combo({tr("Off"), tr("Roots and tips"), tr("All")});
     guidePoints_->setCurrentIndex(settings_.guidePoints);
-    p->setControl("guidePoints", guidePoints_);
+    keep("guidePoints", guidePoints_);
     guideSmoothing_ = spin(1, 16, settings_.guideSmoothing);
-    p->setControl("guideSmoothing", guideSmoothing_);
+    keep("guideSmoothing", guideSmoothing_);
     isolateGroup_ = new QLineEdit(QString::fromStdString(settings_.isolateGroup));
     isolateGroup_->setPlaceholderText(tr("None"));
-    p->setControl("isolateGroup", isolateGroup_);
+    keep("isolateGroup", isolateGroup_);
     guideColorMode_ = combo({tr("Group"), tr("Painted Layer")});
     guideColorMode_->setCurrentIndex(settings_.guideColorMode == 1 ? 1 : 0);
-    p->setControl("guideColorMode", guideColorMode_);
+    keep("guideColorMode", guideColorMode_);
     guideColorLayer_ = combo({});  // the guide layers (refreshDisplayChoices)
-    p->setControl("guideColorLayer", guideColorLayer_);
+    keep("guideColorLayer", guideColorLayer_);
 
     // ---- Display > Strand Shading.
     lighting_ = check(settings_.lighting);
@@ -424,27 +432,28 @@ void MainWindow::buildProperties() {
     ribbonWidth->setValue(settings_.ribbonWidthScale);
     p->setControl("ribbonWidthScale", ribbonWidth);
 
-    // ---- Sculpting: the strands while a stroke is live, the density they evaluate at.
+    // ---- While sculpting: the strands while a stroke is live, the density they evaluate at (the
+    // Correctives' Display while sculpting).
     sculptDisplay_ = combo({});
     for (const ui::json& c : ui::Definitions::shipped().choices("sculptDisplay")) {
         sculptDisplay_->addItem(qs(c.value("label", std::string())));
         sculptDisplay_->setItemData(sculptDisplay_->count() - 1, qs(c.value("tip", std::string())), Qt::ToolTipRole);
     }
     sculptDisplay_->setCurrentIndex(std::clamp(settings_.sculptDisplay, 0, std::max(0, sculptDisplay_->count() - 1)));
-    p->setControl("sculptDisplay", sculptDisplay_);
+    keep("sculptDisplay", sculptDisplay_);
     sculptDensity_ = rowSlider(0.01, 1.0, 2, 0.05, theme::emerald());
     sculptDensity_->setLimits(0.01, 1.0);
     sculptDensity_->setValue(brush_.sculptDensity);
-    p->setControl("sculptDensity", sculptDensity_);
+    keep("sculptDensity", sculptDensity_);
 
-    // ---- Game Cards.
+    // ---- The cards (the Cards node's; Cards mode shows them).
     cardsView_ = check(false);
     cardsView_->setEnabled(false);
-    p->setControl("cardsView", cardsView_);
+    keep("cardsView", cardsView_);
     cardDensitySlider_ = rowSlider(0.01, 1.0, 2, 0.05, theme::yellow());
     cardDensitySlider_->setLimits(0.01, 1.0);
     cardDensitySlider_->setValue(cardDensity_);
-    p->setControl("cardDensity", cardDensitySlider_);
+    keep("cardDensity", cardDensitySlider_);
 
     // ---- Rendering > Render Overrides and Level of Detail (the V-Ray and RenderMan renders, the exports).
     auto overrideSlider = [&](const char* key, float RenderOverrides::* member, double max, double limit) {
@@ -501,6 +510,7 @@ void MainWindow::buildProperties() {
 
     p->finish();
     shell_->setPanelContent(AppShell::Panel::Display, tr("Properties"), theme::purple(), p);
+    fillGuideDisplay();
 
     // ---- What the display controls edit.
     auto toggle = [this](QCheckBox* box, bool DisplaySettings::* member, bool coverage = false) {
@@ -549,6 +559,7 @@ void MainWindow::buildProperties() {
     connect(guideColorMode_, &QComboBox::currentIndexChanged, this, [this](int mode) {
         settings_.guideColorMode = mode;
         properties_->setRowVisible("guideColorLayer", mode == 1);
+        guideColorLayer_->setVisible(mode == 1);
         redisplay();
     });
     connect(guideColorLayer_, &QComboBox::currentIndexChanged, this, [this](int) {
@@ -682,8 +693,71 @@ void MainWindow::refreshProperties() {
     properties_->setRowVisible("colorMin", mode == kAttributeColors);
     properties_->setRowVisible("colorMax", mode == kAttributeColors);
     properties_->setRowVisible("guideColorLayer", settings_.guideColorMode == 1);
+    guideColorLayer_->setVisible(settings_.guideColorMode == 1);
     refreshControlSliders();
-    refreshHairColorRows();
+}
+
+void MainWindow::fillGuideDisplay() {
+    // The Groom Tools' guides arrow (the Simple layout): how the guides draw, as pills and fields
+    // over the display's own controls (they carry the settings; hidden off the Attributes page).
+    QVBoxLayout* rows = groomTools_->guideDisplayRows();
+    QWidget* host = rows->parentWidget();
+    FlowLayout* flow = nullptr;
+    QWidget* chips = pillRow(host, &flow);
+    chips->setObjectName(QStringLiteral("guideDisplayChips"));
+    auto mirror = [&](const QString& label, const char* name, QCheckBox* box, const QString& tip) {
+        QToolButton* c = makePill(label, tip, host);
+        c->setObjectName(QLatin1String(name));
+        c->setChecked(box->isChecked());
+        connect(c, &QToolButton::toggled, box, [box](bool on) {
+            if (box->isChecked() != on) box->setChecked(on);
+        });
+        connect(box, &QCheckBox::toggled, c, [c](bool on) {
+            const QSignalBlocker block(c);
+            c->setChecked(on);
+        });
+        flow->addWidget(c);
+        return c;
+    };
+    mirror(tr("Flow"), "display_flow", flow_, tr("The flow arrows and the field they make (a pale preview)"));
+    mirror(tr("Tubes"), "display_tubes", tubes_, tr("Each guide's tube, the volume its children and Interpolate's Fill Tubes fill"));
+    mirror(tr("Instances"), "display_instances", instances_, tr("Each Instance node's copies of its prototype mesh (else small markers)"));
+    // Smoothed: the guides drawn as a smooth curve through their points (Guide Smoothing's pieces
+    // per segment), else straight segments.
+    QToolButton* smoothed = makePill(tr("Smoothed"), tr("Guides draw as a smooth curve through their points (off: straight segments)"), host);
+    smoothed->setObjectName(QStringLiteral("display_guideSmoothing"));
+    smoothed->setChecked(guideSmoothing_->value() > 1);
+    connect(smoothed, &QToolButton::toggled, guideSmoothing_, [this](bool on) {
+        if ((guideSmoothing_->value() > 1) != on) guideSmoothing_->setValue(on ? std::max(4, smoothKept_) : 1);
+    });
+    connect(guideSmoothing_, &QSpinBox::valueChanged, smoothed, [this, smoothed](int v) {
+        if (v > 1) smoothKept_ = v;
+        const QSignalBlocker block(smoothed);
+        smoothed->setChecked(v > 1);
+    });
+    flow->addWidget(smoothed);
+    rows->addWidget(chips);
+    // Width (a number field: its name inside), Points and Colors (field rows).
+    guideWidth_->setCaption(tr("Width"));
+    guideWidth_->setParent(host);
+    guideWidth_->setToolTip(tr("The guides' width in pixels (selected guides one more)"));
+    rows->addWidget(guideWidth_);
+    auto field = [&](const QString& label, QWidget* control, const QString& tip) {
+        auto* name = new QLabel(label, host);
+        name->setProperty("role", "propLabel");
+        name->setToolTip(tip);
+        control->setToolTip(tip);
+        QWidget* row = fieldRow(host, name, control);
+        rows->addWidget(row);
+        return row;
+    };
+    field(tr("Points"), guidePoints_, tr("The guides' points as dots: off, roots and tips, or all"));
+    field(tr("Colors"), guideColorMode_, tr("Each guide group's own color, or a painted guide layer from black to white"));
+    QWidget* layer = field(tr("Layer"), guideColorLayer_, tr("The painted guide layer Colors shows (Painted Layer), black 0 to white 1"));
+    layer->setObjectName(QStringLiteral("guideColorLayerRow"));
+    guideColorLayer_->setVisible(settings_.guideColorMode == 1);
+    connect(guideColorMode_, &QComboBox::currentIndexChanged, layer, [layer](int mode) { layer->setVisible(mode == 1); });
+    layer->setVisible(settings_.guideColorMode == 1);
 }
 
 bool MainWindow::autoColorRange() {
@@ -850,125 +924,6 @@ void MainWindow::refreshControlSliders() {
             break;
         }
     }
-}
-
-void MainWindow::refreshHairColorRows() {
-    if (groomColorDragging_) return;  // (a slider of these rows is held: its own edit)
-    const std::string node = hairColorNode();
-    nlohmann::json params = nlohmann::json::object();
-    if (document_ && !node.empty()) {
-        for (const nlohmann::json& n : document_->graph().value("nodes", nlohmann::json::array())) {
-            if (n.value("name", std::string()) == node) params = n.value("params", nlohmann::json::object());
-        }
-    }
-    const std::string key = (document_ ? std::string("open") : std::string()) + "|" + node + "|" + params.dump();
-    if (key == hairColorKey_ && hairColorBlock_->layout()->count() > 0) return;
-    hairColorKey_ = key;
-    auto* grid = static_cast<QGridLayout*>(hairColorBlock_->layout());
-    clearLayout(grid);
-    grid->setHorizontalSpacing(10);
-    grid->setVerticalSpacing(5);
-    grid->setColumnStretch(0, 2);
-    grid->setColumnStretch(1, 3);
-    int row = 0;
-    auto note = [&](const QString& text) {
-        auto* l = new QLabel(text, hairColorBlock_);
-        l->setProperty("role", "hint");
-        l->setWordWrap(true);
-        grid->addWidget(l, row++, 0, 1, 2);
-    };
-    if (!document_) {
-        note(tr("Open a groom to color it."));
-        return;
-    }
-    if (node.empty()) {
-        note(tr("No HairColor node colors this groom: add one in the Graph Editor (Add Node > Color > HairColor)."));
-    } else {
-        auto value = [&](const std::string& param) { return document_->paramOrDefault(node, param); };
-        const std::string mode = value("mode") == "color" ? "color" : "melanin";
-        const std::vector<PropertiesPanel::Item> items = PropertiesPanel::appItems();
-        const auto item = std::find_if(items.begin(), items.end(), [](const PropertiesPanel::Item& i) { return i.key == "hairColor"; });
-        for (const ui::json& part : item != items.end() ? item->parts : ui::json::array()) {
-            const std::string param = part.value("id", std::string()), kind = part.value("kind", std::string());
-            const std::string only = part.value("only", std::string());
-            if (!only.empty() && only != mode) continue;
-            const QString label = qs(ui::hostText("label", ui::kHost, {&part})), tip = qs(ui::hostText("tip", ui::kHost, {&part}));
-            if (kind == "heading") {
-                // The nested sections' header (their chevron, their weight): one subsection style.
-                auto* h = new QPushButton(label, hairColorBlock_);
-                h->setProperty("role", "propSubsection");
-                h->setFlat(true);
-                h->setFocusPolicy(Qt::NoFocus);
-                h->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_chevron_down.svg"), theme::textMuted(), 10, h->devicePixelRatioF())));
-                h->setIconSize(QSize(10, 10));
-                grid->addWidget(h, row++, 0, 1, 2);
-                continue;
-            }
-            const nlohmann::json v = kind == "result" ? nlohmann::json() : value(param);
-            auto* l = new QLabel(label, hairColorBlock_);
-            l->setProperty("role", "propLabel");
-            l->setToolTip(tip);
-            QWidget* control = nullptr;
-            if (v.is_object()) {
-                control = valueLabel(tr("mapped (Graph Editor)"));  // a map or an expression: the Graph Editor edits those
-            } else if (kind == "mode") {
-                auto* c = combo({tr("Natural"), tr("Picked color")});
-                c->setCurrentIndex(mode == "color" ? 1 : 0);
-                connect(c, &QComboBox::currentIndexChanged, this, [this](int i) { chooseGroomMode(i == 1 ? "color" : "melanin"); });
-                control = c;
-            } else if (kind == "color" || kind == "result") {
-                auto* e = new ColorEditor();
-                RGB rgb{1.0f, 1.0f, 1.0f};
-                if (kind == "result") {
-                    const nlohmann::json m = value("melanin"), r = value("redness"), d = value("dye");
-                    if (!m.is_number() || !r.is_number()) {
-                        delete e;
-                        delete l;
-                        continue;  // mapped: no one color
-                    }
-                    RGB dye{1.0f, 1.0f, 1.0f};
-                    if (d.is_array() && d.size() == 3) dye = {d[0].get<float>(), d[1].get<float>(), d[2].get<float>()};
-                    rgb = melaninColor(m.get<float>(), r.get<float>(), dye);
-                    e->setReadOnly(true);  // a value to read, not a disabled control
-                } else if (v.is_array() && v.size() == 3) {
-                    rgb = {v[0].get<float>(), v[1].get<float>(), v[2].get<float>()};
-                }
-                e->setLinear(rgb);
-                if (kind == "color") {
-                    connect(e, &ColorEditor::edited, this, [this, e, param](bool live) { pickGroomColor(param, e->linear(), live); });
-                }
-                control = e;
-            } else {
-                auto* s = rowSlider(0.0, 1.0, 3, 0.01, theme::yellow());
-                s->setLimits(0.0, 1.0);
-                s->setValue(v.is_number() ? v.get<double>() : 0.0);
-                connect(s, &ValueSlider::valueChanged, this, [this, param](double x) { editGroomColor(param, x, true); });
-                connect(s, &ValueSlider::released, this, [this, param, s] { editGroomColor(param, s->value(), false); });
-                control = s;
-            }
-            control->setParent(hairColorBlock_);
-            control->setObjectName(QStringLiteral("hairColor_") + qs(param));
-            control->setToolTip(tip);
-            if (auto* field = qobject_cast<ValueSlider*>(control)) {
-                // A number field: its label inside, the row's whole width.
-                field->setCaption(label);
-                delete l;
-                grid->addWidget(control, row++, 0, 1, 2);
-                continue;
-            }
-            // Every other control in a field row, as the number fields: one row type down the card.
-            if (qobject_cast<QComboBox*>(control)) control->setMinimumWidth(140);
-            grid->addWidget(fieldRow(hairColorBlock_, l, control), row++, 0, 1, 2);
-        }
-    }
-    auto* edit = smallButton(node.empty() ? tr("Graph Editor") : tr("Edit in Graph Editor"),
-                             tr("The HairColor node's every param (a map, tipProfile, the seed, the highlight's randomness...)"));
-    edit->setParent(hairColorBlock_);
-    connect(edit, &QPushButton::clicked, this, [this, node] {
-        setGraphShown(true);
-        if (!node.empty()) selectUiNode(qs(node));
-    });
-    grid->addWidget(edit, row, 1, Qt::AlignLeft);
 }
 
 // ---- The groom's HairColor ---------------------------------------------------------------------------

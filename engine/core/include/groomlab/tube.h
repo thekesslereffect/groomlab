@@ -130,6 +130,10 @@ using TubeShapeLibrary = std::map<std::string, CustomTubeShapePtr>;
 // root outline, "rootTube_<n>"): removed from the library with the last of them
 // (GuideHierarchy::removeGuides, removeGroup).
 constexpr const char* kOwnedTubeShapePrefix = "rootTube_";
+// Whether a library shape's name is an owned one (kOwnedTubeShapePrefix): a root tube's drawn root,
+// which only the root tools make and change. Never listed as a library shape (Shape's pickers and
+// library menu, GuideHierarchy::libraryTubeShapes), nor renamed, edited or removed as one.
+bool isOwnedTubeShape(const std::string& name);
 // How much larger than its outline as drawn a root-first tube's shape is laid, about its guide
 // (root_tubes.py ROOT_OVERLAP: sealed neighbours' footprints overlap rather than leave a crack).
 // fillTubes takes it off again to tell which outline a root in the overlap was drawn in.

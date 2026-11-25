@@ -154,7 +154,7 @@ def _guide_path(root, normal, path, length, segments, size=None, density=1.0, su
 
 
 def _library_shape(groom, name):
-    return next((s for s in groomlab.tube_shapes(groom) if s["name"] == name), None)
+    return next((s for s in groomlab.tube_shapes(groom, owned=True) if s["name"] == name), None)
 
 
 def _smooth_normal(groom, point):

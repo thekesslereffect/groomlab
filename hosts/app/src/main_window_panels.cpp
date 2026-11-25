@@ -29,6 +29,7 @@
 #include <QDockWidget>
 
 #include "groomlab/brush_catalog.h"
+#include "groomlab/presets.h"
 
 #include "app_actions.h"
 #include "app_shell.h"
@@ -38,6 +39,8 @@
 #include "cards_panel.h"
 #include "correctives_panel.h"
 #include "export_panel.h"
+#include "find_command.h"
+#include "graph_presets.h"
 #include "glass.h"
 #include "guides_panel.h"
 #include "look_panel.h"
@@ -98,6 +101,33 @@ void MainWindow::buildPanels() {
         refreshDisplayChoices();
         redisplay();
     });
+    // A map's info: Show in Graph (the node reading it), Show on the guides or the strands.
+    connect(maps_, &MapsPanel::readerRequested, this, [this](const std::string& node) {
+        setGraphShown(true);
+        selectUiNode(QString::fromStdString(node));
+    });
+    maps_->setShowState([this](const std::string& where, const std::string& map) {
+        if (where == "guides") return settings_.guideColorMode == 1 && settings_.guideColorLayer == map;
+        if (where == "strands") return settings_.colorMode == kAttributeColors && settings_.colorSource == map;
+        return false;
+    });
+    connect(maps_, &MapsPanel::showOnRequested, this, [this](const QString& where, const std::string& map, bool on) {
+        // As painting shows a map (showPaintView): the strands by the map, black 0 to white 1; a
+        // guide layer on the guides.
+        PaintView v = currentPaintView();
+        if (where == QLatin1String("guides")) {
+            v.guideColorMode = on ? 1 : 0;
+            if (on) v.guideColorLayer = map;
+        } else if (where == QLatin1String("strands")) {
+            v.colorMode = on ? kAttributeColors : kSolidColors;
+            if (on) {
+                v.colorSource = map;
+                v.colorMin = 0.0;
+                v.colorMax = 1.0;
+            }
+        }
+        setPaintView(v);
+    });
     connect(maps_, &MapsPanel::brushChanged, this, [this] {
         groomTools_->refresh();
         refreshTool();
@@ -123,7 +153,8 @@ void MainWindow::buildPanels() {
     });
     connect(groomTools_->tubePanel(), &TubePanel::paintDensityFinished, this, [this] {
         groomTools_->showTab(QStringLiteral("tools"));
-        chooseTool(QStringLiteral("shape"));
+        chooseTool(QStringLiteral("roots"));
+        groomTools_->tubePanel()->startRootMode(RootTubeTool::Mode::Select);  // (the roots to Apply on, as before painting)
     });
     // Painting the density left any other way (another tool, the camera): finished as the button
     // finishes it, once the change that ended it is through.
@@ -232,11 +263,29 @@ void MainWindow::buildPanels() {
         if (viewport_->toolMode() == Viewport::ToolMode::Brush) viewport_->setToolMode(Viewport::ToolMode::Camera);
     });
     connect(groomTools_, &GroomTools::tabChanged, this, [this](const QString& tab) {
-        // Leaving the Paint tab is done painting (Maya's): the camera again.
-        if (tab != QLatin1String("paint") && viewport_->toolMode() == Viewport::ToolMode::Brush && brush_.toolId() == "paint") {
-            viewport_->setToolMode(Viewport::ToolMode::Camera);
+        const bool painting = viewport_->toolMode() == Viewport::ToolMode::Brush && brush_.toolId() == "paint";
+        if (tab == QLatin1String("paint")) {
+            // The Paint tab is painting: entering it starts Paint on the picked map (the brush
+            // before it kept, to give back).
+            if (!painting && document_ && !maps_->selectedMap().empty()) {
+                beforePaint_ = viewport_->toolMode() == Viewport::ToolMode::Brush    ? brush_.toolId()
+                               : viewport_->toolMode() == Viewport::ToolMode::Select ? std::string("select")
+                                                                                       : std::string();
+                chooseTool(QStringLiteral("paint"));
+            }
+            return;
         }
+        // Leaving the Paint tab is done painting (Maya's): the brush picked before Paint comes back
+        // (none: the camera).
+        if (!painting) return;
+        const std::string before = beforePaint_;
+        beforePaint_.clear();
+        if (!before.empty() && before != "paint") chooseTool(QString::fromStdString(before));
+        else viewport_->setToolMode(Viewport::ToolMode::Camera);
     });
+    // The header's groom picker, its search (Find Command).
+    connect(groomTools_, &GroomTools::groomPicked, this, [this](int index) { activateGroom(index); });
+    connect(groomTools_, &GroomTools::findRequested, this, [this] { openFindCommand(); });
     // The first-groom card over the viewport (overlay.h): its steps pick their tools.
     connect(host_, &OverlayHost::starterStepRequested, this, [this](const QString& step) {
         if (step == QLatin1String("guides")) {
@@ -261,6 +310,7 @@ void MainWindow::buildPanels() {
     correctives_ = new CorrectivesPanel();
     shell_->setPanelContent(AppShell::Panel::Correctives, tr("Correctives"), theme::red(), correctives_);
     correctives_->setSession(&brush_);
+    correctives_->setSculptDisplay(sculptDisplay_, sculptDensity_);  // (Display while sculpting, folded under it)
     connect(correctives_, &CorrectivesPanel::edited, this, [this] { guidesEdited(); });
     connect(correctives_, &CorrectivesPanel::targetChanged, this, [this] {
         // A shot sculpt (or a Sculpt node) wants the brush: the layer (the node) takes the strokes
@@ -502,6 +552,66 @@ void MainWindow::wireTimelineCardsAndExport() {
     connect(exports, &ExportPanel::saveAsRequested, this, [this] { saveAs(); });
 }
 
+std::vector<FindCommand::Entry> MainWindow::findCommandEntries() {
+    // Every command the menu bar runs (the shared definitions' app menu bar, unbound ids left out)
+    // with the menu it lives in; every brush; every graph preset.
+    std::vector<FindCommand::Entry> entries;
+    const ui::Bindings bindings = AppActions::bindings(*this);
+    const ui::Definitions& d = ui::Definitions::shipped();
+    ui::ResolveOptions options;
+    options.state.reset();  // (every entry; the binding says whether it runs now)
+    options.keep = [&bindings](const std::string& id) { return bindings.count(id) > 0; };
+    options.dropGenerators = true;
+    std::set<std::string> seen{"commands.find"};
+    std::function<void(const std::vector<ui::Item>&, const QString&)> walk = [&](const std::vector<ui::Item>& items, const QString& where) {
+        for (const ui::Item& item : items) {
+            if (item.kind == ui::Item::Kind::Submenu) {
+                walk(item.items, QString::fromStdString(item.label));
+            } else if (item.kind == ui::Item::Kind::Action && !seen.count(item.id + item.value.dump())) {
+                seen.insert(item.id + item.value.dump());
+                const ui::Binding binding = bindings.at(item.id);
+                QString label = QString::fromStdString(item.label);
+                label.remove(QStringLiteral("..."));
+                const ui::json value = item.value;
+                const bool checkable = item.checkable;
+                entries.push_back({label, QString::fromStdString(item.tip), where.isEmpty() ? tr("GroomLab") : where, [binding, value, checkable] {
+                                       if (binding.enabled && !binding.enabled()) return;
+                                       const bool on = checkable && binding.checked ? !binding.checked(value) : false;
+                                       if (binding.trigger) binding.trigger(value, on);
+                                   }});
+            }
+        }
+    };
+    walk(d.resolve(d.get("menus/app.menuBar"), options), QString());
+    for (BrushCategory category : brushCategories()) {
+        for (const groomlab::BrushEntry* e : brushesInCategory(category)) {
+            const QString id = QString::fromStdString(e->id);
+            entries.push_back({QString::fromStdString(e->label), QString::fromStdString(e->hint), tr("Brush"), [this, id] {
+                                   setUiMode(QStringLiteral("groom"));
+                                   groomTools_->showTab(id == QLatin1String("paint") ? QStringLiteral("paint") : QStringLiteral("tools"));
+                                   if (id != QLatin1String("paint")) chooseTool(id);
+                               }});
+        }
+    }
+    for (const PresetInfo& info : availablePresets()) {
+        const QString path = QString::fromStdString(info.path);
+        entries.push_back({tr("Preset: %1").arg(QString::fromStdString(info.title)),
+                           QString::fromStdString(info.description.empty() ? std::string("Apply the graph preset") : info.description), tr("Preset"),
+                           [this, path] {
+                               const ui::Bindings now = AppActions::bindings(*this);
+                               const auto apply = now.find("preset.apply");
+                               if (apply != now.end()) apply->second.trigger(ui::json(path.toStdString()), false);
+                           }});
+    }
+    return entries;
+}
+
+FindCommand* MainWindow::openFindCommand() {
+    auto* find = new FindCommand(findCommandEntries(), this);
+    find->openOver(this);
+    return find;
+}
+
 }  // namespace groomlab::app
 
 namespace groomlab::app {
@@ -595,6 +705,8 @@ void MainWindow::chooseTool(const QString& id) {
         endPaintView();
         viewport_->setToolMode(Viewport::ToolMode::Brush);
     }
+    // The Roots brush picked: the root tool in Draw root (Maya's root_tube_card.start).
+    if (tool == "roots" && !brush_.rootMode()) groomTools_->tubePanel()->startRootMode(RootTubeTool::Mode::Place);
     groomTools_->refresh();
     viewport_->refreshOverlay();
     refreshTool();

@@ -15,6 +15,7 @@
 #include <QSize>
 #include <QEvent>
 #include <QFont>
+#include <QFontMetrics>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -22,6 +23,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QPainter>
+#include <QPixmap>
+#include <QPolygonF>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QStyle>
@@ -32,6 +36,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/brush.h"
+#include "groomlab/editor/guide_edits.h"
 #include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/tube.h"
@@ -112,6 +117,7 @@ using nlohmann::json;
 
 constexpr double kPi = 3.14159265358979;
 constexpr int kPreviewMs = 60;  // a drag's live preview at most this often
+constexpr const char* kDrawn = "@drawn";  // the root picker's "Drawn root" entry (no shape is named so)
 
 const ui::Definitions& defs() { return ui::Definitions::shipped(); }
 QString qs(const std::string& s) { return QString::fromStdString(s); }
@@ -204,14 +210,21 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
     }
     column->addWidget(tubeBlock_);
 
-    // ---- Edit (Shape, Select): the profile, the library's glyphs in the header.
+    // ---- Edit (the Tube brush): the Profile block (untitled, as Maya's palette.py): Root, Mid and
+    // Tip as tiles with their outlines (the one picked shows in the editor); the editor beside the
+    // picked profile's shape, Apply, Hold and the outline's Mirror / Smooth; a note, a hint and the
+    // library's ⋯ under them.
     profileBlock_ = new CardBlock(tr("Profile"), this);
     profileBlock_->setObjectName(QStringLiteral("profileBlock"));
+    profileBlock_->titleLabel()->hide();
+    profileBlock_->setToolTip(tr("The tube's cross-section: its root, mid and tip profiles (the outline changes smoothly between "
+                                 "them) and the groom's shape library"));
     auto glyph = [this](const char* icon, const char* name, const QString& tip, void (TubePanel::*run)()) {
+        // The library's actions: kept as buttons (scripts and tests click them), shown in the ⋯ menu.
         QToolButton* b = makeGlyph(QLatin1String(icon), tip, profileBlock_);
         b->setObjectName(QLatin1String(name));
         connect(b, &QToolButton::clicked, this, [this, run] { (this->*run)(); });
-        profileBlock_->addAction(b);
+        b->hide();
         return b;
     };
     new_ = glyph("plus", "tubeShapeNew", tr("New shape: a library shape (a circle to start from)"), &TubePanel::newShape);
@@ -224,7 +237,14 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                     &TubePanel::deleteShape);
     delete_->setText(tr("Delete"));
     {
-        // The brush's tubes in the viewport (Maya's Tube card): shaded surfaces, wires.
+        // The tubes in the viewport (Maya's Tube card's Visibility): shaded surfaces, wires, colors.
+        // Not on the card: how things draw lives with the other display settings, under the Groom
+        // Tools' guides arrow (displayBlock; the Simple layout).
+        display_ = new QWidget(this);
+        display_->setObjectName(QStringLiteral("tubeDisplay"));
+        auto* displayRows = new QVBoxLayout(display_);
+        displayRows->setContentsMargins(0, 0, 0, 0);
+        displayRows->setSpacing(4);
         shaded_ = new QCheckBox(tr("Shaded"), profileBlock_);
         shaded_->setObjectName(QStringLiteral("tubeShaded"));
         shaded_->setToolTip(tr("Draw the Tube brush's tubes as shaded surfaces"));
@@ -244,12 +264,28 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         always_ = new QCheckBox(tr("Always visible"), profileBlock_);
         always_->setObjectName(QStringLiteral("tubesAlwaysVisible"));
         always_->setToolTip(tr("Keep the tubes drawn whichever tool is up (Comb, Select, ...), not only the Tube tool"));
+        // As pills (the Simple layout's Chip, as the popup's other display toggles), each mirroring
+        // its box (the boxes carry the settings, hidden).
+        FlowLayout* pills = nullptr;
+        QWidget* pillsRow = pillRow(display_, &pills);
+        pillsRow->setObjectName(QStringLiteral("tubeDisplayPills"));
         for (QCheckBox* box : {shaded_, wireframe_, colors_, levelColors_, always_}) {
             connect(box, &QCheckBox::toggled, this, [this] { emit displayChanged(); });
-            profileBlock_->rows()->addWidget(switchRow(profileBlock_, box));
+            box->hide();
+            QToolButton* pill = makePill(box->text(), box->toolTip(), pillsRow);
+            pill->setObjectName(box->objectName() + QStringLiteral("Pill"));
+            pill->setChecked(box->isChecked());
+            connect(pill, &QToolButton::toggled, box, [box](bool on) {
+                if (box->isChecked() != on) box->setChecked(on);
+            });
+            connect(box, &QCheckBox::toggled, pill, [pill](bool on) {
+                const QSignalBlocker block(pill);
+                pill->setChecked(on);
+            });
+            pills->addWidget(pill);
         }
-        // Root, Mid and Tip (Maya's rows): a button choosing what the editor shows, the picker
-        // and Apply (the shape and its Length to every target) in one field row, its Length under it.
+        displayRows->addWidget(pillsRow);
+        display_->hide();  // (until the Groom Tools take it: displayBlock)
         mid_ = new QComboBox(this);
         mid_->setObjectName(QStringLiteral("tubeMidShape"));
         mid_->setToolTip(tr("The tube's profile at its middle: picked, it goes to the targeted guides (Between: halfway from the "
@@ -269,46 +305,68 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
             const QVariant v = tip_->currentData();
             if (v.toString() != QStringLiteral("*")) pickProfile(2, v.toString().toStdString());
         });
+        // Root, Mid, Tip: tiles with their outline (refreshTiles), one at a time in the editor.
+        auto* tiles = new QHBoxLayout();
+        tiles->setContentsMargins(0, 0, 0, 0);
+        tiles->setSpacing(4);
+        profileBlock_->rows()->addLayout(tiles);
+        // The editor (132 px square) and beside it the picked profile's page.
+        auto* body = new QHBoxLayout();
+        body->setContentsMargins(0, 0, 0, 0);
+        body->setSpacing(8);
+        editor_ = new TubeShapeEditor(profileBlock_);
+        editor_->setFixedSize(132, 132);
+        connect(editor_, &TubeShapeEditor::dragged, this, [this](const std::vector<SectionPoint>&) {
+            if (!previewTimer_->isActive()) previewTimer_->start();
+        });
+        connect(editor_, &TubeShapeEditor::committed, this, [this](const std::vector<SectionPoint>& points) { shapeCommitted(points); });
+        body->addWidget(editor_, 0, Qt::AlignTop);
+        auto* side = new QVBoxLayout();
+        side->setContentsMargins(0, 0, 0, 0);
+        side->setSpacing(4);
+        body->addLayout(side, 1);
+        profileBlock_->rows()->addLayout(body);
         static const char* const kLabels[3] = {"Root", "Mid", "Tip"};
         static const char* const kApplyNames[3] = {"tubeShapeApply", "tubeMidShapeApply", "tubeTipShapeApply"};
         static const char* const kHoldNames[3] = {"tubeRootLength", "tubeMidLength", "tubeTipLength"};
         for (int k = 0; k < 3; ++k) {
-            auto* pickBox = new QFrame(profileBlock_);
-            pickBox->setProperty("role", "propField");
-            pickBox->setMinimumHeight(theme::rowHeight());
-            auto* line = new QHBoxLayout(pickBox);
-            line->setContentsMargins(4, 0, 2, 0);
-            line->setSpacing(4);
-            QToolButton* which = makeChip(tr(kLabels[k]), tr("Show this profile in the editor (a library shape there is edited for "
-                                                             "every guide taking it)"),
+            QToolButton* which = makePill(tr(kLabels[k]),
+                                          tr("Show the %1 profile's shape in the editor (a library shape there is edited for every "
+                                             "guide taking it)")
+                                              .arg(tr(kLabels[k]).toLower()),
                                           profileBlock_);
             which->setObjectName(QStringLiteral("tubeProfile") + QLatin1String(kLabels[k]));
+            which->setProperty("tile", true);
             which->setAutoExclusive(true);
-            which->setFixedWidth(44);  // (the three pickers start at one edge)
+            which->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+            which->setIconSize(QSize(22, 22));
+            which->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+            which->setFixedHeight(48);
             which->setChecked(k == 0);
             connect(which, &QToolButton::clicked, this, [this, k] { setActiveProfile(k); });
             profileButtons_[static_cast<std::size_t>(k)] = which;
-            line->addWidget(which);
-            if (k == 0) {
-                editPicker_ = line;  // (setMode puts the root's picker here, before Apply)
-            } else {
-                line->addWidget(k == 1 ? mid_ : tip_, 1);
-            }
-            QPushButton* apply = new QPushButton(tr("Apply"), profileBlock_);
+            tiles->addWidget(which, 1);
+            auto* page = new QWidget(profileBlock_);
+            page->setObjectName(QStringLiteral("tubeProfilePage") + QLatin1String(kLabels[k]));
+            auto* pageColumn = new QVBoxLayout(page);
+            pageColumn->setContentsMargins(0, 0, 0, 0);
+            pageColumn->setSpacing(4);
+            if (k == 0) editPicker_ = pageColumn;  // (setMode puts the root's picker here, over Apply)
+            else pageColumn->addWidget(k == 1 ? mid_ : tip_);
+            QPushButton* apply = new QPushButton(tr("Apply"), page);
             apply->setObjectName(QLatin1String(kApplyNames[k]));
-            apply->setToolTip(tr("Give the selected guides this %1 profile and its Length").arg(tr(kLabels[k]).toLower()));
+            apply->setToolTip(tr("Give the selected guides this %1 profile and its Hold").arg(tr(kLabels[k]).toLower()));
             connect(apply, &QPushButton::clicked, this, [this, k] { applyProfile(k); });
-            line->addWidget(apply);
+            pageColumn->addWidget(apply);
             profileApply_[static_cast<std::size_t>(k)] = apply;
             if (k == 0) apply_ = apply;
-            profileBlock_->rows()->addWidget(pickBox);
-            ValueSlider* hold = new ValueSlider(this);
+            ValueSlider* hold = new ValueSlider(page);
             hold->setObjectName(QLatin1String(kHoldNames[k]));
             hold->setRange(0.0, 100.0);
             hold->setLimits(0.0, 100.0);
             hold->setDecimals(0);
             hold->setFill(theme::sliderFill(theme::blue()));
-            hold->setCaption(tr("Length"));
+            hold->setCaption(tr("Hold"));
             hold->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral("%"); });
             hold->setToolTip(tr("How much of the tube is exactly the %1 profile's shape (%2); 0%: only at its own point. Between "
                                 "these stretches the shape changes smoothly")
@@ -330,47 +388,56 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                 setHold(k, v);
             });
             holds_[static_cast<std::size_t>(k)] = hold;
-            profileBlock_->rows()->addWidget(hold);
+            pageColumn->addWidget(hold);
+            page->setVisible(k == 0);
+            profilePages_[static_cast<std::size_t>(k)] = page;
+            side->addWidget(page);
         }
-        // The editor: the chosen shape's outline (at most 200 px square), and the library's edits.
-        editor_ = new TubeShapeEditor(profileBlock_);
-        editor_->setMaximumWidth(200);
-        connect(editor_, &TubeShapeEditor::dragged, this, [this](const std::vector<SectionPoint>&) {
-            if (!previewTimer_->isActive()) previewTimer_->start();
-        });
-        connect(editor_, &TubeShapeEditor::committed, this, [this](const std::vector<SectionPoint>& points) { shapeCommitted(points); });
-        profileBlock_->rows()->addWidget(editor_, 0, Qt::AlignHCenter);
-        // Under the drawing, never over it.
-        builtinNote_ = new QLabel(tr("Built-in shape: Duplicate to edit"), profileBlock_);
-        builtinNote_->setProperty("role", "hint");
-        builtinNote_->setAlignment(Qt::AlignHCenter);
-        builtinNote_->hide();
-        profileBlock_->rows()->addWidget(builtinNote_);
-        // The outline's options: a library shape's (a built-in is read-only).
-        shapeOptions_ = new QWidget(profileBlock_);
+        // The outline's options: a library shape's (a built-in is read-only), as pills.
+        FlowLayout* optionPills = nullptr;
+        shapeOptions_ = pillRow(profileBlock_, &optionPills);
         shapeOptions_->setObjectName(QStringLiteral("tubeShapeOptions"));
-        auto* options = new QHBoxLayout(shapeOptions_);
-        options->setContentsMargins(0, 0, 0, 0);
-        options->setSpacing(4);
-        mirror_ = makeChip(tr("Mirror"),
+        mirror_ = makePill(tr("Mirror"),
                            tr("Keep the outline's left and right sides alike (about the up axis): a point and its mirror image move, come "
                               "and go together"),
-                           profileBlock_);
+                           shapeOptions_);
         mirror_->setObjectName(QStringLiteral("tubeShapeMirror"));
         mirror_->setChecked(true);
         connect(mirror_, &QToolButton::toggled, this, [this](bool on) {
             if (!updating_) setMirror(on);
         });
-        shapeSmooth_ = makeChip(tr("Smooth"), tr("A smooth curve through the points; off: straight edges and sharp corners"), profileBlock_);
+        shapeSmooth_ = makePill(tr("Smooth"), tr("A smooth curve through the points; off: straight edges and sharp corners"), shapeOptions_);
         shapeSmooth_->setObjectName(QStringLiteral("tubeShapeSmooth"));
         shapeSmooth_->setChecked(true);
         connect(shapeSmooth_, &QToolButton::toggled, this, [this](bool on) {
             if (!updating_) setShapeSmooth(on);
         });
-        options->addWidget(mirror_);
-        options->addWidget(shapeSmooth_);
-        options->addStretch(1);
-        profileBlock_->rows()->addWidget(shapeOptions_);
+        optionPills->addWidget(mirror_);
+        optionPills->addWidget(shapeSmooth_);
+        side->addWidget(shapeOptions_);
+        side->addStretch(1);
+        // What the targets keep (the core's tube targets and editTubes' note): root tubes their
+        // drawn root, split levels their own Mid and Tip.
+        profileNote_ = new QLabel(profileBlock_);
+        profileNote_->setObjectName(QStringLiteral("tubeProfileNote"));
+        profileNote_->setProperty("role", "hint");
+        profileNote_->setWordWrap(true);
+        profileNote_->hide();
+        profileBlock_->rows()->addWidget(profileNote_);
+        // A hint, and the library's ⋯ (Rename..., New Shape, Duplicate, Delete Shape in red).
+        auto* foot = new QHBoxLayout();
+        foot->setContentsMargins(0, 0, 0, 0);
+        foot->setSpacing(4);
+        shapeHint_ = new QLabel(profileBlock_);
+        shapeHint_->setObjectName(QStringLiteral("tubeShapeHint"));
+        shapeHint_->setProperty("role", "hint");
+        shapeHint_->setWordWrap(true);
+        foot->addWidget(shapeHint_, 1);
+        libraryMenu_ = rowMenuButton(tr("The shape library: rename, new, duplicate, delete"), [this](QMenu* menu) { fillLibraryMenu(menu); },
+                                     nullptr, profileBlock_);
+        libraryMenu_->setObjectName(QStringLiteral("tubeShapeLibrary"));
+        foot->addWidget(libraryMenu_, 0, Qt::AlignTop);
+        profileBlock_->rows()->addLayout(foot);
         renameField_ = new QLineEdit(profileBlock_);
         renameField_->setObjectName(QStringLiteral("tubeShapeName"));
         renameField_->setPlaceholderText(tr("New name, then Enter (Esc: keep it)"));
@@ -379,11 +446,13 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         renameField_->hide();
         profileBlock_->rows()->addWidget(renameField_);
     }
-    // ---- Tube roots and Tube hierarchy (Edit: the Tube tool), over the profile.
+    // ---- Tube roots (Roots: the Roots brush; untitled, the card's header names it) and the tube
+    // hierarchy (the Tube and Roots brushes).
     rootsBlock_ = new CardBlock(tr("Tube roots"), this);
     rootsBlock_->setObjectName(QStringLiteral("rootTubes"));
-    rootsBlock_->titleLabel()->setToolTip(tr("Tubes drawn root first: click the root's outline on the scalp, one CV at a time, "
-                                             "and close it on its first CV. Each tube is its own region."));
+    rootsBlock_->titleLabel()->hide();
+    rootsBlock_->setToolTip(tr("Tubes drawn root first: click the root's outline on the scalp, one CV at a time, and close it on "
+                               "its first CV. Each tube is its own region."));
     {
         auto button = [this](const QString& text, const char* name, const QString& tip, bool checkable, void (TubePanel::*run)()) {
             QAbstractButton* b = nullptr;
@@ -401,7 +470,7 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         };
         drawRoot_ = button(tr("Draw root"), "rootTubeDraw",
                            tr("Click the root's outline on the scalp, one CV at a time (drag to move the CV); click the first CV to "
-                              "close it. Near a neighbouring root a CV snaps onto it, sealing the tubes. Again: leave"),
+                              "close it. Near a neighbouring root a CV snaps onto it, sealing the tubes. Again: the outline dropped"),
                            true, &TubePanel::drawRoot);
         editRoots_ = button(tr("Edit roots"), "rootTubeEdit",
                             tr("Show the root tubes' outlines with their CVs, the guides hidden; drag CVs on the scalp (Ctrl+click an "
@@ -409,7 +478,7 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                             true, &TubePanel::editRoots);
         selectRoot_ = button(tr("Select root"), "rootTubeSelect",
                              tr("Show every root's middle: click one to select its root (Shift: several), drag it to move the root "
-                                "over the scalp. Again: leave"),
+                                "over the scalp. Again: back to Draw root"),
                              true, &TubePanel::selectRoot);
         undoCv_ = button(tr("Undo CV"), "rootTubeUndoCv", tr("Take back the last CV (or the drawn path); in Edit roots, the last CV move"),
                          false, &TubePanel::undoCv);
@@ -428,9 +497,17 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                                tr("Paint subdivision density: the density map on the scalp (Subdivide makes it): white, more and "
                                   "smaller roots; black, fewer and larger. Again, or another tool, stops painting; Apply cuts by it"),
                                true, &TubePanel::paintDensity);
-        paintDensity_->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/groomLab_paint.svg"), theme::textMuted(), 22,
-                                                paintDensity_->devicePixelRatioF())));
-        paintDensity_->setIconSize(QSize(22, 22));
+        {
+            // (Greyed, not gone, without a density map yet: Qt's own disabled tint all but hides it.)
+            const QString brush = QStringLiteral(":/groomlab/icons/groomLab_paint.svg");
+            const qreal dpr = paintDensity_->devicePixelRatioF();
+            // (The Paint tile's two-tone artwork, both tones the dim text.)
+            const QPixmap art = duotoneIcon(brush, theme::textDim(), theme::textDim(), 18, dpr);
+            QIcon icon(art);
+            icon.addPixmap(duotoneIcon(brush, theme::textMuted(), theme::textMuted(), 18, dpr), QIcon::Disabled);
+            paintDensity_->setIcon(icon);
+        }
+        paintDensity_->setIconSize(QSize(18, 18));
         applyDensity_ = button(tr("Apply"), "rootTubeApplyDensity",
                                tr("Cut the subdivided roots again all over, by the density map and the multiplier as they are now (the "
                                   "cells' grooming and tube hierarchy kept)"),
@@ -438,47 +515,65 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         multiplier_ = committingSlider(0.25, 4.0, 0.05, 20.0, 2, &TubePanel::setMultiplier);
         multiplier_->setObjectName(QStringLiteral("rootSubdivisionMultiplier"));
         multiplier_->setCaption(tr("Multiplier"));
+        multiplier_->setValueWidth(22);  // (a narrow field: its name whole)
         multiplier_->setValue(1.0);
         multiplier_->setToolTip(tr("Subdivision multiplier: how dense the cuts are overall, with the painted density: 1 as painted, "
                                    "2 about twice the roots (each smaller), 0.5 half. Apply cuts again at it"));
-        // Rows of chips that wrap on a narrow card (the modes; Undo CV, Delete, Duplicate; Subdivide
-        // and Paint subdivision density).
+        // Three to a row, sharing it however narrow the card (Maya's): the modes; Undo CV, Delete,
+        // Duplicate.
         for (const std::vector<QAbstractButton*>& row : {std::vector<QAbstractButton*>{drawRoot_, editRoots_, selectRoot_},
                                                          std::vector<QAbstractButton*>{undoCv_, deleteRoots_, duplicateRoots_}}) {
-            FlowLayout* flow = nullptr;
-            QWidget* line = chipRow(rootsBlock_, &flow);
-            for (QAbstractButton* b : row) flow->addWidget(b);
+            auto* line = new QWidget(rootsBlock_);
+            auto* lineLayout = new QHBoxLayout(line);
+            lineLayout->setContentsMargins(0, 0, 0, 0);
+            lineLayout->setSpacing(4);
+            for (QAbstractButton* b : row) {
+                b->setSizePolicy(QSizePolicy::Ignored, b->sizePolicy().verticalPolicy());
+                b->setMinimumWidth(40);
+                lineLayout->addWidget(b, 1);
+            }
             rootsBlock_->rows()->addWidget(line);
         }
-        // Subdivide | the paint brush | Multiplier | Apply: one row however narrow the card.
+        // Subdivide | the paint brush | Multiplier | Apply: one row however narrow the card,
+        // Subdivide and Apply their names' width, the brush a square, Multiplier the rest.
         auto* cutRow = new QWidget(rootsBlock_);
         auto* cutLayout = new QHBoxLayout(cutRow);
         cutLayout->setContentsMargins(0, 0, 0, 0);
         cutLayout->setSpacing(4);
-        for (const auto& [w, stretch] : {std::pair<QWidget*, int>{subdivideRoots_, 2}, std::pair<QWidget*, int>{paintDensity_, 0},
-                                         std::pair<QWidget*, int>{multiplier_, 3}, std::pair<QWidget*, int>{applyDensity_, 2}}) {
-            if (stretch) {
-                w->setSizePolicy(QSizePolicy::Ignored, w->sizePolicy().verticalPolicy());
-                w->setMinimumWidth(40);
-            } else {
-                w->setSizePolicy(QSizePolicy::Fixed, w->sizePolicy().verticalPolicy());
-                w->setFixedWidth(34);
-            }
-            cutLayout->addWidget(w, stretch);
+        for (QAbstractButton* b : {subdivideRoots_, applyDensity_}) {
+            b->setSizePolicy(QSizePolicy::Fixed, b->sizePolicy().verticalPolicy());
+            b->setFixedWidth(QFontMetrics(theme::uiFont(theme::fontSize())).horizontalAdvance(b->text()) + 26);  // (the style sheet's font and padding)
         }
+        paintDensity_->setSizePolicy(QSizePolicy::Fixed, paintDensity_->sizePolicy().verticalPolicy());
+        paintDensity_->setFixedWidth(28);
+        if (auto* tool = qobject_cast<QToolButton*>(paintDensity_)) tool->setToolButtonStyle(Qt::ToolButtonIconOnly);  // (a chip: text only)
+        multiplier_->setSizePolicy(QSizePolicy::Ignored, multiplier_->sizePolicy().verticalPolicy());
+        multiplier_->setMinimumWidth(40);
+        cutLayout->addWidget(subdivideRoots_);
+        cutLayout->addWidget(paintDensity_);
+        cutLayout->addWidget(multiplier_, 1);
+        cutLayout->addWidget(applyDensity_);
         rootsBlock_->rows()->addWidget(cutRow);
-        rootSnap_ = new QCheckBox(tr("Snap to neighbours"), rootsBlock_);
+        // Snap and Draw guide: pills (the mock's), as the brushes' toggles.
+        FlowLayout* rootPills = nullptr;
+        QWidget* rootPillRow = pillRow(rootsBlock_, &rootPills);
+        rootPillRow->setObjectName(QStringLiteral("rootTubePills"));
+        rootSnap_ = makePill(tr("Snap to neighbours"), tr("A CV near a neighbouring root's CV or edge snaps onto it, so the tubes meet "
+                                                         "with no gap"),
+                             rootPillRow);
         rootSnap_->setObjectName(QStringLiteral("rootTubeSnap"));
-        rootSnap_->setToolTip(tr("A CV near a neighbouring root's CV or edge snaps onto it, so the tubes meet with no gap"));
         rootSnap_->setChecked(true);
-        connect(rootSnap_, &QCheckBox::toggled, this, &TubePanel::setRootSnap);
-        rootDrawPath_ = new QCheckBox(tr("Draw guide before extrude"), rootsBlock_);
+        connect(rootSnap_, &QToolButton::toggled, this, &TubePanel::setRootSnap);
+        rootDrawPath_ = makePill(tr("Draw guide"), tr("Draw guide before extrude: once the outline closes, drag from its middle out to "
+                                                      "draw the tube's guide. Off: the tube goes straight off the scalp, Length long, in "
+                                                      "Segments"),
+                                 rootPillRow);
         rootDrawPath_->setObjectName(QStringLiteral("rootTubeDrawFirst"));
-        rootDrawPath_->setToolTip(tr("Once the outline closes, drag from its middle out to draw the tube's guide. Off: the tube goes "
-                                     "straight off the scalp, Length long, in Segments"));
         rootDrawPath_->setChecked(true);
-        connect(rootDrawPath_, &QCheckBox::toggled, this, &TubePanel::setRootDrawPath);
-        for (QCheckBox* box : {rootSnap_, rootDrawPath_}) rootsBlock_->rows()->addWidget(switchRow(rootsBlock_, box));
+        connect(rootDrawPath_, &QToolButton::toggled, this, &TubePanel::setRootDrawPath);
+        rootPills->addWidget(rootSnap_);
+        rootPills->addWidget(rootDrawPath_);
+        rootsBlock_->rows()->addWidget(rootPillRow);
         rootDensity_ = committingSlider(0.25, 4.0, 0.05, 20.0, 2, &TubePanel::setRootDensity);
         rootDensity_->setObjectName(QStringLiteral("rootTubeDensity"));
         rootDensity_->setCaption(tr("Point density"));
@@ -503,10 +598,14 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         setRootDrawPath(rootDrawPath_->isChecked());  // (Point density, or Length and Segments)
     }
     column->addWidget(rootsBlock_);
+    // The tube hierarchy: one untitled row under the card's header (Level 1 2 ... + - ⋯; Lock
+    // view, Mixed view and Colors per level in the ⋯ menu), the Tube and Roots brushes' both.
     levelsBlock_ = new CardBlock(tr("Tube hierarchy"), this);
     levelsBlock_->setObjectName(QStringLiteral("tubeHierarchy"));
-    levelsBlock_->titleLabel()->setToolTip(tr("Tube levels: each level splits the tubes above it in two. Shaping a tube carries the "
-                                              "smaller tubes inside it; pick a level to edit its tubes"));
+    levelsBlock_->titleLabel()->hide();
+    const QString levelsTip = tr("Tube levels: each level splits the tubes above it in two. Shaping a tube carries the smaller tubes "
+                                 "inside it; pick a level to edit its tubes");
+    levelsBlock_->setToolTip(levelsTip);
     {
         addLevel_ = new QPushButton(QStringLiteral("+"), levelsBlock_);
         addLevel_->setObjectName(QStringLiteral("tubeLevelAdd"));
@@ -524,25 +623,36 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
             b->setFont(font);
             b->setFixedWidth(30);
         }
-        levelBaseLabel_ = new QLabel(levelsBlock_);
-        levelBaseLabel_->setObjectName(QStringLiteral("tubeLevelBase"));
-        levelBaseLabel_->setProperty("role", "hint");
-        levelsBlock_->rows()->addWidget(levelBaseLabel_);
-        // One row: the level buttons on the left (fillLevels fills them), + and - on the right;
-        // levels reaching + and - push them down to a row of their own.
+        // One row: "Level" and the level buttons on the left (fillLevels fills them), + - ⋯ on the
+        // right; levels reaching them push them down to a row of their own.
         levelLine_ = new QWidget(levelsBlock_);
-        auto* levels = new QWidget(levelLine_);
+        auto* lead = new QWidget(levelLine_);
+        auto* leadRow = new QHBoxLayout(lead);
+        leadRow->setContentsMargins(0, 0, 0, 0);
+        leadRow->setSpacing(6);
+        levelLabel_ = new QLabel(tr("Level"), lead);
+        levelLabel_->setObjectName(QStringLiteral("tubeLevelLabel"));
+        levelLabel_->setProperty("role", "hint");
+        levelLabel_->setToolTip(levelsTip);
+        leadRow->addWidget(levelLabel_);
+        auto* levels = new QWidget(lead);
         levelRow_ = new QHBoxLayout(levels);
         levelRow_->setContentsMargins(0, 0, 0, 0);
         levelRow_->setSpacing(4);
+        leadRow->addWidget(levels);
         auto* edits = new QWidget(levelLine_);
         auto* editRow = new QHBoxLayout(edits);
         editRow->setContentsMargins(0, 0, 0, 0);
         editRow->setSpacing(4);
         editRow->addWidget(addLevel_);
         editRow->addWidget(removeLevel_);
-        new LeadTrailLayout(levels, edits, levelLine_);
+        levelMenu_ = rowMenuButton(tr("Level view: Lock view, Mixed view, colors per level"), [this](QMenu* menu) { fillLevelMenu(menu); },
+                                   nullptr, edits);
+        levelMenu_->setObjectName(QStringLiteral("tubeLevelView"));
+        editRow->addWidget(levelMenu_);
+        new LeadTrailLayout(lead, edits, levelLine_);
         levelsBlock_->rows()->addWidget(levelLine_);
+        // Lock view and Mixed view: the ⋯ menu's (the boxes carry them, not shown).
         lockView_ = new QCheckBox(tr("Lock view"), levelsBlock_);
         lockView_->setObjectName(QStringLiteral("tubeLockView"));
         lockView_->setToolTip(tr("Keep the tubes of the level shown now in view while you pick other levels to work on, whose "
@@ -557,13 +667,15 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                                   "continues them, and their roots in Select root and Edit roots"));
         mixedView_->setChecked(true);
         connect(mixedView_, &QCheckBox::toggled, this, [this] { applyTubeViews(); });
-        for (QCheckBox* box : {lockView_, mixedView_}) levelsBlock_->rows()->addWidget(switchRow(levelsBlock_, box));
+        lockView_->hide();
+        mixedView_->hide();
     }
-    column->addWidget(levelsBlock_);
+    column->insertWidget(column->indexOf(rootsBlock_), levelsBlock_);
     column->addWidget(profileBlock_);
 
-    // ---- Edit: the selected guides' sections; Smooth evens out what the brush painted.
-    selectedBlock_ = new CardBlock(tr("Selected guides"), this);
+    // ---- Edit: the selected tubes' sections (folded: "Selected tubes · N"); Smooth evens out what
+    // the brush painted.
+    selectedBlock_ = new CardBlock(tr("Selected tubes"), this);
     selectedBlock_->setObjectName(QStringLiteral("selectedGuidesBlock"));
     {
         smooth_ = new QToolButton(selectedBlock_);
@@ -596,6 +708,7 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         editFields_ = new QVBoxLayout();
         editFields_->setContentsMargins(0, 0, 0, 0);
         selectedBlock_->rows()->addLayout(editFields_);
+        selectedBlock_->setFoldable(true);  // (folded, as the mock: "Selected tubes · 12")
     }
     column->addWidget(selectedBlock_);
 
@@ -616,12 +729,12 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
 }
 
 void TubePanel::setMode(Mode mode) {
-    const bool edit = mode == Mode::Edit;
-    if (mode != mode_ || placed_) {
+    const bool edit = mode != Mode::New;
+    if (edit != (mode_ != Mode::New) || placed_) {
         placed_ = false;
         // The picker and the fields move to the mode's block.
         if (edit) {
-            editPicker_->insertWidget(1, shape_, 1);  // (after its Root button)
+            editPicker_->insertWidget(0, shape_);  // (the Root page's, over Apply)
             editFields_->addWidget(fields_);
         } else {
             newPicker_->insertWidget(0, shape_);
@@ -631,11 +744,13 @@ void TubePanel::setMode(Mode mode) {
         fields_->show();
     }
     mode_ = mode;
-    tubeBlock_->setVisible(!edit);
-    profileBlock_->setVisible(edit);
-    selectedBlock_->setVisible(edit);
-    rootsBlock_->setVisible(edit);
-    levelsBlock_->setVisible(edit);
+    // New: the Tube block; Edit (the Tube brush): Profile and Selected tubes; Roots (the Roots
+    // brush): the root block; the levels' row with both brushes.
+    tubeBlock_->setVisible(mode == Mode::New);
+    profileBlock_->setVisible(mode == Mode::Edit);
+    selectedBlock_->setVisible(mode == Mode::Edit);
+    rootsBlock_->setVisible(mode == Mode::Roots);
+    levelsBlock_->setVisible(mode != Mode::New);
     refreshTips();
 }
 
@@ -685,26 +800,32 @@ bool TubePanel::rootsDone(bool ok) {
     return ok;
 }
 
-void TubePanel::drawRoot() {
-    if (session_ && session_->rootMode() && (session_->roots().mode() == RootTubeTool::Mode::Place ||
-                                             session_->roots().mode() == RootTubeTool::Mode::Draw)) {
-        session_->leaveRoots();  // again: the outline being drawn dropped, the mode left
-        rootsDone(true);
-        return;
+void TubePanel::startRootMode(RootTubeTool::Mode mode) {
+    if (mode == RootTubeTool::Mode::Place || mode == RootTubeTool::Mode::Draw) {
+        // A deeper level picked: level 1 shown and picked instead (a new root tube is a level 1 guide).
+        fillLevels();
+        if (levels_.size() > 1 && shownLevel_ > 1) showLevel(1);
+        mode = RootTubeTool::Mode::Place;
     }
-    // A deeper level picked: level 1 shown and picked instead (a new root tube is a level 1 guide).
-    fillLevels();
-    if (levels_.size() > 1 && shownLevel_ > 1) showLevel(1);
-    startRoots(RootTubeTool::Mode::Place);
+    startRoots(mode);
+}
+
+void TubePanel::drawRoot() {
+    // Again (Draw root on): the outline being drawn dropped, Draw root again (the core's start
+    // leaves the one running first).
+    startRootMode(RootTubeTool::Mode::Place);
 }
 
 void TubePanel::editRoots() {
     if (session_ && session_->rootMode() && session_->roots().mode() == RootTubeTool::Mode::Edit) {
-        // Finish edit: the edits given to the roots (one undo step), the mode left.
+        // Finish edit: the edits given to the roots (one undo step), Draw root again.
         const bool ok = session_->editRoots("roots", [](RootTubeTool& t, StrokeHost& h) { t.finishEdit(h); });
-        if (ok) session_->leaveRoots();
-        rootsDone(ok);
         emit guidesEdited();
+        if (!ok) {
+            rootsDone(false);
+            return;
+        }
+        startRootMode(RootTubeTool::Mode::Place);
         return;
     }
     startRoots(RootTubeTool::Mode::Edit);
@@ -713,8 +834,7 @@ void TubePanel::editRoots() {
 void TubePanel::selectRoot() {
     if (session_ && session_->rootMode() && (session_->roots().mode() == RootTubeTool::Mode::Select ||
                                              session_->roots().mode() == RootTubeTool::Mode::Duplicate)) {
-        session_->leaveRoots();
-        rootsDone(true);
+        startRootMode(RootTubeTool::Mode::Place);  // again: back to Draw root
         return;
     }
     startRoots(RootTubeTool::Mode::Select);
@@ -887,7 +1007,9 @@ void TubePanel::refreshRoots() {
     const bool on = session_ && session_->rootMode();
     const RootTubeTool::Mode mode = on ? session_->roots().mode() : RootTubeTool::Mode::Place;
     if (session_) session_->refreshRoots();
-    const bool placing = on && (mode == RootTubeTool::Mode::Place || mode == RootTubeTool::Mode::Draw);
+    // (The Roots brush picked with its root tool put away: its next click draws a root.)
+    const bool waiting = session_ && !on && session_->settings().tool == BrushToolSettings::Tool::Roots;
+    const bool placing = waiting || (on && (mode == RootTubeTool::Mode::Place || mode == RootTubeTool::Mode::Draw));
     const bool editing = on && mode == RootTubeTool::Mode::Edit;
     const bool selecting = on && (mode == RootTubeTool::Mode::Select || mode == RootTubeTool::Mode::Duplicate);
     const bool picked = selecting && !session_->roots().selected().empty();
@@ -932,7 +1054,8 @@ void TubePanel::fillLevels() {
     const std::string picked = session_ ? session_->settings().brush.group : std::string();
     const auto at = std::find(info.levels.begin(), info.levels.end(), picked);
     shownLevel_ = at != info.levels.end() ? static_cast<int>(at - info.levels.begin()) + 1 : 1;
-    levelBaseLabel_->setText(levelBase_.empty() ? tr("No guides yet.") : tr("Base: %1").arg(QString::fromStdString(levelBase_)));
+    levelLabel_->setToolTip(levelsBlock_->toolTip() + QStringLiteral("\n\n") +
+                            (levelBase_.empty() ? tr("No guides yet.") : tr("Base: %1").arg(QString::fromStdString(levelBase_))));
     addLevel_->setEnabled(!levelBase_.empty() && info.levels.size() < static_cast<std::size_t>(kMaxTubeLevels));
     removeLevel_->setEnabled(info.levels.size() > 1);
     const std::size_t count = std::max<std::size_t>(info.levels.size(), 1);
@@ -946,7 +1069,7 @@ void TubePanel::fillLevels() {
                                       tr("Level %1%2: show its tubes and edit them").arg(k + 1).arg(k == 0 ? tr(" (the base)") : QString()),
                                       levelsBlock_);
             b->setObjectName(QStringLiteral("tubeLevel%1").arg(k + 1));
-            b->setFixedWidth(30);
+            b->setFixedWidth(26);
             const int level = static_cast<int>(k + 1);
             connect(b, &QToolButton::clicked, this, [this, level] { showLevel(level); });
             levelRow_->addWidget(b);
@@ -1095,12 +1218,21 @@ void TubePanel::refresh(bool force) {
     GroomDocument* doc = document();
     GroomDocument::TubeTargets info;
     library_.clear();
+    owned_.clear();
     if (doc) {
         info = doc->tubeTargets();
         for (const GroomDocument::TubeShapeInfo& s : doc->tubeShapes()) {
             if (!s.builtin) library_.push_back({s.name, s.points, s.smooth, s.users});
         }
+        // The targets' drawn roots (root tubes: no picker lists them; "Drawn root").
+        for (const std::string& name : info.shapes) {
+            if (const std::optional<GroomDocument::TubeShapeInfo> s = doc->ownedTubeShape(name)) {
+                owned_.push_back({s->name, s->points, s->smooth, s->users});
+            }
+        }
     }
+    rootTargets_ = info.rootTubes;
+    splitTargets_ = info.splitTubes;
     targets_ = info.guides;
     source_ = info.source;
     shapes_ = info.shapes;
@@ -1114,7 +1246,10 @@ void TubePanel::refresh(bool force) {
     for (QPushButton* b : profileApply_) {
         if (b) b->setEnabled(info.tube.has_value());
     }
+    // Selected tubes · N (folded).
+    selectedBlock_->setHeading(targets_.empty() ? tr("Selected tubes") : tr("Selected tubes · %1").arg(targets_.size()));
     if (!info.tube) {
+        lastNote_.clear();
         targetsLabel_->setText(tr("No guides selected or soloed: the shape and values here go to the guides Place and Draw make. "
                                   "Select guides (Select tool), or Shift+click one with a brush, to set theirs."));
         targetsKey_.clear();
@@ -1136,6 +1271,7 @@ void TubePanel::refresh(bool force) {
         for (const std::string& s : mids_) key += "m" + s + ",";
         for (const std::string& s : tips_) key += "t" + s + ",";
         if (key != targetsKey_) {
+            lastNote_.clear();  // (other targets: the last edit's note was theirs)
             if (shapes_.size() == 1) choice_ = shapes_.front();
             if (mids_.size() == 1) midChoice_ = mids_.front();
             if (tips_.size() == 1) tipChoice_ = tips_.front();
@@ -1207,14 +1343,27 @@ void TubePanel::fillShapes() {
 void TubePanel::showChoice(bool mixed) {
     const std::vector<std::string> builtins = builtinNames();
     auto known = [&](const std::string& name) {
-        return library(name) || std::find(builtins.begin(), builtins.end(), name) != builtins.end();
+        return library(name) || owned(name) || std::find(builtins.begin(), builtins.end(), name) != builtins.end();
     };
     if (!known(choice_)) choice_ = "round";  // (a library shape gone: renamed, deleted, another groom)
     if (!midChoice_.empty() && !known(midChoice_)) midChoice_.clear();
     if (!tipChoice_.empty() && !known(tipChoice_)) tipChoice_.clear();
     {
+        // The root picker's "Drawn root" (first): there while the targets are root tubes, whose root
+        // is their own drawn outline (no library shape: the core's isOwnedTubeShape).
         const QSignalBlocker blocker(shape_);
-        shape_->setCurrentIndex(mixed && active_ == 0 ? 0 : std::max(0, shape_->findData(qs(choice_))));
+        const bool drawn = mode_ != Mode::New && !(mixed && active_ == 0) && owned(choice_) != nullptr;
+        const int at = shape_->findData(QString::fromLatin1(kDrawn));
+        if (drawn && at < 0) {
+            shape_->insertItem(0, tr("Drawn root"), QString::fromLatin1(kDrawn));
+            shape_->setItemData(0, tr("The root tube's own outline, drawn on the scalp: the Roots brush reshapes it; a Root profile "
+                                      "picked goes to the other guides"),
+                                Qt::ToolTipRole);
+        } else if (!drawn && at >= 0) {
+            shape_->removeItem(at);
+        }
+        if (drawn) shape_->setCurrentIndex(0);
+        else shape_->setCurrentIndex(mixed && active_ == 0 ? 0 : std::max(0, shape_->findData(qs(choice_))));
         if (mixed && active_ != 0) shape_->setCurrentIndex(shapes_.size() > 1 ? 0 : std::max(0, shape_->findData(qs(choice_))));
     }
     for (int k = 1; k < 3; ++k) {
@@ -1224,40 +1373,172 @@ void TubePanel::showChoice(bool mixed) {
         box->setCurrentIndex(differ ? 0 : std::max(0, box->findData(qs(k == 1 ? midChoice_ : tipChoice_))));
     }
     const std::string shown = activeChoice().empty() ? choice_ : activeChoice();  // (an unset mid or tip: the root's)
-    if (const LibraryShape* custom = activeChoice().empty() ? nullptr : library(shown)) {
+    const LibraryShape* custom = activeChoice().empty() ? nullptr : library(shown);
+    if (custom) {
         editor_->setShape(custom->points, custom->smooth, true);
-        builtinNote_->hide();
-        preview_->setShape(custom->points, custom->smooth, false);
         if (mirror_->isChecked() && editor_->setMirror(true)) {
             const std::vector<SectionPoint> made = editor_->points();
             shapeCommitted(made);  // made symmetric: saved so
             return;
         }
-    } else if (const LibraryShape* root = library(shown)) {  // an unset mid or tip: the root's library shape, read-only
-        editor_->setShape(root->points, root->smooth, false, QString());
-        builtinNote_->hide();
-        preview_->setShape(root->points, root->smooth, false);
+    } else if (const LibraryShape* source = library(shown) ? library(shown) : owned(shown)) {
+        // An unset mid or tip (the root's, read-only), or a root tube's drawn root (the Roots brush
+        // reshapes it).
+        const QString note = activeChoice().empty() ? (active_ == 1 ? tr("Between the root's and the tip's") : tr("The root's again"))
+                                                    : tr("Drawn root: the Roots brush reshapes it");
+        editor_->setShape(source->points, source->smooth, false, active_ == 0 && !owned(shown) ? QString() : note);
     } else {
         TubeShape shape = TubeShape::Round;
         parseTubeShape(shown, &shape);
         bool smooth = true;
         const std::vector<SectionPoint> points = builtinTubeShapePoints(shape, &smooth);
-        editor_->setShape(points, smooth, false, QString());
-        builtinNote_->setVisible(!activeChoice().empty());
-        preview_->setShape(points, smooth, false);
+        const QString note = activeChoice().empty() ? (active_ == 1 ? tr("Between the root's and the tip's") : tr("The root's again"))
+                                                    : tr("Built in: Duplicate it to edit a copy");
+        editor_->setShape(points, smooth, false, note);
+    }
+    {
+        // The Tube block's preview (Place, Draw): the placement shape.
+        TubeShape shape = TubeShape::Round;
+        bool smooth = true;
+        if (const LibraryShape* placed = library(choice_)) {
+            preview_->setShape(placed->points, placed->smooth, false);
+        } else {
+            parseTubeShape(choice_, &shape);
+            const std::vector<SectionPoint> points = builtinTubeShapePoints(shape, &smooth);
+            preview_->setShape(points, smooth, false);
+        }
     }
     updating_ = true;
     shapeSmooth_->setChecked(editor_->smooth());
     updating_ = false;
-    const bool custom = !activeChoice().empty() && library(activeChoice()) != nullptr;
     const bool hasGroom = document() != nullptr;
-    shapeOptions_->setVisible(custom);
+    shapeOptions_->setVisible(custom != nullptr);
+    shapeHint_->setText(custom ? tr("Drag a point to edit; ⋯ for the library") : tr("⋯: duplicate it to edit a copy, or a new shape"));
     new_->setEnabled(hasGroom);
     duplicate_->setEnabled(hasGroom);
-    for (QToolButton* b : {rename_, delete_}) b->setEnabled(custom);
+    for (QToolButton* b : {rename_, delete_}) b->setEnabled(custom != nullptr);
     for (QPushButton* b : profileApply_) {
         if (b) b->setEnabled(!targets_.empty());
     }
+    for (int k = 0; k < 3; ++k) {
+        if (QWidget* page = profilePages_[static_cast<std::size_t>(k)]) page->setVisible(k == active_);
+    }
+    refreshTiles();
+    showNotes();
+}
+
+const TubePanel::LibraryShape* TubePanel::owned(const std::string& name) const {
+    for (const LibraryShape& s : owned_) {
+        if (s.name == name) return &s;
+    }
+    return nullptr;
+}
+
+namespace {
+
+// A tube profile's outline as a small icon (the Root / Mid / Tip tiles, Maya's palette.shape_icon);
+// none: a dash.
+QIcon shapeIcon(const std::vector<SectionPoint>* points, int size, qreal dpr) {
+    QPixmap pixmap(QSize(size, size) * dpr);
+    pixmap.setDevicePixelRatio(dpr);
+    pixmap.fill(Qt::transparent);
+    QPainter p(&pixmap);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QPen pen(theme::text());
+    pen.setWidthF(size / 16.0);
+    p.setPen(pen);
+    if (!points || points->empty()) {
+        p.drawLine(QPointF(size * 0.35, size * 0.5), QPointF(size * 0.65, size * 0.5));
+    } else {
+        float reach = 0.0f;
+        for (const SectionPoint& q : *points) reach = std::max({reach, std::abs(q.u), std::abs(q.v)});
+        if (reach <= 0.0f) reach = 1.0f;
+        const double half = size * 0.42;
+        QPolygonF poly;
+        for (const SectionPoint& q : *points) poly << QPointF(size / 2.0 + q.u / reach * half, size / 2.0 - q.v / reach * half);
+        QColor fill = theme::accentInk();
+        fill.setAlpha(70);
+        p.setBrush(fill);
+        p.drawPolygon(poly);
+    }
+    p.end();
+    return QIcon(pixmap);
+}
+
+}  // namespace
+
+void TubePanel::refreshTiles() {
+    const std::array<const std::string*, 3> names = {&choice_, &midChoice_, &tipChoice_};
+    const std::array<bool, 3> differ = {shapes_.size() > 1 && !targets_.empty(), mids_.size() > 1 && !targets_.empty(),
+                                        tips_.size() > 1 && !targets_.empty()};
+    for (int k = 0; k < 3; ++k) {
+        QToolButton* tile = profileButtons_[static_cast<std::size_t>(k)];
+        if (!tile) continue;
+        {
+            const QSignalBlocker quiet(tile);
+            tile->setChecked(k == active_);
+        }
+        const std::string& name = *names[static_cast<std::size_t>(k)];
+        std::vector<SectionPoint> points;
+        bool has = false;
+        if (!name.empty() && !differ[static_cast<std::size_t>(k)]) {
+            if (const LibraryShape* s = library(name) ? library(name) : owned(name)) {
+                points = s->points;
+                has = true;
+            } else {
+                TubeShape shape = TubeShape::Round;
+                if (parseTubeShape(name, &shape)) {
+                    bool smooth = true;
+                    points = builtinTubeShapePoints(shape, &smooth);
+                    has = true;
+                }
+            }
+        }
+        tile->setIcon(shapeIcon(has ? &points : nullptr, 22, devicePixelRatioF()));
+    }
+}
+
+void TubePanel::showNotes() {
+    // What the targets keep: root tubes their drawn root (the last edit's note, else the core's
+    // words for the targets), split levels their own Mid and Tip.
+    QStringList notes;
+    if (!targets_.empty()) {
+        const std::string kept = !lastNote_.empty() ? lastNote_ : rootTargets_ ? rootTubesKeptNote(rootTargets_) : std::string();
+        if (!kept.empty()) notes << qs(kept) + (kept.back() == '.' ? QString() : QStringLiteral("."));
+        if (splitTargets_ > 0) notes << tr("Mid and tip don't carry into split levels.");
+    }
+    profileNote_->setText(notes.join(QLatin1Char(' ')));
+    profileNote_->setVisible(!notes.isEmpty());
+}
+
+void TubePanel::fillLevelMenu(QMenu* menu) {
+    // Lock view, Mixed view and Colors per level, checked as they stand.
+    const std::pair<QString, QCheckBox*> entries[] = {{tr("Lock view"), lockView_}, {tr("Mixed view"), mixedView_},
+                                                      {tr("Colors per level"), levelColors_}};
+    for (const auto& [text, box] : entries) {
+        QAction* a = menu->addAction(text);
+        a->setObjectName(box->objectName() + QStringLiteral("Action"));
+        a->setCheckable(true);
+        a->setChecked(box->isChecked());
+        a->setToolTip(box->toolTip());
+        connect(a, &QAction::toggled, box, &QCheckBox::setChecked);
+    }
+}
+
+void TubePanel::fillLibraryMenu(QMenu* menu) {
+    // Rename first, Delete Shape last in red (picking it is the confirmation), as the buttons stand.
+    const std::pair<QString, QToolButton*> entries[] = {{tr("Rename..."), rename_}, {tr("New Shape"), new_}, {tr("Duplicate"), duplicate_}};
+    for (const auto& [text, button] : entries) {
+        QAction* a = menu->addAction(text, button, &QToolButton::click);
+        a->setEnabled(button->isEnabled());
+        a->setToolTip(button->toolTip());
+    }
+    menu->addSeparator();
+    QAction* remove = ui::dangerAction(menu, tr("Delete Shape"), [this] {
+        armed_ = true;
+        deleteShape();
+    }, tr("Delete this shape from the library (its guides become round)"));
+    remove->setEnabled(delete_->isEnabled());
 }
 
 std::string TubePanel::placement() const {
@@ -1281,19 +1562,22 @@ void TubePanel::pushPlacement() {
     }
 }
 
-void TubePanel::edited(const std::string& error) {
+void TubePanel::edited(const std::string& error, const std::string& note) {
     emit message(qs(error));
+    if (error.empty()) lastNote_ = note;  // (what root tubes kept: the Profile block says it)
     refresh(true);
     if (error.empty()) emit guidesEdited();
 }
 
 void TubePanel::pick(const std::string& name) {
-    if (name.empty()) return;  // "Mixed": nothing to give
+    if (name.empty() || name == kDrawn) return;  // "Mixed", "Drawn root": nothing to give
     choice_ = name;
     if (active_ != 0) setActiveProfile(0);
     GroomDocument* doc = document();
     if (doc && !targets_.empty()) {
-        edited(doc->editTubes(targets_, json{{"shape", name}}));
+        std::string note;
+        const std::string error = doc->editTubes(targets_, json{{"shape", name}}, "set tube", &note);
+        edited(error, note);
     } else {
         showChoice();
     }
@@ -1313,9 +1597,14 @@ void TubePanel::applyProfile(int profile) {
     static const char* const kHold[3] = {"rootHold", "midHold", "tipHold"};
     json edit{{kHold[profile], holds_[static_cast<std::size_t>(profile)]->value() / 100.0}};
     const std::vector<std::string>& among = profile == 0 ? shapes_ : profile == 1 ? mids_ : tips_;
-    if (among.size() <= 1) edit[kShape[profile]] = profile == 0 ? choice_ : profile == 1 ? midChoice_ : tipChoice_;
+    const std::string& picked = profile == 0 ? choice_ : profile == 1 ? midChoice_ : tipChoice_;
+    if (among.size() <= 1 && !owned(picked)) edit[kShape[profile]] = picked;  // (a drawn root is its root tube's own)
     GroomDocument* doc = document();
-    if (doc && !targets_.empty()) edited(doc->editTubes(targets_, edit));
+    if (doc && !targets_.empty()) {
+        std::string note;
+        const std::string error = doc->editTubes(targets_, edit, "set tube", &note);
+        edited(error, note);
+    }
     if (profile == 0) pushPlacement();
 }
 

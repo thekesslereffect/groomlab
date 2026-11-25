@@ -626,7 +626,7 @@ std::vector<SectionPoint> toSection(const std::vector<P2>& pts) {
 Section fitShape(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id, const std::string& shape, const Pts& outline) {
     Footprint fp;
     const std::vector<P2> pts = shapePoints(rootFit(h, scalp, id, outline, &fp));
-    h.setTubeShape(shape, toSection(pts), false);
+    h.setOwnedTubeShape(shape, toSection(pts), false);
     Section s;
     if (!bestSection(pts, libraryPoints(h, shape), &s)) {
         throw std::runtime_error("the root outline's shape " + shape + " does not match its CVs");
@@ -1163,7 +1163,7 @@ GuideId duplicateRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id,
                 kidTube.tipShape = old->tube.tipShape;
                 if (old->tube.custom && isRootTube(old->tube, 0)) {  // a slice: its half, a shape of its own
                     const std::string name = newShapeName(h);
-                    h.setTubeShape(name, old->tube.custom->points, old->tube.custom->smooth);
+                    h.setOwnedTubeShape(name, old->tube.custom->points, old->tube.custom->smooth);
                     kidTube.custom = h.tubeShape(name);
                     kidTube.rollOnScalp = old->tube.rollOnScalp;
                 }
@@ -1739,7 +1739,7 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
         for (const P2& q : capPoints(unit)) fitted.push_back({static_cast<float>((q.x - cu) / su), static_cast<float>((q.y - cv) / sv)});
         name = newShapeName(h);
         try {
-            h.setTubeShape(name, fitted, false);
+            h.setOwnedTubeShape(name, fitted, false);
         } catch (const std::invalid_argument&) {
             return false;
         }

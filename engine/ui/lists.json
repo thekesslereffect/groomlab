@@ -4,13 +4,8 @@
   "lists": {
     "groups": {
       "about": "Place and Draw add to the group picked in this list (click a row); brushes edit it. Guides nodes in the graph read groups by name.",
-      "bar": [
-        {"id": "group.new", "label": "+ New Group"},
-        {"id": "group.rename", "glyph": "rename"},
-        {"id": "group.select", "glyph": "select"},
-        {"id": "group.delete", "glyph": "delete"}
-      ],
-      "context": ["group.new", "group.rename", "group.color", "group.defaultColor", "group.select", "group.resetSegments", "group.promoteDemote", {"id": "guides.paste", "label": "Paste Guides Here"}, "-", "group.delete"],
+      "bar": [{"id": "group.new", "label": "+ New Group"}],
+      "context": ["group.rename", "group.select", "-", {"include": "lists/groups/edits/items"}, "-", "group.color", "group.defaultColor", "group.resetSegments", "group.promoteDemote", {"id": "guides.paste", "label": "Paste Guides Here"}, "-", "group.delete"],
       "edits": {
         "label": "Edit Guides",
         "tip": "Children, mirroring, reparenting, moving between groups, copy and paste, curves, selection",
@@ -44,13 +39,7 @@
       "mirror": ["flow.mirrorNegative", "flow.mirrorPositive"]
     },
     "maps": {
-      "bar": [
-        {"id": "map.new", "label": "+ New Map"},
-        {"id": "map.import", "label": "Import..."},
-        {"id": "map.rename", "glyph": "rename"},
-        {"submenu": "Convert to", "id": "map.convert", "glyph": "convert", "tip": "Convert to another kind: its name, and what reads it, stay the same", "ref": "lists/maps/convert"},
-        {"id": "map.delete", "glyph": "delete"}
-      ],
+      "bar": [{"id": "map.new", "label": "+ New Map"}, {"id": "map.import", "label": "Import..."}],
       "convert": [{"generator": "choices", "choices": "mapKind", "action": "map.convert", "labelField": "convert"}],
       "image": [
         {"id": "map.relink", "needs": ["map", "map.texture"]},
@@ -59,8 +48,6 @@
         "map.showFile"
       ],
       "context": [
-        {"id": "map.new", "tip": ""},
-        {"id": "map.import", "tip": ""},
         {"id": "map.rename", "tip": ""},
         {"submenu": "Convert to", "id": "map.convert", "needs": ["map"], "ref": "lists/maps/convert"},
         "map.makeGray",
@@ -75,32 +62,18 @@
     },
     "correctives": {
       "about": "Brushes edit the picked row: the <b>Base groom</b>, a corrective on top of it, or a <b>Sculpt node</b>'s guides. <b>Fix Frame</b> keys a corrective in and out around this frame.",
-      "bar": [
-        {"id": "corrective.new", "label": "+ New"},
-        {"id": "corrective.fixFrame", "label": "◆ Fix Frame"},
-        {"id": "corrective.up", "glyph": "up"},
-        {"id": "corrective.down", "glyph": "down"},
-        {"id": "corrective.solo", "glyph": "solo"},
-        {"id": "corrective.delete", "glyph": "delete"}
-      ],
-      "context": ["corrective.goTo", "corrective.keyWeight", "corrective.clearKeys", "corrective.rename", "-", "corrective.solo", "corrective.delete"],
+      "bar": [{"id": "corrective.fixFrame", "label": "◆ Fix Frame"}, {"id": "corrective.new", "label": "+ New"}],
+      "row": ["corrective.solo"],
+      "context": ["corrective.rename", "-", "corrective.up", "corrective.down", "-", "corrective.goTo", "corrective.keyWeight", "corrective.clearKeys", "-", "corrective.delete"],
       "nodeContext": [{"id": "sculpt.clearEdits", "label": "Clear Edits", "needs": []}]
     },
     "photos": {
       "about": "Each photo is a camera. Line it up with the mesh (<b>Align Photo</b>, or by eye looking through it), then <b>Lock</b> it and groom to it.",
-      "bar": [
-        {"id": "photo.import", "label": "+ Import Photo..."},
-        {"id": "photo.rename", "glyph": "rename"},
-        {"id": "photo.remove", "glyph": "delete"}
-      ],
-      "context": ["photo.import", "photo.align", "photo.lookThrough", "photo.rename", "photo.selectCamera", "-", "photo.remove"],
-      "alignBar": [{"id": "photo.align", "label": "Align Photo..."}],
+      "bar": [{"id": "photo.import", "label": "+ Import"}, "photo.addView"],
+      "context": ["photo.rename", "photo.align", "photo.selectCamera", "-", "photo.remove"],
+      "click": ["photo.lookThrough"],
       "pairsBar": ["pairs.solve", "pairs.clear", {"id": "pairs.delete", "glyph": "delete"}],
-      "pairsContext": ["pairs.repickPhoto", "pairs.repickMesh", "-", "pairs.delete"],
-      "guidesBar": [
-        {"id": "photos.guides", "label": "Open Guides from Photos...", "tip": "The Photos window's Guides stage: guide lines and mask touch-ups on the lined-up photos, Generate and the measured look"},
-        "photo.addView"
-      ]
+      "pairsContext": ["pairs.repickPhoto", "pairs.repickMesh", "-", "pairs.delete"]
     }
   }
 }

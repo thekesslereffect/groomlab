@@ -1218,16 +1218,16 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     GroomTools tools;
     EXPECT_TRUE(tools.tileLabels()) << "labeled tiles by default";
     tools.setTileLabels(false);
-    EXPECT_EQ(tools.tiles().size(), 21u) << "Select, Freeze, the 17 tools (Paint, Length Keys and Clone among them), Invert Frozen and Unfreeze All";
-    for (const char* id : {"place", "draw", "clone", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "invert", "unfreeze"}) {
+    EXPECT_EQ(tools.tiles().size(), 22u) << "Select, Freeze, the 18 tools (Paint, Length Keys and Clone among them), Invert Frozen and Unfreeze All";
+    for (const char* id : {"place", "draw", "roots", "clone", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "invert", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
     }
     std::vector<std::string> tabs;
     for (int i = 0; i < tools.tabBar()->count(); ++i) tabs.push_back(tools.tabBar()->tabText(i).toStdString());
-    EXPECT_EQ(tabs, (std::vector<std::string>{"Tools", "Paint", "Correctives", "Photos", "Outliner"})) << "palette.json's tabs (the Outliner the app's own)";
+    EXPECT_EQ(tabs, (std::vector<std::string>{"Tools", "Paint", "Photos", "Outliner"})) << "palette.json's tabs (the Outliner the app's own)";
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
-    EXPECT_EQ(grid->columnsFor(260), 4) << "at most four to a row (five 46 px icons would fit in 260 px)";
+    EXPECT_EQ(grid->columnsFor(260), 5) << "at most five to a row (six 40 px icons would fit in 260 px)";
     EXPECT_EQ(grid->columnsFor(150), 3) << "fewer when only fewer fit";
     EXPECT_EQ(qobject_cast<QToolButton*>(tools.tile("comb"))->toolButtonStyle(), Qt::ToolButtonIconOnly);
     EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Comb"))) << "the name in the tool tip";
@@ -1235,7 +1235,7 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     tools.setTileLabels(true);
     const int wide = grid->heightForWidth(300);
     EXPECT_GT(grid->heightForWidth(140), wide) << "a narrower dock wraps to more rows";
-    EXPECT_EQ(grid->columnsFor(300), 4) << "labeled tiles (56 px): as many as fit, at most four";
+    EXPECT_EQ(grid->columnsFor(300), 5) << "labeled tiles (46 px): as many as fit, at most five";
     EXPECT_EQ(grid->columnsFor(180), 3);
     grid->resize(260, grid->heightForWidth(260));
     for (QAbstractButton* t : grid->findChildren<QAbstractButton*>()) {
@@ -1660,8 +1660,8 @@ TEST(AppPanels, EmptyStateCardAndPillsInEveryMode) {
 
 TEST(AppPanels, ViewThemeSavesTheChoiceForTheNextStart) {
     // GroomLab > Theme lists every theme, the worn one checked; a choice is worn at once (restyle)
-    // and saved (QSettings: this run's own ini), and a window built after it wears it too: Playful's
-    // glass over the viewport, its docks solid all the same.
+    // and saved (QSettings: this run's own ini), and a window built after it wears it too: Charcoal
+    // (not the default, so the choice is what is worn), its docks solid.
     const QString saved = theme::savedTheme();
     struct Restore {
         QString name;
@@ -1685,11 +1685,11 @@ TEST(AppPanels, ViewThemeSavesTheChoiceForTheNextStart) {
         EXPECT_TRUE(listed.contains(QStringLiteral("playful")));
         EXPECT_FALSE(window.chooseTheme(QStringLiteral("no such theme")));
         EXPECT_EQ(theme::savedTheme(), saved);
-        ASSERT_TRUE(window.chooseTheme(QStringLiteral("playful")));
-        EXPECT_EQ(theme::savedTheme(), QStringLiteral("playful"));
-        EXPECT_EQ(theme::currentTheme(), QStringLiteral("playful")) << "worn at once";
+        ASSERT_TRUE(window.chooseTheme(QStringLiteral("charcoal")));
+        EXPECT_EQ(theme::savedTheme(), QStringLiteral("charcoal"));
+        EXPECT_EQ(theme::currentTheme(), QStringLiteral("charcoal")) << "worn at once";
         EXPECT_EQ(window.styleSheet(), theme::styleSheet());
-        EXPECT_TRUE(window.findChild<QAction*>(QStringLiteral("theme_playful"))->isChecked());
+        EXPECT_TRUE(window.findChild<QAction*>(QStringLiteral("theme_charcoal"))->isChecked());
         theme::setTheme(theme::defaultTheme());
     }
     ASSERT_TRUE(theme::setTheme(theme::savedTheme()));  // the next start
@@ -1720,12 +1720,12 @@ TEST(AppPanels, UnsavedChangesAreAskedAboutAndMessagesToast) {
     host->resize(1280, 720);
     // Without a groom the groom-only actions are off; Reload needs a file too.
     const auto action = [&](const char* name) { return window.findChild<QAction*>(QLatin1String(name)); };
-    for (const char* name : {"transfer", "guidesFromReference", "deleteGuides", "reload", "saveAs"}) {
+    for (const char* name : {"transfer", "deleteGuides", "reload", "saveAs"}) {
         ASSERT_NE(action(name), nullptr) << name;
         EXPECT_FALSE(action(name)->isEnabled()) << name << " without a groom";
     }
     ASSERT_TRUE(window.openGroom(QString::fromStdString(copy)));
-    for (const char* name : {"transfer", "guidesFromReference", "deleteGuides", "reload", "saveAs"}) {
+    for (const char* name : {"transfer", "deleteGuides", "reload", "saveAs"}) {
         EXPECT_TRUE(action(name)->isEnabled()) << name << " with a groom";
     }
     const std::string hairColor = nodeOfType(*window.document(), "HairColor");
@@ -2780,6 +2780,10 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     EXPECT_FALSE(alphaBox->isVisibleTo(&panel));
     session.settings().paintKind = "vertices";
     tools.refresh();
+    auto* more = panel.findChild<Section*>(QStringLiteral("moreSettings"));
+    ASSERT_TRUE(more) << "More settings: the stamp among them";
+    EXPECT_TRUE(more->isAncestorOf(alphaBox));
+    more->setExpanded(true);
     EXPECT_TRUE(alphaBox->isVisibleTo(&panel));
     AlphaPicker* picker = panel.alphaPicker();
     picker->fill();
@@ -3764,7 +3768,7 @@ TEST(AppPanels, MDragSetsTheStrengthAndAltShiftXTogglesSymmetry) {
     EXPECT_EQ(s.symmetryName(), "none");
     EXPECT_EQ(window.lastReport(), QStringLiteral("Symmetry: World X off"));
     // The Groom Tools' Symmetry box shows symmetry on for any mode (World Y, Topology), not only World X.
-    QCheckBox* chip = window.shell()->groomTools()->symmetryBox();
+    QAbstractButton* chip = window.shell()->groomTools()->symmetryBox();
     ASSERT_NE(chip, nullptr) << "the Groom Tools' Symmetry box";
     ASSERT_TRUE(window.setBrushText(QStringLiteral("symmetry=y")));
     symmetry->trigger();
@@ -4886,7 +4890,7 @@ TEST(AppPanels, PropertiesTabsAreTheModesAndHoldRenderAndExport) {
         }
     };
     walk(groomlab);
-    for (const char* sub : {"Simulate", "Studio", "Import", "Render", "Export", "Utilities"}) EXPECT_TRUE(submenus.count(sub)) << sub;
+    for (const char* sub : {"Start From", "Groom File", "Simulate", "Render", "Export", "Utilities", "Settings"}) EXPECT_TRUE(submenus.count(sub)) << sub;
     EXPECT_TRUE(actions.count("Simulate Range"));
     EXPECT_TRUE(std::any_of(actions.begin(), actions.end(), [](const std::string& t) { return t.rfind("Transfer", 0) == 0; }));
 }

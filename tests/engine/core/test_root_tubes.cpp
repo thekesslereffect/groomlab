@@ -10,6 +10,7 @@
 #include <cmath>
 
 #include "groomlab/brush.h"
+#include "groomlab/guide_hierarchy.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/tube.h"
 #include "test_helpers.h"
@@ -308,6 +309,81 @@ TEST(RootTubes, TheOutlineIsSavedAndMovesToAnotherScalp) {
         EXPECT_NEAR((moved[j] - moved[i]).length(), (kept[j] - kept[i]).length(), 0.01f) << "side " << i;
         EXPECT_NEAR(moved[i].length(), 2.0f, 0.01f) << "on the new scalp";
     }
+}
+
+// A root tube's drawn root is a library shape of its own (isOwnedTubeShape), not one of the
+// library's: the pickers never list it (libraryTubeShapes, tubeTargetsOf's inUse), and the library's
+// edits refuse it (only the root tools change it, setOwnedTubeShape).
+TEST(RootTubes, ItsDrawnRootIsNotALibraryShape) {
+    GuideHierarchy h;
+    const auto scalp = head();
+    const GuideId id = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.12f), {});
+    const std::string drawn = h.guide(id)->tube.custom->name;
+    ASSERT_TRUE(isOwnedTubeShape(drawn));
+    EXPECT_FALSE(isOwnedTubeShape("leaf"));
+    const std::vector<SectionPoint> square{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+    h.setTubeShape("leaf", square, false);
+    std::vector<std::string> listed;
+    for (const CustomTubeShapePtr& s : h.libraryTubeShapes()) listed.push_back(s->name);
+    EXPECT_EQ(listed, std::vector<std::string>{"leaf"}) << "the library as artists see it";
+    EXPECT_EQ(h.tubeShapes().size(), 2u) << "the hierarchy keeps both";
+    // Refused as a library shape: edited, renamed (either way), removed.
+    EXPECT_THROW(h.setTubeShape(drawn, square, false), std::invalid_argument);
+    EXPECT_THROW(h.renameTubeShape(drawn, "mine"), std::invalid_argument);
+    EXPECT_THROW(h.renameTubeShape("leaf", std::string(kOwnedTubeShapePrefix) + "99"), std::invalid_argument);
+    EXPECT_THROW(h.removeTubeShape(drawn), std::invalid_argument);
+    EXPECT_THROW(h.setOwnedTubeShape("leaf", square, false), std::invalid_argument) << "only an owned name";
+    EXPECT_EQ(h.guide(id)->tube.custom->name, drawn);
+    EXPECT_TRUE(isRootTube(h.guide(id)->tube, 0)) << "still a root tube";
+    // The Tubes section's targets: the root tube counted, its drawn root among no profiles in use.
+    const TubeTargets t = tubeTargetsOf(h, {id});
+    EXPECT_EQ(t.rootTubes, 1u);
+    EXPECT_EQ(t.splitTubes, 0u);
+    for (const auto& [name, count] : t.inUse) EXPECT_FALSE(isOwnedTubeShape(name)) << name;
+}
+
+// A Mid or Tip profile does not carry into a tube hierarchy's split levels: each split tube's root
+// shape is its part of the parent's root section, and a blended tube (TubeProfile::blended) would
+// leave the root ring and the overlap check (tubeOverlaps) that keep the levels sealed. So sliceTube
+// starts each split tube with no Mid or Tip, an edit of the parent's leaves them so
+// (carryToSlices carries width, flatness and twist only), and tubeTargetsOf counts the targets in
+// split levels, for the hosts to say so.
+TEST(TubeLevels, MidAndTipProfilesDoNotCarryIntoSplitLevels) {
+    GuideHierarchy h;
+    const auto scalp = head();
+    const Vec3f root = onSphere({0, 1, 0});
+    std::vector<Vec3f> path{root};
+    for (int k = 1; k <= 10; ++k) path.push_back(onSphere(root + Vec3f(0.0f, 0.0f, 0.06f * k)) * (1.05f + 0.01f * k));
+    const GuideId a = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.15f, 6), path);
+    const GuideId b = makeRootTube(h, *scalp, ring({0.5f, 0.85f, 0.1f}, 0.1f), {});
+    // b with a Tip profile before it is split, a after.
+    h.setTube(b, editedTube(h.guide(b)->tube, R"({"tipShape": "blade"})", h.scale(), h.guide(b)->points.size(), &h.tubeShapes()));
+    ASSERT_TRUE(h.guide(b)->tube.tipShape);
+    EXPECT_EQ(addTubeLevel(h, scalp.get()), 2u);
+    h.setTube(a, editedTube(h.guide(a)->tube, R"({"midShape": "ribbon"})", h.scale(), h.guide(a)->points.size(), &h.tubeShapes()));
+    ASSERT_TRUE(h.guide(a)->tube.midShape);
+    h.evaluate(scalp.get());
+    std::vector<GuideId> slices;
+    for (const GuideId parent : {a, b}) {
+        for (const GuideId k : h.childrenOf(parent)) {
+            const HierarchyGuide& s = *h.guide(k);
+            EXPECT_TRUE(isRootTube(s.tube, 0)) << "a split tube: a root of its own";
+            EXPECT_FALSE(s.tube.midShape) << "the parent's Mid stays its own";
+            EXPECT_FALSE(s.tube.tipShape) << "the parent's Tip stays its own";
+            EXPECT_FALSE(s.tube.blended());
+            slices.push_back(k);
+        }
+    }
+    ASSERT_EQ(slices.size(), 4u);
+    // The targets say which are in split levels: the split tubes and the tubes split into them.
+    TubeTargets t = tubeTargetsOf(h, slices);
+    EXPECT_EQ(t.splitTubes, 4u);
+    EXPECT_EQ(t.rootTubes, 4u);
+    t = tubeTargetsOf(h, {a});
+    EXPECT_EQ(t.splitTubes, 1u) << "split into the level below";
+    GuideHierarchy alone;
+    const GuideId c = makeRootTube(alone, *scalp, ring({0, 1, 0}, 0.12f), {});
+    EXPECT_EQ(tubeTargetsOf(alone, {c}).splitTubes, 0u);
 }
 
 }  // namespace

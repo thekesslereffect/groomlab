@@ -8,10 +8,12 @@ import { TipProvider } from "@/components/ui/tooltip";
 import { cssVars } from "@/theme/tokens";
 import { WorkspaceProvider } from "@/workspace/state";
 import { Shell } from "@/workspace/shell";
+import { SimpleProvider } from "@/simple/state";
+import { SimpleShell } from "@/simple/shell";
 
 export function App() {
   const { options } = useLab();
-  const [page, setPage] = useState<Page>(() => (window.location.hash.match(/page=(\w+)/)?.[1] as Page) ?? "workspace");
+  const [page, setPage] = useState<Page>(() => (window.location.hash.match(/page=(\w+)/)?.[1] as Page) ?? "simple");
 
   // Tokens on <html> so portaled menus and tooltips get them too; data-* for CSS that wants them.
   useLayoutEffect(() => {
@@ -25,7 +27,7 @@ export function App() {
       <WorkspaceProvider>
         <div className="flex h-full">
           <div className="min-w-0 flex-1">
-            {page === "workspace" ? <Shell /> : page === "components" ? <Gallery /> : <Export />}
+            {page === "simple" ? <SimpleProvider><SimpleShell /></SimpleProvider> : page === "workspace" ? <Shell /> : page === "components" ? <Gallery /> : <Export />}
           </div>
           <LabPanel page={page} setPage={setPage} />
         </div>

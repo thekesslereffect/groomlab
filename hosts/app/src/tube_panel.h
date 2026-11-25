@@ -4,13 +4,17 @@
 // The tube blocks of the Groom Tools' tool card (brush_panel.h), Maya's palette.py TubePanel in C++:
 // the targets' shape, width, flatness and twist (each change one undo step), the groom's shape
 // library with its outline editor (tube_shape_editor.h) and the shape new guides take. Follows the
-// groom through refresh(). Two layouts (setMode):
+// groom through refresh(). Three layouts (setMode), as Maya's palette.py and root_tube_card.py:
 //
 //   New    Place and Draw: "Tube", a small preview of the profile picked, the picker, Width,
-//          Flatness and Twist (what new guides get; profiles are edited with the Shape brush)
-//   Edit   Shape and Select: "Profile" (the picker with Apply, the outline editor, Edit as custom,
-//          Mirror, Smooth; New / Rename / Duplicate / Delete glyphs in its header) and "Selected
-//          guides" (Width, Flatness, Twist; Smooth in its header)
+//          Flatness and Twist (what new guides get; profiles are edited with the Tube brush)
+//   Edit   the Tube brush: the levels' row, the Profile block always (untitled: Root, Mid and Tip
+//          tiles with their outlines; the editor beside the picked profile's shape, Apply, Hold,
+//          Mirror and Smooth; a hint and the library's ⋯ menu: Rename..., New Shape, Duplicate,
+//          Delete Shape) and "Selected tubes · N" (folded: Width, Flatness, Twist; Smooth)
+//   Roots  the Roots brush: the levels' row and the root block (Draw root, Edit roots, Select
+//          root; Undo CV, Delete, Duplicate; Subdivide; Snap to neighbours, Draw guide; the new
+//          tubes' settings)
 //
 // Fill Tubes and Tube Blend are the Interpolate nodes' settings (fillTubes, tubeBlend: the Graph
 // Editor's node settings).
@@ -41,6 +45,7 @@ class QComboBox;
 class QHBoxLayout;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QPushButton;
 class QTimer;
 class QToolButton;
@@ -59,9 +64,12 @@ class TubePanel : public QWidget {
 public:
     explicit TubePanel(QWidget* parent = nullptr);
 
-    enum class Mode { New, Edit };
+    enum class Mode { New, Edit, Roots };
     void setMode(Mode mode);  // Edit to start with
     Mode mode() const { return mode_; }
+    // The tubes' display switches (Shaded, Wireframe, Colors, level colors, Always visible): the
+    // Groom Tools put them in the guides' display popup.
+    QWidget* displayBlock() const { return display_; }
 
     void setSession(BrushSession* session);  // its document is the groom (null: none)
     // The targets' tubes, the library and Fill Tubes read again. Left alone while the artist is
@@ -114,7 +122,10 @@ public:
 
     // ---- Tube roots and the tube hierarchy (Maya's root_tube_card.py; the core's root tool) ------
     // Draw root, Edit roots (Finish edit while editing), Select root: each starts the root mode
-    // (the brush session's), again leaves it; Undo CV, Delete, Duplicate; the new roots' settings.
+    // (the brush session's), again goes back to Draw (Draw: the outline being drawn dropped; Edit:
+    // finished); Undo CV, Delete, Duplicate; the new roots' settings. startRootMode: the Roots
+    // brush picked (Place: Draw root, level 1 shown).
+    void startRootMode(RootTubeTool::Mode mode);
     void drawRoot();
     void editRoots();
     void selectRoot();
@@ -156,6 +167,13 @@ public:
     QAbstractButton* selectRootButton() const { return selectRoot_; }
     QAbstractButton* deleteRootsButton() const { return deleteRoots_; }
     QAbstractButton* duplicateRootsButton() const { return duplicateRoots_; }
+    QToolButton* levelMenuButton() const { return levelMenu_; }    // the levels' ⋯: Lock view, Mixed view, Colors per level
+    QToolButton* libraryMenuButton() const { return libraryMenu_; }  // the library's ⋯
+    QLabel* profileNote() const { return profileNote_; }  // what the targets keep (root tubes, split levels)
+    QToolButton* profileTile(int profile) const { return profileButtons_[static_cast<std::size_t>(profile)]; }
+    // The ⋯ menus as they open (tests).
+    void fillLevelMenu(QMenu* menu);
+    void fillLibraryMenu(QMenu* menu);
     QComboBox* shapeBox() const { return shape_; }
     QComboBox* profileBox(int profile) const { return profile == 0 ? shape_ : profile == 1 ? mid_ : tip_; }
     ValueSlider* holdSlider(int profile) const { return holds_[static_cast<std::size_t>(profile)]; }
@@ -206,7 +224,9 @@ private:
     void showChoice(bool mixed = false);
     void refreshTips();          // the fields' tips: what they change
     void pushPlacement();        // the placement tube to the brush session when it changed
-    void edited(const std::string& error);  // after a guides edit: said, read again, the host told
+    void edited(const std::string& error, const std::string& note = {});  // after a guides edit: said, read again, the host told
+    void showNotes();            // the Profile block's note: root tubes kept, split levels
+    void refreshTiles();         // the Root, Mid and Tip tiles' outlines
     std::string uniqueName(const std::string& base) const;
     void disarmDelete();
     void sendPreview();
@@ -235,7 +255,11 @@ private:
         std::size_t users = 0;
     };
     std::vector<LibraryShape> library_;
+    std::vector<LibraryShape> owned_;  // the targets' drawn roots (root tubes: "Drawn root")
     const LibraryShape* library(const std::string& name) const;
+    const LibraryShape* owned(const std::string& name) const;
+    std::size_t rootTargets_ = 0, splitTargets_ = 0;  // of the targets (GroomDocument::TubeTargets)
+    std::string lastNote_;  // the last edit's note (root tubes that kept their drawn root)
     std::string targetsKey_;     // the targets and their shapes as last read
     std::string shapesKey_;      // what the picker lists
     std::string pushed_;         // the placement tube last pushed
@@ -253,10 +277,12 @@ private:
     QCheckBox *lockView_ = nullptr, *mixedView_ = nullptr, *levelColors_ = nullptr;
     int lockedLevel_ = 0;  // Lock view: the level whose tubes stay drawn (0: off)
     void applyTubeViews();  // the document's Lock and Mixed views as the switches and the level say
-    QCheckBox *rootSnap_ = nullptr, *rootDrawPath_ = nullptr, *colors_ = nullptr, *always_ = nullptr;
+    QToolButton *rootSnap_ = nullptr, *rootDrawPath_ = nullptr;  // pills
+    QCheckBox *colors_ = nullptr, *always_ = nullptr;
+    QToolButton* levelMenu_ = nullptr;
     ValueSlider *rootDensity_ = nullptr, *rootLength_ = nullptr, *rootSegments_ = nullptr, *rootTaper_ = nullptr;
     QPushButton *addLevel_ = nullptr, *removeLevel_ = nullptr;
-    QLabel* levelBaseLabel_ = nullptr;
+    QLabel* levelLabel_ = nullptr;  // "Level" (its tip: the base group)
     QHBoxLayout* levelRow_ = nullptr;
     QWidget* levelLine_ = nullptr;  // the levels on the left, + and - on the right (LeadTrailLayout)
     std::vector<QAbstractButton*> levelButtons_;
@@ -269,7 +295,7 @@ private:
     CardBlock* profileBlock_ = nullptr;
     CardBlock* selectedBlock_ = nullptr;
     QVBoxLayout* newPicker_ = nullptr;     // where the picker sits in New
-    QHBoxLayout* editPicker_ = nullptr;    // ... and in Edit (before Apply)
+    QVBoxLayout* editPicker_ = nullptr;    // ... and in Edit (the Root page, over Apply)
     QVBoxLayout* newFields_ = nullptr;     // where Width, Flatness and Twist sit in New
     QVBoxLayout* editFields_ = nullptr;    // ... and in Edit
     QWidget* fields_ = nullptr;
@@ -279,11 +305,15 @@ private:
     std::array<QToolButton*, 3> profileButtons_{};  // Root, Mid, Tip: which one the editor shows
     std::array<QPushButton*, 3> profileApply_{};
     std::array<ValueSlider*, 3> holds_{};
+    std::array<QWidget*, 3> profilePages_{};  // beside the editor: the picked profile's shape, Apply, Hold
+    QLabel* profileNote_ = nullptr;
+    QLabel* shapeHint_ = nullptr;
+    QToolButton* libraryMenu_ = nullptr;
+    QWidget* display_ = nullptr;
     QCheckBox* shaded_ = nullptr;
     QCheckBox* wireframe_ = nullptr;
     TubeShapeEditor* preview_ = nullptr;
     TubeShapeEditor* editor_ = nullptr;
-    QLabel* builtinNote_ = nullptr;  // under the editor: a built-in shape is duplicated to edit
     QWidget* shapeOptions_ = nullptr;  // Mirror and Smooth: a library shape's
     QToolButton* mirror_ = nullptr;
     QToolButton* shapeSmooth_ = nullptr;

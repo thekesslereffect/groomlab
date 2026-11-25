@@ -26,10 +26,12 @@ namespace groomlab::app::theme {
 
 namespace {
 
-// The app wears Charcoal unless View > Theme (or --theme) says otherwise; a theme without
-// "extends" fills its gaps from Playful, as the Maya host's theme.load does.
-const QString kDefaultTheme = QStringLiteral("charcoal");
+// The app wears Playful unless View > Theme (or --theme, or the saved choice) says otherwise; a
+// theme without "extends" fills its gaps from Playful, as the Maya host's theme.load does.
+const QString kDefaultTheme = QStringLiteral("playful");
 const QString kBaseTheme = QStringLiteral("playful");
+// The theme whose file holds the components block (sizes shared by every theme: componentValue).
+const QString kComponentsTheme = QStringLiteral("charcoal");
 const QString kThemeSetting = QStringLiteral("ui/theme");
 
 // engine/assets/themes/<name>.json, the Maya host's theme files, embedded at build time (resources of
@@ -459,10 +461,10 @@ int cardRadius() { return std::clamp(value("ui", "cardRadius", panelRadius()), 0
 int panelRadius() { return controlRadius() + 2; }
 int rowHeight() { return std::clamp(value("ui", "rowHeight", 26), 18, 40); }
 namespace {
-// The components block: one for every theme, Charcoal's (the default theme's file sets every key).
+// The components block: one for every theme, Charcoal's (its file sets every key).
 const nlohmann::json* componentValue(const char* name, const char* key) {
     static const nlohmann::json components = [] {
-        const nlohmann::json t = readTheme(kDefaultTheme);
+        const nlohmann::json t = readTheme(kComponentsTheme);
         const auto c = t.find("components");
         return c != t.end() && c->is_object() ? *c : nlohmann::json::object();
     }();
@@ -961,7 +963,11 @@ QScrollBar::handle:horizontal { background: @scroll@; border-radius: 4px; min-wi
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 QTreeWidget, QListWidget { background: @list@; border: 1px solid @fieldEdge@; border-radius: @radiusLarge@px; padding: 4px; outline: none; alternate-background-color: transparent; }
 *[role="popup"] QListWidget, *[role="popup"] QTreeWidget { background: @field@; border: 1px solid @popupEdge@; }
-QTreeWidget::item, QListWidget::item { padding: 3px; border-radius: @smallRadius@px; }
+QTreeWidget::item, QListWidget::item { padding: 3px; border-radius: @radius@px; }
+QTreeWidget::item { border-radius: 0; }
+QTreeWidget::item:first { border-top-left-radius: @radius@px; border-bottom-left-radius: @radius@px; }
+QTreeWidget::item:last { border-top-right-radius: @radius@px; border-bottom-right-radius: @radius@px; }
+QTreeWidget::item:only-one { border-radius: @radius@px; }
 QTreeWidget::item:selected, QListWidget::item:selected { background: @selection@; color: @selectionText@; }
 QTreeWidget::item:hover, QListWidget::item:hover { background: @fieldHover@; }
 QHeaderView::section { background: transparent; color: @muted@; border: none; padding: 2px 4px; font-weight: 600; }
@@ -1028,6 +1034,18 @@ QToolButton[role="chip"][disclosure="true"]:hover, QFrame[role="toolCard"] QTool
     background: @field@; color: @text@; }
 QToolButton[role="chip"][disclosure="true"]:checked, QFrame[role="toolCard"] QToolButton[role="chip"][disclosure="true"]:checked {
     background: @field@; border-color: @dim@; color: @text@; font-weight: 500; }
+)"
+                                   R"(/* A pill (card_parts.h makePill, the Simple layout's Chip): sized to its text, a row's height less 2,
+   fully round; off an outline in the line tone with dim text, on the selection fill under an accent edge. */
+QToolButton[role="pill"] { background: transparent; border: 1px solid @pillEdge@; border-radius: @pillRadius@px; padding: 0 10px;
+    color: @dim@; font-size: @smallSize@px; font-weight: 500; min-height: @pillInner@px; max-height: @pillInner@px; }
+QToolButton[role="pill"]:hover { background: @hover@; color: @text@; }
+QToolButton[role="pill"]:checked, QToolButton[role="pill"]:checked:hover, QToolButton[role="pill"]:pressed {
+    background: @selection@; border-color: @pillOnEdge@; color: @text@; }
+QToolButton[role="pill"]:disabled { color: @disabled@; background: transparent; }
+QToolButton[role="pill"]::menu-indicator { image: none; width: 0; }
+/* A pill worn as a tile (the Tube card's Root / Mid / Tip: the outline over the name): the control radius, its own height. */
+QToolButton[role="pill"][tile="true"] { border-radius: @radius@px; padding: 3px 2px; min-height: 0; max-height: 16777215px; }
 /* A one-of choice (segmentRow): segments on a sunken track, the chosen one raised in a neutral tone. */
 QWidget[role="segTrack"] { background: @sunken@; border-radius: 8px; }
 QWidget[role="segTrack"] QToolButton[role="chip"], QFrame[role="toolCard"] QWidget[role="segTrack"] QToolButton[role="chip"],
@@ -1051,7 +1069,11 @@ QWidget[role="listHeader"] { border: none; }
 QTreeWidget[role="rows"], QListWidget[role="rows"] { background: transparent; border: none; padding: 0; }
 QTreeWidget[role="rows"]::item, QListWidget[role="rows"]::item { padding: 3px 2px; }
 QTreeWidget[role="rows"]::item { border-radius: 0; margin: 0; }
-QListWidget[role="rows"]::item { border-radius: @smallRadius@px; }
+QTreeWidget[role="rows"]::item:first { border-top-left-radius: @radius@px; border-bottom-left-radius: @radius@px; }
+QTreeWidget[role="rows"]::item:last { border-top-right-radius: @radius@px; border-bottom-right-radius: @radius@px; }
+QTreeWidget[role="rows"]::item:only-one { border-radius: @radius@px; }
+QTreeView::branch:selected, QTreeView::branch:hover { background: transparent; }
+QListWidget[role="rows"]::item { border-radius: @radius@px; }
 QTreeWidget[role="rows"]::item:selected, QListWidget[role="rows"]::item:selected { background: @accentSoft@; color: @text@; }
 QTreeWidget[role="rows"]::item:hover:!selected, QListWidget[role="rows"]::item:hover:!selected { background: @cardRule@; }
 QFrame[role="itemBox"] { background: @card@; border: none; border-radius: @cardRadius@px; }
@@ -1149,6 +1171,17 @@ QFrame[role="propRule"] { background: @cardRule@; border: none; }
         {QStringLiteral("@toolOn@"), glass ? uiColor("accent").name() : accentSoft().name()},
         {QStringLiteral("@uiFamily@"), uiFamily()},
         {QStringLiteral("@fieldHeight@"), QString::number(rowHeight() - 8)},
+        // A pill: a row's height less 2 (its 1 px edge outside the content), fully round; its edge
+        // the theme's line tone (ui.border), on: the accent at 60%.
+        {QStringLiteral("@pillInner@"), QString::number(rowHeight() - 4)},
+        {QStringLiteral("@pillRadius@"), QString::number((rowHeight() - 2) / 2)},
+        // (the hover tone 12% toward the text, as Maya's and Blender's pills: ui.border is too faint on a card)
+        {QStringLiteral("@pillEdge@"), towardText(uiColor("hover"), 0.12).name()},
+        {QStringLiteral("@pillOnEdge@"), [] {
+             QColor c = uiColor("accent");
+             c.setAlphaF(0.6f);
+             return cssRgba(c);
+         }()},
         {QStringLiteral("@controlInner@"), QString::number(rowHeight() - 2)},
         {QStringLiteral("@buttonHeight@"), QString::number(rowHeight() - 10)},
         {QStringLiteral("@background@"), backdrop().name()},

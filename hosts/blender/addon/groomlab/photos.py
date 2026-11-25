@@ -13,8 +13,10 @@ perspective on the right, and Pick Points runs with the camera solving live as t
 complete pairs: the focal length kept; 6 or more solve it too, unless Keep focal length). Esc (or
 Align Photo again) ends it and the view joins back.
 
-Guides from Photos (experimental) grows guides from the lined-up photos into the fromReference guide
-group (the helper's guides_from_photos: the core's guidesFromReference, Maya's from_reference).
+The Photos page lists them one line each (Maya's Simple): a click looks through a photo's camera, a
+click again goes back; its settings (opacity, focal length), in front / behind, eye, lock and menu
+are icons on its row. guides_from_photos (the helper's: the core's guidesFromReference) is kept as a
+function; the page and the menu no longer offer it (Guides from Photos left the redesign).
 
 The photos travel with the groom: after every change they are sent to the helper
 (set_reference_photos), which keeps them in the groom's file ("referencePhotos", the standalone
@@ -49,10 +51,6 @@ MIN_PAIRS = 6           # pairs to solve the focal length too
 MIN_PAIRS_FIXED = 4     # pairs with the focal length kept
 GROUP = "fromReference"
 IMAGES = "*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.tga;*.bmp;*.exr;*.webp"
-SYMMETRIES = (("auto", "Auto", "The scalp's topology when it mirrors, else none"),
-              ("x", "World X", "Mirrored across the world's X = 0 plane"),
-              ("topology", "Topology", "Mirrored by the scalp's own symmetry"),
-              ("none", "None", "Each guide grown on its own"))
 
 _previous = {}   # scene name -> the camera it showed before looking through a photo
 _picking = [False]
@@ -107,12 +105,16 @@ def _photo_index_get(self):
 
 
 def _photo_index_set(self, value):
+    """A photo's row clicked: looking through its camera (Maya's Simple: picking a photo is for
+    looking through it); its row clicked again while looking through it: back to the view and the
+    camera before, no photo picked (no row falls back to being picked)."""
     if 0 <= value < len(bpy.data.objects) and is_photo(bpy.data.objects[value]):
-        was, self.photo = self.photo, bpy.data.objects[value]
-        # Looking through a photo: the picked one is looked through instead (Look Through again
-        # still returns to the view and the camera before).
-        if was is not None and was != self.photo and looking_through(bpy.context, was):
-            look_through(bpy.context, self.photo)
+        self.photo = bpy.data.objects[value]
+        try:
+            if not look_through(bpy.context, self.photo):
+                self.photo = None  # (left: no row picked)
+        except (AttributeError, ReferenceError, RuntimeError):  # (no 3D view: picked only)
+            pass
 
 
 def _is_photo_poll(self, obj):
@@ -120,17 +122,12 @@ def _is_photo_poll(self, obj):
 
 
 class GroomLabPhotos(bpy.types.PropertyGroup):
-    """The Photos tab's settings (the scene's)."""
+    """The Photos page's settings (the scene's)."""
     photo: PointerProperty(type=bpy.types.Object, poll=_is_photo_poll, name="Photo")
     photo_index: IntProperty(get=_photo_index_get, set=_photo_index_set)
     keep_focal: BoolProperty(name="Keep focal length", default=False,
                              description="Solve the position and rotation only, keeping the camera's focal length (4 pairs "
                                          "are enough; else 6, and the focal length is solved too)")
-    guide_count: IntProperty(name="Guides", default=300, min=10, max=5000,
-                             description="About this many guides where the photos show hair (roots where they show "
-                                         "none get none)")
-    symmetry: EnumProperty(name="Symmetry", items=SYMMETRIES, default="auto",
-                           description="One view covers both sides: each guide comes with its mirror image")
     result: StringProperty()
     morph_stiffness: FloatProperty(name="Stiffness", default=0.0, min=0.0, max=0.95, subtype="FACTOR",
                                    description="How much the morph gives way: 0 lands every pin exactly, higher keeps "
@@ -1324,53 +1321,109 @@ class GROOMLAB_OT_pairs_repick(_Tipped, bpy.types.Operator):
         return {"FINISHED"}
 
 
-class GROOMLAB_OT_photos_guides(_Tipped, bpy.types.Operator):
-    """Grow guides from the photos into the fromReference guide group"""
-    bl_idname = "groomlab.photos_guides"
-    bl_label = "Guides from Photos"
-    guide_count: IntProperty(name="Guides", default=300, min=10, max=5000,
-                             description="About this many guides where the photos show hair (roots where they show "
-                                         "none get none)")
-    symmetry: EnumProperty(name="Symmetry", items=SYMMETRIES, default="auto")
+class GROOMLAB_OT_photo_toggle(_Tipped, bpy.types.Operator):
+    """A photo row's switch: in front of the mesh or behind it, shown or hidden, locked or not"""
+    bl_idname = "groomlab.photo_toggle"
+    bl_label = "Photo"
+    bl_options = {"REGISTER", "UNDO"}
+
+    photo: StringProperty(name="Photo", options={"SKIP_SAVE"})
+    what: EnumProperty(items=(("DEPTH", "In Front / Behind", "Draw the photo in front of the mesh, or behind it"),
+                              ("VISIBLE", "Show / Hide", "Show or hide the photo (the camera stays)"),
+                              ("LOCK", "Lock", "Lock the camera where it is: its position, rotation, focal length "
+                                               "and the photo on it")), options={"SKIP_SAVE"})
 
     @classmethod
-    def poll(cls, context):
-        return active_groom(context) is not None
-
-    def invoke(self, context, event):
-        s = context.scene.groomlab_photos
-        self.guide_count, self.symmetry = s.guide_count, s.symmetry
-        return context.window_manager.invoke_props_dialog(self)
+    def description(cls, context, properties):
+        cam = bpy.data.objects.get(properties.photo)
+        if cam is None or not is_photo(cam):
+            return ""
+        bg = background(cam)
+        if properties.what == "DEPTH":
+            return ("Behind the mesh: click to draw it in front" if bg is not None and bg.display_depth == "BACK" else
+                    "In front of the mesh: click to draw it behind")
+        if properties.what == "VISIBLE":
+            return "Show or hide the photo (the camera stays)"
+        return ("Locked: the camera can not move. Click to unlock" if cam.groomlab_photo.locked else
+                "Lock the camera: its position, rotation, focal length and the photo on it")
 
     def execute(self, context):
-        scalp = active_groom(context)
-        try:
-            r = guides_from_photos(scalp, self.guide_count, self.symmetry)
-        except (ValueError, HelperError) as e:
-            return _fail(self, e)
-        s = context.scene.groomlab_photos
-        s.guide_count, s.symmetry = self.guide_count, self.symmetry
-        look = r.get("look") or {}
-        s.result = "%d guides in %s from %d photo%s (%d roots unseen, %d bald)%s" % (
-            r["guides"], r["group"], r["views"], "" if r["views"] == 1 else "s", r["rootsUnseen"], r["rootsBald"],
-            "; the hair's melanin %.2f, redness %.2f" % (look["melanin"], look["redness"]) if look.get("ok") else "")
-        _say(self, s.result)
+        cam = bpy.data.objects.get(self.photo)
+        if cam is None or not is_photo(cam):
+            return {"CANCELLED"}
+        bg = background(cam)
+        if self.what == "LOCK":
+            cam.groomlab_photo.locked = not cam.groomlab_photo.locked
+        elif bg is None:
+            return {"CANCELLED"}
+        elif self.what == "DEPTH":
+            bg.display_depth = "FRONT" if bg.display_depth == "BACK" else "BACK"
+        else:
+            bg.show_background_image = not bg.show_background_image
+        sync(active_groom(context))
         return {"FINISHED"}
+
+
+class GROOMLAB_PT_photo_settings(bpy.types.Panel):
+    """A photo's settings (its row's sliders): how opaque it is, its focal length (a locked camera
+    keeps its own) and where its alignment stands."""
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "HEADER"
+    bl_label = "Photo"
+    bl_ui_units_x = 11
+
+    def draw(self, context):
+        layout = self.layout
+        cam = current(context.scene)
+        if cam is None:
+            layout.label(text="Import a photo to start.")
+            return
+        p = cam.groomlab_photo
+        layout.label(text=cam.name)
+        bg = background(cam)
+        col = layout.column(align=True)
+        if bg is not None:
+            col.prop(bg, "alpha", text="Opacity", slider=True)
+        lens = col.row(align=True)
+        lens.enabled = not p.locked
+        lens.prop(cam.data, "lens", text="Focal Length")
+        if p.locked:
+            layout.label(text="Locked: unlock to change the lens or align.")
+        elif p.rms >= 0.0:
+            layout.label(text="Lined up: %.2f px off (the last solve)" % p.rms)
+        else:
+            layout.label(text="Not lined up yet: Align Photo (its menu)")
 
 
 # ---- The Photos tab --------------------------------------------------------------------------------
 
 class GROOMLAB_UL_photos(bpy.types.UIList):
-    """The scene's photo cameras (bpy.data.objects, only the photos shown)."""
+    """The scene's photo cameras (bpy.data.objects, only the photos shown), one line each: the camera
+    mark while looking through it, its name, then (ROW_ORDER) its settings, in front / behind, eye,
+    lock and menu."""
 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index=0):
+        from . import palette
+        if not is_photo(item):  # (filter_items shows the photos alone)
+            return
         p = item.groomlab_photo
+        bg = background(item)
         row = layout.row(align=True)
-        row.label(text=item.name, icon="OUTLINER_OB_CAMERA")
-        sub = row.row()
+        try:
+            through = looking_through(context, item)
+        except (AttributeError, ReferenceError):
+            through = False
+        row.label(text=item.name, icon="VIEW_CAMERA" if through else "BLANK1")
+        sub = row.row(align=True)
         sub.alignment = "RIGHT"
-        sub.label(text="%d x %d%s%s" % (p.width, p.height, "  ·  locked" if p.locked else "",
-                                        "" if p.rms >= 0.0 else "  ·  not lined up"))
+        palette.row_button(sub, "PHOTOS", index, icon="OPTIONS", panel=GROOMLAB_PT_photo_settings.__name__)
+        for what, on, icon_on, icon_off in (("DEPTH", bg is None or bg.display_depth != "BACK", "TRIA_UP_BAR",
+                                             "TRIA_DOWN_BAR"),
+                                            ("VISIBLE", bg is None or bg.show_background_image, "HIDE_OFF", "HIDE_ON"),
+                                            ("LOCK", not p.locked, "UNLOCKED", "LOCKED")):
+            op = sub.operator("groomlab.photo_toggle", text="", icon=icon_on if on else icon_off, emboss=False)
+            op.photo, op.what = item.name, what
+        palette.row_button(sub, "PHOTOS", index, menu_name="GROOMLAB_MT_photo_context")
 
     def filter_items(self, context, data, propname):
         objs = getattr(data, propname)
@@ -1390,92 +1443,93 @@ class GROOMLAB_UL_photo_pairs(bpy.types.UIList):
         sub.label(text="%.1f px" % item.error if item.error >= 0.0 else "")
 
 
+def _follow_view(context):
+    """A photo looked through elsewhere (the camera view, the scene's camera set some other way)
+    gets picked: on a timer, drawing cannot set it."""
+    try:
+        area, rv3d = _view3d(context)
+    except (AttributeError, ReferenceError):
+        return
+    cam = context.scene.camera
+    if rv3d is None or rv3d.view_perspective != "CAMERA" or not is_photo(cam) or cam == current(context.scene):
+        return
+    _to_pick[0] = (context.scene.name, cam.name)
+    if not bpy.app.timers.is_registered(_pick_followed):
+        bpy.app.timers.register(_pick_followed, first_interval=0.0)
+
+
+_to_pick = [None]  # (scene, photo) _follow_view picks
+
+
+def _pick_followed():
+    if _to_pick[0] is not None:
+        scene, obj = bpy.data.scenes.get(_to_pick[0][0]), bpy.data.objects.get(_to_pick[0][1])
+        _to_pick[0] = None
+        if scene is not None and is_photo(obj):
+            scene.groomlab_photos.photo = obj
+    return None
+
+
 def draw_tab(layout, context, chars):
-    """The Photos tab (Maya's ReferenceTab): the photos (bar, list, right-click menu), how the picked
-    one shows, Align by Points, and Guides from Photos."""
+    """The Photos page (Maya's ReferenceTab, Simple): the photos, one line each (a click looks
+    through one, again goes back); Add Camera and Import in the header. Under the list, folded, the
+    picked photo's pairs (Align by Points: Blender has no Photos window, so its pairs stay here) and
+    the scalp's shape morphed to the pairs."""
     from . import palette
     scene = context.scene
     s = scene.groomlab_photos
-    # The photos (a header: how many, Import), the list, then the picked photo's box: rename and
-    # delete, how it shows, its lens; Align by Points; Guides from Photos.
-    layout = palette.look(layout, "card")  # (the GroomLab window: the tab on a card)
+    _follow_view(context)
+    layout = palette.look(layout, "card")  # (the GroomLab window: the page on a card)
     head = palette.section_header(layout, "Photos", len(list_photos(scene)))
     sub = head.row(align=True)
     sub.alignment = "RIGHT"
-    palette.bar_icons(sub, "lists/photos/bar", "photosbar", context, ("photo.import",))
+    palette.bar_icons(sub, "lists/photos/bar", "photosbar", context, ("photo.addView", "photo.import"))
     shown = bool(list_photos(scene))
     if shown or not palette.in_window(layout):
-        row = layout.row()  # the list (bpy.data.objects, the photos shown) with its right-click menu beside it
-        row.template_list("GROOMLAB_UL_photos", "", bpy.data, "objects", s, "photo_index", rows=3)
-        row.column(align=True).menu("GROOMLAB_MT_photo_context", text="", icon="DOWNARROW_HLT")
+        layout.template_list("GROOMLAB_UL_photos", "", bpy.data, "objects", s, "photo_index", rows=1)
     else:  # (the GroomLab window: an empty state)
         palette.empty_state(layout, "No photos yet", "Import a photo to start: a camera to groom to.", "IMPORT", chars)
     cam = current(scene)
     if cam is None:
         if shown or not palette.in_window(layout):
             _wrap(layout, "Import a photo to start.", width=chars)
-    else:
-        p = cam.groomlab_photo
-        box = layout.box()
-        row = palette.item_bar(box, cam.name)
-        palette.bar_icons(row, "lists/photos/bar", "photosbar", context, ("photo.rename", "photo.remove"))
-        row = box.row(align=True)
-        row.operator("groomlab.photo_look_through", text="Look Through", depress=looking_through(context, cam),
-                     icon="VIEW_CAMERA")
-        row.prop(p, "locked", toggle=True, icon="LOCKED" if p.locked else "UNLOCKED")
-        bg = background(cam)
-        if bg is not None:
-            row = box.row(align=True)
-            row.prop(bg, "display_depth", expand=True)
-            row.prop(bg, "show_background_image", text="", icon="HIDE_OFF" if bg.show_background_image else "HIDE_ON")
-            col = box.column(align=True)
-            col.prop(bg, "alpha", text="Opacity", slider=True)
-            lens = col.row(align=True)
-            lens.enabled = not p.locked  # (a locked camera keeps its focal length)
-            lens.prop(cam.data, "lens", text="Focal Length")
-        layout.label(text="ALIGN BY POINTS")
-        _wrap(layout, "Pairs: a feature clicked on the photo (looking through its camera) and the same feature on the "
-                      "mesh (in another view). 6 pairs solve the focal length too; 4 with it kept.", width=chars)
-        row = layout.row(align=True)
-        row.operator("groomlab.photo_align", text="Align Photo...", depress=bool(_align), icon="SPLITSCREEN")
+        return
+    _wrap(palette.look(layout, "hint"), "Click it again to leave the camera." if looking_through(context, cam) else
+          "Click a photo to look through it.", width=chars)
+    p = cam.groomlab_photo
+    body = palette.fold(layout, "photo_pairs", "Align by points: %s" % cam.name)
+    if body is not None:
+        _wrap(body, "Pairs: a feature clicked on the photo (looking through its camera) and the same feature on "
+                    "the mesh (in another view). 6 pairs solve the focal length too; 4 with it kept.", width=chars)
+        row = body.row(align=True)
+        row.operator("groomlab.photo_align", text="Align Photo...", depress=bool(_align), icon="WINDOW")
         row.operator("groomlab.photo_pick", text="Pick Points", depress=_picking[0], icon="RESTRICT_SELECT_OFF")
-        row.prop(s, "keep_focal")
-        palette.list_with_menu(layout, "GROOMLAB_UL_photo_pairs", p, "pairs", "pair_index", "GROOMLAB_MT_pair_context",
+        body.prop(s, "keep_focal")
+        palette.list_with_menu(body, "GROOMLAB_UL_photo_pairs", p, "pairs", "pair_index", "GROOMLAB_MT_pair_context",
                                rows=4)
-        palette.draw_bar(layout, "lists/photos/pairsBar", "pairsbar", context)
+        palette.draw_bar(body, "lists/photos/pairsBar", "pairsbar", context)
         done = len(complete_pairs(cam))
         need = MIN_PAIRS_FIXED if s.keep_focal else MIN_PAIRS
         text = s.result if s.result else "%d complete pair%s: %s" % (
             done, "" if done == 1 else "s", "ready to Solve" if done >= need else "%d more to Solve" % (need - done))
         if p.rms >= 0.0 and not s.result:
             text += " (last solve %.2f px)" % p.rms
-        _wrap(layout, text, width=chars)
-        # Scalp shape: the scalp morphed to the lined-up photos' pairs (KeenTools-style pins), a shape key.
-        layout.label(text="SCALP SHAPE")
-        row = layout.row(align=True)
+        _wrap(body, text, width=chars)
+    # Scalp shape: the scalp morphed to the lined-up photos' pairs (KeenTools-style pins), a shape key.
+    body = palette.fold(layout, "photo_morph", "Scalp shape")
+    if body is not None:
+        row = body.row(align=True)
         row.operator("groomlab.photos_morph", icon="SHAPEKEY_DATA")
         row.prop(s, "morph_symmetry", toggle=True)
-        row.prop(s, "morph_stiffness", slider=True)
-    # Guides from Photos (experimental): folded (Blender 4.1+'s layout panels; a heading before).
-    body = layout
-    if hasattr(layout, "panel"):
-        header, body = layout.panel("groomlab_photos_guides", default_closed=True)
-        header.label(text="Guides from photos (experimental)")
-    else:
-        layout.label(text="GUIDES FROM PHOTOS (EXPERIMENTAL)")
-    if body is not None:
-        lined = [c for c in list_photos(scene) if c.groomlab_photo.rms >= 0.0]
-        _wrap(body, "Every photo lined up with the mesh (%d of %d) grows guides into the %s group (replaced each time), "
-                    "following the strands the photos show. Guide lines and mask touch-ups drawn in Maya's or the app's "
-                    "Photos window are used too." % (len(lined), len(list_photos(scene)), GROUP), width=chars)
-        palette.draw_bar(body, "lists/photos/guidesBar", "photosguides", context)
+        body.prop(s, "morph_stiffness", slider=True)
 
 
 classes = (GroomLabPhotoPair, GroomLabPhoto, GroomLabPhotos, GROOMLAB_OT_photo_import, GROOMLAB_OT_photo_look_through,
            GROOMLAB_OT_photo_select_camera, GROOMLAB_OT_photo_add_view,
            GROOMLAB_OT_photo_rename, GROOMLAB_OT_photo_remove, GROOMLAB_OT_photo_pick, GROOMLAB_OT_photo_align,
            GROOMLAB_OT_pairs_solve,
-           GROOMLAB_OT_photos_morph, GROOMLAB_OT_pairs_clear, GROOMLAB_OT_pairs_delete, GROOMLAB_OT_pairs_repick, GROOMLAB_OT_photos_guides,
+           GROOMLAB_OT_photos_morph, GROOMLAB_OT_pairs_clear, GROOMLAB_OT_pairs_delete, GROOMLAB_OT_pairs_repick,
+           GROOMLAB_OT_photo_toggle, GROOMLAB_PT_photo_settings,
            GROOMLAB_UL_photos, GROOMLAB_UL_photo_pairs)
 
 
@@ -1488,6 +1542,8 @@ def register():
 
 def unregister():
     _picking[0] = False
+    if bpy.app.timers.is_registered(_pick_followed):
+        bpy.app.timers.unregister(_pick_followed)
     _align.clear()
     if _draw_handle[0] is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_draw_handle[0], "WINDOW")

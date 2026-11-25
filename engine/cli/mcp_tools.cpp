@@ -214,7 +214,9 @@ TubeProfile tubeFrom(const json& t, TubeProfile base, const GuideHierarchy& h) {
             base.custom = custom;
         } else {
             std::string names = "round, ribbon, teardrop, blade";
-            for (const auto& [n, s] : h.tubeShapes()) names += ", " + n;
+            for (const auto& [n, s] : h.tubeShapes()) {
+                if (!isOwnedTubeShape(n)) names += ", " + n;
+            }
             throw ToolError("no tube shape '" + name + "' (shapes: " + names + ")");
         }
     }

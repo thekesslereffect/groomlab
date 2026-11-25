@@ -2284,7 +2284,7 @@ ACTIONS = {
     "sample.manny": lambda: add_sample_action("manny"),
     "sample.wolf": lambda: add_sample_action("wolf"),
     "sample.buddy": lambda: add_sample_action("buddy"),
-    "photos.guides": open_guides_from_reference,
+    "commands.find": lambda: __import__("groomlab.ui.find_command", fromlist=["show"]).show(),
     "file.import": import_groom_dialog,
     "file.reload": reload_groom_file,
     "file.save": save_groom_file,

@@ -371,22 +371,19 @@ void GroomShape::setTubesAlwaysVisible(bool always) {
 }
 
 void GroomShape::setTubeWires(bool on, bool shaded, bool wireframe, bool colors, bool levelColors) {
-    if (!on) {  // (the look kept, for Always visible)
-        if (!tubeWires_) return;
-        tubeWires_ = false;
-        M3dView::scheduleRefreshAllViews();
-        return;
-    }
-    if (on == tubeWires_ && shaded == tubeShaded_ && wireframe == tubeWireframe_ && colors == tubeColors_ &&
-        levelColors == tubeLevelColors_) {
-        return;
-    }
+    // The look (Shaded, Wireframe, Colors, level colors) is kept whether the tubes show or not: the
+    // guides display sets it with any tool up, and Always visible draws it once Tube or Roots is put
+    // down; a change made while the tubes show is drawn at once.
+    const bool look = shaded != tubeShaded_ || wireframe != tubeWireframe_ || colors != tubeColors_ ||
+                      levelColors != tubeLevelColors_;
+    if (on == tubeWires_ && !look) return;
+    const bool drawn = tubeWires_ || on || tubesAlways_;
     tubeWires_ = on;
     tubeShaded_ = shaded;
     tubeWireframe_ = wireframe;
     tubeColors_ = colors;
     tubeLevelColors_ = levelColors;
-    M3dView::scheduleRefreshAllViews();
+    if (drawn) M3dView::scheduleRefreshAllViews();
 }
 
 void GroomShape::stopStrokeWarmup() {

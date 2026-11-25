@@ -231,9 +231,9 @@ def main():
 
     def tool_icons():
         from groomlab.ui import theme
-        names = ("place", "draw", "part", "flow", "comb", "slide", "smooth", "lift", "twist",
+        names = ("place", "draw", "roots", "part", "flow", "comb", "slide", "smooth", "lift", "twist",
                  "attract", "shape", "cut", "length", "lengths", "erase", "select", "freeze", "invert", "unfreeze")
-        _expect(palette.ToolPalette.TILE_ICON == 32, "tool icons default to 32 px")
+        _expect(palette.ToolPalette.TILE_ICON == 28, "tool icons default to 28 px")
         for key in ("playful", "charcoal", "studio", "paper"):
             t = theme.Theme(key, theme.load(key))
             for name in names:

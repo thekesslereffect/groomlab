@@ -669,11 +669,13 @@ void bindHierarchy(py::module_& m) {
                 for (const auto& entry : h.tubeShapes()) {
                     py::dict d = customShapeDict(*entry.second);
                     d["users"] = h.tubeShapeUsers(entry.first);
+                    d["owned"] = isOwnedTubeShape(entry.first);  // (a root tube's drawn root: no picker lists it)
                     out.append(d);
                 }
                 return out;
             },
-            "The library's custom tube shapes, by name: dicts of name, points, smooth, outline, corners, users.")
+            "The library's custom tube shapes, by name: dicts of name, points, smooth, outline, corners, users, owned "
+            "(a root tube's drawn root, which only the root tools change).")
         .def(
             "set_tube_shape",
             [](GuideHierarchy& h, const std::string& name, const std::vector<std::pair<float, float>>& points, bool smooth) {

@@ -81,7 +81,7 @@ def _linear_rgba(c, alpha=1.0):
 # The tools by group, as their icons are colored (Maya's widgets.ICON_GROUPS, the app's brush
 # categories): the guide tools share paint's color.
 TOOL_GROUPS = {
-    "create": ("place", "draw", "clone", "part", "flow"),
+    "create": ("place", "draw", "roots", "clone", "part", "flow"),
     "shape": ("comb", "slide", "smooth", "lift", "twist", "attract", "shape"),
     "trim": ("cut", "length", "lengths", "erase"),
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),
@@ -137,6 +137,7 @@ class Theme:
         c["popupEdge"] = own("popupEdge") or _mix(c["raised"], text, 0.18)
         c["swatchEdge"] = own("checkEdge" if self.light else "swatchEdge") or _mix(c["raised"], text,
                                                                                   0.45 if self.light else 0.22)
+        c["pillEdge"] = _mix(c["hover"], text, 0.12)  # (an off pill's outline: Maya's hoverEdge)
         c["scroll"] = _mix(c["hover"], text, 0.25)
         c["scrollHover"] = _mix(c["hover"], text, 0.45)
         icons = data.get("icons", {})
@@ -156,6 +157,7 @@ class Theme:
         for key, value in c.items():
             setattr(self, key, _linear_rgba(value))
         self.track = self.hover  # (a switch's off track)
+        self.accentLine = _linear_rgba(c["accent"], 0.6)  # (an on pill's outline: the accent at 60%)
         self.radius = float(ui.get("radius", 6))
         self.card_radius = float(ui.get("cardRadius", self.radius + 2))
         self.check_radius = float(ui.get("checkRadius", max(2.0, self.radius - 2)))
@@ -962,17 +964,27 @@ class Glyph(Button):
 
 
 class Tile(Button):
-    """A tool's tile, flat (a tray's): its icon over its name, as the app's (groom_tools.cpp): a tool
-    design in its two tones, its group's color (the theme's icons: Playful's green, blue, red and
-    yellow) and the theme's icon ink (icons/<name>_main.png and _ink.png, tinted); hovered, the
-    hover; the picked one on the soft accent with its edge, the icon in the accent's ink, or with
-    toolOn "category" (Playful's) washed with its group's color, the icon as at rest."""
+    """A tool's tile, flat (a tray's): its icon over its name, as Maya's trays (50 x 56, a
+    28 px icon): a tool design in its two tones, its group's color (the theme's icons: Playful's
+    green, blue, red and yellow) and the theme's icon ink (icons/<name>_main.png and _ink.png,
+    tinted); hovered, the hover; the picked one on the soft accent with its edge, the icon in the
+    accent's ink, or with toolOn "category" (Playful's) washed with its group's color, the icon as at
+    rest. Greyed (a corrective picked), its icon and its name dim alike."""
 
-    ICON = 32  # px (the app's and Maya's tool tiles)
+    ICON = 28  # px (Maya's tiles: 50 x 56, a 28 px icon)
+    own_disabled = True  # (greyed, its icon and its name dim alike: the grid keeps its shape)
 
     def __init__(self, wid, rect, text, action, icon, active, tooltip=""):
         super().__init__(wid, rect, text, action, icon, tooltip=tooltip)
         self.active = active
+
+    def tones(self, t):
+        """The icon's two tones (linear RGBA): its main parts' and its ink's."""
+        if self.disabled:
+            return t.textMuted, t.textMuted
+        if self.active and not t.tool_on_category:
+            return t.accentInk, t.accentInk
+        return t.tool_color(self.icon), t.icon_ink  # (at rest, and picked in a toolOn "category" theme)
 
     def draw(self, p, win):
         t, s = p.theme, p.scale
@@ -988,20 +1000,18 @@ class Tile(Button):
         x, y, w, h = self.rect
         g = self.ICON * s
         r = (x + (w - g) * 0.5, y + h - g - 6 * s, g, g)
-        if self.disabled:
-            main = ink = t.textMuted
-        elif self.active and not by_group:
-            main = ink = t.accentInk
-        else:  # (at rest, and picked in a toolOn "category" theme: its own two tones)
-            main, ink = t.tool_color(self.icon), t.icon_ink
+        main, ink = self.tones(t)
         if has_icon(self.icon + "_main"):
             p.icon(self.icon + "_main", r, tint=main)
             if has_icon(self.icon + "_ink"):  # (a design of one tone has none)
                 p.icon(self.icon + "_ink", r, tint=ink)
         else:
             p.glyph(self.icon, r, main, mono=True)
-        color = t.textDisabled if self.disabled else t.text if self.active or hover else t.textDim
-        p.text(self.text, (x + 2 * s, y + 4 * s, w - 4 * s, 15 * s), color, t.tiny_size, "center")
+        color = t.textMuted if self.disabled else t.text if self.active or hover else t.textDim
+        size = t.tiny_size  # (a name wider than its tile drawn a little smaller, never cut)
+        while size > t.tiny_size - 2.5 and p.text_size(self.text, size) > w - 4 * s:
+            size -= 0.5
+        p.text(self.text, (x + 2 * s, y + 4 * s, w - 4 * s, 15 * s), color, size, "center")
 
 
 class RailButton(Widget):
@@ -1405,6 +1415,29 @@ class ToggleButton(Button):
         return None
 
 
+class Pill(ToggleButton):
+    """A switch as the Simple redesign's chip (research/ui-redesign/src/simple/parts.tsx Chip, Maya's
+    QToolButton[role="pill"]): as wide as its name (PAD each side), fully rounded, the small text;
+    off, no fill, a thin outline and the dim text (hovered: the hover, the text); on, the selection
+    with the accent's edge at 60%, the text."""
+
+    PAD = 10  # px each side of the name
+    GAP = 6   # px between pills, across and down
+
+    def draw(self, p, win):
+        t, s = p.theme, p.scale
+        hover = win.hover == self.id and not self.disabled
+        x, y, w, h = self.rect
+        if self.on():
+            fill, edge, color = t.selection, t.accentLine, t.text
+        else:
+            fill, edge, color = (t.hover if hover else (0.0, 0.0, 0.0, 0.0)), t.pillEdge, (t.text if hover else t.textDim)
+        if self.disabled:
+            color = t.textDisabled
+        p.rect(self.rect, fill, h * 0.5, edge, 1.0 * s)
+        p.text(self.text, (x + self.PAD * s * 0.5, y, w - self.PAD * s, h), color, t.small_size, "center")
+
+
 class Segment(Button):
     """One choice of an enum shown expanded: on a sunken track (tracked: components.segTrack, the
     chosen one raised in a neutral tone), else a chip; pressed while it is the value."""
@@ -1533,7 +1566,7 @@ class Backdrop(Widget):
 
 class ListRow(Widget):
     """A list's row: picked on a press (its item made the active one); the picked row in the soft
-    accent, a hovered one a step up (components.listBand)."""
+    accent, a hovered one a step up (components.listBand), rounded as a field (Maya's rows)."""
 
     def __init__(self, wid, rect, active, pick):
         super().__init__(wid, rect)
@@ -1542,7 +1575,7 @@ class ListRow(Widget):
 
     def draw(self, p, win):
         t, s = p.theme, p.scale
-        radius = max(2.0, t.radius - 2) * s
+        radius = t.radius * s
         if self.active:
             p.rect(self.rect, t.role("listBand", "selected", "accentSoft"), radius)
         elif win.hover == self.id:
@@ -1822,7 +1855,8 @@ _theme_data = [None]  # the active theme's data (themes.py: the one picked, merg
 
 
 def theme_data():
-    """The active theme's data (themes.apply sets it), else Charcoal's file as it ships."""
+    """The active theme's data (themes.apply sets it: Playful until another is picked), else Charcoal's
+    file as it ships (before the add-on registers)."""
     if _theme_data[0] is None:
         _theme_data[0] = Theme._read(THEME_FILE)
     return _theme_data[0]

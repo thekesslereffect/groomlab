@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QApplication>
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -22,6 +24,7 @@
 #include "groomlab/correctives.h"
 #include "card_parts.h"
 #include "list_bar.h"
+#include "param_editors.h"
 #include "theme.h"
 
 namespace groomlab::app {
@@ -51,31 +54,51 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
     header_->addGlyph(bar_);
     layout->addWidget(header_);
 
+    // One line per row (the Simple layout's lists): the name, its keys (muted), then the icons:
+    // the weight (a popup), Solo, the eye, the menu (a Sculpt node's row: its menu alone).
     tree_ = new QTreeWidget(this);
     tree_->setObjectName(QStringLiteral("correctivesTree"));
-    tree_->setHeaderLabels({tr("Layer"), tr("Weight"), tr("Keys")});
+    tree_->setColumnCount(3);
+    tree_->setHeaderLabels({tr("Layer"), tr("Keys"), QString()});
     plainRows(tree_);
     tree_->setRootIsDecorated(false);
     tree_->header()->setStretchLastSection(false);
     tree_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     tree_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    tree_->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    tree_->header()->setSectionResizeMode(2, QHeaderView::Fixed);
+    tree_->header()->resizeSection(2, 112);  // the row's icons: weight, solo, eye, menu
     tree_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
-    tree_->setToolTip(tr("Click: what brushes edit. Checkbox: show or hide. Double-click the name: rename. Weight: now, on this "
-                         "frame. Right-click: more"));
+    tree_->setToolTip(tr("Click: what brushes edit (again: the base groom). The weight, Solo, the eye and the menu (or right-click): "
+                         "on the row. Double-click the name: rename"));
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(tree_);
     connect(tree_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item, QTreeWidgetItem*) {
-        if (!updating_) picked(item);
+        if (updating_) return;
+        justPicked_ = true;  // (itemClicked: this click picked it)
+        picked(item);
     });
+    connect(tree_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int) {
+        // The picked layer clicked again (the click didn't change the pick): the base groom.
+        if (justPicked_) {
+            justPicked_ = false;
+            return;
+        }
+        if (!item || item->data(0, kKindRole).toString() == QLatin1String("base")) return;
+        // (After the double-click time: a double-click renames it instead.)
+        const int click = ++baseClick_;
+        QTimer::singleShot(QApplication::doubleClickInterval(), this, [this, click] {
+            if (click != baseClick_) return;
+            setTargetNode({});
+            setTargetLayer({});
+        });
+    });
+    connect(tree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem*, int) { ++baseClick_; });
     connect(tree_, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int column) {
         if (updating_ || !item || column != 0 || item->data(0, kKindRole).toString() != QLatin1String("layer")) return;
         const std::string name = item->data(0, kNameRole).toString().toStdString();
-        const bool on = item->checkState(0) == Qt::Checked;
         const std::string text = item->text(0).trimmed().toStdString();
-        // (Not inside the item's own signal: the stack is rebuilt.)
-        QTimer::singleShot(0, this, [this, name, on, text] {
-            if (stack_ && stack_->layer(name) && stack_->layer(name)->enabled != on) setLayerEnabled(name, on);
+        // (Not inside the item's own signal: the stack is rebuilt. On / off: the row's eye.)
+        QTimer::singleShot(0, this, [this, name, text] {
             if (!text.empty() && text != name && !renameLayer(name, text)) {
                 shownKey_.clear();
                 refresh();
@@ -86,16 +109,13 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
         if (QMenu* menu = contextMenu(pos)) menu->popup(tree_->viewport()->mapToGlobal(pos));
     });
 
-    // The picked layer's box: up, down, solo, delete; its weight and the key.
-    QVBoxLayout* rows = nullptr;
-    box_ = itemBox(this, &rows);
-    box_->setObjectName(QStringLiteral("layerBox"));
-    itemBar_ = new ListBar(box_);
-    itemBar_->setObjectName(QStringLiteral("layerItemBar"));
-    rows->addWidget(itemBar_);
+    // A layer's weight (and its key) in a popup under the row's weight icon.
+    weightPopup_ = new PopupPanel(this, 230);
+    weightPopup_->setObjectName(QStringLiteral("correctiveWeightPopup"));
+    box_ = weightPopup_;
     auto* row = new QHBoxLayout();
     row->setSpacing(4);
-    weight_ = new ValueSlider(box_);
+    weight_ = new ValueSlider(weightPopup_);
     weight_->setCaption(tr("Weight"));
     weight_->setRange(0.0, 1.0);
     weight_->setLimits(0.0, 1.0);
@@ -103,11 +123,10 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
     weight_->setFill(theme::purple());
     weight_->setToolTip(tr("The corrective's weight on this frame. A keyed weight is keyed here as you change it"));
     row->addWidget(weight_, 1);
-    key_ = makeGlyph(QStringLiteral("key"), qs(defs().action("corrective.keyWeight").value("tip", std::string())), box_);
+    key_ = makeGlyph(QStringLiteral("key"), qs(defs().action("corrective.keyWeight").value("tip", std::string())), weightPopup_);
     key_->setObjectName(QStringLiteral("correctiveKey"));
     row->addWidget(key_);
-    rows->addLayout(row);
-    layout->addWidget(box_);
+    weightPopup_->add(row);
     connect(weight_, &ValueSlider::released, this, [this] {
         if (updating_) return;
         setLayerWeight(currentLayer(), static_cast<float>(weight_->value()));
@@ -130,17 +149,109 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
         if (it != bindings_.end()) it->second.trigger(ui::json(), false);
     });
     layout->addWidget(newButton_, 0, Qt::AlignHCenter);
+    // How the strands draw while sculpting (the window's controls: setSculptDisplay), folded under
+    // the list.
+    auto* display = new QWidget(this);
+    displayRows_ = new QVBoxLayout(display);
+    displayRows_->setContentsMargins(0, 0, 0, 0);
+    displayRows_->setSpacing(4);
+    displaySection_ = new Section(tr("Display while sculpting"), display, false, this);
+    displaySection_->setObjectName(QStringLiteral("sculptDisplaySection"));
+    displaySection_->hide();  // (until the window gives its controls)
+    layout->addWidget(displaySection_);
     fitRows(tree_);
     setEnabled(false);
+}
+
+void CorrectivesPanel::setSculptDisplay(QComboBox* strands, ValueSlider* density) {
+    auto* name = new QLabel(tr("Strands"), displaySection_->content());
+    name->setProperty("role", "propLabel");
+    strands->setToolTip(qs(defs().get("choices/sculptDisplay").value("tip", std::string("The strands while a stroke is live"))));
+    name->setToolTip(strands->toolTip());
+    displayRows_->addWidget(fieldRow(displaySection_->content(), name, strands));
+    density->setParent(displaySection_->content());
+    density->setCaption(tr("Strand density"));
+    density->setToolTip(tr("The share of the strands evaluated while a stroke is live (all of them again when it ends)"));
+    displayRows_->addWidget(density);
+    strands->show();
+    density->show();
+    displaySection_->show();
+}
+
+QWidget* CorrectivesPanel::rowIcons(QTreeWidgetItem* item) {
+    // A row's icons (ROW_ORDER): the weight (a popup), Solo, the eye, the menu; a Sculpt node's
+    // row: its menu alone; the base groom: none.
+    const QString kind = item->data(0, kKindRole).toString();
+    const std::string name = item->data(0, kNameRole).toString().toStdString();
+    auto pick = [this, item] {
+        if (tree_->currentItem() != item) tree_->setCurrentItem(item);
+        justPicked_ = false;
+    };
+    if (kind == QLatin1String("node")) {
+        QToolButton* more = rowMenuButton(tr("Clear Edits"),
+                                          [this, name](QMenu* menu) {
+                                              ui::Bindings bindings = bindings_;
+                                              bindings["sculpt.clearEdits"] = {[this, name](const ui::json&, bool) { clearNodeEdits(name); }};
+                                              ui::FillOptions options = options_;
+                                              options.resolve.state = std::set<std::string>{};
+                                              ui::fillMenu(menu, defs().get("lists/correctives/nodeContext"), bindings, options);
+                                          },
+                                          pick, tree_);
+        more->setObjectName(QStringLiteral("correctiveMenu_node_") + qs(name));
+        return rowStrip({more}, tree_);
+    }
+    if (kind != QLatin1String("layer") || !stack_) return nullptr;
+    const CorrectiveLayer* l = stack_->layer(name);
+    if (!l) return nullptr;
+    const double now = document_ ? document_->time() : 0.0;
+    const float w = l->enabled ? l->weightAt(now) : 0.0f;
+    QToolButton* weight = popupButton(QStringLiteral("weight"), tr("Weight %1 on this frame (click to change it, or key it)").arg(w, 0, 'f', 2),
+                                      weightPopup_, pick, tree_, QString::number(w, 'f', 1));
+    weight->setObjectName(QStringLiteral("correctiveWeight_") + qs(name));
+    // Solo (lists.json correctives.row): on while it is the only layer on.
+    bool solo = l->enabled;
+    for (const CorrectiveLayer& other : stack_->layers) solo = solo && (other.name == name || !other.enabled);
+    solo = solo && stack_->layers.size() > 1;
+    std::vector<QWidget*> icons{weight};
+    for (const ui::Item& entry : defs().resolve(defs().get("lists/correctives/row"))) {
+        if (entry.kind != ui::Item::Kind::Action || !bindings_.count(entry.id)) continue;
+        QToolButton* b = rowGlyph(QStringLiteral("glyph_solo"), qs(entry.tip), tree_, {}, solo);
+        b->setObjectName(QStringLiteral("correctiveSolo_") + qs(name));
+        const ui::Binding binding = bindings_.at(entry.id);
+        connect(b, &QToolButton::clicked, this, [pick, binding] {
+            pick();
+            binding.trigger(ui::json(), false);
+        });
+        icons.push_back(b);
+    }
+    const bool on = l->enabled;
+    QToolButton* eye = rowGlyph(on ? QStringLiteral("eye") : QStringLiteral("eye_off"),
+                                on ? tr("Turn %1 off (it is kept)").arg(qs(name)) : tr("Turn %1 on").arg(qs(name)), tree_);
+    eye->setObjectName(QStringLiteral("correctiveEye_") + qs(name));
+    connect(eye, &QToolButton::clicked, this, [this, name, on] {
+        QTimer::singleShot(0, this, [this, name, on] { setLayerEnabled(name, !on); });
+    });
+    icons.push_back(eye);
+    QToolButton* more = rowMenuButton(tr("Rename, move, keys, delete"),
+                                      [this](QMenu* menu) {
+                                          ui::FillOptions options = options_;
+                                          options.resolve.state = std::set<std::string>{"corrective"};
+                                          ui::fillMenu(menu, defs().get("lists/correctives/context"), bindings_, options);
+                                      },
+                                      pick, tree_);
+    more->setObjectName(QStringLiteral("correctiveMenu_") + qs(name));
+    icons.push_back(more);
+    return rowStrip(icons, tree_);
 }
 
 void CorrectivesPanel::setActions(const ui::Bindings& bindings, const ui::FillOptions& options) {
     bindings_ = bindings;
     options_ = options;
     options_.liveShortcuts = false;
-    // + New and Fix Frame in the header (glyphs), the picked layer's up, down, solo, delete in its box.
+    // Fix Frame and + New in the header (glyphs); a row's Solo and menu on the row.
     bar_->build(defs().get("lists/correctives/bar"), bindings_, options_, ListBar::Part::Labeled);
-    itemBar_->build(defs().get("lists/correctives/bar"), bindings_, options_, ListBar::Part::Glyphs);
+    shownKey_.clear();
+    refresh();
 }
 
 void CorrectivesPanel::setDocument(GroomDocument* document) {
@@ -223,13 +334,16 @@ void CorrectivesPanel::refresh() {
             item->setText(0, qs(l->name));
             item->setData(0, kKindRole, QStringLiteral("layer"));
             item->setData(0, kNameRole, qs(l->name));
-            item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
-            item->setCheckState(0, l->enabled ? Qt::Checked : Qt::Unchecked);
+            item->setFlags(item->flags() | Qt::ItemIsEditable);
+            if (!l->enabled) item->setForeground(0, theme::textMuted());  // (off: its eye says so too)
             QString keys;
             if (!l->weightCurve.empty()) keys = QStringLiteral("◆ %1").arg(l->weightCurve.size());
-            else if (l->allFrames()) keys = tr("all frames");
-            else if (document_) keys = tr("frame %1 ± %2").arg(std::lround(l->time * document_->framesPerSecond())).arg(std::lround(std::max(l->fadeIn, l->fadeOut) * document_->framesPerSecond()));
-            item->setText(2, keys);
+            else if (!l->allFrames() && document_) keys = tr("f%1").arg(std::lround(l->time * document_->framesPerSecond()));
+            item->setText(1, keys);
+            item->setToolTip(1, !l->weightCurve.empty() ? tr("Keyed on %1 frames").arg(l->weightCurve.size())
+                                : l->allFrames()     ? tr("On every frame")
+                                : document_ ? tr("Frame %1, fading over %2 frames").arg(std::lround(l->time * document_->framesPerSecond())).arg(std::lround(std::max(l->fadeIn, l->fadeOut) * document_->framesPerSecond()))
+                                            : QString());
             QString tip = tr("%1: %n guide(s) corrected", "", static_cast<int>(l->offsets.size())).arg(qs(l->name));
             if (const std::optional<double> frame = layerFrame(l->name)) tip += tr("; strongest on frame %1").arg(*frame);
             item->setToolTip(0, tip);
@@ -238,7 +352,7 @@ void CorrectivesPanel::refresh() {
         for (const auto& [n, edited] : nodes) {
             auto* item = new QTreeWidgetItem(tree_);
             item->setText(0, tr("Node: %1").arg(qs(n)));
-            item->setText(2, edited ? tr("%1 edited").arg(edited) : QString());
+            item->setText(1, edited ? tr("%1 edited").arg(edited) : QString());
             item->setData(0, kKindRole, QStringLiteral("node"));
             item->setData(0, kNameRole, qs(n));
             item->setToolTip(0, tr("Brushes shape %1's guides (the graph's, made again when what feeds it changes; the strokes follow them). "
@@ -254,20 +368,16 @@ void CorrectivesPanel::refresh() {
         base->setFont(0, font);
         for (QTreeWidgetItem* row : tree_->findItems(QStringLiteral("*"), Qt::MatchWildcard)) {
             row->setForeground(1, theme::textMuted());
-            row->setForeground(2, theme::textMuted());
+            if (QWidget* icons = rowIcons(row)) tree_->setItemWidget(row, 2, icons);
         }
         updating_ = false;
-        header_->setCount(tree_->topLevelItemCount());
+        header_->setCount(static_cast<int>(stack_->layers.size()));
         fitRows(tree_);
     }
     selectTargetRow();
     refreshWeights();
     applyTarget();
     bar_->refresh();
-    itemBar_->refresh();
-    // The box is the picked row's (a corrective, the base groom or a Sculpt node).
-    QTreeWidgetItem* picked = tree_->currentItem();
-    itemBar_->setTitle(QString());  // (the picked row above names it: the drawer's bar holds its actions alone)
 }
 
 void CorrectivesPanel::refreshWeights() {
@@ -281,12 +391,14 @@ void CorrectivesPanel::refreshWeights() {
         const CorrectiveLayer* l = stack_->layer(item->data(0, kNameRole).toString().toStdString());
         if (!l) continue;
         const float w = l->enabled ? l->weightAt(now) : 0.0f;
-        item->setText(1, QStringLiteral("%1%").arg(std::lround(100.0f * w)));
+        // The row's weight icon shows it (one decimal), its tip the exact one.
+        if (auto* b = tree_->findChild<QToolButton*>(QStringLiteral("correctiveWeight_") + item->data(0, kNameRole).toString())) {
+            b->setText(QString::number(w, 'f', 1));
+            b->setToolTip(tr("Weight %1 on this frame (click to change it, or key it)").arg(w, 0, 'f', 2));
+        }
     }
     const CorrectiveLayer* layer = target_.empty() ? nullptr : stack_->layer(target_);
-    // The base groom has no weight: the row shows only for a corrective (no dead slider).
-    weight_->setVisible(layer != nullptr);
-    key_->setVisible(layer != nullptr);
+    // The base groom has no weight (the popup is a corrective's).
     weight_->setEnabled(layer != nullptr);
     key_->setEnabled(layer != nullptr);
     if (layer) weight_->setValue(layer->weightCurve.empty() ? layer->weight : layer->weightAt(now));
@@ -391,8 +503,7 @@ void CorrectivesPanel::applyTarget() {
                           : stack_ && !stack_->layers.empty() ? tr("Strokes edit the guides. Pick a corrective to sculpt it at this frame.")
                                                                 : tr("Correctives sculpt per-shot fixes on top of the groom, keyed over time."));
     if (session_) session_->setShotSculpt(shot, document_ ? document_->time() : 0.0, document_ ? std::lround(document_->frame()) : 0, target_);
-    // The base groom is not a layer: no layer box for it. No corrective yet: the first one, labeled.
-    box_->setVisible(shot || !node.empty());
+    // No corrective yet: the first one, labeled.
     const bool first = document_ && (!stack_ || stack_->layers.empty());
     newButton_->setText(tr("New Corrective at Frame %1").arg(document_ ? std::lround(document_->frame()) : 0));
     newButton_->setVisible(first);

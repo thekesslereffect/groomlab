@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Tube tool card's root tube blocks (Groom Tools, the Tube tool):
+"""The root tube blocks of the Groom Tools' cards: the Roots brush's (both) and the Tube brush's
+(the levels):
 
-Tube roots (issue 61)   Draw root: the root's outline clicked on the scalp CV by CV, then (Draw
-                        before extrude) its path drawn from the root's middle; Edit roots, which
-                        turns into Finish edit while editing; Select root (pick a root by its
-                        middle and drag it over the scalp), with Duplicate and Delete for the
-                        selected root. A mode's button again leaves it (Draw and Select: as they
-                        are; Edit: finished). Undo CV, Delete, Duplicate; the new tubes' Length,
-                        Segments and Taper; Snap to neighbours. Subdivide (#85) cuts the selected
+Tube roots (issue 61)   The Roots brush. Draw root (where picking the brush starts): the root's
+                        outline clicked on the scalp CV by CV, then (Draw before extrude) its path
+                        drawn from the root's middle; Edit roots, which turns into Finish edit
+                        while editing; Select root (pick a root by its middle and drag it over the
+                        scalp), with Duplicate and Delete for the selected root. A mode's button
+                        again goes back to Draw (Draw: the outline being drawn dropped; Edit:
+                        finished). Leaving the brush leaves root mode. Undo CV, Delete,
+                        Duplicate; the new tubes' Length, Segments and Taper; Snap to
+                        neighbours. Subdivide (#85) cuts the selected
                         root into Voronoi cells (a cell cut again: a destructive cut the map
                         leaves be); the brush beside it paints the one density map
                         (tubeSubdivisionDensity) that makes them smaller and more numerous;
@@ -102,6 +105,7 @@ class RootTubeCard(QtCore.QObject):
 
         # -- Root tubes --------------------------------------------------------------------
         self.root_block = widgets.Block("Tube roots", name="rootTubes")
+        self.root_block.set_titled(False)  # (the Roots card's header names it)
         self.root_block.setToolTip("Tubes drawn root first: click the root's outline on the scalp, one "
                                    "CV at a time, and close it on its first CV. Each tube is its own region.")
         self.draw_root = widgets.chip("Draw root", "Click the root's outline on the scalp, one CV at a time (drag "
@@ -168,19 +172,22 @@ class RootTubeCard(QtCore.QObject):
                 w.setSizePolicy(QtWidgets.QSizePolicy.Fixed, w.sizePolicy().verticalPolicy())
                 w.setFixedWidth(theme.px(34))
             layout.addWidget(w, stretch)
+        self.subdivide_root.setMinimumWidth(self.subdivide_root.fontMetrics().horizontalAdvance("Subdivide") + theme.px(22))  # (its name whole)
         self.root_block.add(row)
         self._painting = None  # painting a density map: (the roots it is for, the map)
-        self.snap = widgets.switch("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
-                                   "so the tubes meet with no gap", True, "rootTubeSnap")
+        # Snap and Draw guide: pills (the mock's), as the brushes' toggles.
+        self.snap = widgets.chip("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
+                                 "so the tubes meet with no gap", True, "rootTubeSnap")
+        self.snap.row = self.snap
         self.snap.toggled.connect(lambda on: self._set(snap=on))
-        self.root_block.add(self.snap.row)
-        self.extrude_draw = widgets.switch("Draw guide before extrude", "Once the outline closes, drag from its middle "
-                                           "out to draw the tube's guide (as the Draw tool draws one): smoothed, its "
-                                           "curls kept, its points as many as its length and turns need. Off: the "
-                                           "tube goes straight off the scalp, Length long, in Segments",
-                                           True, "rootTubeDrawFirst")
+        self.extrude_draw = widgets.chip("Draw guide", "Draw guide before extrude: once the outline closes, drag from "
+                                         "its middle out to draw the tube's guide (as the Draw tool draws one): "
+                                         "smoothed, its curls kept, its points as many as its length and turns need. "
+                                         "Off: the tube goes straight off the scalp, Length long, in Segments",
+                                         True, "rootTubeDrawFirst")
+        self.extrude_draw.row = self.extrude_draw
         self.extrude_draw.toggled.connect(self.draw_toggled)
-        self.root_block.add(self.extrude_draw.row)
+        self.root_block.add(widgets.pill_row((self.snap, self.extrude_draw)))
         self.density = widgets.SoftSlider(1.0, 0.25, 4.0, minimum=0.05, maximum=20.0, key="palette.rootTubeDensity",
                                           label="Point density")
         self.density.setToolTip("How many points a drawn guide gets: 1, about one per root width along it and "
@@ -213,6 +220,7 @@ class RootTubeCard(QtCore.QObject):
                                          "deepest level everywhere", None, "tubeLevelRemove")
         self.remove_level.clicked.connect(self.remove_clicked)
         self.hierarchy_block = widgets.Block("Tube hierarchy", name="tubeHierarchy")
+        self.hierarchy_block.set_titled(False)  # (one row under the card's header: Level 1 2 ... + - ⋯)
         self.hierarchy_block.setToolTip("Tube levels: each level splits the tubes above it in two. Shaping "
                                         "a tube carries the smaller tubes inside it; pick a level to edit its tubes")
         for b in (self.add_level, self.remove_level):
@@ -223,12 +231,21 @@ class RootTubeCard(QtCore.QObject):
         self.base_label = QtWidgets.QLabel()
         self.base_label.setProperty("role", "about")
         self.hierarchy_block.add(self.base_label)
+        self.base_label.setVisible(False)  # (the levels' row says it: the Level label's tooltip)
         self.level_group = QtWidgets.QButtonGroup(self)
         self.level_group.setExclusive(True)
         self.level_group.buttonClicked.connect(self.level_clicked)
         # One row: the level buttons on the left (fill_levels fills them), + and - on the right;
         # levels reaching + and - push them down to a row of their own.
+        lead = QtWidgets.QWidget()
+        lead_layout = QtWidgets.QHBoxLayout(lead)
+        lead_layout.setContentsMargins(0, 0, 0, 0)
+        lead_layout.setSpacing(theme.px(6))
+        level_label = widgets.small_label("Level")
+        level_label.setToolTip(self.hierarchy_block.toolTip())
+        lead_layout.addWidget(level_label)
         levels = QtWidgets.QWidget()
+        lead_layout.addWidget(levels)
         self.level_layout = QtWidgets.QHBoxLayout(levels)
         self.level_layout.setContentsMargins(0, 0, 0, 0)
         self.level_layout.setSpacing(theme.px(4))
@@ -238,21 +255,26 @@ class RootTubeCard(QtCore.QObject):
         edit_layout.setSpacing(theme.px(4))
         edit_layout.addWidget(self.add_level)
         edit_layout.addWidget(self.remove_level)
+        self.view_menu = widgets.menu_button("Level view: Lock view, Mixed view, colors per level", self.fill_view_menu)
+        self.view_menu.setObjectName("tubeLevelView")
+        edit_layout.addWidget(self.view_menu)
         self.level_row = QtWidgets.QWidget()
-        LeadTrailLayout(levels, edits, self.level_row)
+        LeadTrailLayout(lead, edits, self.level_row)
         self.hierarchy_block.add(self.level_row)
         self.lock_view = widgets.switch("Lock view", "Keep the tubes of the level shown now in view while you pick "
                                         "other levels to work on, whose guides show (step down to level 1 and comb "
                                         "its guides while level 5's tubes stay in view and follow). Only the tubes' "
                                         "view: the other visibility controls work as they do", False, "tubeLockView")
         self.lock_view.toggled.connect(self.lock_toggled)
-        self.hierarchy_block.add(self.lock_view.row)
+        self.lock_view.row.setVisible(False)  # (the ⋯ menu's: fill_view_menu)
         self.mixed_view = widgets.switch("Mixed view", "Working on a level, also show the tubes (not the guides) of the "
                                          "levels above where no level below continues them (a level 1 tube not split "
                                          "to level 2 shows while you work on level 2), and their roots in Select root "
                                          "and Edit roots", True, "tubeMixedView")
         self.mixed_view.toggled.connect(self.mixed_toggled)
-        self.hierarchy_block.add(self.mixed_view.row)
+        self.mixed_view.row.setVisible(False)
+        for switch in (self.lock_view, self.mixed_view):
+            switch.row.setParent(self.hierarchy_block)
         self._locked = 0  # Lock view: the level kept in view (0: none), of hierarchy _locked_base
         self._locked_base = None
         self._current = 1  # the level picked
@@ -262,16 +284,37 @@ class RootTubeCard(QtCore.QObject):
         self.blocks = (self.root_block, self.hierarchy_block)
         self.show(False)
 
+    def fill_view_menu(self, menu_):
+        """The levels' ⋯: Lock view, Mixed view and Colors per level, checked as they stand."""
+        entries = [("Lock view", self.lock_view), ("Mixed view", self.mixed_view)]
+        colors = getattr(self.owner, "tube_level_colors", None)
+        if colors is not None:
+            entries.append(("Colors per level", colors))
+        for text, box in entries:
+            action = menu_.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(box.isChecked())
+            action.setToolTip(box.toolTip())
+            action.toggled.connect(box.setChecked)
+
     # -- Showing ---------------------------------------------------------------------------
 
-    def show(self, on):
-        for b in self.blocks:
-            b.setVisible(on)
+    def show(self, on, roots=False):
+        """The levels' row (`on`: the Tube and Roots brushes) and the root block (`roots`: Roots)."""
+        self.hierarchy_block.setVisible(on)
+        self.root_block.setVisible(on and roots)
         if on:
             self.refresh(self.owner.groom())
 
     def visible(self):
-        return self.root_block.isVisible()
+        return any(b.isVisible() for b in self.blocks)
+
+    def start(self, mode="place"):
+        """The Roots brush picked: the root tool in `mode` ("place": Draw root, "edit", "select")."""
+        button = {"place": self.draw_root, "edit": self.edit_root, "select": self.select_root}[mode]
+        if mode == "place":
+            self.to_base_level()
+        self._enter(mode, button)
 
     def refresh(self, groom, full=True):
         """The buttons as the tool stands, and the hierarchy's levels. `full` False (the palette's
@@ -404,7 +447,7 @@ class RootTubeCard(QtCore.QObject):
         self._run(root_tube_tool.start, groom, mode, **self._settings())
 
     def toggle_draw(self, _on=None):
-        if self._mode() in ("place", "draw"):  # again: the outline being drawn dropped, the mode left
+        if self._mode() in ("place", "draw"):  # again: the outline being drawn dropped, Draw again
             return self.back_to_brush()
         self.to_base_level()
         self._enter("place", self.draw_root)
@@ -438,7 +481,7 @@ class RootTubeCard(QtCore.QObject):
         self._enter("edit", self.edit_root)
 
     def toggle_select(self, _on=None):
-        if self._mode() in ("select", "duplicate"):  # again: left
+        if self._mode() in ("select", "duplicate"):  # again: back to Draw
             return self.back_to_brush()
         self._enter("select", self.select_root)
 
@@ -580,13 +623,16 @@ class RootTubeCard(QtCore.QObject):
             return
         (_roots, name), self._painting = self._painting, None
         self.owner.show_tab("tools")
-        self.back_to_brush()
+        self.back_to_brush("select")  # (the roots to Apply on, as before painting)
         self.owner.status.setText("Painted %s: Apply cuts its roots by it." % name)
 
-    def back_to_brush(self):
-        """The Tube brush again (the root tool put away)."""
+    def back_to_brush(self, mode="place"):
+        """The Roots brush again, in `mode` (Draw root unless said): the root tool's edit put away."""
         self.tool.leave()
-        self.owner.activate("shape")
+        if self.owner.tool != "roots":
+            self.owner.activate("roots")  # (Draw root)
+        if mode != "place" or self._mode() != "place":
+            self.start(mode)
         self.refresh(self.owner.groom())
 
     # -- Tube hierarchy ----------------------------------------------------------------------

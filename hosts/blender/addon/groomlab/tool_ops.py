@@ -220,10 +220,21 @@ class ToolSession(object):
             if busy:
                 self.cancel(context)
                 return {"RUNNING_MODAL"}
-            if kind == "ESC" and context.scene.groomlab_tools.root_mode:
-                leave_roots(context, scalp)  # the Tube tool's root mode left: the Tube brush again
+            t = context.scene.groomlab_tools
+            if kind == "ESC" and t.root_mode and (t.root_mode not in ("place", "draw") or t.root_cvs):
+                # The Roots brush: Edit, Select or an outline begun left for Draw root (again: the tool left).
+                try:
+                    leave_roots(context, scalp)
+                    tools.start_roots(context, scalp, "place")
+                except HelperError as e:
+                    tools.status(context.scene, e.message)
                 display.redraw()
                 return {"RUNNING_MODAL"}
+            if kind == "ESC" and t.root_mode:
+                try:
+                    leave_roots(context, scalp)  # (then the tool left, below)
+                except HelperError:
+                    pass
             if kind == "ESC" and self.leave_sculpt_node(context, scalp):
                 return {"RUNNING_MODAL"}  # (again: leaves the tool)
             if kind == "ESC":
@@ -667,6 +678,13 @@ class GROOMLAB_OT_tool(bpy.types.Operator):
             self.report({"WARNING"}, "This groom's guides are Blender curves: sculpt them with Sculpt Guides. "
                                      "GroomLab's tools work on grooms made with Create Groom from Selection")
             return {"CANCELLED"}
+        kind, _name = tools.picked_corrective(context.scene)
+        if s is not None and kind in ("layer", "node") and not tools.edits_layers(self.tool):
+            # (its tile is greyed: Maya's palette stops such a tool on a corrective)
+            info = tools.tool_info(self.tool) or {}
+            self.report({"WARNING"}, "%s doesn't edit a corrective: pick Base groom under Correctives to use it" %
+                        info.get("label", self.tool))
+            return {"CANCELLED"}
         try:
             tools.pick(context, self.tool)
         except HelperError as e:
@@ -843,9 +861,13 @@ class GROOMLAB_OT_guides_edit(GroomToolOperator):
     bl_options = {"REGISTER", "UNDO"}
 
     action: EnumProperty(items=GUIDE_EDITS)
+    count: IntProperty(name="Per guide", default=0, min=0, max=500, options={"SKIP_SAVE"},
+                       description="Generate Children: this many per guide (0: the count used last)")
 
     @classmethod
     def description(cls, context, properties):
+        if properties.action == "CHILDREN" and getattr(properties, "count", 0):
+            return "%d children per guide: the selected guides', else the picked group's" % properties.count
         return _description(cls, properties, next((tip for k, _l, tip in GUIDE_EDITS if k == properties.action), ""))
 
     def execute(self, context):
@@ -855,6 +877,8 @@ class GROOMLAB_OT_guides_edit(GroomToolOperator):
         a = self.action
         try:
             if a == "CHILDREN":
+                if self.count:  # (the group menu's Generate Children: a count picked)
+                    t.children_count = self.count
                 args = {"count": int(t.children_count)}
                 if t.selected_count:
                     args["selected"] = True
@@ -1731,15 +1755,15 @@ class GROOMLAB_OT_length_edit(GroomToolOperator):
         return {"FINISHED"}
 
 
-# ---- Tube roots and the tube hierarchy (the Tube card's blocks; the core's root tool) --------------
+# ---- Tube roots and the tube hierarchy (the Roots card's and the Tube card's; the core's root tool) --
 
 ROOT_TIPS = {
     "DRAW": "Click the root's outline on the scalp, one CV at a time (drag to move the CV); click the first CV to "
-            "close it. Near a neighbouring root a CV snaps onto it, sealing the tubes. Again: leave",
+            "close it. Near a neighbouring root a CV snaps onto it, sealing the tubes. Again: the outline begun dropped",
     "EDIT": "Show the root tubes' outlines with their CVs, the guides hidden; drag CVs on the scalp (Ctrl+click an "
-            "edge: a new CV there; a CV: taken out), then Finish edit",
+            "edge: a new CV there; a CV: taken out), then Finish edit (back to Draw root)",
     "SELECT": "Show every root's middle: click one to select its root (Shift: several), drag it to move the root "
-              "over the scalp. Again: leave",
+              "over the scalp. Again: back to Draw root",
     "UNDO_CV": "Take back the last CV (or the drawn path); in Edit roots, the last CV move",
     "DELETE": "Delete the selected roots: their tubes and the tube hierarchy under them",
     "DUPLICATE": "Copy the selected roots: the copies follow the cursor over the scalp, a click sets them down. "
@@ -1755,7 +1779,7 @@ ROOT_TIPS = {
 
 
 class GROOMLAB_OT_root_tube(GroomToolOperator):
-    """The Tube card's Tube roots buttons: Draw root, Edit roots, Select root, Undo CV, Delete, Duplicate"""
+    """The Roots card's buttons: Draw root, Edit roots, Select root, Undo CV, Delete, Duplicate"""
     bl_idname = "groomlab.root_tube"
     bl_label = "Tube Roots"
     bl_options = {"REGISTER"}
@@ -1776,23 +1800,18 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
         t = context.scene.groomlab_tools
         mode = t.root_mode
         try:
+            # A mode's button again goes back to Draw root (Draw: the outline begun dropped; Edit: finished).
             if self.action == "DRAW":
-                if mode in ("place", "draw"):
-                    leave_roots(context, scalp)
-                else:
-                    self.begin(context, scalp, "place")
+                self.begin(context, scalp, "place")
             elif self.action == "EDIT":
                 if mode == "edit":
                     tools.root_edit(scalp, "finish")
                     if t.root_mode != "edit":  # (finished; on an error still editing)
-                        leave_roots(context, scalp)
+                        self.begin(context, scalp, "place")
                 else:
                     self.begin(context, scalp, "edit")
             elif self.action == "SELECT":
-                if mode in ("select", "duplicate"):
-                    leave_roots(context, scalp)
-                else:
-                    self.begin(context, scalp, "select")
+                self.begin(context, scalp, "place" if mode in ("select", "duplicate") else "select")
             elif self.action == "UNDO_CV":
                 tools.root_edit(scalp, "undoCv")
             elif self.action == "DELETE":
@@ -1834,22 +1853,22 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
                                     "brush again (or another tool) stops painting; then Apply to cut by it.")
 
     def begin(self, context, scalp, mode):
+        """The root tool in `mode`: the Roots brush picked first (it starts in Draw root)."""
         t = context.scene.groomlab_tools
-        if t.tool != "shape":
-            tools.pick(context, "shape")
-        if mode == "place":
-            # A deeper level picked: level 1 shown and picked instead (a new root tube is a level 1 guide).
-            tools.tube_levels(scalp)
-            levels = [x for x in t.tube_levels.split(",") if x]
-            if len(levels) > 1 and t.tube_level > 1:
-                tools.tube_level_show(scalp, 1)
-        tools.root_edit(scalp, "start", mode=mode)
+        if t.tool != "roots":
+            tools.pick(context, "roots")
+            if mode != "place":
+                tools.start_roots(context, scalp, mode)
+        else:
+            if t.root_mode:
+                tools.root_edit(scalp, "leave")  # (an edit pending given to its roots; an outline begun dropped)
+            tools.start_roots(context, scalp, mode)
         start_modal(context)
 
 
 def finish_density_painting(context):
     """Painting the subdivision density done (the brush again, or the paint tool left any other
-    way): the Tools tab and the Tube tool again; nothing cut (Apply cuts by the map). None when not
+    way): the Tools tab and the Roots brush again, in Select root; nothing cut (Apply cuts by the map). None when not
     painting it."""
     t = context.scene.groomlab_tools
     if not t.root_painting:
@@ -1860,7 +1879,8 @@ def finish_density_painting(context):
     scalp = active(context)
     if scalp is None:
         return None
-    tools.pick(context, "shape")
+    tools.pick(context, "roots")
+    tools.start_roots(context, scalp, "select")  # (the roots to Apply on, as before painting)
     tools.status(context.scene, "Painted the density map: Apply cuts its roots by it.")
     display.redraw()
     return True
@@ -1897,7 +1917,7 @@ def _cut_said(r, verb):
 
 
 def leave_roots(context, scalp):
-    """The root mode put away (an edit not finished given to its roots): the Tube brush again."""
+    """The root mode put away (an edit not finished given to its roots): leaving the Roots brush."""
     t = context.scene.groomlab_tools
     if not t.root_mode:
         return
@@ -1989,7 +2009,7 @@ class GROOMLAB_OT_tube_apply(TubeOperator):
         profile = self.profile.lower()
         edit = {profile + "_hold": float(getattr(t, "tube_%s_hold" % profile)) / 100.0}
         if profile == "root":
-            if not t.tube_mixed:
+            if not t.tube_mixed and not t.tube_drawn:  # (Drawn root: the root tubes keep theirs, the hold goes)
                 edit["shape"] = t.tube_choice
         elif not getattr(t, "tube_%s_mixed" % profile):
             edit[profile + "_shape"] = getattr(t, "tube_%s_choice" % profile)
@@ -2029,22 +2049,42 @@ class GROOMLAB_OT_tube_shape_custom(TubeOperator):
         scalp = active(context)
         scene = context.scene
         t = scene.groomlab_tools
-        base = t.tube_choice or "round"
+        base, kind = tools.profile_choice(t)  # the shape the editor shows (an unset mid or tip: the root's)
+        if kind == "mixed":
+            base = t.tube_choice or "round"
         try:
             points, smooth = tools.shape_points(scalp, base)
-            name = tools.unique_shape_name(scene, base)
+            # (A drawn root's copy: a library shape of its own, not named as root tubes' are.)
+            name = tools.unique_shape_name(scene, "root" if kind == "drawn" else base)
             tools.add_tube_shape(scalp, name, points, smooth=smooth)
-            guides = tools.groom_tools(scalp).tube_guides
-            if guides:
-                tools.set_tube(scalp, guides=guides, shape=name)
+            _take_shape(context, scalp, name)
         except HelperError as e:
             return _fail(self, e)
-        with props.quiet():
-            t.tube_choice = name
-        tools.refresh_tubes(scalp, scene)
-        tools.push_safely(context)
         tools.status(scene, "%s: a copy of the built-in in the groom's library." % name)
         return {"FINISHED"}
+
+
+def _take_shape(context, scalp, name, give=True):
+    """A new library shape as the profile the editor shows: its picker's choice, and (`give`) the
+    targets' (Edit as Custom; New Shape and Duplicate only pick it)."""
+    t = context.scene.groomlab_tools
+    profile = t.tube_profile.lower()
+    guides = tools.groom_tools(scalp).tube_guides if give else []
+    if guides:
+        tools.set_tube(scalp, guides=guides, **{"shape" if profile == "root" else profile + "_shape": name})
+    with props.quiet():
+        if profile == "root":
+            t.tube_choice = name
+        else:
+            setattr(t, "tube_%s_choice" % profile, name)
+    tools.refresh_tubes(scalp, context.scene)
+    with props.quiet():  # (no targets: the pickers show it too)
+        try:
+            setattr(t, "tube_shape" if profile == "root" else "tube_%s_shape" % profile, name)
+        except TypeError:
+            pass
+    tools.follow_profile(t)
+    tools.push_safely(context)
 
 
 class GROOMLAB_OT_tube_shape_new(TubeOperator):
@@ -2076,15 +2116,9 @@ class GROOMLAB_OT_tube_shape_new(TubeOperator):
                 points, smooth = tools.shape_points(scalp, "round")
                 smooth, name = True, tools.unique_shape_name(scene, "shape")
             tools.add_tube_shape(scalp, name, points, smooth=smooth)
+            _take_shape(context, scalp, name, give=False)
         except HelperError as e:
             return _fail(self, e)
-        with props.quiet():
-            t.tube_choice = name
-        tools.refresh_tubes(scalp, scene)
-        names = [x.name for x in t.tube_shapes]
-        with props.quiet():
-            t.tube_shape_index = names.index(name) if name in names else t.tube_shape_index
-        tools.push_safely(context)
         return {"FINISHED"}
 
 
@@ -2113,11 +2147,12 @@ class GROOMLAB_OT_tube_shape_rename(TubeOperator):
             tools.rename_tube_shape(active(context), old, new)
         except HelperError as e:
             return _fail(self, e)
-        if t.tube_choice == old:
-            with props.quiet():
-                t.tube_choice = new
-            tools.refresh_tubes(active(context), context.scene)
-            tools.push_safely(context)
+        with props.quiet():
+            for attr in ("tube_choice", "tube_mid_choice", "tube_tip_choice"):
+                if getattr(t, attr) == old:
+                    setattr(t, attr, new)
+        tools.refresh_tubes(active(context), context.scene)
+        tools.push_safely(context)
         return {"FINISHED"}
 
 
@@ -2141,10 +2176,14 @@ class GROOMLAB_OT_tube_shape_remove(TubeOperator):
             tools.remove_tube_shape(active(context), name)
         except HelperError as e:
             return _fail(self, e)
-        if t.tube_choice == name:
-            with props.quiet():
+        with props.quiet():
+            if t.tube_choice == name:
                 t.tube_choice = "round"
-            tools.push_safely(context)
+            for attr in ("tube_mid_choice", "tube_tip_choice"):
+                if getattr(t, attr) == name:
+                    setattr(t, attr, "")
+        tools.refresh_tubes(active(context), context.scene)
+        tools.push_safely(context)
         tools.status(context.scene, "Deleted %s: %d guide%s went round." % (name, users, "" if users == 1 else "s"))
         return {"FINISHED"}
 
@@ -2194,6 +2233,8 @@ class GROOMLAB_OT_corrective_new(GroomToolOperator):
         except HelperError as e:
             return _fail(self, e)
         tools.status(context.scene, "Brushes sculpt into %s." % name)
+        from . import tool_props
+        tool_props.stop_off_layer(context)  # (a tool that can't edit a corrective stops: its tile greys)
         return {"FINISHED"}
 
 
@@ -2226,6 +2267,23 @@ class GROOMLAB_OT_corrective_solo(CorrectiveOperator):
             return {"CANCELLED"}
         try:
             tools.corrective_solo(active(context), name)
+        except HelperError as e:
+            return _fail(self, e)
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_corrective_enable(CorrectiveOperator):
+    """Turn the corrective off (it is kept, with its keys) or on again"""
+    bl_idname = "groomlab.corrective_enable"
+    bl_label = "Corrective On / Off"
+
+    def execute(self, context):
+        name = self.corrective(context)
+        if not name:
+            return {"CANCELLED"}
+        row = next((r for r in context.scene.groomlab_tools.correctives if r.kind == "layer" and r.name == name), None)
+        try:
+            tools.corrective_set(active(context), name, enabled=not (row.enabled if row is not None else True))
         except HelperError as e:
             return _fail(self, e)
         return {"FINISHED"}
@@ -2524,7 +2582,8 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_length_edit, GROOMLAB_OT_root_tube, GROOMLAB_OT_tube_level,
            GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,
            GROOMLAB_OT_tube_shape_rename, GROOMLAB_OT_tube_shape_remove, GROOMLAB_OT_corrective_new,
-           GROOMLAB_OT_corrective_move, GROOMLAB_OT_corrective_solo, GROOMLAB_OT_corrective_delete,
+           GROOMLAB_OT_corrective_move, GROOMLAB_OT_corrective_solo, GROOMLAB_OT_corrective_enable,
+           GROOMLAB_OT_corrective_delete,
            GROOMLAB_OT_corrective_go_to, GROOMLAB_OT_corrective_key, GROOMLAB_OT_corrective_clear_keys,
            GROOMLAB_OT_corrective_rename, GROOMLAB_OT_sculpt_target, GROOMLAB_OT_sculpt_clear,
            GROOMLAB_OT_show_strand_colors, GROOMLAB_OT_auto_strand_color_range, GROOMLAB_MT_pie)

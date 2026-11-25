@@ -500,14 +500,22 @@ public:
     // fillTubes, clumps and the display fill and draw its outline.
     const TubeShapeLibrary& tubeShapes() const { return tubeShapes_; }
     CustomTubeShapePtr tubeShape(const std::string& name) const;  // null when absent
+    // The library as artists see it (every host's Shape pickers and library menu): the custom
+    // shapes by name, without the owned ones (isOwnedTubeShape: a root tube's drawn root).
+    std::vector<CustomTubeShapePtr> libraryTubeShapes() const;
     // Adds a shape, or gives the one of that name new points: every guide taking it takes the new
-    // outline (call evaluate after). Throws std::invalid_argument as makeCustomTubeShape does.
+    // outline (call evaluate after). Throws std::invalid_argument as makeCustomTubeShape does, and
+    // for an owned name (isOwnedTubeShape: the root tools' own, setOwnedTubeShape).
     CustomTubeShapePtr setTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth = true);
+    // setTubeShape for an owned shape (a root tube's drawn root: the root tools' and their scripts'
+    // only). Throws std::invalid_argument for a name that is not an owned one.
+    CustomTubeShapePtr setOwnedTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth = false);
     // Renames a shape; the guides taking it keep it. Throws std::invalid_argument on an unknown
-    // name, or a new one taken or not allowed (checkTubeShapeName).
+    // name, or a new one taken or not allowed (checkTubeShapeName), or an owned one either way (a
+    // root tube's drawn root keeps its name; no library shape becomes one).
     void renameTubeShape(const std::string& from, const std::string& to);
-    // Removes a shape (throws std::invalid_argument on an unknown name): the guides taking it
-    // become round. Returns how many did.
+    // Removes a shape (throws std::invalid_argument on an unknown name, or an owned one: it goes
+    // with its last guide): the guides taking it become round. Returns how many did.
     std::size_t removeTubeShape(const std::string& name);
     // How many guides take the shape.
     std::size_t tubeShapeUsers(const std::string& name) const;
@@ -636,6 +644,8 @@ private:
     float scale_ = 1.0f;  // setScale
     // The library's owned shapes (kOwnedTubeShapePrefix) no guide takes any more, removed.
     void pruneOwnedTubeShapes();
+    // setTubeShape's and setOwnedTubeShape's work, once the name is checked.
+    CustomTubeShapePtr storeTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth);
     TubeShapeLibrary tubeShapes_;
     LengthKeySet lengthKeys_;
     std::vector<RootSubdivisionRecord> rootSubdivisions_;
@@ -647,12 +657,19 @@ private:
 // else the soloed ones (some guides frozen by `freeze`, these not, nor their parents: the brushes'
 // solo), else a groom's only guide. With the profiles among them (each different root, mid and tip
 // shape, "" an unset mid or tip) and the groom's (each shape any guide takes, root, mid or tip, and
-// how many guides take it), in the order first met.
+// how many guides take it, in the order first met; not the owned ones, a root tube's drawn root,
+// which no picker offers).
 struct TubeTargets {
     std::string source = "none";  // "selection", "solo" or "none"
     std::vector<GuideId> guides;
     std::vector<std::string> shapes, midShapes, tipShapes;
     std::vector<std::pair<std::string, int>> inUse;
+    // Of the guides: the root tubes (isRootTube: their Root profile is their drawn root, which a
+    // Root profile given does not replace, editTubes), and those in a tube hierarchy's split levels
+    // (a split tube, or one split into them: a Mid or Tip profile does not carry into the levels,
+    // sliceTube).
+    std::size_t rootTubes = 0;
+    std::size_t splitTubes = 0;
 };
 TubeTargets tubeTargetsOf(const GuideHierarchy& hierarchy, const std::vector<GuideId>& selection,
                           const std::string& freeze = "freeze");

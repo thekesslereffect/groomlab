@@ -319,6 +319,10 @@ void MainWindow::refreshOutliner() {
         entries.push_back(e);
     }
     outliner_->setEntries(entries);
+    // The Groom Tools' header picker: the same grooms.
+    QStringList names;
+    for (const OutlinerPanel::Entry& e : entries) names << e.name;
+    groomTools_->setGrooms(names, activeGroom_);
     if (cardAtlasWindow_ && cardAtlasWindow_->isVisible()) cardAtlasWindow_->refresh();  // its blocks are the grooms
 }
 

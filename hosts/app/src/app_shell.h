@@ -37,6 +37,7 @@
 class QAction;
 class QDockWidget;
 class QLabel;
+class QLineEdit;
 class QMainWindow;
 class QSplitter;
 class QStackedWidget;
@@ -70,9 +71,8 @@ public:
 
     // ---- The pieces ---------------------------------------------------------------------------
     GroomTools* groomTools() const { return groomToolsWidget_; }
-    IconRail* leftRail() const { return leftRail_; }
-    // The side docks folded to their rails (the open page's icon): `left` the Groom Tools, else the
-    // Properties. Kept across starts (MainWindow::saveLayout): the fold and the width it opens at.
+    // The side docks folded: `left` the Groom Tools (away altogether: they have no rail), else the
+    // Properties (to its rail; the open page's icon). Kept across starts (MainWindow::saveLayout): the fold and the width it opens at.
     bool folded(bool left) const;
     int openWidth(bool left) const;
     void restoreFold(bool left, bool fold, int width);
@@ -93,10 +93,11 @@ public:
     QToolButton* graphAddButton() const { return graphAdd_; }
     QToolButton* graphPresetsButton() const { return graphPresets_; }
     QToolButton* graphEditButton() const { return graphEdit_; }
-    QToolButton* graphSnapButton() const { return graphSnap_; }
-    // After Presets: the wire style (its menu, the icon showing the style) and the Align buttons
-    // (left, centers, right, spacing down; top, middles, bottom, spacing across), each named
-    // "graphAlign_<mode>".
+    QToolButton* graphSnapButton() const { return graphSnap_; }  // (hidden: the Edit menu's Snap to Grid)
+    QLineEdit* graphFindBox() const { return graphFind_; }       // Find node: Enter picks and frames the first match
+    // The wire style (its menu, the icon showing the style) and the Align buttons (left, centers,
+    // right, spacing down; top, middles, bottom, spacing across), each named "graphAlign_<mode>":
+    // made, hidden (the Edit menu's Align and Wire Style do it on the bar).
     QToolButton* graphWireButton() const { return graphWire_; }
     const std::vector<QToolButton*>& graphAlignButtons() const { return graphAlign_; }
     QLabel* graphStatus() const { return graphStatus_; }
@@ -181,6 +182,7 @@ private:
     QToolButton* graphPresets_ = nullptr;
     QToolButton* graphEdit_ = nullptr;
     QToolButton* graphSnap_ = nullptr;
+    QLineEdit* graphFind_ = nullptr;
     QToolButton* graphWire_ = nullptr;
     std::vector<QToolButton*> graphAlign_;
     QLabel* graphStatus_ = nullptr;
@@ -205,9 +207,8 @@ private:
     QWidget* emptyPage_ = nullptr;
     QSplitter* graphSplit_ = nullptr;
     // The side docks' icon rails (their pages; the open page's icon folds the dock to its rail).
-    IconRail* leftRail_ = nullptr;
     IconRail* rightRail_ = nullptr;
-    QWidget* leftContent_ = nullptr;   // what folds away: the Groom Tools
+    QWidget* leftContent_ = nullptr;   // the Groom Tools
     QWidget* rightContent_ = nullptr;  // the Properties' title and pages
     QLabel* propertiesTitle_ = nullptr;
     int leftWidth_ = 0, rightWidth_ = 0;  // a folded dock's width to open it at again

@@ -86,7 +86,7 @@ def _shape_of(tube):
 
 
 def _library_shape(groom, name):
-    return next((s for s in groomlab.tube_shapes(groom) if s["name"] == name), None)
+    return next((s for s in groomlab.tube_shapes(groom, owned=True) if s["name"] == name), None)
 
 
 def _frames(groom, guide):
@@ -455,7 +455,7 @@ def _new_guide(groom, points, group):
 
 
 def _new_shape_name(groom):
-    taken = set(s["name"] for s in groomlab.tube_shapes(groom))
+    taken = set(s["name"] for s in groomlab.tube_shapes(groom, owned=True))
     n = 1
     while "%s%d" % (SHAPE_PREFIX, n) in taken:
         n += 1
@@ -626,10 +626,11 @@ def _fit(groom, guide, shape, outline):
     (u, v)) and the outline's points as the shape keeps them."""
     _center, _u, _v, flat = _root_fit(groom, guide, outline)
     pts, _indices = tm.shape_points(flat)
-    if _library_shape(groom, shape) is None:
-        groomlab.add_tube_shape(groom, shape, pts, smooth=False)
-    else:
-        groomlab.set_tube_shape_points(groom, shape, pts, smooth=False)
+    # (A root tube's own shape, "owned": the library refuses the name otherwise, as the core's root
+    # tools make and fit theirs.)
+    op = "add" if _library_shape(groom, shape) is None else "set"
+    cmds.groomLabGuides(groom, editTubeShape=json.dumps({"op": op, "name": shape, "points": [list(p) for p in pts],
+                                                          "smooth": False, "owned": True}))
     section = _best_section(pts, _library_shape(groom, shape)["points"])
     if section is None:
         raise RuntimeError("the root outline's shape %s does not match its CVs" % shape)

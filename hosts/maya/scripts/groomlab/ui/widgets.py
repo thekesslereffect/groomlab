@@ -53,7 +53,7 @@ def _save_folded():
 # replaces: each tool group has its color (theme "icons": {group: color}), a
 # darker shade and a lighter tint of it; "ink" is hair and neutral parts.
 ICON_GROUPS = {
-    "create": ("place", "draw", "clone", "part", "flow"),
+    "create": ("place", "draw", "roots", "clone", "part", "flow"),
     "shape": ("comb", "slide", "smooth", "lift", "twist", "attract", "shape"),  # "shape": the Tube brush
     "trim": ("cut", "length", "lengths", "erase"),
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),  # the guide tools share one color
@@ -563,13 +563,12 @@ GLYPHS = {
               'fill="none" stroke="{c}" stroke-width="1.8" stroke-linejoin="round" opacity="0.5"/>'
               '<path d="M4 20 L20 4" stroke="{c}" stroke-width="1.8" stroke-linecap="round"/>',
     # Guides: three strands from their roots (the guides' eye), and struck through when hidden.
-    "guides": '<path d="M6 20 C6 15 4.5 11 5.5 6 M12 20 C12 14 13 10 12 4 M18 20 C18 16 19.5 12 19 8" fill="none" '
-              'stroke="{c}" stroke-width="1.8" stroke-linecap="round"/><circle cx="6" cy="20" r="1.8" fill="{c}"/>'
-              '<circle cx="12" cy="20" r="1.8" fill="{c}"/><circle cx="18" cy="20" r="1.8" fill="{c}"/>',
-    "guidesOff": '<g opacity="0.5"><path d="M6 20 C6 15 4.5 11 5.5 6 M12 20 C12 14 13 10 12 4 M18 20 C18 16 19.5 12 19 8" '
-                 'fill="none" stroke="{c}" stroke-width="1.8" stroke-linecap="round"/><circle cx="6" cy="20" r="1.8" '
-                 'fill="{c}"/><circle cx="12" cy="20" r="1.8" fill="{c}"/><circle cx="18" cy="20" r="1.8" fill="{c}"/></g>'
-                 '<path d="M4 20 L20 4" stroke="{c}" stroke-width="1.8" stroke-linecap="round"/>',
+    # The guides (the mock's: a curve between two points; lucide "spline", ISC).
+    "guides": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+              '<path d="M5 17A12 12 0 0 1 17 5"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/></g>',
+    "guidesOff": '<g opacity="0.5" fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" '
+                 'stroke-linejoin="round"><path d="M5 17A12 12 0 0 1 17 5"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/></g>'
+                 '<path d="M4 20 L20 4" stroke="{c}" stroke-width="2" stroke-linecap="round"/>',
     # A push pin (Maya's pinned panels): standing up when pinned, leaning (outlined) when not.
     "pin": '<g transform="rotate(40 12 12)"><path d="M9 4 H15 M10.5 4 V10 L7.5 14 H16.5 L13.5 10 V4 M12 14 V20.5" '
            'fill="none" stroke="{c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></g>',
@@ -599,6 +598,28 @@ GLYPHS = {
                   'stroke-linejoin="round"/>',
     # The Groom Tools' lists and cards: add, import, key, help, duplicate, curves.
     "plus": '<path d="M12 5 V19 M5 12 H19" fill="none" stroke="{c}" stroke-width="1.9" stroke-linecap="round"/>',
+    # The Simple panel's row icons (research/ui-redesign/SIMPLE.md): segments, settings sliders,
+    # info, lock, in front / behind, the weight, search.
+    "segments": '<path d="M12 3.5 V20.5" fill="none" stroke="{c}" stroke-width="1.8" stroke-linecap="round"/>'
+                '<circle cx="12" cy="7.5" r="2" fill="{c}"/><circle cx="12" cy="16.5" r="2" fill="{c}"/>',
+    "sliders": '<path d="M4 7 H20 M4 17 H20" fill="none" stroke="{c}" stroke-width="1.8" stroke-linecap="round"/>'
+               '<circle cx="9" cy="7" r="2.4" fill="{c}"/><circle cx="15" cy="17" r="2.4" fill="{c}"/>',
+    "info": '<circle cx="12" cy="12" r="8.2" fill="none" stroke="{c}" stroke-width="1.8"/>'
+            '<path d="M12 11 V16.5" fill="none" stroke="{c}" stroke-width="1.9" stroke-linecap="round"/>'
+            '<circle cx="12" cy="7.8" r="1.2" fill="{c}"/>',
+    "lock": '<rect x="5.5" y="10.5" width="13" height="9" rx="2" fill="none" stroke="{c}" stroke-width="1.8"/>'
+            '<path d="M8.5 10.5 V8 A3.5 3.5 0 0 1 15.5 8 V10.5" fill="none" stroke="{c}" stroke-width="1.8"/>',
+    "lockOpen": '<rect x="5.5" y="10.5" width="13" height="9" rx="2" fill="none" stroke="{c}" stroke-width="1.8"/>'
+                '<path d="M8.5 10.5 V8 A3.5 3.5 0 0 1 15.3 6.8" fill="none" stroke="{c}" stroke-width="1.8" '
+                'stroke-linecap="round"/>',
+    "front": '<rect x="4" y="4" width="10" height="10" rx="1.5" fill="none" stroke="{c}" stroke-width="1.6" '
+             'stroke-dasharray="2 2"/><rect x="10" y="10" width="10" height="10" rx="1.5" fill="{c}"/>',
+    "behind": '<rect x="10" y="10" width="10" height="10" rx="1.5" fill="none" stroke="{c}" stroke-width="1.6" '
+              'stroke-dasharray="2 2"/><rect x="4" y="4" width="10" height="10" rx="1.5" fill="{c}"/>',
+    "weight": '<circle cx="12" cy="12" r="8" fill="none" stroke="{c}" stroke-width="1.8"/>'
+              '<path d="M12 4 A8 8 0 0 1 12 20 Z" fill="{c}"/>',
+    "search": '<circle cx="10.5" cy="10.5" r="6" fill="none" stroke="{c}" stroke-width="1.9"/>'
+              '<path d="M15 15 L20 20" fill="none" stroke="{c}" stroke-width="1.9" stroke-linecap="round"/>',
     "import": '<rect x="3.5" y="6" width="13" height="13" rx="2" fill="none" stroke="{c}" stroke-width="1.7"/>'
               '<path d="M3.8 16 L8.2 11.8 L12.5 16" fill="none" stroke="{c}" stroke-width="1.7" stroke-linejoin="round"/>'
               '<path d="M18.5 3 V9.5 M15.25 6.25 H21.75" fill="none" stroke="{c}" stroke-width="1.8" stroke-linecap="round"/>',
@@ -622,14 +643,19 @@ GLYPHS = {
              'height="6.5" rx="1.6"/></g>',
     "layers": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
               '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></g>',
+    "camera": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+              '<path d="M3 8.5A2 2 0 0 1 5 6.5h2.5L9 4h6l1.5 2.5H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
+              '<circle cx="12" cy="13" r="3.6"/></g>',
     "imagePlus": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
                  '<path d="M20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7"/><path d="M4 16l4.5-4.5 5 5"/>'
                  '<path d="M13.5 14.5l2-2 4.5 4.5"/><path d="M18 3v6M15 6h6"/></g>',
     "spline": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
               '<path d="M5 19c2-9 12-5 14-14"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/></g>',
+    # The Graph Editor (the mock's: three linked boxes; lucide "network", ISC).
     "graphLine": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
-                 '<circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/>'
-                 '<path d="M7.5 6h9"/><path d="M6 8.3l4.7 7.5"/><path d="m18 8.3-4.7 7.5"/></g>',
+                 '<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/>'
+                 '<rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/>'
+                 '<path d="M12 12V8"/></g>',
     "chevronDown": '<path d="M6 9 12 15 18 9" fill="none" stroke="{c}" stroke-width="2.4" stroke-linecap="round" '
                    'stroke-linejoin="round"/>',
     "chevronRight": '<path d="M9 6 15 12 9 18" fill="none" stroke="{c}" stroke-width="2.4" stroke-linecap="round" '
@@ -768,13 +794,14 @@ class FlowLayout(QtWidgets.QLayout):
     up; the last row's items share its whole width (no hole at its end) unless `last_row_stretch`
     is off (a segmented track keeps its column grid, its few segments on one row)."""
 
-    def __init__(self, parent=None, spacing=None, max_columns=3, last_row_stretch=True):
+    def __init__(self, parent=None, spacing=None, max_columns=3, last_row_stretch=True, natural=False):
         super(FlowLayout, self).__init__(parent)
         from groomlab.ui import theme
         self._items = []
         self._gap = theme.px(4) if spacing is None else spacing
         self.max_columns = max(1, max_columns)
         self.last_row_stretch = last_row_stretch
+        self.natural = natural  # (pills: each at its own width, left to right, wrapping; no grid)
         self.setContentsMargins(0, 0, 0, 0)
 
     def addItem(self, item):
@@ -817,6 +844,18 @@ class FlowLayout(QtWidgets.QLayout):
         if not shown:
             return 0
         gap = self._gap
+        if self.natural:
+            x, y, line = area.x(), area.y(), 0
+            for item in shown:
+                hint = item.sizeHint()
+                width = min(hint.width(), area.width())
+                if x > area.x() and x + width > area.right() + 1:
+                    x, y, line = area.x(), y + line + gap, 0
+                if move:
+                    item.setGeometry(QtCore.QRect(QtCore.QPoint(x, y), QtCore.QSize(width, hint.height())))
+                x += width + gap
+                line = max(line, hint.height())
+            return y + line - rect.y() + m.bottom()
         widest = max(item.sizeHint().width() for item in shown)
         n = len(shown)
         columns = max(1, min((area.width() + gap) // max(1, widest + gap), min(self.max_columns, n)))
@@ -851,6 +890,20 @@ def chip_row(buttons, parent=None):
     row = QtWidgets.QWidget(parent)
     flow = FlowLayout(row)
     for b in buttons:
+        flow.addWidget(b)
+    row.flow = flow
+    return row
+
+
+def pill_row(buttons, parent=None):
+    """On/off toggles as pills (QToolButton[role="pill"], the mock's Chip): each as wide as its
+    name, left to right, wrapping; off a thin outline and dim text, on the selection fill."""
+    from groomlab.ui import theme
+    row = QtWidgets.QWidget(parent)
+    flow = FlowLayout(row, spacing=theme.px(6), natural=True)
+    for b in buttons:
+        b.setProperty("role", "pill")
+        b.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         flow.addWidget(b)
     row.flow = flow
     return row
@@ -1164,6 +1217,142 @@ class ItemBox(QtWidgets.QFrame):
         self.title.set_full_text(text or "")
 
 
+# ---------------------------------------------------------------------------
+# List rows in the Simple layout (research/ui-redesign/SIMPLE.md): every list row is one line, its
+# icons in one order (ROW_ORDER): muted text (a count, a tag) -> the settings popup -> state toggles
+# (solo, in front / behind) -> the eye -> the lock -> the row's menu, always last. No row expands:
+# a row's settings open from its icon as a small popup.
+
+
+class PopupPanel(QtWidgets.QFrame):
+    """A small popup card under a row's icon (a row's settings: segments, weight, map info, photo
+    settings): the widgets added stay in it, shown again each time; it closes on a click outside."""
+
+    def __init__(self, parent=None, width=240):
+        super(PopupPanel, self).__init__(parent, QtCore.Qt.Popup | QtCore.Qt.FramelessWindowHint)
+        from groomlab.ui import theme
+        self.setProperty("role", "card")
+        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        self.setFixedWidth(theme.px(width))
+        self.body = QtWidgets.QVBoxLayout(self)
+        pad = theme.px(8)
+        self.body.setContentsMargins(pad, pad, pad, pad)
+        self.body.setSpacing(theme.px(6))
+        self.about_to_show = []  # callables run before it shows (fill in the row's values)
+
+    def add(self, item):
+        if isinstance(item, QtWidgets.QLayout):
+            self.body.addLayout(item)
+        else:
+            self.body.addWidget(item)
+        return item
+
+    def show_under(self, anchor):
+        """Open under `anchor` (its right edges lined up), kept on the screen."""
+        for fn in list(self.about_to_show):
+            fn()
+        self.adjustSize()
+        point = anchor.mapToGlobal(QtCore.QPoint(anchor.width() - self.width(), anchor.height() + 2))
+        screen = QtWidgets.QApplication.desktop().availableGeometry(anchor) if hasattr(
+            QtWidgets.QApplication, "desktop") else anchor.screen().availableGeometry()
+        point.setX(max(screen.left(), min(point.x(), screen.right() - self.width())))
+        if point.y() + self.height() > screen.bottom():
+            point.setY(anchor.mapToGlobal(QtCore.QPoint(0, 0)).y() - self.height() - 2)
+        self.move(point)
+        self.show()
+
+
+def row_glyph(name, tip="", slot=None, checkable=False, text=None, on=False):
+    """A row's small icon button (ROW_ORDER's): 22 px, a 14 px glyph; `text` beside it (a count);
+    `on`: the glyph in the accent (a locked photo, a soloed layer)."""
+    from groomlab.ui import theme
+    b = glyph_button(name, tip, slot, checkable)
+    b.setIconSize(QtCore.QSize(theme.px(14), theme.px(14)))
+    if on:
+        b.setIcon(glyph(name, color=theme.current().color("ui.accent")))
+        b.glyph = None  # (kept in the accent when the theme changes the other glyphs)
+    if text is not None:
+        b.setText(text)
+        b.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        b.setFixedSize(theme.px(40), theme.px(22))
+    else:
+        b.setFixedSize(theme.px(22), theme.px(22))
+    return b
+
+
+def popup_button(name, tip, panel, before=None, text=None):
+    """A row icon opening `panel` (PopupPanel) under it; `before()` runs first (pick the row)."""
+    b = row_glyph(name, tip, text=text)
+
+    def open_():
+        if before is not None:
+            before()
+        panel.show_under(b)
+    b.clicked.connect(lambda _=False: open_())
+    b.popup = panel
+    return b
+
+
+def menu_button(tip, fill, before=None):
+    """The row's menu (ROW_ORDER: always last): "more", its menu made again as it opens by
+    `fill(menu)` (`before()` first: pick the row)."""
+    b = row_glyph("more", tip)
+    menu = QtWidgets.QMenu(b)
+    menu.setToolTipsVisible(True)
+
+    def show():
+        if before is not None:
+            before()
+        menu.clear()
+        menu.submenus = []
+        fill(menu)
+    menu.aboutToShow.connect(show)
+    b.setMenu(menu)
+    b.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+    b.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0; }")
+    b.row_menu = menu
+    return b
+
+
+class RowStrip(QtWidgets.QWidget):
+    """A list row's icons on its right, in ROW_ORDER (the caller adds them in that order)."""
+
+    def __init__(self, widgets_=(), parent=None):
+        super(RowStrip, self).__init__(parent)
+        row = QtWidgets.QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        for w in widgets_:
+            if w is not None:
+                row.addWidget(w)
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+
+
+class ListRow(QtWidgets.QWidget):
+    """A QListWidget row (setItemWidget): its name, a muted tag, then a RowStrip. Clicks on the name
+    reach the list (the row is picked as ever); the icons take their own."""
+
+    def __init__(self, text, tag="", strip=(), parent=None):
+        super(ListRow, self).__init__(parent)
+        from groomlab.ui import theme
+        row = QtWidgets.QHBoxLayout(self)
+        row.setContentsMargins(theme.px(6), 0, 0, 0)
+        row.setSpacing(theme.px(4))
+        self.label = ElidedLabel()
+        self.label.set_full_text(text)
+        self.label.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        row.addWidget(self.label, 1)
+        self.tag = QtWidgets.QLabel(tag)
+        self.tag.setProperty("role", "count")
+        self.tag.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        self.tag.setVisible(bool(tag))
+        row.addWidget(self.tag)
+        self.strip = RowStrip(strip)
+        row.addWidget(self.strip)
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+
+
 class ElidedLabel(QtWidgets.QLabel):
     """A one-line label that elides its text to its width (the whole text in its tooltip)."""
 
@@ -1385,6 +1574,57 @@ class IconRail(QtWidgets.QWidget):
             self._paint_icon(i, t)
 
 
+class TextRail(QtWidgets.QWidget):
+    """The pages as labeled tabs on one track (the Simple layout: Tools · Paint · Photos), the same
+    interface as IconRail (add_page, set_current, picked, add_trailing)."""
+
+    picked = QtCore.Signal(int)
+
+    def __init__(self, parent=None):
+        super(TextRail, self).__init__(parent)
+        from groomlab.ui import theme
+        self.setObjectName("pageTabs")
+        self.buttons = []
+        self.group = QtWidgets.QButtonGroup(self)
+        self.group.setExclusive(True)
+        self._row = QtWidgets.QHBoxLayout(self)
+        pad = theme.px(8)
+        self._row.setContentsMargins(pad, theme.px(2), pad, theme.px(6))
+        self._row.setSpacing(theme.px(4))
+        self._track = QtWidgets.QWidget()
+        self._row.addWidget(self._track, 1)
+        self._trailing = []
+
+    def add_page(self, icon, name, tip=""):
+        b = chip(name, tip, False, "page_" + name.lower())
+        b.setAutoExclusive(False)
+        b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        index = len(self.buttons)
+        b.clicked.connect(lambda _=False, i=index: self._clicked(i))
+        self.group.addButton(b)
+        self.buttons.append(b)
+        # (one track: rebuilt with every page, a segmented row as seg_row makes it)
+        old = self._track
+        self._track = seg_row(self.buttons)
+        self._row.replaceWidget(old, self._track)
+        old.deleteLater()
+        return b
+
+    def add_trailing(self, widget):
+        self._row.addWidget(widget)
+        self._trailing.append(widget)
+
+    def _clicked(self, index):
+        self.set_current(index)
+        self.picked.emit(index)
+
+    def set_current(self, index):
+        for i, b in enumerate(self.buttons):
+            b.blockSignals(True)
+            b.setChecked(i == index)
+            b.blockSignals(False)
+
+
 class Pages(QtWidgets.QWidget):
     """Pages switched by an icon rail (IconRail, `rail`: the window puts it along its top): only
     the page showing takes room, so what sits under it follows right below (the QTabWidget API:
@@ -1392,12 +1632,12 @@ class Pages(QtWidgets.QWidget):
 
     currentChanged = QtCore.Signal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, text=False):
         super(Pages, self).__init__(parent)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self.rail = IconRail()
+        self.rail = TextRail() if text else IconRail()
         self._pages = []
         self._titles = []
         self._current = -1
@@ -1662,12 +1902,15 @@ def fill_menu(menu, entries, bind, state=(), values=None, generators=None, check
                     elif tip:
                         tip = shortcuts.tip(tip, item["shortcut"])
                     label = "%s	%s" % (label, keys)
-                action = target.addAction(label)
-                if tip:
-                    action.setToolTip(tip)
                 fn = bind(item)
                 if wrap is not None:
                     fn = wrap(fn, item["label"])
+                if _destructive(item):
+                    made[item["id"]] = danger_action(target, label, fn, tip, item["enabled"])
+                    continue
+                action = target.addAction(label)
+                if tip:
+                    action.setToolTip(tip)
                 if item["checkable"]:
                     action.setCheckable(True)
                     action.setChecked(bool(checked(item)) if checked else False)
@@ -1679,6 +1922,49 @@ def fill_menu(menu, entries, bind, state=(), values=None, generators=None, check
 
     build(menu, definitions.resolve(entries, state, values, expanding))
     return made
+
+
+def _destructive(item):
+    """An action the definitions mark destructive (actions.json "destructive": Delete, Remove)."""
+    from groomlab.ui import definitions
+    try:
+        return bool(definitions.get("actions").get(item.get("id"), {}).get("destructive"))
+    except (KeyError, AttributeError):
+        return False
+
+
+def danger_action(menu, text, slot, tip="", enabled=True):
+    """A menu entry for a destructive action (Delete, Remove): its text and a trash glyph in the
+    theme's error color, as the last entry of a row's menu. A QWidgetAction (a QAction's text color
+    is the menu's): a flat button the width of the menu that closes the menu and runs `slot`."""
+    from groomlab.ui import theme
+    t = theme.current()
+    color = t.color("ui.error", "#D9736C")  # (charcoal: ui.error is the palette's red)
+    button = QtWidgets.QToolButton()
+    button.setText(text.split("	")[0])
+    button.setIcon(tinted_icon("delete", color))
+    button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+    button.setAutoRaise(True)
+    button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+    button.setStyleSheet("QToolButton { color: %s; text-align: left; padding: %dpx %dpx; border: none; } "
+                         "QToolButton:hover { background: %s; }"
+                         % (color, theme.px(3), theme.px(8), theme._blend(t.token("card"), color, 0.18)))
+    button.setToolTip(tip)
+    button.setEnabled(bool(enabled))
+    action = QtWidgets.QWidgetAction(menu)
+    action.setDefaultWidget(button)
+    action.setText(text)  # (scripts and tests find it by its text)
+
+    def run():
+        top = menu
+        while isinstance(top.parent(), QtWidgets.QMenu):
+            top = top.parent()
+        top.close()
+        slot()
+    button.clicked.connect(run)
+    action.triggered.connect(lambda _=False: slot())
+    menu.addAction(action)
+    return action
 
 
 def _check_slot(fn):

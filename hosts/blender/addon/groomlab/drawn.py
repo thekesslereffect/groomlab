@@ -14,7 +14,8 @@ out.
 The app's look where UILayout has no word for it: a panel sets a sub-layout's groomlab_role
 (palette.look(); the sidebar's layouts have no such attribute and draw as they always did): "card"
 a section on its card, "title" / "tray" / "hint" / "tool" / "status" / "count" its labels' roles, "empty" an empty state (its first label's icon on a disc, its labels centered),
-"primary" its operators in the accent."""
+"primary" its operators in the accent, "pills" its switches as pills (each as wide as its name, wrapping),
+"dot" its color as a small dot (a card header's group)."""
 
 import bpy
 
@@ -28,14 +29,19 @@ ICONS = {
     "SOLO_ON": "ui_glyph_solo", "HIDE_OFF": "ui_eye", "HIDE_ON": "ui_eye_off", "DOWNARROW_HLT": "ui_more",
     "TRIA_RIGHT": "ui_chevron_right", "IMPORT": "ui_image_plus", "EXPORT": "ui_export", "FILE_FOLDER": "ui_file",
     "TEXT": "ui_file", "LOOP_BACK": "ui_undo", "LOOP_FORWARDS": "ui_redo", "CHECKMARK": "ui_check_light",
-    "DUPLICATE": "ui_copy", "DECORATE_KEYFRAME": "ui_key", "INFO": "ui_help", "ERROR": "ui_shield",
+    "DUPLICATE": "ui_copy", "DECORATE_KEYFRAME": "ui_key", "INFO": "ui_info", "ERROR": "ui_shield",
     "LINKED": "ui_link", "URL": "ui_link", "PINNED": "ui_frame", "NODE": "ui_graph", "TEXTURE": "ui_layers",
     "IMAGE_DATA": "ui_layers", "SHAPEKEY_DATA": "ui_layers", "CURVES": "ui_spline", "OUTLINER_OB_CURVES": "ui_spline",
     "OUTLINER_DATA_CURVES": "ui_spline", "CURVE_BEZCURVE": "ui_spline", "IPO_LINEAR": "ui_spline",
-    "MESH_CIRCLE": "ui_box", "PREFERENCES": "ui_menu", "TIME": "ui_play", "LOCKED": "ui_shield",
-    "SHADING_SOLID": "ui_sun", "VIEW_CAMERA": "ui_frame", "OUTLINER_OB_CAMERA": "ui_frame",
+    "MESH_CIRCLE": "ui_box", "PREFERENCES": "ui_menu", "TIME": "ui_play", "LOCKED": "ui_lock",
+    "SHADING_SOLID": "ui_sun", "VIEW_CAMERA": "ui_camera", "OUTLINER_OB_CAMERA": "ui_frame",
     "SCULPTMODE_HLT": "ui_pen", "BRUSH_DATA": "ui_pen", "VERTEXSEL": "ui_glyph_select", "FUND": "ui_shield",
     "FILE_TICK": "ui_save", "ASSET_MANAGER": "ui_box", "SORT_DESC": "ui_glyph_down", "NODE_INSERT_ON": "ui_graph",
+    "NODETREE": "ui_graph", "WINDOW": "ui_frame",
+    # The Groom Tools' rows and header (the redesign's glyphs: ROW_ORDER).
+    "THREE_DOTS": "ui_more", "DISCLOSURE_TRI_DOWN": "ui_chevron_down", "VIEWZOOM": "ui_search",
+    "UNLOCKED": "ui_lock_open", "OPTIONS": "ui_sliders", "CURVE_PATH": "ui_segments", "MOD_VERTEX_WEIGHT": "ui_weight",
+    "TRIA_UP_BAR": "ui_front", "TRIA_DOWN_BAR": "ui_behind", "CAMERA_DATA": "ui_photo_camera",
 }
 
 
@@ -181,6 +187,10 @@ class DrawnLayout(object):
         """The tube cross-section editor (the window's own: palette.draw_profile asks for it here)."""
         self._item("profile", tools=tools_props)
 
+    def groomlab_profile_tiles(self, context, tools_props):
+        """The Tube card's Root, Mid and Tip as tiles with their outlines (the window's own)."""
+        self._item("profile_tiles", tools=tools_props)
+
     def context_pointer_set(self, name, data):
         pass
 
@@ -276,10 +286,10 @@ def menu_entries(name, context, extra=None):
         return None
     entries = []
 
-    def walk(node, enabled):
+    def walk(node, enabled, alert=False):
         for c in node.children:
             if isinstance(c, DrawnLayout):
-                if not walk(c, enabled and c.enabled):
+                if not walk(c, enabled and c.enabled, alert or c.alert):
                     return False
                 continue
             kind, a = c.kind, c.args
@@ -294,7 +304,7 @@ def menu_entries(name, context, extra=None):
                 cls_op = _operator_class(idname)
                 text = a["text"] if a["text"] is not None else getattr(cls_op, "bl_label", idname)
                 entries.append({"kind": "op", "text": text, "icon": a.get("icon"), "enabled": enabled,
-                                "checked": bool(a.get("depress")),
+                                "checked": bool(a.get("depress")), "alert": alert,
                                 "run": lambda ctx, i=idname, p=props, cc=a.get("context"): run_operator(
                                     i, p, cc or "INVOKE_DEFAULT")})
             elif kind == "prop":
@@ -391,15 +401,19 @@ class CurvePreview(uikit.Widget):
 
 
 class MenuButton(uikit.Button):
-    """A menu's button: a press opens it drawn (editors.PopupMenu), else as Blender's own popup."""
+    """A menu's button: a press opens it drawn (editors.PopupMenu), else as Blender's own popup.
+    `before` (a list row's ⋯): run first (the row picked, what the menu acts on)."""
 
-    def __init__(self, wid, rect, text, icon, menu_name, ctx=None):
+    def __init__(self, wid, rect, text, icon, menu_name, ctx=None, before=None):
         # (a named menu: the app's disclosure, outlined with a small chevron and no icon)
         super().__init__(wid, rect, text, None, None if text else icon, flat=not text, menu=bool(text))
         self.menu_name = menu_name
         self.ctx = ctx or {}
+        self.before = before
 
     def press(self, win, context, event):
+        if self.before is not None:
+            self.before()
         entries = menu_entries(self.menu_name, context, self.ctx)
         if not entries:
             bpy.ops.wm.call_menu(name=self.menu_name)
@@ -456,6 +470,8 @@ class Placer(object):
         """Whether a column holds cards (its gaps then the cards' own)."""
         return any(isinstance(c, DrawnLayout) and c.groomlab_role == "card" for c in layout.children)
 
+    PROFILE = 132  # px: the tube cross-section editor's square (Maya's)
+
     # The text roles' line heights (a wrapped hint's lines close together).
     LINE = {"title": 24, "tray": 18, "about": 17, "hint": 15, "emptyBody": 15, "emptyTitle": 22, "tool": 24, "status": 16,
             "count": 18}
@@ -479,7 +495,7 @@ class Placer(object):
                 return h
             return self.label_h * max(1.0, st.scale_y)
         if kind == "operator" and st.tiles:
-            return 62 * self.s  # a tool tile: its 32 px icon over its name (the app's 56 x 62)
+            return 56 * self.s  # a tool tile: its 28 px icon over its name (Maya's 50 x 56)
         if kind in ("operator", "menu", "popover") and st.scale_y <= 1.0:
             return self.row_h - 2 * self.s  # buttons and chips a little under the fields (the app's)
         if kind == "prop" and st.scale_y <= 1.0:
@@ -492,7 +508,9 @@ class Placer(object):
         if kind == "curve":
             return 64 * self.s
         if kind == "profile":
-            return min(200 * self.s, self.ui.w) + self.row_h + 5 * self.s
+            return self.PROFILE * self.s
+        if kind == "profile_tiles":
+            return 50 * self.s
         if kind == "list":
             return self.list_height(item)
         return self.row_h * st.scale_y
@@ -500,6 +518,8 @@ class Placer(object):
     def natural_width(self, node, st):
         """The width a thing wants (None: it takes a share of what is left)."""
         if isinstance(node, DrawnLayout):
+            if node.groomlab_role == "dot":  # (a group's color as a dot)
+                return 12 * self.s
             widths = [self.natural_width(c, st) for c in node.children]
             if not widths or any(w is None for w in widths):
                 return None
@@ -509,6 +529,8 @@ class Placer(object):
                 return max(widths)
             return None
         a = node.args
+        if node.kind == "profile":
+            return self.PROFILE * self.s
         if node.kind in ("operator", "menu", "popover"):
             text = a.get("text")
             if node.kind == "operator" and text is None:
@@ -546,6 +568,8 @@ class Placer(object):
         outer = st
         st = st.under(node)
         kind = node.kind
+        if node.groomlab_role == "pills":
+            return self.place_pills(node, x, top, w, st)
         if node.groomlab_role == "card" and not outer.in_card:
             return self.place_card(node, x, top, w, st)
         if kind == "row":
@@ -626,11 +650,15 @@ class Placer(object):
         return h
 
     def share(self, children, naturals, w, gap):
-        """Widths for a row: fixed ones as they want, the rest of the width shared by scale_x."""
+        """Widths for a row: fixed ones as they want, the rest of the width shared by scale_x. A
+        right-aligned row (a list row's icons and counts, a card header's right side) keeps the width
+        it wants while that is at most 70% of the row: the name beside it gives way, not its numbers."""
         free = w - gap * (len(children) - 1)
-        fixed = sum(n for n, c in zip(naturals, children) if n is not None and self.fixed(c))
-        weights = [0.0 if (n is not None and self.fixed(c)) else max(0.05, getattr(c, "scale_x", 1.0) or 1.0)
-                   for n, c in zip(naturals, children)]
+        keep = [n is not None and (self.fixed(c) or (isinstance(c, DrawnLayout) and c.kind == "row" and
+                                                    c.alignment == "RIGHT" and n <= 0.7 * free))
+                for n, c in zip(naturals, children)]
+        fixed = sum(n for n, k in zip(naturals, keep) if k)
+        weights = [0.0 if k else max(0.05, getattr(c, "scale_x", 1.0) or 1.0) for k, c in zip(keep, children)]
         total = sum(weights) or 1.0
         rest = max(0.0, free - fixed)
         return [n if weight == 0.0 else rest * weight / total for n, c, weight in zip(naturals, children, weights)]
@@ -639,9 +667,11 @@ class Placer(object):
         """Whether a row's child keeps the width it wants: icon buttons and short toggles do, rows of
         them do; labels, fields and text buttons share the row."""
         if isinstance(child, DrawnLayout):  # a row or column of icon buttons (a list's menu beside it)
+            if child.groomlab_role == "dot":
+                return True
             return child.kind in ("row", "column") and child.alignment == "EXPAND" and all(
                 isinstance(c, Item) and self.icon_only(c) for c in child.children) and bool(child.children)
-        return self.icon_only(child)
+        return child.kind == "profile" or self.icon_only(child)
 
     def icon_only(self, item):
         a = item.args
@@ -676,8 +706,8 @@ class Placer(object):
             return 0.0
         gap = self.gap(node, True) if not st.tiles else 2 * self.s
         cols = node.columns or max(1, int((w + gap) // (110 * self.s)))
-        if st.tiles:  # tool tiles: the app's 56 px minimum, as many as fit, at most `columns`
-            cols = max(1, min(cols, int((w + gap) // (56 * self.s + gap))))
+        if st.tiles:  # tool tiles: 50 px at least (Maya's), as many as fit, at most `columns`
+            cols = max(1, min(cols, int((w + gap) // (50 * self.s + gap))))
         cw = (w - gap * (cols - 1)) / cols
         y = top
         for start in range(0, len(children), cols):
@@ -686,6 +716,45 @@ class Placer(object):
                 row_h = max(row_h, self.place(child, x + i * (cw + gap), y, cw, st))
             y -= row_h + gap
         return top - y - gap
+
+    def place_pills(self, node, x, top, w, st):
+        """Switches as pills (palette.pills: the Simple redesign's chips, research/ui-redesign
+        parts.tsx Chip): each as wide as its name in the small text, left to right with Pill.GAP
+        between, wrapping onto rows a field's height less 2 px. Anything but a switch is left out."""
+        import blf
+        s = self.s
+        h = self.row_h - 2 * s
+        gap = uikit.Pill.GAP * s
+        fid = uikit.font()
+        blf.size(fid, self.ui.win.theme.small_size * s)
+        switches = []
+
+        def gather(layout, state):
+            for child in layout.children:
+                if isinstance(child, DrawnLayout):
+                    gather(child, state.under(child))
+                elif child.kind == "prop":
+                    switches.append((child, state))
+        gather(node, st)
+        cx, y, placed = x, top, 0
+        for item, state in switches:
+            a = item.args
+            rna = _rna(a["data"], a["prop"])
+            if rna is None or rna.type != "BOOLEAN":
+                continue
+            label = a.get("text")
+            prop = uikit.Prop(a["data"], a["prop"], rna.name if label is None else label)
+            pw = min(w, blf.dimensions(fid, prop.label)[0] + 2 * uikit.Pill.PAD * s)
+            if cx > x and cx + pw > x + w + 0.5:  # (no room left on this row: the next)
+                cx, y = x, y - h - gap
+            pill = uikit.Pill(self.wid("pill", "%s.%s" % (type(a["data"]).__name__, a["prop"])),
+                              (cx, y - h, pw, h), prop, prop.label)
+            pill.disabled = not state.enabled
+            pill.dim = not state.active
+            self.widgets.append(pill)
+            cx += pw + gap
+            placed += 1
+        return (top - y + h) if placed else 0.0
 
     def place_panel(self, node, x, top, w, st):
         """A folding section: its header row (the panel's own header content beside the chevron),
@@ -699,7 +768,28 @@ class Placer(object):
             _folds[fold_id] = not open_
 
         h = 22 * self.s
-        self.widgets.append(uikit.PanelHeader(self.wid("panel", fold_id), (x, top - h, w, h), title, open_, toggle))
+        header = uikit.PanelHeader(self.wid("panel", fold_id), (x, top - h, w, h), title, open_, toggle)
+        self.widgets.append(header)
+        # What the header holds besides its title (Selected tubes' Smooth): on its right, over it.
+        extras = DrawnLayout("row", align=True)
+        extras.alignment = "RIGHT"
+        skipped = False
+        for c in node.children:
+            if not skipped and isinstance(c, Item) and c.kind == "label":
+                skipped = True
+                continue
+            extras.children.append(c)
+        if len(extras.children) == 1 and isinstance(extras.children[0], DrawnLayout):
+            extras = extras.children[0]  # (a row of its own: placed as it is, its own alignment)
+        if extras.children:
+            first = len(self.widgets)
+            eh = self.place(extras, x, top, w, st)
+            if eh > h:  # (the header as tall as what it holds, its title centered)
+                header.rect = (x, top - eh, w, eh)
+                h = eh
+            else:
+                for wd in self.widgets[first:]:
+                    wd.rect = (wd.rect[0], wd.rect[1] - (h - eh) * 0.5, wd.rect[2], wd.rect[3])
         total = h
         if open_ and node.body is not None:
             total += 8 * self.s
@@ -754,6 +844,8 @@ class Placer(object):
                                         self.actions["preview"])
         elif kind == "profile":
             self.profile(item, rect, st)
+        elif kind == "profile_tiles":
+            self.profile_tiles(item, rect, st)
         elif kind == "curve":
             widget = CurvePreview(self.wid("curve", getattr(a["data"], "name", "")), rect, a["data"], a["prop"])
         if widget is not None:
@@ -778,6 +870,14 @@ class Placer(object):
         if st.tiles and a.get("icon") and text:
             return uikit.Tile(self.wid("tile", props.get("tool", idname)), rect, text, run, a["icon"],
                               bool(a.get("depress")), tooltip=tip)
+        if idname == "groomlab.row_popup" and props.get("menu"):
+            # A list row's ⋯: its menu drawn here (the row picked first), as the other menus are.
+            def pick(props=dict(props)):
+                run_operator(idname, dict(props, menu="", panel=""), "EXEC_DEFAULT")
+            button = MenuButton(self.wid("rowmenu", "%s.%s" % (props.get("list"), props.get("index"))), rect, "",
+                                a.get("icon") or "ui_more", props["menu"], before=pick)
+            button.tooltip = tip
+            return button
         return uikit.Button(self.wid("op", idname), rect, text, run, a.get("icon") or None, tooltip=tip,
                             primary=st.role == "primary" and bool(text), flat=not a.get("emboss", True),
                             depress=bool(a.get("depress")), align="left" if (text and st.in_list) else "center")
@@ -800,7 +900,7 @@ class Placer(object):
             return uikit.Check(self.wid("check", key), rect, prop)
         if kind in ("INT", "FLOAT") and getattr(rna, "is_array", False) and rna.array_length > 1:
             if rna.subtype in ("COLOR", "COLOR_GAMMA"):
-                if st.in_list:  # a list row's color: a dot at its left, as the app's
+                if st.in_list or st.role == "dot":  # a list row's (or a card header's group): a dot, as the app's
                     side = min(rect[2], 10 * self.s)
                     rect = (rect[0] + 2 * self.s, rect[1] + (rect[3] - side) * 0.5, side, side)
                     swatch = uikit.ColorSwatch(self.wid("color", key), rect, prop, self.actions.get("color"))
@@ -828,20 +928,33 @@ class Placer(object):
         return uikit.Label(self.wid("label"), rect, prop.label)
 
     def profile(self, item, rect, st):
-        """The picked library shape's cross-section in a square (at most 200 px), Mirror under it."""
+        """The cross-section of the profile the Tube card shows, in a square (PROFILE px): a library
+        shape's to edit, else read-only with its note (the card's Mirror pill keeps the sides alike)."""
         t = item.args["tools"]
         x, y, w, h = rect
-        side = h - self.row_h - 5 * self.s
+        side = min(w, h)
         shape = self.actions["tube_shape"](t)
         mirror = uikit.Prop(t, "tube_shape_mirror")
-        editor = editors.ProfileEditor(self.wid("profile"), (x + (w - side) * 0.5, y + self.row_h + 5 * self.s, side, side),
+        editor = editors.ProfileEditor(self.wid("profile"), (x, y + h - side, side, side),
                                        shape, lambda pts: self.actions["tube_preview"](t, shape, pts),
                                        lambda pts: self.actions["tube_commit"](t, shape, pts), lambda: bool(mirror.get()))
         editor.disabled = not st.enabled
         self.widgets.append(editor)
-        toggle = uikit.ToggleButton(self.wid("toggle", "tube_shape_mirror"), (x, y, w, self.row_h), mirror, mirror.label)
-        toggle.disabled = not st.enabled or not editor.editable
-        self.widgets.append(toggle)
+
+    def profile_tiles(self, item, rect, st):
+        """Root, Mid and Tip as tiles (Maya's), each with its shape's outline; the one picked the
+        editor's."""
+        t = item.args["tools"]
+        x, y, w, h = rect
+        prop = uikit.Prop(t, "tube_profile")
+        gap = 4 * self.s
+        items = prop.items()
+        cw = (w - gap * (len(items) - 1)) / max(1, len(items))
+        for i, (ident, name, tip) in enumerate(items):
+            tile = editors.ProfileTile(self.wid("profile_tile", ident), (x + i * (cw + gap), y, cw, h), name, prop, ident,
+                                       self.actions["tube_shape"](t, ident), tooltip=tip)
+            tile.disabled = not st.enabled
+            self.widgets.append(tile)
 
     def segments(self, prop, items, rect, st, key):
         """An enum expanded: its choices on a sunken track (components.segTrack)."""
@@ -920,7 +1033,11 @@ class Placer(object):
             r = (x + 2 * self.s, top - row_h, w - 4 * self.s, row_h)
 
             def pick(ctx, index=index):
-                uikit.Prop(active_data, active_prop).set(index)
+                prop = uikit.Prop(active_data, active_prop)
+                if prop.get() == index:  # the picked row again: set all the same (the list's own "again")
+                    setattr(active_data, active_prop, index)
+                else:
+                    prop.set(index)
 
             row = uikit.ListRow(self.wid("listrow", "%s.%d" % (list_id, index)), r, index == active, pick)
             row.disabled = not st.enabled

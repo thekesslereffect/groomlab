@@ -110,15 +110,22 @@ def _preview_of(icon_value):
 _shapes = {"at": 0.0, "scalp": None, "list": []}
 
 
-def _tube_shape(t):
-    """The library row picked (the Shape tool's Profile): {name, points, smooth, builtin}, or None.
-    The library is asked again at most twice a second (the window lays out on every mouse move)."""
+NOTES = {"drawn": "Drawn root: the Roots brush reshapes it", "builtin": "Built in: Duplicate it to edit a copy"}
+
+
+def _tube_shape(t, profile=None):
+    """The shape a Tube card profile shows (`profile` ROOT, MID or TIP; default the one the editor
+    shows): {name, points, smooth, builtin, editable (a library shape), note (a read-only one's)}, or
+    None (Mixed). The library is asked again at most twice a second (the window lays out on every
+    mouse move)."""
     from . import tools
     from .ops import active_groom
     scalp = active_groom(bpy.context)
-    if scalp is None or not (0 <= t.tube_shape_index < len(t.tube_shapes)):
+    if scalp is None:
         return None
-    name = t.tube_shapes[t.tube_shape_index].name
+    name, kind = tools.profile_choice(t, profile)
+    if kind == "mixed":
+        return None
     if _shapes["scalp"] != scalp.name or time.time() - _shapes["at"] > 0.5:
         try:
             _shapes["list"] = tools.tube_shapes(scalp)
@@ -128,6 +135,10 @@ def _tube_shape(t):
     shape = next((dict(s) for s in _shapes["list"] if s.get("name") == name), None)
     if shape is not None:
         shape["scalp"] = scalp
+        shape["editable"] = kind == "library"
+        shape["unset"] = kind == "unset"
+        shape["note"] = (("Between the root's and the tip's" if (profile or t.tube_profile) == "MID" else
+                          "The root's again") if kind == "unset" else NOTES.get(kind, ""))
     return shape
 
 
@@ -144,7 +155,7 @@ def _tube_preview(t, shape, points):
 def make_tube_shape_symmetric(t):
     """The picked custom shape made symmetric (Mirror turned on); a built-in one is left alone."""
     shape = _tube_shape(t)
-    if not shape or shape.get("builtin"):
+    if not shape or not shape.get("editable"):
         return False
     points = [list(p) for p in shape.get("points") or []]
     made = process.call("tube_shape_symmetric", points=points)["points"]
@@ -157,7 +168,7 @@ def make_tube_shape_symmetric(t):
 def _tube_commit(t, shape, points):
     """An edit settled: the points stored (one undo step), or (None) the preview dropped."""
     from . import tools
-    if not shape:
+    if not shape or not shape.get("editable"):
         return
     scalp = shape["scalp"]
     try:
@@ -200,7 +211,7 @@ def content(layout, context):
     palette.CHARS[0] = max(20, int(inner / (6.1 * layout.s)))
     try:
         drawn.draw_panel(palette.VIEW3D_PT_groomlab_tools, rec, context)
-        for cls in (palette.VIEW3D_PT_groomlab_tools_sculpting, palette.VIEW3D_PT_groomlab_tools_display):
+        for cls in (palette.VIEW3D_PT_groomlab_tools_display,):
             if cls.poll(context):
                 card = palette.look(rec, "card")  # (the sub-panels: folding sections on their cards)
                 head, body = card.panel("sub:" + cls.__name__, default_closed=True)
@@ -213,36 +224,30 @@ def content(layout, context):
     drawn.place(rec, layout, context, ACTIONS)
 
 
-def _rail_icon(name):
-    """A page's icon (palette.json's tabs' "icon") as one of the add-on's PNGs: the app's glyphs by
-    name, Maya's groomLab_<tool> as the tool's own."""
-    import os
-    if not os.path.isfile(os.path.join(uikit.ICON_DIR, name + ".png")) and name.startswith("groomLab_"):
-        name = name[len("groomLab_"):]
-    return name
-
-
 def _rail(context):
-    """The window's pages (palette.json's tabs: Tools, Paint, Correctives, Photos) on its rail."""
-    from . import definitions
+    """The window's rail: the groom picker and its buttons (palette.header_buttons: the eyes, how
+    the guides draw, the Graph Editor, Find Command, More), in view however far the window scrolls
+    (issue 73). The pages (Tools, Paint, Photos) are labeled, at the top of the content, as the
+    sidebar's (Maya's Simple: the groom first, then the pages)."""
     t = getattr(context.scene, "groomlab_tools", None)
     if t is None:
         return None
-    ids = {i for i, _n, _d in uikit.Prop(t, "tab").items()}
-    pages = [(p["id"].upper(), p["label"], p.get("tip", ""), _rail_icon(p.get("icon", "ui_tools")))
-             for p in definitions.tabs() if p["id"].upper() in ids]
-    return uikit.Rail(pages, lambda: bpy.context.scene.groomlab_tools.tab,
+    return uikit.Rail([], lambda: bpy.context.scene.groomlab_tools.tab,
                       lambda ident: uikit.Prop(bpy.context.scene.groomlab_tools, "tab").set(ident), extras=_rail_extras)
 
 
-def _rail_extras(layout, context):
-    """The current groom's eyes, the Graph Editor and More (palette.header_buttons), at the rail's
-    right end: in view however far the window scrolls (issue 73)."""
+def rail_content(context):
+    """What the rail holds, recorded: the current groom (its picker) and palette.header_buttons."""
     rec = drawn.DrawnLayout("column")
     row = rec.row(align=True)
-    row.alignment = "RIGHT"
+    row.prop(context.scene.groomlab, "groom", text="")
     palette.header_buttons(row, context)
-    drawn.place(rec, layout, context, ACTIONS)
+    return rec
+
+
+def _rail_extras(layout, context):
+    """The rail's content laid out across it."""
+    drawn.place(rail_content(context), layout, context, ACTIONS)
 
 
 def _window(context, region=None, reuse=False):

@@ -248,6 +248,8 @@ qt_add_library(groomlab_app_ui STATIC
     src/definitions.h
     src/export_panel.cpp
     src/export_panel.h
+    src/find_command.cpp
+    src/find_command.h
     src/glass.cpp
     src/glass.h
     src/guides_panel.cpp

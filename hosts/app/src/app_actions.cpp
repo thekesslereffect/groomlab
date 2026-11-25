@@ -264,19 +264,20 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
                                   m->guidesEdited();
                               }),
                               {}, groomOpen, {}, {}, QStringLiteral("visibilityInvert")};
-    // Tube's Draw Root and Edit Root: the Tube card's Draw root and Edit roots (the root mode, a
-    // root tube's outline clicked on the scalp, or the roots' outlines edited); picked again, they
-    // leave it (Edit: Finish edit), as the card's buttons do.
+    // Roots' Draw Root and Edit Root: the Roots card's Draw root and Edit roots (the root mode, a
+    // root tube's outline clicked on the scalp, or the roots' outlines edited); picked again, back
+    // to Draw (Edit: Finish edit), as the card's buttons do.
     auto rootMode = [m](RootTubeTool::Mode a, RootTubeTool::Mode b2) {
         return m->brush_.rootMode() && (m->brush_.roots().mode() == a || m->brush_.roots().mode() == b2);
     };
     auto tubeRoots = [m](bool draw) {
         m->setUiMode(QStringLiteral("groom"));
-        if (m->brush_.toolId() != "shape" || m->viewport_->toolMode() != Viewport::ToolMode::Brush) m->chooseTool(QStringLiteral("shape"));
+        const bool picked = m->brush_.toolId() == "roots" && m->viewport_->toolMode() == Viewport::ToolMode::Brush;
+        if (!picked) m->chooseTool(QStringLiteral("roots"));  // (starts Draw root)
         m->shell_->groomToolsDock()->show();
         m->shell_->groomToolsDock()->raise();
         TubePanel* tubes = m->groomTools_->tubePanel();
-        if (!tubes) return;
+        if (!tubes || (!picked && draw)) return;  // (Draw root: picking the brush started it)
         if (draw) tubes->drawRoot();
         else tubes->editRoots();
     };
@@ -291,6 +292,8 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
     // Groom Tools: the dock shown and raised (Groom mode, where it lives).
     // GroomLab > Radial Menu Settings...: its shortcut and size (showRadialMenuSettings).
     b["radial.settings"] = {run([m] { AppActions::showRadialMenuSettings(*m); }), {}, {}, {}, {}, QStringLiteral("radialSettings")};
+    // Find Command (Ctrl+K, the Groom Tools' search): every command, brush and graph preset by name.
+    b["commands.find"] = {run([m] { m->openFindCommand(); }), {}, {}, {}, {QKeySequence(Qt::CTRL | Qt::Key_K)}, QStringLiteral("findCommand")};
     b["tools.open"] = {run([m] {
                            m->setUiMode(QStringLiteral("groom"));
                            m->shell_->groomToolsDock()->show();
@@ -321,12 +324,6 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
                                    m->notify(QObject::tr("Deleted %1 flow arrows and %2 sinks").arg(arrows).arg(sinks));
                            }),
                            {}, groomOpen};
-    b["photos.guides"] = {run([m] {
-                              if (ReferenceWindow* w = m->openReferenceWindow())
-                                  // (Align while no photo is lined up: guides grow from lined-up photos)
-                                  w->setStage(w->anyLinedUp() ? ReferenceWindow::Stage::Guides : ReferenceWindow::Stage::Align);
-                          }),
-                          {}, groomOpen, {}, {}, QStringLiteral("guidesFromReference")};
     b["groom.transfer"] = {run([m] { m->openTransferWindow(); }), {}, groomOpen, {}, {}, QStringLiteral("transfer")};
     b["cardAtlas.open"] = {run([m] { m->openCardAtlas(); })};
     b["sim.range"] = {run([m] { m->simulateTo(); }), {}, groomOpen};

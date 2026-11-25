@@ -96,10 +96,11 @@ public:
     // the brushes shape (stroke.h sculptFreezeEdit: kept in the node, one undo step); false when no
     // node is targeted (the caller unfreezes the groom's guides) or it threw (lastError says).
     bool sculptFreeze(const std::string& op);
-    // The Tube tool's root mode (Tool::Roots, root_tube_tool.h): its buttons through the
+    // The Roots brush's root mode (Tool::Roots, root_tube_tool.h): its buttons through the
     // session's host (start, Finish edit, Undo CV, Duplicate, Delete...), false when no groom is
     // open or it threw (lastError says); the overlay's root outlines follow. startRoots makes it
-    // the tool ("place", "edit" or "select"); leaveRoots puts it away for the Tube brush.
+    // the tool ("place", "edit" or "select"); leaveRoots puts the root tool away, the Roots brush
+    // still picked (its next click starts Draw root: the core's BrushTool::press).
     RootTubeTool& roots() { return tool_.roots(); }
     bool rootMode() const { return tool_.settings.tool == BrushToolSettings::Tool::Roots && tool_.roots().active(); }
     bool startRoots(RootTubeTool::Mode mode);

@@ -250,24 +250,26 @@ def toggle_tubes_always():
 
 
 def _root_card():
-    """The Groom Tools' Tube card's root block, the Tube tool up (the palette opened for it)."""
+    """The Groom Tools' Roots card's root block, the Roots brush up (the palette opened for it)."""
     from groomlab.ui import palette
     window = palette.current() or palette.show()
-    if window.tool != "shape":
-        window.activate("shape")
+    if window.tool != "roots":
+        window.activate("roots")
     return window.root_card
 
 
 def root_mode(which):
     window = _palette()
-    if window is None or getattr(window, "tool", None) != "shape":
+    if window is None or getattr(window, "tool", None) != "roots":
         return False
     card = window.root_card
     return (card.draw_root if which == "draw" else card.edit_root).isChecked()
 
 
 def draw_root():
-    _root_card().draw_root.click()
+    card = _root_card()
+    if not root_mode("draw"):  # (picking Roots draws a root already)
+        card.draw_root.click()
 
 
 def edit_roots():

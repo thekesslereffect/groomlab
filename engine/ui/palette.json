@@ -3,9 +3,8 @@
   "version": 1,
   "palette": {
     "tabs": [
-      {"id": "tools", "label": "Tools", "icon": "ui_tools", "tip": "The brushes, guide groups and edits"},
+      {"id": "tools", "label": "Tools", "icon": "ui_tools", "tip": "The brushes, guide groups and correctives", "aliases": ["correctives", "sculpt"]},
       {"id": "paint", "label": "Paint", "icon": "groomLab_paint", "tip": "Painted maps and the painting brushes"},
-      {"id": "correctives", "label": "Correctives", "icon": "ui_layers", "tip": "Correctives: sculpt layers on top of the groom", "aliases": ["sculpt"]},
       {"id": "photos", "label": "Photos", "icon": "ui_image_plus", "tip": "Reference photos as cameras to groom to", "aliases": ["reference"]},
       {"id": "outliner", "label": "Outliner", "icon": "ui_outliner", "tip": "The document's grooms, each on its scalp: click one to work on it, the eye shows or hides it, Add Groom grows another on a mesh", "hosts": ["app"]}
     ],
@@ -25,7 +24,8 @@
       ]
     },
     "sections": [
-      {"id": "groups", "label": "Guide groups", "expanded": true, "tabs": ["tools"]}
+      {"id": "groups", "label": "Guide groups", "expanded": true, "tabs": ["tools"]},
+      {"id": "correctives", "label": "Correctives", "expanded": true, "tabs": ["tools"]}
     ],
     "output": [
       {"id": "sim.range", "tip": "Step the Simulate nodes over the playback range into their cache (Simulate > Add Simulate Node first); Esc stops", "tips": {"app": "Step the Simulate nodes over the timeline's range into their cache (Simulate > Add Simulate Node first); Esc stops"}},

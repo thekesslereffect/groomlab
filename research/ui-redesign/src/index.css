@@ -27,6 +27,8 @@
   --color-accent: var(--gl-accent);
   --color-on-accent: var(--gl-on-accent);
   --color-selection: var(--gl-selection);
+  /* The theme's ui.error (charcoal.json: palette red #D9736C): destructive menu items. */
+  --color-error: var(--gl-error, #D9736C);
   --color-track: var(--gl-track);
   --radius-ctl: var(--gl-radius);
   --radius-pnl: var(--gl-radius-lg);

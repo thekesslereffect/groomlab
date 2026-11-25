@@ -219,7 +219,7 @@ def _bar(entries, bind, owner):
 
 # The lists' labelled actions (+ New, Import..., Fix Frame) as glyphs in their section's header.
 HEADER_GLYPHS = {"group.new": "plus", "map.new": "plus", "map.import": "import", "corrective.new": "plus",
-                 "corrective.fixFrame": "key", "photo.import": "import"}
+                 "corrective.fixFrame": "key", "photo.import": "import", "photo.addView": "camera"}
 
 
 def _glyphs(entries, bind, owner):
@@ -238,7 +238,11 @@ def _glyphs(entries, bind, owner):
             menu_.setToolTipsVisible(True)
             made[item["id"]] = widgets.glyph_button(name, tip, menu=menu_)
         else:
-            made[item["id"]] = widgets.glyph_button(name, tip, bind(item))
+            slot = bind(item)
+            if isinstance(slot, QtWidgets.QMenu):  # (a menu the tab fills as it opens)
+                made[item["id"]] = widgets.glyph_button(name, tip, menu=slot)
+            else:
+                made[item["id"]] = widgets.glyph_button(name, tip, slot)
     return made
 
 
@@ -382,11 +386,11 @@ class GuidesTab(_GroomTab):
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
         self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
         self.tree.header().setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)
-        self.tree.header().resizeSection(2, theme.px(26))
+        self.tree.header().resizeSection(2, theme.px(86))  # the row's icons: segments, eye, menu
         self.tree.setEditTriggers(QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed)
         self.tree.itemClicked.connect(lambda item, _: self.row_clicked(item))
         self.tree.setToolTip("Click: brushes and new guides use this group (again: all groups). Double-click the "
-                             "name: rename. The eye: show or hide. Right-click: its color, and more")
+                             "name: rename. The segments, the eye, and the menu (or right-click): on the row")
         self.tree.itemChanged.connect(self.item_changed)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.context_menu)
@@ -396,16 +400,15 @@ class GuidesTab(_GroomTab):
         self.empty.setVisible(False)
         column.addWidget(self.empty)
 
-        # The picked group's box: rename, select, delete, then its Segments and Edit guides.
-        self.box = widgets.ItemBox([glyphs[k] for k in ("group.rename", "group.select", "group.delete") if k in glyphs])
-        self.box.setObjectName("guideGroupBox")
-        self.box_glyphs = [glyphs[k] for k in ("group.rename", "group.select", "group.delete") if k in glyphs]
-        column.addWidget(self.box)
+        # A row's settings: Segments (with By length and what it applies to) in a popup under the
+        # row's segments icon; the edits (Rename, Select, Generate Children, Mirror...) in its menu.
+        self.segments_popup = widgets.PopupPanel(self, width=250)
+        self.segments_popup.setObjectName("guideSegmentsPopup")
         # Segments: the selected guides' (else the picked group's, else every guide's) point count,
         # resampled live while dragging (a preview from the stored guides) and committed as one
         # undo step on release; a whole group's new guides get it too.
         self.segments = widgets.SoftSlider(12, lo=2, hi=64, integer=True, minimum=1, maximum=256,
-                                           key="guides.segments", label="Segments")  # its scope added on refresh
+                                           key="guides.segments", label="Segments")
         self.segments.setToolTip("Points along the guides, kept on their smooth curve: the selected guides (their own "
                                  "count from then on, kept when the group's changes; the group's count makes them "
                                  "follow it again), else the picked group's (its new guides get as many too), else "
@@ -413,46 +416,16 @@ class GuidesTab(_GroomTab):
                                  "value) to apply it as one undo step. More segments let a guide curl tighter.")
         self.segments.dragged.connect(self.segments_dragged)
         self.segments.committed.connect(self.segments_committed)
-        self.box.add(self.segments)
-        # Segments by length (issue #98): a switch under the slider; toggled, the targets resampled
-        # at the slider's count by length (on) or to it (off), one undo step.
+        self.segments_popup.add(self.segments)
+        # Segments by length (issue #98): toggled, the targets resampled at the slider's count by
+        # length (on) or to it (off), one undo step.
         self.by_length = widgets.switch(definitions.text("segmentsByLength"), definitions.text("segmentsByLengthTip"), False,
                                         "segmentsByLength")
         self.by_length.toggled.connect(self.by_length_toggled)
-        self.box.add(self.by_length.row)
-        # Edits on many guides: one menu; Generate Children's count beside it, inline (no prompt):
-        # children per guide for the selected guides, else for the picked group.
-        edits = QtWidgets.QToolButton()
-        edits.setText(lists["edits"]["label"] + "  ▾")
-        edits.setObjectName("editGuides")
-        edits.setAutoRaise(True)
-        edits.setProperty("role", "ghost")
-        edits.setToolTip(lists["edits"]["tip"])
-        edits.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.edits_menu = QtWidgets.QMenu(edits)
-        widgets.fill_menu(self.edits_menu, lists["edits"]["items"], bind,
-                          generators={"guideGroups": widgets.menu_filler(lambda menu, item: self.fill_group_menu(menu, item))})
-        self.edits_menu.setToolTipsVisible(True)
-        edits.setMenu(self.edits_menu)
-        row = QtWidgets.QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(edits)
-        row.addStretch(1)
-        self.box.add(row)
-        # Edit Guides > Children's count, on a line of its own (beside the menu it would widen a
-        # narrow dock).
-        row = QtWidgets.QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(widgets.small_label("Children per guide"))
-        row.addStretch(1)
-        self.children_count = QtWidgets.QSpinBox()
-        self.children_count.setRange(1, 500)
-        self.children_count.setValue(menu.CHILDREN_COUNT)
-        self.children_count.setToolTip("Children per guide for Edit Guides > Children (the selected guides, else the "
-                                       "picked group)")
-        self.children_count.valueChanged.connect(lambda v: setattr(menu, "CHILDREN_COUNT", int(v)))
-        row.addWidget(self.children_count)
-        self.box.add(row)
+        self.segments_popup.add(self.by_length.row)
+        self.segments_scope = widgets.small_label("", wrap=True)  # what Segments applies to
+        self.segments_scope.setObjectName("guideSegmentsScope")
+        self.segments_popup.add(self.segments_scope)
         self._preview_segments = None
         self._previewing = False
 
@@ -489,10 +462,11 @@ class GuidesTab(_GroomTab):
             common = max(set(counts), key=counts.count)
             mixed = min(counts) != max(counts)
             self.segments.setValue(common)
-            self.segments.setLabel("Segments (%s%s)" % (scope, ", mixed" if mixed else ""))
+            self.segments_scope.setText("Applies to %s%s" % (scope, " (mixed: %d to %d)" % (min(counts), max(counts))
+                                                              if mixed else ""))
             self.segments.unit_tip = "%d to %d segments" % (min(counts), max(counts)) if mixed else ""
         else:
-            self.segments.setLabel("Segments")
+            self.segments_scope.setText("No guides yet")
             self.segments.unit_tip = ""
         self.segments.setEnabled(bool(counts))
         # The switch: on where the picked group goes by length (a selection keeps what it was set to).
@@ -504,7 +478,7 @@ class GuidesTab(_GroomTab):
             self.by_length.blockSignals(False)
             if on and picked[0]["segments"] > 0:  # (by length: the count of a guide of the average length)
                 self.segments.setValue(picked[0]["segments"])
-                self.segments.setLabel("Segments (%s, by length)" % group)
+                self.segments_scope.setText("Applies to %s, by length" % group)
         self.by_length.setEnabled(bool(counts))
 
     def segments_dragged(self, value):
@@ -606,7 +580,7 @@ class GuidesTab(_GroomTab):
                 item = QtWidgets.QTreeWidgetItem(parent, [g["name"], str(g["count"]), ""])
                 item.setData(0, QtCore.Qt.UserRole, g["name"])
                 item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
-                item.setIcon(0, dot_icon(colors.get(g["name"]) or g["color"], dashed=not colors.get(g["name"])))
+                item.setIcon(0, dot_icon(colors.get(g["name"]) or g["color"]))  # (solid, picked or automatic)
                 item.setTextAlignment(1, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
                 item.setForeground(1, muted)
                 if g["name"] in hidden:
@@ -618,7 +592,7 @@ class GuidesTab(_GroomTab):
                                    "\nNew guides: %d segments" % g["segments"] if g["segments"] else ""))
                 item.setToolTip(1, "%d guides" % g["count"])
                 items[g["name"]] = item
-                self.tree.setItemWidget(item, 2, self._eye(g["name"], g["name"] not in hidden))
+                self.tree.setItemWidget(item, 2, self._strip(g, g["name"] not in hidden))
             if len(left) == len(pending):
                 break
             pending = left
@@ -651,9 +625,6 @@ class GuidesTab(_GroomTab):
         else:
             self.tree.clearSelection()
         self.tree.blockSignals(False)
-        for b in self.box_glyphs:
-            b.setEnabled(self.group() is not None)
-        self.box.set_title(name or "All groups")  # none picked: Segments and the edits on every group
         self.sync_segments()
 
     def row_clicked(self, item):
@@ -666,13 +637,67 @@ class GuidesTab(_GroomTab):
         self.owner.pick_group(name)
         self.show_picked()
 
+    CHILDREN_COUNTS = (1, 2, 3, 4, 6, 8)  # Generate Children's submenu
+
+    def _strip(self, g, shown):
+        """A row's icons (ROW_ORDER): the segments (a popup), the eye, the menu."""
+        name = g["name"]
+        try:
+            counts = groomlab.guide_segments(self.groom, group=name)
+        except RuntimeError:
+            counts = []
+        common = max(set(counts), key=counts.count) if counts else (g.get("segments") or 0)
+        segments = widgets.popup_button("segments", "Segments: %d (click to change; By length)" % common,
+                                        self.segments_popup, before=lambda: self.pick_row(name),
+                                        text=str(common) if common else "")
+        segments.setObjectName("groupSegments_" + name)
+        more = widgets.menu_button("Rename, select, children, mirror, move, color, delete",
+                                   lambda m: self.fill_row_menu(m, name), before=lambda: self.pick_row(name))
+        more.setObjectName("groupMenu_" + name)
+        return widgets.RowStrip((segments, self._eye(name, shown), more))
+
+    def pick_row(self, name):
+        """The row's popup or menu opened: its group picked first (what they act on)."""
+        item = getattr(self, "_rows", {}).get(name)
+        if item is not None and self.tree.currentItem() is not item:
+            self.tree.setCurrentItem(item)
+        if getattr(self.owner, "current_group", lambda: "")() != name:
+            self.owner.pick_group(name)
+        self.show_picked()
+
+    def fill_row_menu(self, menu_, name):
+        """The row's menu: lists.json's groups context (Rename first, Delete last); Generate Children
+        a submenu of counts."""
+        state, actions = {"group"}, dict(self.ACTIONS)
+        if name in groomlab.guide_group_colors(self.groom):
+            state.add("group.color")
+        item = getattr(self, "_rows", {}).get(name)
+        if item is not None:
+            actions["group.rename"] = definitions.bound(lambda: self.tree.editItem(item, 0))  # in place
+        made = widgets.fill_menu(menu_, definitions.get("lists/groups/context"), definitions.binder(actions, self), state,
+                                 generators={"guideGroups": widgets.menu_filler(lambda m, it: self.fill_group_menu(m, it))})
+        self.children_menu(menu_, made.get("guides.children"))
+
+    def children_menu(self, menu_, action):
+        """Generate Children's entry as a submenu: how many children per guide (the selected guides,
+        else the picked group)."""
+        if action is None:
+            return
+        target = action.parent() if isinstance(action.parent(), QtWidgets.QMenu) else menu_
+        sub = QtWidgets.QMenu(action.text(), target)
+        sub.setToolTip(action.toolTip())
+        for n in self.CHILDREN_COUNTS:
+            sub.addAction("%d per guide" % n, lambda n=n: self.generate_children(n))
+        target.insertMenu(action, sub)
+        target.removeAction(action)
+        menu_.submenus = getattr(menu_, "submenus", []) + [sub]
+
     def _eye(self, name, shown):
         """A row's eye: show or hide the group in the viewport."""
-        b = widgets.glyph_button("eye" if shown else "eyeOff", "Show or hide %s in the viewport" % name,
-                                 lambda: self.set_shown(name, not shown))
-        b.setFixedSize(theme.px(22), theme.px(22))
-        b.setIconSize(QtCore.QSize(theme.px(14), theme.px(14)))
-        return b
+        eye = widgets.row_glyph("eye" if shown else "eyeOff", "Show or hide %s in the viewport" % name,
+                                lambda: self.set_shown(name, not shown))
+        eye.setObjectName("groupEye_" + name)
+        return eye
 
     def set_shown(self, name, on):
         if self.run(groomlab.show_guide_group, self.groom, name, on):
@@ -705,17 +730,16 @@ class GuidesTab(_GroomTab):
             QtCore.QTimer.singleShot(0, self.refresh)
 
     def context_menu(self, pos):
+        """Right-click a row: its menu (the row's own); on no row: a new group."""
         item = self.tree.itemAt(pos)
         menu_ = QtWidgets.QMenu(self)
-        state, actions = set(), dict(self.ACTIONS)
+        menu_.setToolTipsVisible(True)
         if item is not None:
             name = item.data(0, QtCore.Qt.UserRole)
-            self.tree.setCurrentItem(item)
-            state.add("group")
-            if name in groomlab.guide_group_colors(self.groom):
-                state.add("group.color")
-            actions["group.rename"] = definitions.bound(lambda: self.tree.editItem(item, 0))  # in place
-        widgets.fill_menu(menu_, definitions.get("lists/groups/context"), definitions.binder(actions, self), state)
+            self.pick_row(name)
+            self.fill_row_menu(menu_, name)
+        else:
+            widgets.fill_menu(menu_, definitions.get("lists/groups/bar"), definitions.binder(self.ACTIONS, self))
         qt.exec_(menu_, self.tree.viewport().mapToGlobal(pos))
 
     def _need_group(self):
@@ -850,11 +874,13 @@ class GuidesTab(_GroomTab):
         text = QtWidgets.QApplication.clipboard().text()
         self.menu_action(lambda: groomlab.paste_guides(self.groom, text, group))
 
-    def generate_children(self):
-        """Edit Guides > Children: the inline count of children for the selected guides, else for
-        the picked group (the last group when none is picked)."""
+    def generate_children(self, count=None):
+        """Generate Children: `count` children per guide (the row menu's submenu; else the last
+        count used) for the selected guides, else for the picked group."""
+        if count is not None:
+            menu.CHILDREN_COUNT = int(count)
         group = self.owner.current_group() if hasattr(self.owner, "current_group") else ""
-        self.menu_action(lambda: menu.generate_children_dialog(count=self.children_count.value(), group=group or None,
+        self.menu_action(lambda: menu.generate_children_dialog(count=menu.CHILDREN_COUNT, group=group or None,
                                                                groom=self.groom))
 
 
@@ -1104,13 +1130,38 @@ class PaintTab(_GroomTab):
         self.empty.setVisible(False)
         column.addWidget(self.empty)
 
-        # The picked map's box: rename, convert, delete; where it shows, and what reads it.
-        glyphs["map.convert"].setObjectName("paintConvert")
-        self.convert_menu = glyphs["map.convert"].menu()
-        self.box_glyphs = [glyphs[k] for k in ("map.rename", "map.convert", "map.delete")]
-        self.box = widgets.ItemBox(self.box_glyphs)
-        self.box.setObjectName("mapBox")
-        column.addWidget(self.box)
+        # A map row's info (the row's i): its kind, what reads it (a link into the Graph Editor),
+        # Use for (drive a param with it), and where it shows; its menu (Rename, Convert to, the
+        # image, Delete) is the row's last icon and the list's right-click.
+        self.info_popup = widgets.PopupPanel(self, width=260)
+        self.info_popup.setObjectName("mapInfoPopup")
+        self.info_title = QtWidgets.QLabel()
+        self.info_title.setProperty("role", "subheading")
+        self.info_popup.add(self.info_title)
+        self.kind_label = widgets.small_label("", wrap=True)
+        self.info_popup.add(self.kind_label)
+        self.users = widgets.small_label("", wrap=True)
+        self.users.setObjectName("mapUsers")
+        self.info_popup.add(self.users)
+        links = QtWidgets.QHBoxLayout()
+        links.setContentsMargins(0, 0, 0, 0)
+        links.setSpacing(theme.px(4))
+        self.open_reader = QtWidgets.QPushButton("Show in Graph")
+        self.open_reader.setObjectName("mapShowInGraph")
+        self.open_reader.setToolTip("Open the Graph Editor on the node that reads this map")
+        self.open_reader.clicked.connect(lambda: self.show_reader())
+        links.addWidget(self.open_reader)
+        self.use_for = QtWidgets.QPushButton("Use for  ▾")
+        self.use_for.setObjectName("mapUseFor")
+        self.use_for.setToolTip("Drive a setting with this map (a Map node feeds the param; the param's value times "
+                                "the map)")
+        self.use_for_menu = QtWidgets.QMenu(self.use_for)
+        self.use_for_menu.setToolTipsVisible(True)
+        self.use_for_menu.aboutToShow.connect(self.fill_use_for)
+        self.use_for.setMenu(self.use_for_menu)
+        links.addWidget(self.use_for)
+        links.addStretch(1)
+        self.info_popup.add(links)
         self.view_guides = widgets.chip("Guides", "Color the guides by the map", False, "paintShowOnGuides")
         self.view_guides.toggled.connect(self.toggle_view_guides)
         self.view_strands = widgets.chip("Strands", "Color the strands by the map", False, "paintShowOnStrands")
@@ -1124,13 +1175,11 @@ class PaintTab(_GroomTab):
             self.view_channel.addItem(c["label"], c["value"])
         self.view_channel.setToolTip(definitions.get("choices/scalpChannel")["tip"])
         self.view_channel.currentIndexChanged.connect(lambda _i: self.view_channel_changed())
-        self.box.add(widgets.small_label("Show on"))
-        self.box.add(widgets.chip_row((self.view_guides, self.view_strands, self.view_scalp)))
+        self.info_popup.add(widgets.small_label("Show on"))
+        self.info_popup.add(widgets.chip_row((self.view_guides, self.view_strands, self.view_scalp)))
         # A color map: which of its channels the scalp shows.
         self.view_channel_row, _label = widgets.field_row("Channel", self.view_channel)
-        self.box.add(self.view_channel_row)
-        self.users = widgets.small_label("", wrap=True)
-        self.box.add(self.users)
+        self.info_popup.add(self.view_channel_row)
 
         # The Paint card's own block (the Groom Tools put it there): the mode, the value painted
         # and Fill; a color map: the color, its channels and Fill.
@@ -1151,13 +1200,12 @@ class PaintTab(_GroomTab):
             self.mode_buttons[choice["value"]] = button
         modes = widgets.seg_row(self.mode_buttons.values())  # one of them: segments on a track
         modes.setToolTip(definitions.get("choices/paintMode")["tip"])
-        controls.addWidget(widgets.small_label("Mode"))
         controls.addWidget(modes)
-        self.whole_faces = widgets.switch("Whole Faces", "The brush fills the scalp's faces under it all the way, "
+        self.whole_faces = widgets.chip("Whole faces", "The brush fills the scalp's faces under it all the way, "
                                           "no falloff: masks by face (a vertex or texture map; Shift+drag still "
                                           "smooths)", False, "paintWholeFaces")
+        self.whole_faces.row = self.whole_faces  # (a chip in the card's toggles row)
         self.whole_faces.toggled.connect(self.whole_faces_changed)
-        controls.addWidget(self.whole_faces.row)
         self.value = widgets.SoftSlider(1.0, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None, label="Value")
         self.value.setToolTip("What the Paint brush paints toward, and what Fill sets")
         self.value.committed.connect(lambda v: self.owner.push(value=v))
@@ -1219,11 +1267,82 @@ class PaintTab(_GroomTab):
         return state
 
     def list_menu(self, global_pos):
+        """Right-click: the row's menu (on no map: New and Import)."""
         menu_ = QtWidgets.QMenu(self)
+        menu_.setToolTipsVisible(True)
+        item = self.list.itemAt(self.list.viewport().mapFromGlobal(global_pos))
+        if item is not None:
+            self.list.setCurrentItem(item)
+            self.fill_row_menu(menu_)
+        else:
+            widgets.fill_menu(menu_, definitions.get("lists/maps/bar"), definitions.binder(self.ACTIONS, self))
+        qt.exec_(menu_, global_pos)
+
+    def fill_row_menu(self, menu_):
+        """A map's menu (lists.json's maps context): Rename first, Convert to, the image, Delete last."""
         widgets.fill_menu(menu_, definitions.get("lists/maps/context"), definitions.binder(self.ACTIONS, self),
                           self.menu_state(), checked=lambda item: delete_map_files())
-        menu_.setToolTipsVisible(True)
-        qt.exec_(menu_, global_pos)
+
+    def _row(self, m, color, lost):
+        """A map's row: its name (a lost image marked), RGBA on a color map, then i and the menu."""
+        name = m["name"]
+        pick = lambda: self.select(name)  # noqa: E731
+        info = widgets.popup_button("info", "What reads %s, Use for, where it shows" % name, self.info_popup,
+                                    before=pick)
+        info.setObjectName("mapInfo_" + name)
+        more = widgets.menu_button("Rename, convert, the image, delete", self.fill_row_menu, before=pick)
+        more.setObjectName("mapMenu_" + name)
+        return widgets.ListRow(("\u26a0 " if lost else "") + name, "RGBA" if color else "", (info, more))
+
+    def show_reader(self):
+        """The Graph Editor, on the first node reading the picked map."""
+        users = groomlab.map_users(self.groom, self.current()) if self.groom and self.current() else []
+        from groomlab.ui import graph_editor
+        editor = graph_editor.show(self.groom)
+        self.info_popup.hide()
+        if users and editor is not None:
+            node = users[0][0]
+            item = getattr(editor, "items", {}).get(node)
+            if item is not None:
+                editor.scene.clearSelection()
+                item.setSelected(True)
+                editor.view.centerOn(item)
+
+    def fill_use_for(self):
+        """Use for: the common settings the graph has, then every other mappable param."""
+        self.use_for_menu.clear()
+        name = self.current()
+        if not (self.groom and name):
+            return
+        try:
+            settings, others = groomlab.setting_targets(self.groom)
+        except (RuntimeError, ValueError, KeyError):
+            settings, others = [], []
+        used = set(groomlab.map_users(self.groom, name))
+        for t in settings:
+            if not t.get("node"):
+                continue
+            action = self.use_for_menu.addAction("%s  (%s.%s)" % (t["label"], t["node"], t["param"]),
+                                                 lambda t=t: self.use_map_for(t["node"], t["param"]))
+            action.setToolTip(t.get("hint", ""))
+            action.setEnabled((t["node"], t["param"]) not in used)
+        if others:
+            sub = self.use_for_menu.addMenu("Other")
+            for t in others:
+                node, _, param = t["id"].partition(".")
+                action = sub.addAction(t["id"], lambda n=node, p=param: self.use_map_for(n, p))
+                action.setEnabled((node, param) not in used)
+
+    def use_map_for(self, node, param):
+        """Drive node.param with the picked map (groomlab.use_map: a Map node feeds it), one undo step."""
+        name = self.current()
+        if not (self.groom and name):
+            return
+        channel = "luminance"
+        if self.run(groomlab.use_map, self.groom, node, param, name, kind=self.current_kind() or "guides",
+                    channel=channel):
+            self.status("%s.%s reads %s now" % (node, param, name))
+            self.map_changed(name, push=False)
 
     def image_actions(self):
         """The list menu's entries for the picked map's image: (label, tip, function)."""
@@ -1290,11 +1409,8 @@ class PaintTab(_GroomTab):
         for m in entries:
             color = m.get("channels") == 4
             lost = m["name"] in missing
-            item = QtWidgets.QListWidgetItem("%s%s   (%s%s)" % ("\u26a0 " if lost else "", m["name"],
-                                                               KIND_LABELS.get(m["kind"], m["kind"]),
-                                                               ", color" if color else ""))
+            item = QtWidgets.QListWidgetItem("")
             item.setSizeHint(QtCore.QSize(0, theme.px(24)))
-            item.setIcon(_map_icon(4 if color else 1))
             item.setData(QtCore.Qt.UserRole, m["name"])
             item.setData(QtCore.Qt.UserRole + 1, m["kind"])
             item.setData(QtCore.Qt.UserRole + 2, 4 if color else 1)
@@ -1308,15 +1424,13 @@ class PaintTab(_GroomTab):
                        "Utilities > Find Missing Files...)." % expected)
             item.setToolTip(tip)
             self.list.addItem(item)
+            self.list.setItemWidget(item, self._row(m, color, lost))
         if not (current and self.select(current)) and self.list.count():
             self.list.setCurrentItem(self.list.item(0))
         self.list.blockSignals(False)
         self.section.set_count(self.list.count() if self.groom else None)
         fit_rows(self.list)
         self.show_empty(self.list, self.list.count())
-        for b in self.box_glyphs:
-            b.setEnabled(self.list.currentItem() is not None)
-        self.box.set_title(self.current() or "")
         self.map_changed(self.current(), push=False)
         self.push_paint_flags()
 
@@ -1492,9 +1606,17 @@ class PaintTab(_GroomTab):
             self.owner.push(attribute=name, **self.context_flags())
             self.show_while_painting(name)
         self._sync_views()
+        if self.owner.tool == "paint" and hasattr(self.owner, "show_editing"):
+            self.owner.show_editing()  # the Paint card's header: the map it paints
         users = groomlab.map_users(self.groom, name) if name else []
+        self.info_title.setText(name or "")
+        kind = self.current_kind()
+        self.kind_label.setText("%s%s" % (KIND_TIPS.get(kind, "").split(".")[0], ", in color" if self.current_channels() == 4
+                                          else "") if name else "")
+        self.open_reader.setEnabled(bool(users))
         self.users.setText("Read by " + ", ".join("%s.%s" % u for u in users) if users else
-                           "Not read by the graph yet" if name else "No maps yet: + (a new map) above")
+                           "Not read by the graph yet: Use for picks a setting" if name else
+                           "No maps yet: + (a new map) above")
         self.users.setToolTip("" if users else
                               "+ (New Map) > For a setting makes a map a setting reads; or in the Graph Editor, "
                               "right-click a param > Paint, or add a Map node.")
@@ -1784,6 +1906,7 @@ class CorrectivesBox(_GroomTab):
 
     def __init__(self, owner):
         super(CorrectivesBox, self).__init__(owner)
+        self.owner = owner
         from groomlab import sculpts, shots
         self.shots = shots
         self.sculpts = sculpts
@@ -1810,9 +1933,14 @@ class CorrectivesBox(_GroomTab):
         self.tree.header().setStretchLastSection(False)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
         self.tree.setEditTriggers(QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed)
-        self.tree.setToolTip("Click: what brushes edit. Checkbox: show or hide. Double-click the name: rename. "
-                             "Weight: now, on this frame. Right-click: more")
+        self.tree.setToolTip("Click: what brushes edit (again: the base groom). The weight, Solo, the eye and the "
+                             "menu (or right-click): on the row. Double-click the name: rename")
         self.tree.currentItemChanged.connect(lambda item, _: self.picked(item))
+        self.tree.itemClicked.connect(lambda item, _: self.row_clicked(item))
+        self.tree.setColumnCount(3)
+        self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        self.tree.header().setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)
+        self.tree.header().resizeSection(2, theme.px(108))  # the row's icons: weight, solo, eye, menu
         self.tree.itemChanged.connect(self.item_changed)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.context_menu)
@@ -1824,11 +1952,9 @@ class CorrectivesBox(_GroomTab):
         self.empty.setVisible(False)
         column.addWidget(self.empty)
 
-        # The picked layer's box: solo, up, down, delete; its weight and the key.
-        self.box_glyphs = [glyphs[k] for k in ("corrective.solo", "corrective.up", "corrective.down", "corrective.delete")]
-        self.box = widgets.ItemBox(self.box_glyphs)
-        self.box.setObjectName("layerBox")
-        column.addWidget(self.box)
+        # A layer's weight (and its key) in a popup under the row's weight icon.
+        self.weight_popup = widgets.PopupPanel(self, width=230)
+        self.weight_popup.setObjectName("correctiveWeightPopup")
         row = QtWidgets.QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(theme.px(4))
@@ -1841,7 +1967,31 @@ class CorrectivesBox(_GroomTab):
         self.key = widgets.glyph_button("key", definitions.action("corrective.keyWeight")["tip"], self.key_weight)
         self.key.setObjectName("correctiveKey")
         row.addWidget(self.key)
-        self.box.add(row)
+        self.weight_popup.add(row)
+        # How the strands draw while sculpting (the groom's sculptDisplay and sculptDensity: they left
+        # the Attribute Editor for here), folded under the list.
+        display = QtWidgets.QWidget()
+        rows = QtWidgets.QVBoxLayout(display)
+        rows.setContentsMargins(0, 0, 0, 0)
+        rows.setSpacing(theme.px(4))
+        self.sculpt_display = QtWidgets.QComboBox()
+        self.sculpt_display.setObjectName("sculptDisplay")
+        for c in definitions.choices("sculptDisplay"):
+            self.sculpt_display.addItem(c["label"], c["value"])
+        self.sculpt_display.setToolTip(definitions.get("choices/sculptDisplay")["tip"])
+        self.sculpt_display.activated.connect(lambda _i: self.set_sculpt_display())
+        line, _label = widgets.field_row("Strands", self.sculpt_display)
+        rows.addWidget(line)
+        self.sculpt_density = widgets.SoftSlider(0.25, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None,
+                                                 label="Strand density")
+        self.sculpt_density.setObjectName("sculptDensity")
+        self.sculpt_density.setToolTip("The share of the strands evaluated while a stroke is live (the rest come "
+                                       "back when it ends)")
+        self.sculpt_density.committed.connect(self.set_sculpt_density)
+        rows.addWidget(self.sculpt_density)
+        self.display_section = widgets.Section("Display while sculpting", display, expanded=False)
+        self.display_section.setObjectName("sculptDisplaySection")
+        column.addWidget(self.display_section)
         self._state = None
 
     # -- helpers
@@ -1864,6 +2014,7 @@ class CorrectivesBox(_GroomTab):
         self._state = None
         self._layers = None
         self.refresh()
+        self._tell_owner()  # (a delete or new layer moves the pick without a click)
 
     # -- actions
 
@@ -1907,6 +2058,66 @@ class CorrectivesBox(_GroomTab):
             self.run(self.shots.key_weight, self.groom, name, value=self.weight.value())
             self._changed()
 
+    def _strip(self, item, layer, extra):
+        """A row's icons (ROW_ORDER): the weight (a popup), Solo, the eye, the menu; a Sculpt node's
+        row: its menu only."""
+        pick = lambda: self.tree.currentItem() is not item and self.tree.setCurrentItem(item)  # noqa: E731
+        if layer is None:  # a Sculpt node
+            node = extra
+            more = widgets.menu_button("Clear Edits", lambda m: widgets.fill_menu(
+                m, definitions.get("lists/correctives/nodeContext"),
+                definitions.binder(dict(self.ACTIONS, **{"sculpt.clearEdits": definitions.bound(
+                    lambda: self.clear_node_edits(node))}), self)), before=pick)
+            return widgets.RowStrip((more,))
+        now = extra
+        name = layer["name"]
+        weight = widgets.popup_button("weight", "Weight %.2f on this frame (click to change, key it)" % now,
+                                      self.weight_popup, before=pick, text="%.1f" % now)
+        weight.setObjectName("correctiveWeight_" + name)
+        solo = widgets.row_glyph("solo", definitions.action("corrective.solo")["tip"],
+                                 lambda: (pick(), self.solo()))
+        eye = widgets.row_glyph("eye" if layer["enabled"] else "eyeOff",
+                                "Turn %s %s" % (name, "off (keeps it)" if layer["enabled"] else "on"),
+                                lambda: self.set_enabled(name, not layer["enabled"]))
+        eye.setObjectName("correctiveEye_" + name)
+        more = widgets.menu_button("Rename, move, keys, delete", lambda m: widgets.fill_menu(
+            m, definitions.get("lists/correctives/context"), definitions.binder(self.ACTIONS, self)), before=pick)
+        more.setObjectName("correctiveMenu_" + name)
+        return widgets.RowStrip((weight, solo, eye, more))
+
+    def set_enabled(self, name, on):
+        if self.groom:
+            self.run(self.shots.set_layer, self.groom, name, enabled=on)
+            QtCore.QTimer.singleShot(0, self._changed)
+
+    def sync_display(self):
+        """Display while sculpting: the groom's sculptDisplay and sculptDensity."""
+        from maya import cmds
+        if not self.groom:
+            return
+        try:
+            mode = cmds.getAttr(self.groom + ".sculptDisplay")
+            density = cmds.getAttr(self.groom + ".sculptDensity")
+        except (RuntimeError, ValueError, TypeError):
+            return
+        values = [c["value"] for c in definitions.choices("sculptDisplay")]
+        if isinstance(mode, int) and 0 <= mode < len(values):
+            self.sculpt_display.blockSignals(True)
+            self.sculpt_display.setCurrentIndex(mode)
+            self.sculpt_display.blockSignals(False)
+        if density is not None and not self.sculpt_density.busy():
+            self.sculpt_density.setValue(float(density))
+
+    def set_sculpt_display(self):
+        if self.groom:
+            from maya import cmds
+            self.run(cmds.setAttr, self.groom + ".sculptDisplay", self.sculpt_display.currentIndex())
+
+    def set_sculpt_density(self, value):
+        if self.groom:
+            from maya import cmds
+            self.run(cmds.setAttr, self.groom + ".sculptDensity", float(value))
+
     def clear_node_edits(self, node=None):
         """A Sculpt node's row: drop the strokes kept in it (the picked row's node by default)."""
         if node is None:
@@ -1917,7 +2128,21 @@ class CorrectivesBox(_GroomTab):
             self.run(self.sculpts.clear_edits, self.groom, node)
             self._changed()
 
+    def row_clicked(self, item):
+        """The picked layer clicked again (the click didn't change the pick): the brushes back on
+        the base groom."""
+        if getattr(self, "_just_picked", False):
+            self._just_picked = False
+            return
+        name = item.data(0, QtCore.Qt.UserRole) if item else None
+        if name and name != BASE and self.groom:
+            base = self.tree.findItems("Base groom", QtCore.Qt.MatchExactly)
+            if base:
+                self.tree.setCurrentItem(base[0])
+                self._just_picked = False
+
     def picked(self, item):
+        self._just_picked = True  # (row_clicked: this click picked it)
         if not (self.groom and item):
             return
         name = item.data(0, QtCore.Qt.UserRole)
@@ -1925,12 +2150,20 @@ class CorrectivesBox(_GroomTab):
             node = name[len(NODE):]
             if node != self.sculpts.target(self.groom):
                 self.run(self.sculpts.set_target, self.groom, node)
+            self._tell_owner()
             QtCore.QTimer.singleShot(0, self._changed)
             return
         target = None if name == BASE else name
         if target != self.shots.target(self.groom) or self.sculpts.target(self.groom):
             self.run(self.shots.set_target, self.groom, target)
+        self._tell_owner()
         QtCore.QTimer.singleShot(0, self._changed)  # not while the tree is changing its current item
+
+    def _tell_owner(self):
+        """The Groom Tools grey or free the tiles at once (not at the next poll)."""
+        changed = getattr(self.owner, "layer_changed", None)
+        if changed is not None:
+            changed(force=True)
 
     def item_changed(self, item, column):
         name = item.data(0, QtCore.Qt.UserRole)
@@ -1939,10 +2172,7 @@ class CorrectivesBox(_GroomTab):
         layer = next((l for l in self.shots.layers(self.groom) if l["name"] == name), None)
         if layer is None:
             return
-        on = item.checkState(0) == QtCore.Qt.Checked
-        text = item.text(0).strip()
-        if on != layer["enabled"]:
-            self.run(self.shots.set_layer, self.groom, name, enabled=on)
+        text = item.text(0).strip()  # (on / off: the row's eye)
         if text and text != name:
             self.run(self.shots.set_layer, self.groom, name, rename=text)
         QtCore.QTimer.singleShot(0, self._changed)  # not inside the item's own signal
@@ -2018,21 +2248,28 @@ class CorrectivesBox(_GroomTab):
         self.tree.blockSignals(True)
         self.tree.clear()
         picked = None
+        pending_strips = []
         for l in reversed(layers):  # top of the stack first
             now = l["weight"] if l["enabled"] else 0.0
-            keys = "◆ %d" % len(l["keys"]) if l["keyed"] else "all frames"
-            item = QtWidgets.QTreeWidgetItem(self.tree, [l["name"], "%d%%" % round(100 * now), keys])
+            keys = "\u25c6 %d" % len(l["keys"]) if l["keyed"] else ""
+            item = QtWidgets.QTreeWidgetItem(self.tree, [l["name"], keys, ""])
             item.setData(0, QtCore.Qt.UserRole, l["name"])
-            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEditable)
-            item.setCheckState(0, QtCore.Qt.Checked if l["enabled"] else QtCore.Qt.Unchecked)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
+            item.setForeground(1, theme.current().qcolor("ui.textDim"))
+            item.setToolTip(1, "Keyed on %d frames" % len(l["keys"]) if l["keyed"] else "On every frame")
+            if not l["enabled"]:
+                item.setForeground(0, theme.current().qcolor("ui.textDim"))
+            pending_strips.append((item, l, now))
             item.setToolTip(0, "%s: %d guides corrected%s" % (
                 l["name"], l["guides"], "; strongest on frame %g" % l["frame"] if l["frame"] is not None else ""))
             if l["name"] == target:
                 picked = item
         # The Sculpt nodes: their guides as the graph makes them, brushed in the node.
         for node, edited in nodes:
-            item = QtWidgets.QTreeWidgetItem(self.tree, ["Node: " + node, "", "%d edited" % edited if edited else ""])
+            item = QtWidgets.QTreeWidgetItem(self.tree, ["Node: " + node, "%d edited" % edited if edited else "", ""])
             item.setData(0, QtCore.Qt.UserRole, NODE + node)
+            item.setForeground(1, theme.current().qcolor("ui.textDim"))
+            pending_strips.append((item, None, node))
             item.setToolTip(0, "Brushes shape %s's guides (the graph's, made again when what feeds it changes; the "
                                "strokes follow them). Right-click: Clear Edits" % node)
             if node == sculpting:
@@ -2046,14 +2283,14 @@ class CorrectivesBox(_GroomTab):
         base.setFont(0, font)
         self.tree.setCurrentItem(picked or base)
         self.tree.blockSignals(False)
-        for column in (1, 2):
-            self.tree.resizeColumnToContents(column)
+        for item, layer, extra in pending_strips:
+            self.tree.setItemWidget(item, 2, self._strip(item, layer, extra))
+        self.tree.resizeColumnToContents(1)
         self.section.set_count(len(layers))
         fit_rows(self.tree)
         self.show_empty(self.tree, len(layers) + len(nodes), hide_view=False)  # (the base groom stays listed)
         layer = next((l for l in layers if l["name"] == target), None)
-        row = self.tree.currentItem()
-        self.box.set_title(row.text(0) if row is not None else "")
+        self.sync_display()
         self.weight.setEnabled(layer is not None)
         self.key.setEnabled(layer is not None)
         if layer is not None and not self.weight.busy():
@@ -2083,7 +2320,6 @@ class ReferenceTab(_GroomTab):
         "photo.remove": "remove",
         "photo.addView": "cameras_menu",  # a menu: the cameras with an image plane, as it opens
         "photo.align": lambda self: self.open_window("align"),
-        "photos.guides": lambda self: self.open_window("guides"),
     }
 
     def __init__(self, owner):
@@ -2100,23 +2336,27 @@ class ReferenceTab(_GroomTab):
         layout.setSpacing(theme.px(6))
         lists = definitions.get("lists/photos")
         bind = definitions.binder(self.ACTIONS, self)
+        self.cameras_menu = QtWidgets.QMenu(self)  # Add Camera: the cameras with an image plane
+        self.cameras_menu.aboutToShow.connect(lambda m=self.cameras_menu: self._fill_cameras_menu(m))
         glyphs = _glyphs(lists["bar"], bind, self)
         glyphs["photo.import"].setObjectName("referenceImport")
+        glyphs["photo.addView"].setObjectName("referenceAddView")
         body = QtWidgets.QWidget()
         column = QtWidgets.QVBoxLayout(body)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(theme.px(6))
-        self.section = widgets.Section("Photos", body, expanded=True, count=True, actions=(glyphs["photo.import"],))
+        self.section = widgets.Section("Photos", body, expanded=True, count=True,
+                                       actions=(glyphs["photo.addView"], glyphs["photo.import"]))
         self.section.setObjectName("photosSection")
         self.section.setToolTip(lists["about"].replace("<b>", "").replace("</b>", ""))
         layout.addWidget(self.section)
 
         self.list = QtWidgets.QListWidget()
         self.list.setObjectName("referenceList")
-        self.list.setIconSize(QtCore.QSize(theme.px(32), theme.px(24)))
-        self.list.setToolTip("The reference photos. Double-click: look through it; right-click: more")
+        self.list.setToolTip("The reference photos. Click: look through it (again: back to the camera before). "
+                             "The settings, in front / behind, the eye, the lock and the menu: on the row")
         self.list.currentItemChanged.connect(lambda *_: self.picked())
-        self.list.itemDoubleClicked.connect(lambda _: self.look_through())
+        self.list.itemClicked.connect(self.row_clicked)
         self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(
             lambda pos: self.list_menu(self.list.viewport().mapToGlobal(pos)))
@@ -2127,43 +2367,18 @@ class ReferenceTab(_GroomTab):
         self.empty.setVisible(False)
         column.addWidget(self.empty)
 
-        # The picked photo: rename, show or hide, delete; how it shows (looking through, locked,
-        # its side, opacity), its lens and Align Photo....
-        self.visible = QtWidgets.QToolButton()  # the eye, as the groom's in the header
-        self.visible.setObjectName("referenceVisible")
-        self.visible.setCheckable(True)
-        self.visible.setAutoRaise(True)
-        self.visible.setProperty("role", "glyph")
-        self.visible.setFixedSize(theme.px(24), theme.px(24))
-        self.visible.setIconSize(QtCore.QSize(theme.px(16), theme.px(16)))
-        self.visible.setToolTip("Show or hide the photo (the camera stays)")
-        self.visible.toggled.connect(self.set_visible)
-        self._eye(True)
-        self.box = widgets.ItemBox([glyphs["photo.rename"], self.visible, glyphs["photo.remove"]])
-        self.box.setObjectName("photoBox")
-        column.addWidget(self.box)
-        self.look = widgets.chip("Look through", "Show the photo's camera in the viewport (again: back to the camera "
-                                 "it showed before)", False, "referenceLook")
-        self.look.clicked.connect(lambda on: self.look_through() if on else self.look_back())
-        self.lock = widgets.chip("Lock", "Lock the camera where it is: its position, rotation, focal length and the "
-                                 "photo on it (tumbling through it does nothing)", False, "referenceLock")
-        self.lock.toggled.connect(self.set_locked)
-        self.side_buttons = {}
-        sides = []
-        for key, label, tip in [(c["value"], c["label"], c["tip"]) for c in definitions.choices("photoDepth")]:
-            b = widgets.chip(label, tip, False, "referenceDepth_" + key)
-            b.setAutoExclusive(True)
-            b.clicked.connect(lambda _=False, k=key: self.set_depth(k))
-            sides.append(b)
-            self.side_buttons[key] = b
-        self.box.add(widgets.chip_row([self.look, self.lock] + sides))
+        # A photo's settings (opacity, the lens, where the alignment stands) in a popup under the
+        # row's sliders icon; in front / behind, the eye and the lock are the row's icons; Rename,
+        # Align Photo, Select Camera and Remove its menu.
+        self.settings_popup = widgets.PopupPanel(self, width=250)
+        self.settings_popup.setObjectName("photoSettingsPopup")
         self.opacity = widgets.SoftSlider(reference.DEFAULT_OPACITY, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None,
                                           label="Opacity")
         self.opacity.setObjectName("referenceOpacity")
         self.opacity.setToolTip("How opaque the photo is: see the mesh through it")
         self.opacity.committed.connect(self.set_opacity)
         self.opacity.dragged.connect(self.set_opacity)
-        self.box.add(self.opacity)  # the name inside the field
+        self.settings_popup.add(self.opacity)  # the name inside the field
         self.focal = widgets.SoftSlider(reference.DEFAULT_FOCAL, reference.FOCAL_RANGE[0], reference.FOCAL_RANGE[1],
                                         minimum=2.5, maximum=3500.0, key=None, label="Focal length", suffix="mm")
         self.focal.setObjectName("referenceFocal")
@@ -2174,50 +2389,15 @@ class ReferenceTab(_GroomTab):
         self.focal.dragged.connect(self.set_focal)
         self.focal.menu_hook = lambda menu_: menu_.addAction(
             "Reset Focal Length (%g mm)" % reference.DEFAULT_FOCAL, self.reset_focal)
-        self.box.add(self.focal)
-        # Align Photo...: the Photos window (the photo and the mesh side by side), and where it stands.
-        item = definitions.resolve(lists["alignBar"], None)[0]
-        align = QtWidgets.QPushButton(item["label"])
-        align.setObjectName("referenceAlign")
-        align.setToolTip(item["tip"])
-        align.clicked.connect(lambda _=False, s=bind(item): s())
-        self.box.add(align)
-        self.align_about = widgets.small_label("", wrap=True)
+        self.settings_popup.add(self.focal)
+        self.align_about = widgets.small_label("", wrap=True)  # where the alignment stands
         self.align_about.setObjectName("referenceAlignAbout")
-        self.box.add(self.align_about)
-        self.box_glyphs = [glyphs["photo.rename"], glyphs["photo.remove"]]
-        self._controls = (self.look, self.lock, self.opacity, self.focal, self.visible, align) + \
-            tuple(self.side_buttons.values()) + tuple(self.box_glyphs)
-        self._build_generate(layout)
+        self.settings_popup.add(self.align_about)
+        self._controls = (self.opacity, self.focal)
         self.refresh()
 
-    # -- Guides from Photos (experimental) -------------------------------------------
-
-    def _build_generate(self, layout):
-        """The Guides from Photos section (folded): the Reference window does the work (the photo
-        and the mesh side by side: landmarks, guide lines, the mask, Generate, the measured look);
-        here, a way in and where things stand."""
-        body = QtWidgets.QWidget()
-        column = QtWidgets.QVBoxLayout(body)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(theme.px(6))
-        self.generate_section = widgets.Section("Guides from photos", body, expanded=False)
-        self.generate_section.setObjectName("referenceGuidesHeading")
-        self.generate_section.setToolTip("Experimental")
-        layout.addWidget(self.generate_section)
-        self.gen_hint = widgets.small_label("", wrap=True)
-        self.gen_hint.setObjectName("referenceGuidesHint")
-        column.addWidget(self.gen_hint)
-        self.cameras_menu = QtWidgets.QMenu(self)
-        self.cameras_menu.aboutToShow.connect(lambda m=self.cameras_menu: self._fill_cameras_menu(m))
-        bar, made = _bar(definitions.get("lists/photos/guidesBar"), definitions.binder(self.ACTIONS, self), self)
-        made[0].setObjectName("referenceOpenWindow")
-        made[1].setObjectName("referenceAddView")
-        column.addLayout(bar)
-
     def open_window(self, stage="align"):
-        """The Photos window on this groom (on the picked photo): its Align stage (line the photo up)
-        or its Guides stage (Guides from Photos)."""
+        """The Photos window on this groom (on the picked photo): Align Photo (line the photo up)."""
         from groomlab.ui import reference_window
         if not self.need():
             return None
@@ -2244,29 +2424,8 @@ class ReferenceTab(_GroomTab):
         if made:
             self.refresh()
             self.select(made)
-            self.status("%s is a reference now: line it up in Guides from Photos." % made.split("|")[-1])
+            self.status("%s is a reference now: Align Photo lines it up." % made.split("|")[-1])
         return made
-
-    def show_generate(self):
-        """Where Guides from Photos stands: the photos, their landmarks and guide lines, the next step."""
-        from groomlab import from_reference
-        rows = []
-        try:
-            for name in self.ref.list_references():
-                pairs = len(self.ref.complete_pairs(name))
-                strokes = len(from_reference.reference_hints(self.groom, name)) if self.groom else 0
-                rows.append((name, pairs, strokes))
-        except (RuntimeError, ValueError):
-            pass
-        if not rows:
-            step = "Open Guides from Photos, import a photo of the groom and line it up with a few landmarks."
-        else:
-            step = "; ".join("%s: %d landmark pair%s, %d guide line%s" % (
-                name.split("|")[-1], pairs, "" if pairs == 1 else "s", strokes, "" if strokes == 1 else "s")
-                for name, pairs, strokes in rows) + ". Generate in Guides from Photos."
-        if self.groom and from_reference.measured_look(self.groom):
-            step += " A measured look is ready to apply there."
-        self.gen_hint.setText(step)
 
     # -- The list ------------------------------------------------------------------
 
@@ -2309,7 +2468,8 @@ class ReferenceTab(_GroomTab):
             rows = []
             for name in names:
                 info = self.ref.reference_info(name)
-                rows.append((name, info["image"], info["width"], info["height"], info["locked"]))
+                rows.append((name, info["image"], info["width"], info["height"], info["locked"],
+                             info["visible"], info["depth"]))
         except (RuntimeError, ValueError):
             rows = []
         if rows != self._rows:
@@ -2317,23 +2477,80 @@ class ReferenceTab(_GroomTab):
             current = self.current()
             self.list.blockSignals(True)
             self.list.clear()
-            for name, path, width, height, locked in rows:
-                item = QtWidgets.QListWidgetItem("%s   %d x %d%s" % (name.split("|")[-1], width, height,
-                                                                   "  ·  locked" if locked else ""))
-                item.setSizeHint(QtCore.QSize(0, theme.px(28)))
+            try:
+                viewing = self.ref.current_reference()
+            except (RuntimeError, ValueError):
+                viewing = None
+            for name, path, width, height, locked, visible, depth in rows:
+                item = QtWidgets.QListWidgetItem("")
+                item.setSizeHint(QtCore.QSize(0, theme.px(24)))
                 item.setData(QtCore.Qt.UserRole, name)
-                item.setIcon(self._thumbnail(path))
-                item.setToolTip(path)
+                item.setToolTip("%s\n%d x %d" % (path, width, height))
                 self.list.addItem(item)
-            if not (current and self.select(current)) and self.list.count():
-                self.list.setCurrentRow(0)
+                self.list.setItemWidget(item, self._row(name, locked, visible, depth,
+                                                        bool(viewing) and self.ref._same_node(viewing, name)))
+            # The picked photo stays picked; none picked (a photo left with a click again): the one
+            # looked through, if any, else none (no first row picked for you).
+            if not (current and self.select(current)) and viewing:
+                self.select(viewing)
             self.list.blockSignals(False)
             self._shown = None
             self.section.set_count(len(rows))
             fit_rows(self.list)
             self.show_empty(self.list, len(rows))
         self.show_controls()
-        self.show_generate()
+
+    def _row(self, name, locked, visible, depth, viewing):
+        """A photo's row: the camera mark while looking through it, its name, then (ROW_ORDER) the
+        settings, in front / behind, the eye, the lock and the menu."""
+        short = name.split("|")[-1]
+        pick = lambda: self.select(name)  # noqa: E731
+        settings = widgets.popup_button("sliders", "Opacity and focal length", self.settings_popup, before=pick)
+        settings.setObjectName("photoSettings_" + short)
+        side = widgets.row_glyph("behind" if depth == "behind" else "front",
+                                 "Behind the mesh: click to draw it in front" if depth == "behind" else
+                                 "In front of the mesh: click to draw it behind",
+                                 lambda: (pick(), self.set_depth("front" if depth == "behind" else "behind"),
+                                          self.refresh()))
+        eye = widgets.row_glyph("eye" if visible else "eyeOff", "Show or hide the photo (the camera stays)",
+                                lambda: (pick(), self.set_visible(not visible), self.refresh()))
+        lock = widgets.row_glyph("lock" if locked else "lockOpen",
+                                 "Locked: the camera can't move. Click to unlock" if locked else
+                                 "Lock the camera: its position, rotation, focal length and the photo on it",
+                                 lambda: (pick(), self.set_locked(not locked)), on=locked)
+        lock.setObjectName("photoLock_" + short)
+        more = widgets.menu_button("Rename, Align Photo, Select Camera, Remove", self.fill_row_menu, before=pick)
+        more.setObjectName("photoMenu_" + short)
+        row = widgets.ListRow(("\u25c9 " if viewing else "") + short, "", (settings, side, eye, lock, more))
+        return row
+
+    def fill_row_menu(self, menu_):
+        widgets.fill_menu(menu_, definitions.get("lists/photos/context"), definitions.binder(self.ACTIONS, self),
+                          {"photo"} if self.current() else ())
+
+    def row_clicked(self, item):
+        """A click on a photo: look through its camera; on the one looked through: back to the camera
+        before, the photo unpicked."""
+        name = item.data(QtCore.Qt.UserRole) if item else None
+        if not name:
+            return
+        try:
+            viewing = self.ref.current_reference()
+        except (RuntimeError, ValueError):
+            viewing = None
+        if viewing and self.ref._same_node(viewing, name):
+            self.look_back()
+            self.list.blockSignals(True)
+            self.list.clearSelection()
+            self.list.setCurrentRow(-1)
+            self.list.blockSignals(False)
+            self._rows = None
+            self.refresh()
+            return
+        self.select(name)
+        self.look_through()
+        self._rows = None
+        self.refresh()
 
     def picked(self):
         """Another reference picked: its controls. While the viewport looks through a reference, it
@@ -2352,7 +2569,6 @@ class ReferenceTab(_GroomTab):
         camera = self.current()
         for widget in self._controls:
             widget.setEnabled(camera is not None)
-        self.box.set_title(camera.split("|")[-1] if camera else "")
         if not camera:
             self.align_about.setText("Import a photo to start.")
             self._shown = None
@@ -2363,14 +2579,8 @@ class ReferenceTab(_GroomTab):
         if not self.focal.busy() and abs(self.focal.value() - info["focal"]) > 1e-4:
             self.focal.setValue(info["focal"])
         if state != (self._shown or (None,))[0:5]:
-            for widget, value in ((self.lock, info["locked"]), (self.visible, info["visible"])):
-                widget.blockSignals(True)
-                widget.setChecked(value)
-                widget.blockSignals(False)
-            self._eye(info["visible"])
             if not self.opacity.busy():
                 self.opacity.setValue(info["opacity"])
-            self.side_buttons[info["depth"]].setChecked(True)
         self.show_alignment(info)
         self._shown = state
         self.follow_view(camera)
@@ -2407,9 +2617,15 @@ class ReferenceTab(_GroomTab):
         except (RuntimeError, ValueError):
             names, viewing = (), None
         state = (names, viewing, cmds.currentCtx(), self.current())
-        if full or state != getattr(self, "_poll_state", None):
+        old = getattr(self, "_poll_state", None)
+        if full or state != old:
             self._poll_state = state
+            looked = old is None or old[1] != viewing  # (a camera looked through, or left, elsewhere)
+            if looked:
+                self._rows = None  # (the rows again: the looked-through mark moves)
             self.refresh()
+            if looked and viewing:
+                self.follow_view()  # the list picks the photo looked through
 
     def follow_view(self, camera=None):
         """The viewport looks through a reference: pick it here; Look Through shows whether it is on."""
@@ -2419,14 +2635,6 @@ class ReferenceTab(_GroomTab):
             viewing = None
         if viewing and viewing != self.current() and self.select(viewing):
             return  # picked(): the controls follow
-        camera = camera or self.current()
-        on = bool(viewing) and viewing == camera
-        if self.look.isChecked() != on:
-            self.look.blockSignals(True)
-            self.look.setChecked(on)
-            self.look.blockSignals(False)
-        self.look.setToolTip("Looking through the photo: click to go back to the camera before" if self.look.isChecked()
-                             else "Show the photo's camera in the viewport (again: back to the camera it showed before)")
 
     # -- Actions ----------------------------------------------------------------------
 
@@ -2491,14 +2699,10 @@ class ReferenceTab(_GroomTab):
         camera = self._need()
         if camera:
             self.run(self.ref.lock_reference, camera, on)
+            self._rows = None
             self.refresh()
 
-    def _eye(self, on):
-        self.visible.glyph = "eye" if on else "eyeOff"
-        self.visible.setIcon(widgets.glyph(self.visible.glyph))
-
     def set_visible(self, on):
-        self._eye(on)
         camera = self._need()
         if camera:
             self.run(self.ref.set_reference_visible, camera, on)

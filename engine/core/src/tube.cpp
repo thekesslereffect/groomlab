@@ -1020,8 +1020,10 @@ std::vector<float> rollToMatch(const std::vector<Vec3f>& points, const Vec3f& fr
     return out;
 }
 
+bool isOwnedTubeShape(const std::string& name) { return name.rfind(kOwnedTubeShapePrefix, 0) == 0; }
+
 bool isRootTube(const TubeProfile& tube, int depth) {
-    return depth == 0 && tube.custom && tube.custom->name.rfind(kOwnedTubeShapePrefix, 0) == 0;
+    return depth == 0 && tube.custom && isOwnedTubeShape(tube.custom->name);
 }
 
 SectionPoint TubeSpine::rootCoords(const Vec3f& p, float* along) const {

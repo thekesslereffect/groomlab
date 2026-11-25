@@ -25,6 +25,7 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QKeyEvent>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPainter>
@@ -43,6 +44,7 @@
 #include "groom_tools.h"
 #include "cards_panel.h"
 #include "export_panel.h"
+#include "find_command.h"
 #include "graph_presets.h"
 #include "maps_panel.h"
 #include "tube_panel.h"
@@ -341,6 +343,88 @@ bool MainWindow::setUiMenu(const QString& name) {
         }
         return !uiMenus_.empty();
     }
+    if (n == QStringLiteral("guidedisplay") || n == QStringLiteral("find") || n == QStringLiteral("mapinfo") ||
+        n == QStringLiteral("photosettings") || n == QStringLiteral("segments") || n == QStringLiteral("weight") ||
+        n == QStringLiteral("groupmenu")) {
+        // The Simple layout's popups, shown for real and grabbed: the guides' display (the
+        // header's arrow), Find Command (typed "export"), a map row's info, a photo's settings, a
+        // guide group's segments or menu, a corrective's weight.
+        if (!document_ && n != QStringLiteral("find")) {
+            report(tr("No groom open: nothing to show"));
+            return false;
+        }
+        setUiMode(QStringLiteral("groom"));
+        shell_->groomToolsDock()->show();
+        uiMenus_.clear();
+        auto keep = [this](QWidget* popup) {
+            QApplication::processEvents();
+            if (popup && popup->isVisible()) uiMenus_.emplace_back(popup->grab(), mapFromGlobal(popup->pos()));
+        };
+        auto clickNamed = [this](const QString& prefix) {
+            // (The rows a list made before are deleted later: gone first, so the icon clicked is
+            // one shown now.)
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            for (QToolButton* b : groomTools_->findChildren<QToolButton*>()) {
+                if (b->objectName().startsWith(prefix) && b->isVisible()) {
+                    b->click();
+                    return b;
+                }
+            }
+            return static_cast<QToolButton*>(nullptr);
+        };
+        if (n == QStringLiteral("find")) {
+            QApplication::processEvents();  // (the window shown first: a window activated later closes a popup)
+            FindCommand* find = openFindCommand();
+            find->box()->setText(QStringLiteral("export"));
+            keep(find);
+        } else if (n == QStringLiteral("guidedisplay")) {
+            QApplication::processEvents();
+            groomTools_->guidesDisplayButton()->click();
+            keep(groomTools_->guideDisplayPopup());
+        } else if (n == QStringLiteral("mapinfo")) {
+            groomTools_->showTab(QStringLiteral("paint"));
+            QApplication::processEvents();
+            if (!clickNamed(QStringLiteral("mapInfo_"))) return false;
+            keep(maps_->infoPopup());
+        } else if (n == QStringLiteral("photosettings")) {
+            groomTools_->showTab(QStringLiteral("photos"));
+            QApplication::processEvents();
+            if (!clickNamed(QStringLiteral("photoSettings_"))) return false;
+            keep(photos_->settingsPopup());
+        } else if (n == QStringLiteral("segments")) {
+            groomTools_->showTab(QStringLiteral("tools"));
+            QApplication::processEvents();
+            if (!clickNamed(QStringLiteral("groupSegments_"))) return false;
+            keep(guidesPanel_->segmentsPopup());
+        } else if (n == QStringLiteral("weight")) {
+            groomTools_->showTab(QStringLiteral("tools"));
+            if (correctives_->layerNames().empty()) correctives_->addLayer(true);  // (one to show the weight of)
+            QApplication::processEvents();
+            if (!clickNamed(QStringLiteral("correctiveWeight_"))) return false;
+            keep(correctives_->weightPopup());
+        } else {
+            // A guide group row's menu (its ⋯), Generate Children open.
+            groomTools_->showTab(QStringLiteral("tools"));
+            QApplication::processEvents();
+            QToolButton* more = nullptr;
+            for (QToolButton* b : groomTools_->findChildren<QToolButton*>()) {
+                if (b->objectName().startsWith(QStringLiteral("groupMenu_")) && b->isVisible() && !more) more = b;
+            }
+            if (!more || !more->menu()) return false;
+            QMenu* menu = more->menu();
+            menu->popup(more->mapToGlobal(QPoint(more->width() - 200, more->height())));
+            keep(menu);
+            for (QAction* a : menu->actions()) {
+                if (a->menu() && a->menu()->objectName() == QStringLiteral("menu_generateChildren")) {
+                    menu->setActiveAction(a);
+                    QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+                    QApplication::sendEvent(menu, &right);
+                    keep(a->menu());
+                }
+            }
+        }
+        return !uiMenus_.empty();
+    }
     if (n == QStringLiteral("groups") || n == QStringLiteral("maps") || n == QStringLiteral("correctives") ||
         n == QStringLiteral("editguides") || n == QStringLiteral("convert")) {
         // A Groom Tools list's right-click menu on its current row (lists.json's context), Edit
@@ -379,10 +463,26 @@ bool MainWindow::setUiMenu(const QString& name) {
             menu = maps_->contextMenu(pos);
             at = list->viewport()->mapToGlobal(pos);
         } else if (n == QStringLiteral("convert")) {
-            QToolButton* convert = maps_->bar()->button("map.convert");
-            if (!convert) return false;
-            menu = convert->menu();
-            at = convert->mapToGlobal(QPoint(0, convert->height()));
+            // The picked map's row menu, its Convert to open.
+            QListWidget* list = maps_->list();
+            QListWidgetItem* item = list->currentItem() ? list->currentItem() : list->item(0);
+            const QPoint pos = item ? list->visualItemRect(item).center() : QPoint(20, 20);
+            menu = maps_->contextMenu(pos);
+            at = list->viewport()->mapToGlobal(pos);
+            if (menu) {
+                menu->popup(at);
+                QApplication::processEvents();
+                if (menu->isVisible()) uiMenus_.emplace_back(menu->grab(), mapFromGlobal(menu->pos()));
+                for (QAction* a : menu->actions()) {
+                    if (!a->menu() || a->menu()->objectName() != QStringLiteral("menu_map.convert")) continue;
+                    menu->setActiveAction(a);
+                    QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+                    QApplication::sendEvent(menu, &right);
+                    QApplication::processEvents();
+                    if (a->menu()->isVisible()) uiMenus_.emplace_back(a->menu()->grab(), mapFromGlobal(a->menu()->pos()));
+                }
+                return !uiMenus_.empty();
+            }
         } else {
             QTreeWidget* tree = correctives_->tree();
             QTreeWidgetItem* layer = nullptr;
@@ -662,9 +762,9 @@ bool MainWindow::foldUiDocks(const QString& which) {
         report(tr("No dock '%1' to fold (left, right or both)").arg(which));
         return false;
     }
-    for (IconRail* rail : {left ? shell_->leftRail() : nullptr, right ? shell_->rightRail() : nullptr}) {
-        if (rail && !rail->collapsed() && rail->button(rail->current())) rail->button(rail->current())->click();
-    }
+    if (left && !shell_->folded(true)) shell_->toggleFold(true);  // (the Groom Tools: no rail)
+    IconRail* rail = right ? shell_->rightRail() : nullptr;
+    if (rail && !rail->collapsed() && rail->button(rail->current())) rail->button(rail->current())->click();
     return true;
 }
 

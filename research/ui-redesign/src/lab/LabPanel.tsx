@@ -6,11 +6,11 @@ import { cn } from "@/lib/utils";
 import { defaults, dimensions, directions, type DimId } from "./options";
 import { useLab } from "./store";
 
-export type Page = "workspace" | "components" | "export";
+export type Page = "simple" | "workspace" | "components" | "export";
 
 export function LabPanel({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
   const lab = useLab();
-  const [open, setOpen] = useState(() => !/(^|[#&])lab=0/.test(window.location.hash));
+  const [open, setOpen] = useState(() => /(^|[#&])lab=1/.test(window.location.hash) || (page !== "simple" && !/(^|[#&])lab=0/.test(window.location.hash)));
   const [name, setName] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -43,9 +43,9 @@ export function LabPanel({ page, setPage }: { page: Page; setPage: (p: Page) => 
       <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
         <span className="whitespace-nowrap font-semibold text-white">Design lab</span>
         <div className="ml-auto flex rounded-md bg-zinc-900 p-0.5">
-          {(["workspace", "components", "export"] as Page[]).map((p) => (
+          {(["simple", "workspace", "components", "export"] as Page[]).map((p) => (
             <button key={p} onClick={() => setPage(p)} className={cn("whitespace-nowrap rounded px-2 py-0.5 capitalize", page === p ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white")}>
-              {p === "export" ? "Qt" : p === "components" ? "Parts" : "App"}
+              {p === "export" ? "Qt" : p === "components" ? "Parts" : p === "simple" ? "Simple" : "Today"}
             </button>
           ))}
         </div>

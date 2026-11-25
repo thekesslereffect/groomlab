@@ -246,10 +246,10 @@ def main():
             menu.cmds = real
         tree = stack[0]
         top = [label for label, _, _ in tree]
-        _expect(top == ["Groom Tools", "Graph Editor", "Create Groom from Selection", "Card Atlas...", "Add Sample Mesh",
-                        "Guides from Photos (experimental)...", "Groom Files", "Import", "Add", "Simulate", "Display",
-                        "Review", "Studio", "Render", "Export", "Utilities", "Theme", "Install GroomLab Hotkeys",
-                        "Radial Menu Settings...", "Help"],
+        # The Simple layout's GroomLab menu (research/ui-redesign/SIMPLE.md): the windows and Find
+        # Command, starting a groom, then one submenu per job.
+        _expect(top == ["Groom Tools", "Graph Editor", "Find Command...", "Create Groom from Selection", "Start From",
+                        "Add", "Groom File", "Export", "Render", "Simulate", "Utilities", "Display", "Settings", "Help"],
                 "top: %r" % top)
         sub = {label: children for label, children, _ in tree}
         _expect([l for l, _, _ in sub["Help"]] == ["Docs", "Keyboard Shortcuts", "Check for Updates...",
@@ -257,16 +257,21 @@ def main():
         _expect([l for l, _, _ in sub["Simulate"]][-1] == "Legacy", "nHair under Simulate > Legacy")
         _expect("Simulation" not in [l for l, _, _ in sub["Add"]], "no second Add Simulate")
         render = [l for l, _, _ in sub["Render"]]
-        _expect(render == ["Render from Groom File...", "Render as Curves", "Maya Hardware 2.0 (no renderer needed)...",
-                           "RenderMan (prman)...", "V-Ray Standalone...", "Refresh Redshift Grooms"],
-                "Render: %r" % render)
+        _expect(render[:6] == ["Render from Groom File...", "Render as Curves", "Maya Hardware 2.0 (no renderer needed)...",
+                               "RenderMan (prman)...", "V-Ray Standalone...", "Refresh Redshift Grooms"]
+                and render[-2:] == ["Studio", "Review"], "Render: %r" % render)
         _expect(not {"Groom File...", "Bake Scale Maps", "Render as Curves"} & {l for l, _, _ in sub["Export"]}, "Export")
-        _expect("Save Groom File As..." in [l for l, _, _ in sub["Groom Files"]], "one groom-file block")
-        review = {l: kw for l, _, kw in sub["Review"]}
+        _expect("Save Groom File As..." in [l for l, _, _ in sub["Groom File"]], "one groom-file block")
+        render_sub = {l: children for l, children, _ in sub["Render"]}
+        review = {l: kw for l, _, kw in render_sub["Review"]}
         _expect("checkBox" in review["Density Heatmap"] and "checkBox" in review["Strand Count HUD"], "checkable")
         _expect("Braid on Curves..." in [l for l, _, _ in sub["Add"]], "a dialog item ends in ...")
-        studio_items = [l for l, _, _ in sub["Studio"]]
+        studio_items = [l for l, _, _ in render_sub["Studio"]]
         _expect(studio_items[0] == "Portrait" and studio_items[-1] == "Remove Studio", "Studio: %r" % studio_items)
+        start = [l for l, _, _ in sub["Start From"]]
+        _expect(start[:4] == ["Nika (head)", "Manny (head)", "Wolf", "Buddy (rig)"] and "Guides from Photos" not in
+                " ".join(start), "Start From: the samples, then the imports: %r" % start)
+        _expect("Card Atlas..." in [l for l, _, _ in sub["Utilities"]], "Card Atlas under Utilities")
     check.run("GroomLab's menu: one place for each thing, Help holds the rest", menu_layout)
 
     # The UI definitions every host shares (engine/ui): every action id a Maya menu, bar or list shows
@@ -311,10 +316,11 @@ def main():
                 ("PaintTab.ACTIONS", tool_tabs.PaintTab.ACTIONS, tools.paint_tab,
                  ids("lists/maps/bar", "lists/maps/context")),
                 ("CorrectivesBox.ACTIONS", tool_tabs.CorrectivesBox.ACTIONS, tools.correctives,
-                 ids("lists/correctives/bar", "lists/correctives/context", "lists/correctives/nodeContext")),
+                 ids("lists/correctives/bar", "lists/correctives/context", "lists/correctives/nodeContext",
+                     "lists/correctives/row")),
                 ("ReferenceTab.ACTIONS", tool_tabs.ReferenceTab.ACTIONS, tools.reference_tab,
                  ids("lists/photos/bar", "lists/photos/context", "lists/photos/pairsBar", "lists/photos/pairsContext",
-                     "lists/photos/guidesBar")),
+                     "lists/photos/click")),
                 ("NodeItem.ACTIONS", graph_editor.NodeItem.ACTIONS, graph_editor.NodeItem,
                  ids("graph/nodeMenu", exposeParams="node.expose", innerParams="compound.showInner")),
                 ("BackdropItem.ACTIONS", graph_editor.BackdropItem.ACTIONS, graph_editor.BackdropItem,
@@ -449,7 +455,8 @@ def main():
                     "Unfreeze All: a labeled tile, a button")
             _expect(unfreeze.text() == "Unfreeze All" and unfreeze.toolButtonStyle() == QtCore.Qt.ToolButtonTextUnderIcon,
                     "Unfreeze All's name under its icon")
-            # Two-tone artwork at rest, the accent's ink when chosen in this theme.
+            # The two-tone artwork in its group's colors at rest; chosen, the accent's ink (a theme whose
+            # toolOn is "category", Playful: the artwork stays, the tile takes its group's wash).
             comb = tools.buttons["comb"].icon()
 
             def ink(icon, state):
@@ -458,30 +465,23 @@ def main():
                             if QtGui.QColor.fromRgba(image.pixel(x, y)).alpha() == 255)
             normal = comb.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.Off).toImage()
             expected = QtGui.QIcon(widgets._pixmap(widgets.icon_svg("comb", t), 48))
-            _expect(normal == expected.pixmap(32, 32).toImage()
-                    and ink(comb, QtGui.QIcon.On) == t.token("accentInk").upper(),
-                    "a tile preserves its themed artwork, chosen the accent's ink")
-            # The pages: an icon rail along the window's top (components.iconRail; a side column
-            # would widen the docked panel), no tab row.
+            chosen = (ink(expected, QtGui.QIcon.Off) if t.get("ui.toolOn") == "category"
+                      else t.token("accentInk").upper())
+            _expect(normal == expected.pixmap(32, 32).toImage() and ink(comb, QtGui.QIcon.On) == chosen,
+                    "a tile keeps its group-colored artwork; chosen: %s" % chosen)
+            # The header (the groom and its buttons) and the pages as labeled tabs, pinned on top,
+            # outside the scroll; no tab row widget.
             rail = tools.tabs.rail
-            _expect(rail.height() == theme.component_px("iconRail", "width", 44) and rail.y() == 0 and rail.x() == 0
-                    and rail.width() == tools.width() and not tools.scroll.isAncestorOf(rail),
-                    "the page rail along the top, %d px" % rail.height())
-            _expect([b.accessibleName() for b in rail.buttons] == [t_["label"] for t_ in definitions.tabs()]
-                    and all(b.toolTip().startswith(b.accessibleName()) for b in rail.buttons), "one icon per page, named")
+            _expect(isinstance(rail, widgets.TextRail) and not tools.scroll.isAncestorOf(rail)
+                    and not tools.scroll.isAncestorOf(tools.header)
+                    and tools.header.y() < rail.y(), "the header, then the pages, pinned on top")
+            _expect([b.text() for b in rail.buttons] == [t_["label"] for t_ in definitions.tabs()], "one tab per page, named")
             _expect(not tools.findChildren(QtWidgets.QTabBar), "no tab row")
-            # The groom's eyes, the Graph Editor and More on the rail's right end (issue 73: they
-            # stay in view however far the panel scrolls), the groom's list in the column.
-            rights = [b.geometry().right() for b in tools.header_buttons]
-            _expect(all(rail.isAncestorOf(b) for b in tools.header_buttons)
-                    and min(b.x() for b in tools.header_buttons) > max(b.geometry().right() for b in rail.buttons)
-                    and max(rights) < rail.width() and tools.scroll.isAncestorOf(tools.grooms),
-                    "the header's buttons on the rail, right of the pages")
+            _expect(all(tools.header.isAncestorOf(b) for b in tools.header_buttons)
+                    and tools.header.isAncestorOf(tools.grooms), "the groom's buttons beside its picker")
             sheet = tools.styleSheet()
             _expect("QToolButton[role=\"tool\"]:checked { background: %s; border-color: %s;"
                     % (t.token("accentSoft"), t.token("accentEdge")) in sheet, "checked tile: the soft accent")
-            _expect("QToolButton[role=\"railButton\"]:checked { background: %s; }" % t.token("accentSoft") in sheet,
-                    "the open page's icon on the soft accent")
             _expect("QWidget[role=\"tray\"] { background: %s;" % t.token("card") in sheet, "sections on cards")
             _expect(tools.settings.property("role") == "toolCard" and tools.settings.layout().contentsMargins().left() > 0,
                     "the tool's settings on a card")
@@ -560,97 +560,60 @@ def main():
             return out
 
         try:
+            # The Simple layout (research/ui-redesign/SIMPLE.md): the groom and its buttons, then the
+            # labeled pages, pinned; the brushes in unnamed trays, the tool's card, the lists, one scroll.
             content = tools.scroll.widget()
-            _expect(tools.top_part.isAncestorOf(tools.tool_palette) and tools.top_part.isAncestorOf(tools.grooms)
-                    and not tools.scroll.isAncestorOf(tools.tabs.rail), "the top: the header, the tool grid (the rail over it)")
-            _expect(tools.scroll.isAncestorOf(tools.top_part), "the whole panel scrolls, the top too")
-            _expect(content.isAncestorOf(tools.settings) and content.isAncestorOf(tools.guides_section),
-                    "the card and the list scroll")
+            _expect(not tools.scroll.isAncestorOf(tools.header) and tools.header.isAncestorOf(tools.grooms)
+                    and not tools.scroll.isAncestorOf(tools.tabs.rail), "the header and the pages: pinned on top")
+            _expect(isinstance(tools.tabs.rail, widgets.TextRail), "the pages: labeled tabs")
+            _expect(tools.scroll.isAncestorOf(tools.top_part) and tools.top_part.isAncestorOf(tools.tool_palette),
+                    "the brushes scroll with the panel")
+            _expect(content.isAncestorOf(tools.settings) and content.isAncestorOf(tools.guides_section)
+                    and content.isAncestorOf(tools.correctives), "the card and the lists scroll")
+            _expect(not [lab for lab, _grid in tools.tool_grids if lab.isVisibleTo(tools)],
+                    "the brush trays have no names")
+            _expect(all(tray.toolTip() for tray in tools.tool_trays), "each tray's name: its tooltip")
             _expect(tools.guides_section.mapTo(content, tools.guides_section.rect().topLeft()).y()
                     > tools.hint.mapTo(content, tools.hint.rect().topLeft()).y(),
                     "the card (no tool: its hint) right under the grid, the list after it")
+            _expect(tools.correctives.mapTo(content, tools.correctives.rect().topLeft()).y()
+                    > tools.guides_section.mapTo(content, tools.guides_section.rect().topLeft()).y(),
+                    "Correctives: its own section under the guide groups")
             _expect(not tools.level.isVisibleTo(tools), "no Group combo: the list picks the group")
             _expect(tools.guides_section.row.isAncestorOf(tools.isolate) and tools.isolate.isCheckable(),
-                    "Isolate: an eye in the Guide groups header")
-            _expect(tools.guides_section.expanded(), "Guide groups open")
-            expected = [
-                (None, []),
-                ("comb", ["Brush", "Applies to"]),  # Stretch: a Brush chip
-                ("place", ["New guides", "Tube", "Applies to"]),
-                ("draw", ["New guides", "Tube", "Applies to"]),
-                ("shape", ["Brush", "Visibility", "Profile", "Tube roots", "Tube hierarchy", "Selected guides"]),
-                ("select", ["Selection", "Applies to"]),
-                ("lengths", ["Keys", "Applies to"]),
-                ("erase", ["Brush", "Erases", "Applies to"]),
-                ("flow", ["Brush", "Flow", "Applies to"]),  # Mirror (issue 105)
-                ("part", ["Parts", "Applies to"]),
-                ("freeze", ["Brush", "Applies to"]),
-            ]
-            for tool, want in expected:
+                    "Isolate: in the Guide groups header")
+            for tool in (None, "comb", "place", "draw", "select", "lengths", "erase", "flow", "part", "freeze"):
                 tools.tool = tool
                 tools.show_tool_settings()
                 settle()
-                got = shown_blocks()
-                _expect(got == want, "%s's card: %r, not %r" % (tool, got, want))
                 if tool is None:
                     _expect(tools.hint.text() == palette.NO_TOOL and tools.hint.isVisibleTo(tools),
                             "no tool: one line on how to start")
                     continue
                 _expect(not tools.hint.isVisibleTo(tools), "%s: the card is only its settings" % tool)
+                _expect(tools.card_title.text() == palette.NAMES[tool] and tools.card_icon.isVisibleTo(tools),
+                        "%s: the card's header has its icon and name" % tool)
+                _expect(" on " in tools.card_editing.text(), "%s: the header says what it edits" % tool)
+                _expect(not tools.applies_block.isVisibleTo(tools), "%s: Applies to went to More" % tool)
+                _expect(tools.more_section.isVisibleTo(tools) and not tools.more_section.expanded(),
+                        "%s: More settings, folded" % tool)
+                _expect(tools.toggles.isVisibleTo(tools) and tools.symmetry.isVisibleTo(tools),
+                        "%s: the toggles row, Mirror in it" % tool)
+                flow = tools.toggles.flow
+                _expect(flow.itemAt(0).widget() is tools.symmetry, "%s: Mirror first" % tool)
                 tip = tools.buttons[tool].toolTip()
                 _expect(palette.NAMES[tool] in tip and palette.HINTS[tool][:30] in tip.replace("&#x27;", "'"),
                         "%s: the tile carries the hint" % tool)
-                if "radius" in palette.TOOL_SETTINGS[tool]:
-                    _expect("Middle-drag" in tip and "<table" in tip, "%s: the tile lists the gestures" % tool)
-                words = texts()
-                for gone in ("selected only", "front facing only", "while sculpting", "fill tubes", "tube blend",
-                             "output", "tubes", "isolate", "group"):
-                    _expect(not any(w.startswith(gone) or w.endswith(gone) for w in words if w),
-                            "%s: %r left the panel: %r" % (tool, gone, [w for w in words if gone in w]))
-                _expect(not [b for b in tools.settings.findChildren(QtWidgets.QToolButton)
-                             if b.isVisibleTo(tools) and b.isCheckable() and b.property("role") == "chip"
-                             and not b.property("disclosure") and b.parent() is not None
-                             and b.objectName() in ("chip_pressure", "chip_collide", "stretch", "straighten",
-                                                    "matchNearby", "soloNewGuides", "alphaInvert")],
-                        "%s: toggles are switch rows, not chips" % tool)
-            # The Tube card's blocks fold away (a chevron before the title, or a click on the title),
-            # folded or not remembered across tools (issue 70); no other card's blocks fold.
-            widgets._folded = set()
-            tools.tool = "shape"
-            tools.show_tool_settings()
-            settle()
-            shown = [b for b in tools.tube_tool_blocks() if b.isVisibleTo(tools)]
-            _expect(len(shown) == 6 and all(b.chevron is not None and b.chevron.isVisibleTo(tools) for b in shown),
-                    "Tube: every block folds")
-            _expect(tools.brush_block.title.isVisibleTo(tools), "Tube: Brush titled (to fold it)")
-            profile = tools.tube_panel.profile_block
-            profile.chevron.click()
-            settle()
-            _expect(profile.folded() and not profile.content.isVisibleTo(tools), "Tube: Profile folds")
             tools.tool = "comb"
             tools.show_tool_settings()
             settle()
-            _expect(not [b for b in tools.settings.findChildren(widgets.Block) if b.isVisibleTo(tools)
-                         and b.chevron is not None and b.chevron.isVisibleTo(tools)], "Comb: no block folds")
-            _expect(tools.brush_block.content.isVisibleTo(tools) and not tools.brush_block.title.isVisibleTo(tools),
-                    "Comb: Brush as it was (untitled, open)")
-            tools.tool = "shape"
-            tools.show_tool_settings()
+            _expect(tools.brush_block.isAncestorOf(tools.radius) and tools.brush_block.isAncestorOf(tools.strength)
+                    and tools.more_body.isAncestorOf(tools.falloff), "Comb: Radius and Strength; Falloff in More")
+            _expect(tools.stretch.isVisibleTo(tools) and tools.more_body.isAncestorOf(tools.brush_chips)
+                    and tools.more_body.isAncestorOf(tools.symmetry_row), "Comb: Stretch a chip; the curves and "
+                    "Mirror across in More")
+            tools.more_section.set_expanded(True)
             settle()
-            _expect(profile.folded() and not profile.content.isVisibleTo(tools), "Tube: Profile still folded")
-            profile.chevron.click()
-            settle()
-            _expect(profile.content.isVisibleTo(tools) and not widgets.folded_blocks(), "Tube: Profile open again")
-            # The brush's toggles as switch rows in one order whatever the tool (Pressure, Keep off
-            # scalp, Stretch, Straighten), then the two curves' chips.
-            tools.tool = "comb"
-            tools.show_tool_settings()
-            settle()
-            rows = [b.row for b in (tools.pressure, tools.collide, tools.stretch, tools.straighten)]
-            body = tools.brush_block.body
-            at = [body.indexOf(r) for r in rows]
-            _expect(at == sorted(at) and min(at) >= 0, "brush switch rows in order: %r" % at)
-            _expect(all(r.property("role") == "propField" for r in rows), "brush toggles: switch rows")
             flow = tools.brush_chips.flow
             order = [flow.itemAt(i).widget().text() for i in range(flow.count())]
             _expect(order == ["Falloff curve", "Root to tip"], "brush chips: %r" % order)
@@ -658,37 +621,47 @@ def main():
             settle()
             _expect(tools.strength_curve.isVisibleTo(tools), "a curve chip on: its ramp under the chips")
             tools.strength_curve_box.setChecked(False)
+            tools.more_section.set_expanded(False)
             _expect(isinstance(tools.length_keys.scale, widgets.SoftSlider)
                     and isinstance(tools.length_keys.length, widgets.SoftSlider), "Length Keys: fill fields")
-            # The tabs: Paint's card and its tile alone; Correctives' grid and card; Photos no card.
+            # Place: Length, Segments and Match nearby; its tube, Spacing and Solo new in More.
+            tools.tool = "place"
+            tools.show_tool_settings()
+            settle()
+            _expect(tools.create_box.isVisibleTo(tools) and tools.more_body.isAncestorOf(tools.tube_panel.tube_block)
+                    and tools.more_body.isAncestorOf(tools.spacing), "Place: the essentials, the rest in More")
+            # Two brushes: Tube edits tubes (the levels, what it paints, the profile, the selected
+            # tubes), Roots draws them (the levels, the root block); no job switch.
+            for tool, shown, hidden in (("shape", [tools.brush_block, tools.tube_panel.profile_block,
+                                                   tools.tube_panel.selected_block], [tools.root_card.root_block]),
+                                        ("roots", [tools.root_card.root_block], [tools.brush_block,
+                                                                                tools.tube_panel.profile_block,
+                                                                                tools.tube_panel.selected_block])):
+                tools.tool = tool
+                tools.show_tool_settings()
+                settle()
+                _expect(all(b.isVisibleTo(tools) for b in shown) and not any(b.isVisibleTo(tools) for b in hidden),
+                        "%s: its blocks only" % tool)
+                _expect(tools.root_card.hierarchy_block.isVisibleTo(tools), "%s: the levels' row" % tool)
+                card = tools.settings.layout()
+                _expect(card.indexOf(tools.root_card.hierarchy_block) < card.indexOf(tools.brush_block)
+                        < card.indexOf(tools.tube_panel.profile_block) < card.indexOf(tools.tube_panel.selected_block),
+                        "%s: the levels under the header, the profile under the brush" % tool)
+            _expect(not hasattr(tools, "tube_job_row"), "no job switch")
+            _expect(tools.display_popup.isAncestorOf(tools.tube_channel_box), "the tubes' display: the guides menu")
+            # The pages: Paint's card over its maps (no tile); Photos: no card.
             tools.tool = None
             tools.tabs.setCurrentIndex(palette.TABS.index("paint"))
             settle()
-            # What a stroke paints first (untitled under the header), then Brush, titled.
-            _expect(shown_blocks() == ["Paint", "Brush", "Applies to"], "the Paint tab's card: %r" % shown_blocks())
-            _expect(tools.paint_block.isAncestorOf(tools.paint_tab.value), "Value and Fill in the Paint block")
-            _expect(not tools.paint_block.title.isVisibleTo(tools) and tools.brush_block.title.isVisibleTo(tools),
-                    "Paint's block untitled, Brush titled")
-            _expect(tools.brush_block.isAncestorOf(tools.alpha_box), "the alpha stamp in the Brush block")
-            _expect(tools.paint_tiles.isVisibleTo(tools) and not tools.tool_palette.isVisibleTo(tools),
-                    "the Paint button alone on top")
-            from groomlab.ui.qt import QtCore
-            paint = tools.tiles["paint"][-1]
-            _expect(paint.toolButtonStyle() == QtCore.Qt.ToolButtonTextBesideIcon
-                    and paint.width() >= tools.paint_tiles.width() - 2 * theme.px(8) - theme.px(2),  # (in its tray)
-                    "Paint: one full-width button over the maps (%d of %d px)" % (paint.width(), tools.paint_tiles.width()))
-            _expect(tools.paint_tab.section.isVisibleTo(tools) and tools.paint_tab.box.isVisibleTo(tools),
-                    "the Maps list and the picked map's box")
-            tools.tabs.setCurrentIndex(palette.TABS.index("correctives"))
-            settle()
-            _expect(tools.tool_palette.isVisibleTo(tools) and tools.hint.isVisibleTo(tools)
-                    and tools.correctives.section.isVisibleTo(tools), "Correctives: the grid, the card's hint, the layers")
+            _expect(not tools.paint_tiles.isVisibleTo(tools) and not tools.tool_palette.isVisibleTo(tools),
+                    "Paint: no tiles (the tab is painting)")
+            _expect(tools.paint_tab.section.isVisibleTo(tools), "the Maps list")
             tools.tabs.setCurrentIndex(palette.TABS.index("photos"))
             settle()
             _expect(not tools.settings.isVisibleTo(tools) and not tools.hint.isVisibleTo(tools)
                     and not tools.tool_palette.isVisibleTo(tools)
                     and tools.reference_tab.section.isVisibleTo(tools), "Photos: the photos, no card")
-            _expect(not tools.reference_tab.generate_section.expanded(), "Guides from photos folded")
+            _expect(not hasattr(tools.reference_tab, "generate_section"), "no Guides from photos")
             tools.tabs.setCurrentIndex(palette.TABS.index("tools"))
         finally:
             widgets.dispose(tools)
@@ -923,15 +896,15 @@ def main():
         tools = palette.ToolPalette()
         try:
             titles = [tools.tabs.tabText(i) for i in range(tools.tabs.count())]
-            _expect(titles == ["Tools", "Paint", "Correctives", "Photos"], "Groom Tools tabs: %r" % titles)
-            _expect(tools.applies_block.isAncestorOf(tools.symmetry_row), "Mirror sits in the card's Applies to")
+            _expect(titles == ["Tools", "Paint", "Photos"], "Groom Tools tabs: %r" % titles)
+            _expect(tools.more_body.isAncestorOf(tools.symmetry_row), "Mirror across sits in the card's More")
             tools.work.setVisible(True)
             tools.show_tool_settings()  # no tool: no Mirror (nothing mirrors)
-            _expect(tools.symmetry_row.isHidden() and tools.applies_block.isHidden(), "no Mirror with no tool")
+            _expect(tools.toggles.isHidden() and tools.more_section.isHidden(), "no Mirror with no tool")
             for tool, shown in (("comb", True), ("flow", True), ("place", True), ("select", True)):
                 tools.tool = tool
                 tools.show_tool_settings()
-                _expect(tools.symmetry_row.isHidden() != shown, "%s: Mirror %s" % (tool, "shown" if shown else "hidden"))
+                _expect(tools.symmetry.isHidden() != shown, "%s: Mirror %s" % (tool, "shown" if shown else "hidden"))
             tools.tool = None
             _expect("Alt+Shift+X" in tools.symmetry.toolTip(), "symmetry's tooltip names its key")
         finally:

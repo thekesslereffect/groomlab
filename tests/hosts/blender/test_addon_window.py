@@ -8,14 +8,15 @@
 - Prop over a real property (range, clamping, int rounding, text);
 - the window's operators and gizmo group registered, Toggle shows and hides it;
 - the sidebar's Groom Tools panel drawn into drawn.DrawnLayout (what the window lays out): its
-  empty state's actions recorded as the sidebar draws them, on the window's cards, no tab row (the
-  window's rail: palette.json's pages, their icons shipped).
+  empty state's actions recorded as the sidebar draws them, on the window's cards; the window's rail
+  holds the groom picker and the header's buttons (the pages are labeled, in the content).
 
 Drawing and input need a window: build/probe/blender_window drives them with simulated events."""
 
 import importlib
 import os
 import sys
+import types
 import unittest
 
 import bpy
@@ -64,15 +65,15 @@ class Assets(unittest.TestCase):
     def test_font_and_theme_ship(self):
         self.assertTrue(os.path.isfile(uikit.FONT_FILE), uikit.FONT_FILE)
         self.assertTrue(os.path.isfile(uikit.THEME_FILE), uikit.THEME_FILE)
-        t = uikit.Theme()
-        self.assertAlmostEqual(t.panel[0], uikit.linear(0x17 / 255.0), places=5)  # charcoal's #17181B
-        self.assertAlmostEqual(t.accent[2], uikit.linear(0xFF / 255.0), places=5)  # #8B7DFF
-        self.assertEqual(t.row, 28.0)
+        t = uikit.Theme(uikit.THEME_FILE)  # (the components' file: Charcoal's)
+        self.assertAlmostEqual(t.panel[0], uikit.linear(0x1C / 255.0), places=5)  # charcoal's #1C1C1C
+        self.assertAlmostEqual(t.accent[2], uikit.linear(0xEF / 255.0), places=5)  # #5B8DEF
+        self.assertEqual(t.row, 26.0)  # (its ui.rowHeight)
 
     def test_derived_tokens_and_components(self):
-        t = uikit.Theme()
-        self.assertAlmostEqual(t.card[0], uikit.linear(0x1F / 255.0), places=5)  # charcoal's own ui.card
-        self.assertAlmostEqual(t.accentSoft[2], uikit.linear(0x50 / 255.0), places=5)  # #2C2850
+        t = uikit.Theme(uikit.THEME_FILE)
+        self.assertAlmostEqual(t.card[0], uikit.linear(0x20 / 255.0), places=5)  # charcoal's own ui.card #202020
+        self.assertAlmostEqual(t.accentSoft[2], uikit.linear(0x5E / 255.0), places=5)  # #35435E
         self.assertEqual(t.size("iconRail", "width", 0), 44.0)
         self.assertEqual(t.size("iconRail", "padding", 0, 1), 10.0)
         self.assertEqual(t.role("chip", "onText", "text"), t.accentInk)
@@ -106,7 +107,13 @@ class Themes(unittest.TestCase):
         canvas = importlib.import_module(bu.MODULE + ".graph_canvas")
         menu = importlib.import_module(bu.MODULE + ".menu")
         self.assertTrue({"charcoal", "paper", "playful", "studio"} <= set(themes.list_themes()))
-        self.assertEqual(themes.active(), "charcoal")
+        # A user who never picked a theme gets Playful (the window, its tiles, the Theme menu).
+        self.assertEqual(themes.DEFAULT, "playful")
+        self.assertEqual(themes.active(), "playful")
+        playful_panel = uikit._srgb(themes.load("playful")["ui"]["panel"], {})
+        self.assertEqual(uikit._theme().panel, uikit._linear_rgba(playful_panel))
+        self.assertTrue(uikit._theme().tool_on_category)
+        self.assertEqual(uikit._theme().size("iconRail", "width", 0), 44.0)  # (its components: Charcoal's file's)
         dark = uikit._theme().panel
         canvas_dark = canvas.theme()["canvas"]
         themes.set_theme("paper")
@@ -128,6 +135,7 @@ class Themes(unittest.TestCase):
                   and i["id"] == "theme.set"]
         self.assertIn(("paper", True), listed)
         self.assertIn(("charcoal", False), listed)
+        self.assertIn(("playful", False), listed)
         self.assertTrue({"theme.new", "theme.reload", "theme.openFolder"} <= {i["id"] for i in sub["items"]
                                                                                if i["kind"] == "action"})
         # The Groom Tools' More menu (palette.json's header "more": its themeMenu generator) and the
@@ -145,8 +153,8 @@ class Themes(unittest.TestCase):
         sub = [e for e in edit if e[0] == "menu" and e[1] == "Theme"]
         self.assertTrue(sub)
         ops = gu._submenus[sub[0][2]][1]
-        self.assertIn(("groomlab.theme_set", {"name": "paper"}), [(e[2], e[3]) for e in ops if e[0] == "op"
-                                                                   and e[3].get("name") == "paper"])
+        self.assertIn(("groomlab.theme_set", "paper"), [(e[2], e[3].get("name")) for e in ops if e[0] == "op"
+                                                         and e[3].get("name") == "paper"])
         self.assertTrue(ge)
         # Tool tiles in their group's color (the theme's "icons", as the app's toolIconColor): Playful's
         # four groups apart, the guide tools paint's; Charcoal's one gray; Playful's picked tile washed.
@@ -154,13 +162,26 @@ class Themes(unittest.TestCase):
         groups = {name: playful.tool_color(name) for name in ("place", "comb", "cut", "paint", "select", "freeze")}
         self.assertEqual(len({groups[n] for n in ("place", "comb", "cut", "paint")}), 4)
         self.assertEqual(groups["select"], groups["paint"])
-        self.assertEqual(groups["freeze"], groups["paint"])
+        freeze = uikit._srgb(themes.load("playful")["icons"]["freeze"], {})  # (Freeze's own: icons.freeze)
+        self.assertEqual(groups["freeze"], uikit._linear_rgba(freeze))
         emerald = uikit._srgb(themes.load("playful")["palette"]["emerald"], {})
         self.assertEqual(groups["place"], uikit._linear_rgba(emerald))
         self.assertTrue(playful.tool_on_category)
         charcoal = uikit.Theme(data=themes.load("charcoal"))
         self.assertEqual(len({charcoal.tool_color(n) for n in ("place", "comb", "cut", "paint")}), 1)
         self.assertFalse(charcoal.tool_on_category)
+        # A tile draws its tool in two tones: its group's color and the theme's ink, picked or not in
+        # Playful (its wash says it is picked); picked in Charcoal, the accent's ink; greyed, muted.
+        tile = uikit.Tile("tile:comb", (0, 0, 46, 50), "Comb", None, "comb", False)
+        self.assertEqual(tile.tones(playful), (playful.tool_color("comb"), playful.icon_ink))
+        self.assertNotEqual(uikit.Tile("t", (0, 0, 46, 50), "Cut", None, "cut", False).tones(playful)[0],
+                            tile.tones(playful)[0])  # (Trim's red, Shape's blue)
+        tile.active = True
+        self.assertEqual(tile.tones(playful), (playful.tool_color("comb"), playful.icon_ink))
+        self.assertEqual(tile.tones(charcoal), (charcoal.accentInk, charcoal.accentInk))
+        tile.disabled = True
+        self.assertEqual(tile.tones(playful), (playful.textMuted, playful.textMuted))
+        self.assertEqual(uikit.Tile.ICON, 28)  # (Maya's tiles' size)
         # A theme of the user's own: only its accent, the rest from the theme it extends.
         path = themes.create_theme("probe_accent", base="charcoal")
         with open(path, encoding="utf-8") as f:
@@ -170,7 +191,7 @@ class Themes(unittest.TestCase):
         themes.set_theme("probe_accent")
         t = uikit._theme()
         self.assertAlmostEqual(t.accent[0], 1.0, places=5)
-        self.assertAlmostEqual(t.panel[0], uikit.linear(0x17 / 255.0), places=5)  # Charcoal's panel kept
+        self.assertAlmostEqual(t.panel[0], uikit.linear(0x1C / 255.0), places=5)  # Charcoal's panel kept (#1C1C1C)
         self.assertTrue(data.get("ui"))
         os.remove(path)
 
@@ -210,6 +231,49 @@ class Window(unittest.TestCase):
 
 
 class Drawn(unittest.TestCase):
+    def test_toggles_as_pills(self):
+        """The brush's toggles (palette.pills): in the window pills, as the Simple mock's chips (each
+        as wide as its name, a row less 2 px tall, 6 px apart, wrapping); in the sidebar toggle
+        buttons in left-aligned rows, as many as fit the width."""
+        t = bpy.context.scene.groomlab_tools
+        switches = [(t, "symmetry", "Mirror"), (t, "pressure", "Pressure"), (t, "collide", "Keep off scalp"),
+                    (t, "stretch", "Stretch")]
+        rec = drawn.DrawnLayout("column")
+        palette.pills(rec, bpy.context, switches)
+        self.assertEqual(rec.children[-1].groomlab_role, "pills")
+        ui = types.SimpleNamespace(s=1.0, row=26.0, widgets=[], w=200.0,
+                                   win=types.SimpleNamespace(theme=uikit.Theme()))
+        h = drawn.Placer(ui, bpy.context, window.ACTIONS).place(rec, 0.0, 0.0, 200.0, drawn._State())
+        pills = [w for w in ui.widgets if isinstance(w, uikit.Pill)]
+        self.assertEqual([p.text for p in pills], ["Mirror", "Pressure", "Keep off scalp", "Stretch"])
+        self.assertLess(pills[0].rect[2], pills[2].rect[2])  # each as wide as its name
+        self.assertTrue(all(p.rect[3] == 24.0 for p in pills))
+        tops = sorted({p.rect[1] for p in pills}, reverse=True)
+        self.assertGreater(len(tops), 1)  # wrapped onto a second row
+        first = [p for p in pills if p.rect[1] == tops[0]]
+        self.assertEqual(first[0].rect[0], 0.0)
+        for a, b in zip(first, first[1:]):
+            self.assertAlmostEqual(b.rect[0] - (a.rect[0] + a.rect[2]), uikit.Pill.GAP)
+        self.assertTrue(all(p.rect[0] + p.rect[2] <= 200.0 + 1e-3 for p in pills))
+        self.assertAlmostEqual(h, len(tops) * 24.0 + (len(tops) - 1) * uikit.Pill.GAP)
+
+        class Rows(object):  # (Blender's layout, its rows recorded)
+            def __init__(self):
+                self.rows = []
+
+            def column(self, align=False):
+                return self
+
+            def row(self, align=False):
+                r = types.SimpleNamespace(alignment="EXPAND", props=[])
+                r.prop = lambda data, prop, **kw: r.props.append(prop)
+                self.rows.append(r)
+                return r
+        side = Rows()
+        palette.pills(side, bpy.context, switches, width=220)
+        self.assertEqual([r.props for r in side.rows], [["symmetry", "pressure"], ["collide", "stretch"]])
+        self.assertTrue(all(r.alignment == "LEFT" for r in side.rows))
+
     def test_groom_tools_recorded(self):
         rec = drawn.DrawnLayout("column")
         drawn.draw_panel(palette.VIEW3D_PT_groomlab_tools, rec, bpy.context)
@@ -224,8 +288,22 @@ class Drawn(unittest.TestCase):
         walk(rec)
         ops = [i.args["idname"] for i in items if i.kind == "operator"]
         self.assertIn("groomlab.add_groom", ops)  # the empty state's Create Groom (no groom in the file)
+        self.assertIn("groomlab.add_sample", ops)  # its sample meshes, as chips
+        labels = [i.args["text"] for i in items if i.kind == "label"]
+        self.assertTrue([x for x in labels if x.startswith(("Selected: ", "Nothing selected"))], labels)  # what is selected now
         props = [i.args["prop"] for i in items if i.kind == "prop"]
-        self.assertIn("groom", props)  # the groom picker heads the panel
+        self.assertNotIn("groom", props)  # the groom picker: on the rail
+        rail = []
+
+        def walk_rail(node):
+            for child in node.children:
+                if isinstance(child, drawn.DrawnLayout):
+                    walk_rail(child)
+                else:
+                    rail.append(child)
+        walk_rail(window.rail_content(bpy.context))
+        self.assertEqual([i.args["prop"] for i in rail if i.kind == "prop"], ["groom"])
+        self.assertIn("groomlab.find_command", [i.args["idname"] for i in rail if i.kind == "operator"])
         self.assertEqual(drawn.icon_name("ADD"), "ui_plus")
         self.assertTrue(os.path.isfile(os.path.join(uikit.ICON_DIR, "ui_plus.png")))
         for name in set(drawn.ICONS.values()):
@@ -233,9 +311,9 @@ class Drawn(unittest.TestCase):
 
     def test_window_rail_and_cards(self):
         rail = window._rail(bpy.context)
-        self.assertEqual([p[0] for p in rail.pages], ["TOOLS", "PAINT", "CORRECTIVES", "PHOTOS"])
-        for _ident, _label, _tip, icon in rail.pages:
-            self.assertTrue(os.path.isfile(os.path.join(uikit.ICON_DIR, icon + ".png")), icon)
+        self.assertEqual(rail.pages, [])  # (the pages: labeled, at the top of the content, as the sidebar's)
+        t = bpy.context.scene.groomlab_tools
+        self.assertEqual([i[0] for i in uikit.Prop(t, "tab").items()], ["TOOLS", "PAINT", "PHOTOS"])
         rec = drawn.DrawnLayout("column")
         drawn.draw_panel(palette.VIEW3D_PT_groomlab_tools, rec, bpy.context)
         roles, props = [], []
@@ -248,7 +326,6 @@ class Drawn(unittest.TestCase):
                 elif child.kind == "prop":
                     props.append(child.args["prop"])
         walk(rec)
-        self.assertNotIn("tab", props)  # (the rail switches the pages)
         self.assertIn("primary", roles)  # the empty state's Create Groom in the accent
         # The header's buttons on the rail's right end (issue 73: they don't scroll), not in the column.
         self.assertIs(rail.extras, window._rail_extras)
@@ -261,6 +338,14 @@ class Drawn(unittest.TestCase):
         row = drawn.DrawnLayout("row")
         palette.header_buttons(row, bpy.context)
         self.assertTrue(named(row, "menu", "menu") and named(row, "operator", "idname"))
+        # A list row's menu in the window: drawn as the window's menus (the row picked first).
+        placer = drawn.Placer(types.SimpleNamespace(s=1.0, row=28.0, widgets=[]), bpy.context, window.ACTIONS)
+        op = drawn.Item("operator", idname="groomlab.row_popup", text="", icon="ui_more", props=drawn.OperatorProperties(),
+                        emboss=False, depress=False)
+        op.args["props"].rows, op.args["props"].index, op.args["props"].menu = "GROUPS", 0, "GROOMLAB_MT_group_context"
+        button = placer.operator(op, (0, 0, 24, 24), drawn._State())
+        self.assertIsInstance(button, drawn.MenuButton)
+        self.assertEqual(button.menu_name, "GROOMLAB_MT_group_context")
 
 
 class Editors(unittest.TestCase):
@@ -312,4 +397,4 @@ class CharcoalTheme(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    bu.run(TypedValues, Assets, Props, Window, Drawn, Editors, CharcoalTheme)
+    bu.run(TypedValues, Assets, Props, Themes, Window, Drawn, Editors, CharcoalTheme)

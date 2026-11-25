@@ -30,7 +30,9 @@
 
 #include "definitions.h"
 
+class QComboBox;
 class QFrame;
+class QVBoxLayout;
 class QLabel;
 class QMenu;
 class QPushButton;
@@ -48,6 +50,8 @@ class BrushSession;
 class GroomDocument;
 class ListBar;
 class ListHeader;
+class PopupPanel;
+class Section;
 class ValueSlider;
 
 class CorrectivesPanel : public QWidget {
@@ -98,8 +102,13 @@ public:
     std::optional<double> layerFrame(const std::string& name) const;
 
     QTreeWidget* tree() const { return tree_; }
-    ListBar* bar() const { return bar_; }          // the header's: + New, Fix Frame
-    ListBar* itemBar() const { return itemBar_; }  // the picked layer's: Up, Down, Solo, Delete
+    ListBar* bar() const { return bar_; }  // the header's: Fix Frame, + New
+    PopupPanel* weightPopup() const { return weightPopup_; }  // a row's weight icon's: the weight and its key
+    ValueSlider* weightSlider() const { return weight_; }
+    // Display while sculpting (folded under the list): the window's controls of the strands while a
+    // stroke is live and the share of them evaluated.
+    void setSculptDisplay(QComboBox* strands, ValueSlider* density);
+    Section* sculptDisplaySection() const { return displaySection_; }
 
 signals:
     void edited();          // the document's correctives changed: the host evaluates and redraws
@@ -111,6 +120,7 @@ protected:
 
 private:
     void picked(QTreeWidgetItem* item);
+    QWidget* rowIcons(QTreeWidgetItem* item);  // a row's icons (null: none)
     void applyTarget();  // the session's shot sculpt from the target and the document's time
     void refreshWeights();  // the weight column and slider at the document's time
     void selectTargetRow();
@@ -123,8 +133,12 @@ private:
     ui::FillOptions options_;
     ListHeader* header_ = nullptr;
     ListBar* bar_ = nullptr;
-    ListBar* itemBar_ = nullptr;
-    QFrame* box_ = nullptr;
+    QFrame* box_ = nullptr;  // (the weight popup)
+    PopupPanel* weightPopup_ = nullptr;
+    Section* displaySection_ = nullptr;
+    QVBoxLayout* displayRows_ = nullptr;
+    bool justPicked_ = false;
+    int baseClick_ = 0;  // a click on the picked row: back to the base groom unless a double-click follows
     QTreeWidget* tree_ = nullptr;
     ValueSlider* weight_ = nullptr;
     QToolButton* key_ = nullptr;

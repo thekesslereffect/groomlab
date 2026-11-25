@@ -77,9 +77,9 @@ def partners(points):
 
 
 class ProfileEditor(uikit.Widget):
-    """A tube shape's cross-section in a square. shape: {"name", "points", "smooth", "builtin"};
-    preview(points) while a point moves, commit(points) when an edit settles; mirror() says whether
-    the sides move together."""
+    """A tube shape's cross-section in a square. shape: {"name", "points", "smooth", "builtin",
+    "editable" (default: not built in), "note" (what a read-only one says)}; preview(points) while a
+    point moves, commit(points) when an edit settles; mirror() says whether the sides move together."""
 
     HIT = 8.0
 
@@ -87,9 +87,10 @@ class ProfileEditor(uikit.Widget):
         super().__init__(wid, rect)
         self.shape, self.preview, self.commit, self.mirror = shape, preview, commit, mirror
         self.points = [tuple(p) for p in (shape or {}).get("points") or []]
-        self.editable = bool(shape) and not shape.get("builtin")
+        self.editable = bool(shape) and bool(shape.get("editable", not shape.get("builtin")))
+        self.note = (shape or {}).get("note") or "Built in: Duplicate it to edit a copy"
         self.tooltip = ("Drag a point to move it; click the outline to add one; right-click a point to remove it"
-                        if self.editable else "A built-in shape: Duplicate it (the library's glyph) to edit a copy")
+                        if self.editable else self.note + " (the library's ⋯)")
 
     def to_screen(self, u, v):
         x, y, w, h = self.rect
@@ -142,9 +143,12 @@ class ProfileEditor(uikit.Widget):
             follower = self.mirror() and mates[i] not in (None, i) and u < 0
             color = t.text if self.editable else t.textMuted
             p.rect((px - r, py - r, 2 * r, 2 * r), uikit.with_alpha(color, 0.55 if follower else 1.0), r)
-        if not self.editable:
-            p.text("Built-in: Duplicate to edit", (x + 6 * s, y + 4 * s, w - 12 * s, 16 * s), t.textMuted,
-                   t.font_size - 2)
+        if not self.editable and self.shape:  # (its note wrapped over the square's foot, as Maya's)
+            import textwrap
+            per = max(8, int((w - 12 * s) / (5.6 * s)))
+            lines = textwrap.wrap(self.note, per)[:3]
+            for k, line in enumerate(reversed(lines)):
+                p.text(line, (x + 6 * s, y + 4 * s + k * 14 * s, w - 12 * s, 14 * s), t.textDim, t.font_size - 2)
 
     # Editing (Maya's move_point, add_point, remove_point)
     def move_point(self, i, u, v):
@@ -285,6 +289,43 @@ def draw_thumbnail(p, tex, r):
     quad.draw(shader)
 
 
+class ProfileTile(uikit.Button):
+    """A Tube card profile (Root, Mid, Tip) as a tile, Maya's: its outline over its name (a dash for
+    an unset or mixed one), outlined; the one the editor shows on the selection with the accent's
+    edge. A press shows it in the editor."""
+
+    def __init__(self, wid, rect, text, prop, ident, shape, tooltip=""):
+        super().__init__(wid, rect, text, None, None, tooltip=tooltip)
+        self.prop, self.ident, self.shape = prop, ident, shape
+
+    def on(self):
+        return self.prop.get() == self.ident
+
+    def draw(self, p, win):
+        t, s = p.theme, p.scale
+        hover = win.hover == self.id and not self.disabled
+        on = self.on()
+        fill = t.selection if on else t.hover if hover else (0.0, 0.0, 0.0, 0.0)
+        p.rect(self.rect, fill, t.radius * s, t.accentLine if on else t.pillEdge, 1.0 * s)
+        x, y, w, h = self.rect
+        color = t.textDisabled if self.disabled else t.text if on or hover else t.textDim
+        g = 22 * s
+        gx, gy = x + (w - g) * 0.5, y + h - g - 6 * s
+        pts = [tuple(q) for q in (self.shape or {}).get("points") or []]
+        if len(pts) >= 3:
+            curve = dense_curve(pts, self.shape.get("smooth", True))
+            k = g * 0.5 / EXTENT
+            out = [(gx + g * 0.5 + u * k, gy + g * 0.5 + v * k) for u, v in curve]
+            p.lines(out + [out[0]], color, 1.5)
+        else:  # (unset or mixed: a dash)
+            p.rect((gx + g * 0.3, gy + g * 0.5, g * 0.4, max(1.0, 1.5 * s)), color)
+        p.text(self.text, (x + 2 * s, y + 4 * s, w - 4 * s, 15 * s), color, t.small_size, "center")
+
+    def press(self, win, context, event):
+        self.prop.set(self.ident)
+        return None
+
+
 class IconPicker(uikit.Widget):
     """An enum whose items have icons (the alphas): the current one's thumbnail and name; a press
     opens a grid of them. items: [(id, name, tip, icon_value)]; preview_of(icon_value)."""
@@ -396,7 +437,8 @@ class PopupMenu(uikit.Interaction):
     """A menu drawn in the window's look: entries (drawn.menu_entries) in a box at `anchor` (under
     a button, or at the pointer), submenus to the side on hover. An entry's action runs when it is
     picked; a press elsewhere or Esc closes it. Entries: {"kind": op | check | sub | label | sep,
-    "text", "icon", "run", "checked", "enabled", "sub" (a menu's entries, built when it opens)}."""
+    "text", "icon", "run", "checked", "enabled", "alert" (red: a delete), "sub" (a menu's entries, built
+    when it opens)}."""
 
     def __init__(self, win, entries, anchor, armed=False):
         self.win_scale, self.region_w = win.scale, win.region_w
@@ -517,7 +559,8 @@ class PopupMenu(uikit.Interaction):
                 elif e.get("icon"):
                     g = 14 * s
                     p.glyph(e["icon"], (r[0] + 5 * s, r[1] + (r[3] - g) * 0.5, g, g), t.textDim)
-                p.text(e.get("text", ""), (r[0] + 26 * s, r[1], r[2] - 44 * s, r[3]), t.text)
+                p.text(e.get("text", ""), (r[0] + 26 * s, r[1], r[2] - 44 * s, r[3]),
+                       t.error if e.get("alert") else t.text)  # (Delete and Remove in the error red)
                 if kind == "sub":
                     p.chevron(r[0] + r[2] - 10 * s, r[1] + r[3] * 0.5, 3.0 * s, t.textDim, down=False)
                 p.fade = 1.0

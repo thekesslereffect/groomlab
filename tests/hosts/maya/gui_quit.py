@@ -27,13 +27,12 @@ def start():
 
 
 def open_panels():
-    """The panels open on a new groom and repolish what changes role (the first-groom steps, the
-    editor's status): a dynamic property's rule applies, and no widget's style() is called."""
+    """The panels open on a new groom and repolish what changes role (the editor's status): a dynamic
+    property's rule applies, and no widget's style() is called."""
     import groomlab
     from groomlab.ui.qt import QtGui, QtWidgets
     from groomlab.ui import graph_editor, palette
     cmds.file(new=True, force=True)
-    cmds.optionVar(intValue=(palette.STARTER_VAR, 0))  # the first-groom steps show (they repolish)
     scalp = cmds.polySphere(radius=1, subdivisionsX=20, subdivisionsY=10)[0]
     groom = groomlab.create_groom(scalp)
     cmds.select(groom)
@@ -57,7 +56,6 @@ def open_panels():
     finally:
         QtWidgets.QWidget.style = style
     state.update(groom=groom, tools=tools, editor=editor)
-    check("the first-groom steps are showing", tools.starter.isVisible())
     check("the status label takes its role's color when the role changes (%s, then %s)" % (trouble, calm),
           trouble != calm)
     check("no widget's style() is called (it would keep Qt's style sheet style alive from it: %s)"

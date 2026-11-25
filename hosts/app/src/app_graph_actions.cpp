@@ -12,6 +12,7 @@
 #include <tuple>
 
 #include <QAction>
+#include <QLineEdit>
 #include <QActionGroup>
 #include <QDesktopServices>
 #include <QDir>
@@ -654,6 +655,56 @@ void AppActions::wireGraphEditor(MainWindow& w) {
     QObject::connect(snap, &QToolButton::toggled, snap, [m](bool on) {
         m->graph_->setSnapping(on);
         if (m->interactive_) QSettings().setValue(QStringLiteral("graph/snap"), on);
+    });
+    // Snap to Grid: the Edit menu's last entry, checked as the (hidden) Snap button is (added again
+    // after the menu fills itself again as it opens: it holds generators).
+    {
+        auto addSnap = [edit, snap] {
+            for (QAction* a : edit->actions()) {
+                if (a->objectName() == QLatin1String("graphSnap")) return;
+            }
+            edit->addSeparator();
+            QAction* snapAction = edit->addAction(QObject::tr("Snap to Grid"));
+            snapAction->setObjectName(QStringLiteral("graphSnap"));
+            snapAction->setCheckable(true);
+            snapAction->setChecked(snap->isChecked());
+            snapAction->setToolTip(snap->toolTip());
+            QObject::connect(snapAction, &QAction::toggled, snap, [snap](bool on) {
+                if (snap->isChecked() != on) snap->setChecked(on);
+            });
+        };
+        addSnap();
+        QObject::connect(edit, &QMenu::aboutToShow, edit, addSnap);  // (after the menu's own refill)
+        QObject::connect(snap, &QToolButton::toggled, edit, [edit](bool on) {
+            for (QAction* a : edit->actions()) {
+                if (a->objectName() == QLatin1String("graphSnap") && a->isChecked() != on) a->setChecked(on);
+            }
+        });
+    }
+    // Find node: Enter picks the first node whose name (else type) holds the text, and frames it.
+    QObject::connect(m->shell_->graphFindBox(), &QLineEdit::returnPressed, m, [m] {
+        const QString text = m->shell_->graphFindBox()->text().trimmed();
+        if (text.isEmpty() || !m->document_) return;
+        std::string found;
+        for (const GroomDocument::NodeInfo& n : m->document_->nodes()) {
+            if (QString::fromStdString(n.name).contains(text, Qt::CaseInsensitive)) {
+                found = n.name;
+                break;
+            }
+        }
+        if (found.empty()) {
+            for (const GroomDocument::NodeInfo& n : m->document_->nodes()) {
+                if (QString::fromStdString(n.type).contains(text, Qt::CaseInsensitive)) {
+                    found = n.name;
+                    break;
+                }
+            }
+        }
+        if (found.empty()) {
+            m->shell_->setGraphStatus(QObject::tr("No node matches \"%1\"").arg(text));
+            return;
+        }
+        m->selectUiNode(QString::fromStdString(found));
     });
 
     // The right-click menus of the graph: a node's, a backdrop's, the canvas's.

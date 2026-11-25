@@ -490,7 +490,8 @@ void Viewport::keyPressEvent(QKeyEvent* event) {
             }
             if (session_ && session_->stroking()) session_->cancel();
             if (session_ && mode_ == ToolMode::Brush && session_->rootMode()) {
-                // The root mode: Esc leaves it for the Tube brush (again: leaves the brush).
+                // The root mode: Esc puts the root tool away, the Roots brush still picked (its
+                // next click draws a root again); again: leaves the brush.
                 session_->leaveRoots();
                 refreshOverlay();
                 emit brushSettingsChanged();

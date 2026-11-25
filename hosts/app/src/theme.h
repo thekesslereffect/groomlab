@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// The app's look: GroomLab's themes (engine/assets/themes/*.json; Charcoal by default: calm neutral
+// The app's look: GroomLab's themes (engine/assets/themes/*.json; Playful by default; Charcoal: calm neutral
 // greys, flat, thin borders, as the Maya host wears it) in the standalone app's docked window
 // (app_shell.h: menu bar, tool bar, solid docks, clean and dark like Plasticity). Glass themes
 // (a theme with ui.glass) keep their translucent pieces over the viewport; every theme's docks are solid.
@@ -36,7 +36,7 @@ namespace groomlab::app::theme {
 // repainted; the painted widgets read the theme when they paint).
 QStringList themeNames();                  // "charcoal", "paper", "playful", "studio" and the user's (sorted)
 QString themeLabel(const QString& name);   // "Charcoal"
-QString defaultTheme();                    // "charcoal" (themes without "extends" still extend Playful)
+QString defaultTheme();                    // "playful" (themes without "extends" extend it too)
 QString currentTheme();                    // defaultTheme() until setTheme
 bool setTheme(const QString& name);        // false (nothing changes) for a theme there is no file of
 QString savedTheme();                      // QSettings ui/theme, defaultTheme() when unset or unknown

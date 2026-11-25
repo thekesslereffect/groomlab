@@ -3185,27 +3185,28 @@ class GraphEditor(QtWidgets.QWidget):
         popup("Presets  ▾", self.preset_menu,
               "Start from a look (hair, fur, feathers), a technique to learn from (blending, layers, maps, "
               "motion...), save this graph as a preset, or copy and paste the whole graph as text to share it")
-        # The wire style (its menu, its icon the style's) and the Align buttons, as the app's bar.
-        toolbar.addSeparator()
+        # The wire style and the Align buttons: in the ⋯ menu (graph_ui.json's editMenu has both), not
+        # on the bar (the Simple layout: Groom, Pin, Add Node, Presets, ⋯). Made and kept here, hidden:
+        # scripts and the menu's checks read them.
         self.wire_menu = QtWidgets.QMenu(self)
         for choice in definitions.choices("wireStyles"):
             action = self.wire_menu.addAction(widgets.glyph("wire_" + choice["value"]), choice["label"])
             action.setToolTip(choice.get("tip", ""))
             action.triggered.connect(lambda _=False, v=choice["value"]: self.set_wire_style(v))
         self.wire_button = widgets.glyph_button("wire_" + WIRE_STYLE[0], "Wire style: Smooth, Square or Rounded", menu=self.wire_menu)
-        toolbar.addWidget(self.wire_button)
-        toolbar.addSeparator()
+        self.wire_button.setParent(self)
+        self.wire_button.setVisible(False)
         self.align_buttons = {}
         for mode, tip in (("left", "Align left edges"), ("centerX", "Align centers (a vertical line)"),
                           ("right", "Align right edges"), ("distributeY", "Space evenly down"), (None, None),
                           ("top", "Align top edges"), ("centerY", "Align middles (a horizontal line)"),
                           ("bottom", "Align bottom edges"), (None, None), ("distributeX", "Space evenly across")):
             if mode is None:
-                toolbar.addSeparator()
                 continue
             button = widgets.glyph_button("align_" + mode, tip, slot=lambda m=mode: self.align_selected(m))
+            button.setParent(self)
+            button.setVisible(False)
             self.align_buttons[mode] = button
-            toolbar.addWidget(button)
         spacer = QtWidgets.QWidget()
         spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         spacer.setStyleSheet("background: transparent;")
@@ -3218,12 +3219,14 @@ class GraphEditor(QtWidgets.QWidget):
             pass
         self.snap_box.setToolTip("Nodes and pins you move land on the grid's dots")
         self.snap_box.toggled.connect(self.set_snapping)
-        toolbar.addWidget(self.snap_box)
+        self.snap_box.setParent(self)
+        self.snap_box.setVisible(False)  # (Snap and Live: checkable entries of the ⋯ menu)
         self.live_box = QtWidgets.QCheckBox("Live")
         self.live_box.setChecked(True)
         self.live_box.setToolTip("Every edit applies to the groom at once (one undo step each). Off: edit, then Apply")
         self.live_box.toggled.connect(self.set_live)
-        toolbar.addWidget(self.live_box)
+        self.live_box.setParent(self)
+        self.live_box.setVisible(False)
         self.apply_action = toolbar.addAction("Apply", self.apply)
         self.apply_action.setToolTip("Write the graph to the groom")
         self.apply_action.setVisible(False)  # only while Live is off
@@ -3251,7 +3254,17 @@ class GraphEditor(QtWidgets.QWidget):
         self.edit_menu.aboutToShow.connect(self.sync_gpu_action)
         self.sync_gpu_action()
         self.edit_menu.setToolTipsVisible(True)
-        more = popup("", self.edit_menu, "Undo, layout, grouping, copy and paste the whole graph, units, theme")
+        # Snap and Live, last in the menu, checked as their boxes are.
+        self.edit_menu.addSeparator()
+        for box, text in ((self.snap_box, "Snap to Grid"), (self.live_box, "Live (apply every edit)")):
+            action = self.edit_menu.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(box.isChecked())
+            action.setToolTip(box.toolTip())
+            action.toggled.connect(box.setChecked)
+            box.toggled.connect(lambda on, a=action: a.isChecked() != on and a.setChecked(on))
+        more = popup("", self.edit_menu, "Undo, layout and align, wire style, grouping, copy and paste the whole graph, "
+                     "units, theme, Snap, Live")
         more.setIcon(widgets.glyph("more"))
         more.glyph = "more"
         more.setProperty("role", "glyph")

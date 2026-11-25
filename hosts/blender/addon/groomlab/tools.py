@@ -84,6 +84,13 @@ def tool_info(tool):
     return None
 
 
+def edits_layers(tool):
+    """Whether a tool can edit a corrective or a Sculpt node (the catalog's "corrective"; Paint
+    paints maps, wherever the brushes edit): the others' tiles grey on one (Maya's CORRECTIVE)."""
+    info = tool_info(tool)
+    return tool == "paint" or bool(info and info.get("corrective"))
+
+
 def sections():
     """[(category, [tool, ...])] in the catalog's order: the palette's tile groups."""
     cat = _catalog
@@ -300,8 +307,6 @@ def push(scalp, scene=None, **only):
     rt = groom.ensure(scalp, scene)
     tool = t.tool or "comb"
     settings = settings_of(scene, tool)
-    if t.root_mode and tool == "shape":
-        tool = "roots"  # the Tube tool's root mode: the helper's root tool keeps the events
     if only:
         settings = {k: v for k, v in settings.items() if k in only}
     r = process.call("tool_set", session=rt.session, tool=tool, settings=settings)
@@ -365,13 +370,13 @@ def pick(context, tool):
     if tool not in [x["id"] for x in catalog()["tools"]]:
         raise HelperError("bad_request", "no GroomLab tool %r" % tool)
     if t.root_painting and tool != "paint":
-        # Painting the subdivision density left for another tool: finished (the Tube tool, its
-        # roots cut, Edit roots), as Maya's Tube card finishes it.
+        # Painting the subdivision density left for another tool: finished (the Roots brush, in
+        # Select root, its roots to Apply on), as Maya's Roots card finishes it.
         from . import tool_ops
         tool_ops.finish_density_painting(context)
         return None
-    if t.root_mode:
-        # The Tube tool's root mode put away first (an edit not finished given to its roots).
+    if t.root_mode and tool != "roots":
+        # Another brush leaves the Roots brush's root mode (an edit not finished given to its roots).
         scalp = active(context)
         if scalp is not None:
             try:
@@ -410,6 +415,8 @@ def pick(context, tool):
             pass  # (a graph with nothing to part: the brush still draws)
     r = push(scalp, scene)
     status(scene, "")
+    if tool == "roots":
+        start_roots(context, scalp, "place")  # the Roots brush picked (again): Draw root
     from . import display
     display.mark(scalp)
     return r
@@ -889,7 +896,13 @@ def get_tube(scalp, guide):
 def _tube_edit(scalp, cmd, **args):
     r = call(scalp, cmd, **args)
     after_edit(scalp, groom.scene_of(scalp), r.get("undo"), refresh=True)
+    _tube_note[0] = r.get("note") or ""
+    if _tube_note[0]:  # (root tubes that kept their drawn root: the core's rootTubesKeptNote)
+        status(groom.scene_of(scalp), _tube_note[0])
     return r
+
+
+_tube_note = [""]  # what the last tube edit said (tube_changed says it again after its push)
 
 
 def set_tube(scalp, guides=None, group=None, level=None, shape=None, width=None, aspect=None, twist=None, samples=None,
@@ -1197,11 +1210,24 @@ def root_edit(scalp, edit, mode=None):
     r = call(scalp, "root_edit", **args)
     take_roots(scalp, r)
     if edit in ("start", "leave"):
-        push(scalp, scene)  # the helper's tool: roots while a mode is on, the Tube brush after
+        push(scalp, scene)  # the helper's tool as the card stands
     if r.get("committed"):
         after_edit(scalp, scene, r.get("undo"), refresh=True)
         push_undo_step((r.get("undo") or {}).get("undoLabel") or "root tubes")
     return r
+
+
+def start_roots(context, scalp, mode="place"):
+    """The Roots brush's root tool in `mode`: "place" (Draw root: where picking the brush starts; a
+    deeper level shown goes back to level 1, a new root tube being a level 1 guide), "edit" or
+    "select"."""
+    t = context.scene.groomlab_tools
+    if mode == "place":
+        tube_levels(scalp)
+        levels = [x for x in t.tube_levels.split(",") if x]
+        if len(levels) > 1 and t.tube_level > 1:
+            tube_level_show(scalp, 1)
+    return root_edit(scalp, "start", mode=mode)
 
 
 def root_subdivide(scalp, apply=False, guides=None, multiplier=1.0):
@@ -1370,6 +1396,7 @@ def _fill_groups(scene, info, gt):
             item.guides = int(g.get("guides", 0))
             item.hidden = bool(g.get("hidden"))
             item.segment_length = float(g.get("segmentLength") or 0.0)
+            item.segments = int(g.get("segments") or 0)
             item.depth = depth
             color = g.get("color")
             item.has_color = bool(color)
@@ -1554,11 +1581,18 @@ def refresh_tubes(scalp, scene=None):
     t = scene.groomlab_tools
     gt = groom_tools(scalp)
     info = tube_targets(scalp)
-    library = [x for x in tube_shapes(scalp) if not x.get("builtin")]
+    listed = [x for x in tube_shapes(scalp) if not x.get("builtin")]
+    library = [x for x in listed if not x.get("owned")]  # (the root tubes' drawn roots: in no picker)
+    owned = set(x["name"] for x in listed if x.get("owned"))
     gt.tube_guides = [int(g) for g in info.get("guides") or []]
     tube, shapes = info.get("tube"), list(info.get("shapes") or [])
     mids, tips = list(info.get("midShapes") or []), list(info.get("tipShapes") or [])
     with props.quiet():
+        t.tube_root_targets = int(info.get("rootTubes") or 0)
+        t.tube_split_targets = int(info.get("splitTubes") or 0)
+        t.tube_in_use = ", ".join("%s (%d)" % (u["name"], int(u.get("guides") or 0))
+                                  for u in info.get("inUse") or [] if u.get("name") not in owned)
+        t.tube_drawn = shapes[0] if tube is not None and len(shapes) == 1 and shapes[0] in owned else ""
         picked = t.tube_shapes[t.tube_shape_index].name if 0 <= t.tube_shape_index < len(t.tube_shapes) else ""
         t.tube_shapes.clear()
         for x in library:
@@ -1582,7 +1616,7 @@ def refresh_tubes(scalp, scene=None):
         if tube is not None and not any(k in _deferred for k in ("tube.width", "tube.flatness", "tube.twist")):
             key = (tuple(gt.tube_guides), tuple(shapes), tuple(mids), tuple(tips))
             if key != gt.tube_key:
-                if len(shapes) == 1:
+                if len(shapes) == 1 and shapes[0] not in owned:
                     t.tube_choice = shapes[0]
                 if len(mids) == 1:
                     t.tube_mid_choice = mids[0]
@@ -1598,20 +1632,67 @@ def refresh_tubes(scalp, scene=None):
             t.tube_width = t.tube_reference
             t.tube_flatness = float(card.get("flatness", 0.0))
             t.tube_twist = float(card.get("twist", 0.0))
-        if t.tube_choice in names:  # the library list follows the shape picked
-            t.tube_shape_index = names.index(t.tube_choice)
         try:
-            t.tube_shape = tool_props.MIXED if t.tube_mixed else t.tube_choice
+            t.tube_shape = tool_props.MIXED if t.tube_mixed else tool_props.DRAWN if t.tube_drawn else t.tube_choice
             t.tube_mid_shape = tool_props.MIXED if t.tube_mid_mixed else (t.tube_mid_choice or tool_props.UNSET)
             t.tube_tip_shape = tool_props.MIXED if t.tube_tip_mixed else (t.tube_tip_choice or tool_props.UNSET)
         except TypeError:
             pass
+    follow_profile(t)
     fill = fill_tubes(scalp)
     with props.quiet():
         t.tube_has_fill = fill is not None
         if fill is not None:
             t.tube_fill = bool(fill["fillTubes"])
             t.tube_blend = float(fill["tubeBlend"])
+
+
+def profile_choice(t, profile=None):
+    """The shape of a Tube card profile (`profile` ROOT, MID or TIP; default the one the editor
+    shows): (name, kind), kind "unset" (a mid or tip not set: the root's shape, name its), "mixed"
+    (the targets differ), "drawn" (a root tube's drawn root, name the owned shape's), "library" or
+    "builtin"."""
+    profile = (profile or t.tube_profile).lower()
+    if profile == "root":
+        if t.tube_mixed:
+            return "", "mixed"
+        if t.tube_drawn:
+            return t.tube_drawn, "drawn"
+        name = t.tube_choice or "round"
+    else:
+        if getattr(t, "tube_%s_mixed" % profile):
+            return "", "mixed"
+        name = getattr(t, "tube_%s_choice" % profile)
+        if not name:
+            root, kind = profile_choice(t, "ROOT")
+            return (root if kind != "mixed" else (t.tube_choice or "round")), "unset"
+    return name, ("library" if name in [x.name for x in t.tube_shapes] else "builtin")
+
+
+def follow_profile(t):
+    """The library row and the Smooth pill follow the shape the editor shows (Rename, Delete and the
+    outline's switches act on it)."""
+    name, kind = profile_choice(t)
+    names = [x.name for x in t.tube_shapes]
+    with props.quiet():
+        if kind == "library":
+            t.tube_shape_index = names.index(name)
+            t.tube_shape_smooth = bool(t.tube_shapes[t.tube_shape_index].smooth)
+        else:
+            t.tube_shape_index = -1
+
+
+def set_profile_smooth(context, on):
+    """The Smooth pill: the library shape the editor shows smooth or with sharp corners."""
+    t = context.scene.groomlab_tools
+    name, kind = profile_choice(t)
+    scalp = active(context)
+    if kind != "library" or scalp is None:
+        return
+    try:
+        set_tube_shape_points(scalp, name, smooth=bool(on))
+    except HelperError as e:
+        status(context.scene, e.message)
 
 
 def _interpolate_nodes(scalp):
@@ -1660,10 +1741,11 @@ def tube_changed(context, key):
     scene = context.scene
     t = scene.groomlab_tools
     gt = groom_tools(scalp)
+    _tube_note[0] = ""
     try:
         if key == "shape":
             name = t.tube_shape
-            if name == tool_props.MIXED:
+            if name in (tool_props.MIXED, tool_props.DRAWN):  # (nothing to give: a drawn root is its tube's own)
                 return
             with props.quiet():
                 t.tube_choice = name
@@ -1701,7 +1783,10 @@ def tube_changed(context, key):
                 elif key == "twist":
                     set_tube(scalp, guides=gt.tube_guides, twist=float(t.tube_twist))
             defer("tube." + key, commit)
+        follow_profile(t)
         push_safely(context)
+        if _tube_note[0]:
+            status(scene, _tube_note[0])
     except HelperError as e:
         status(scene, e.message)
 
@@ -1893,6 +1978,8 @@ def refresh_correctives(scalp, scene=None):
         if target.get("kind") not in ("corrective", "node"):
             picked = len(t.correctives) - 1
         t.corrective_index = picked
+        row = t.correctives[picked]
+        t.corrective_picked = "%s:%s" % (row.kind, row.name)  # (clicked again: the base groom)
     for name in made_keys:
         push_corrective_keys(scalp, name, force=True)
     for name in names:  # Blender's keys are the weights' (after Blender's undo, a .blend opened): sent when they differ
