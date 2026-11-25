@@ -143,7 +143,7 @@ TEST(AppMarkingMenu, ItemsFollowTheDefinitions) {
     std::vector<std::string> a, b;
     for (const Item& item : find(items, "Brushes A")->items) a.push_back(item.id);
     for (const Item& item : find(items, "Brushes B")->items) b.push_back(item.id);
-    EXPECT_EQ(std::set<std::string>(a.begin(), a.end()), (std::set<std::string>{"draw", "comb", "slide", "smooth", "shape", "flow", "place"}));
+    EXPECT_EQ(std::set<std::string>(a.begin(), a.end()), (std::set<std::string>{"draw", "comb", "slide", "smooth", "shape", "roots", "flow", "place"}));
     EXPECT_EQ(std::set<std::string>(b.begin(), b.end()), (std::set<std::string>{"lift", "twist", "attract", "part", "cut", "erase"}));
     for (const Item& item : find(items, "Brushes A")->items) {
         EXPECT_FALSE(item.icon.isEmpty()) << item.id;
@@ -184,15 +184,18 @@ TEST(AppMarkingMenu, BrushOptionsFollowThePickedBrush) {
     EXPECT_TRUE(smooth.items[3].checked) << "Curve, as Smooth always was";
     AppActions::runMarkingMenuItem(window, smooth.items[1]);
     EXPECT_EQ(window.brush().settings().brush.smoothMode, SmoothMode::Length);
-    // Tube: Draw Root, Edit Root, Width, Flatness, Twist, Always Visible.
+    // Tube: Width, Flatness, Twist, Always Visible; Roots: Draw Root, Edit Root, Always Visible.
     window.brush().setTool("shape");
     Item tube = options();
     std::vector<std::string> ids;
     for (const Item& item : tube.items) ids.push_back(item.value.empty() ? item.id : item.id + "=" + item.value);
-    EXPECT_EQ(ids, (std::vector<std::string>{"tube.drawRoot", "tube.editRoot", "tubeChannel=width", "tubeChannel=flatness",
-                                             "tubeChannel=twist", "display.tubesAlways"}));
-    AppActions::runMarkingMenuItem(window, tube.items[3]);
+    EXPECT_EQ(ids, (std::vector<std::string>{"tubeChannel=width", "tubeChannel=flatness", "tubeChannel=twist", "display.tubesAlways"}));
+    AppActions::runMarkingMenuItem(window, tube.items[1]);
     EXPECT_EQ(window.brush().settings().brush.tubeChannel, TubeChannel::Flatness);
+    window.brush().setTool("roots");
+    ids.clear();
+    for (const Item& item : options().items) ids.push_back(item.value.empty() ? item.id : item.id + "=" + item.value);
+    EXPECT_EQ(ids, (std::vector<std::string>{"tube.drawRoot", "tube.editRoot", "display.tubesAlways"}));
     // A brush without options: the submenu there, disabled, saying so.
     window.brush().setTool("lift");
     Item lift = options();

@@ -16,6 +16,8 @@
 // The list is rebuilt only when what it shows changed, and while the panel is hidden not at all
 // (invalidate: a stroke marks it stale; it catches up when it shows or is asked for its map).
 
+#include <functional>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -48,6 +50,7 @@ class ColorEditor;
 class GroomDocument;
 class ListBar;
 class ListHeader;
+class PopupPanel;
 class RoundButton;
 
 class MapsPanel : public QWidget {
@@ -116,9 +119,18 @@ public:
 
     // The pieces (tests, screenshots).
     QListWidget* list() const { return list_; }
-    ListBar* bar() const { return bar_; }          // the header's: + New Map, Import...
-    ListBar* itemBar() const { return itemBar_; }  // the picked map's: Rename, Convert to, Delete
-    QFrame* mapBox() const { return box_; }
+    ListBar* bar() const { return bar_; }  // the header's: + New Map, Import...
+    PopupPanel* infoPopup() const { return infoPopup_; }  // a row's ⓘ: kind, Read by, Use for, Show on
+    QFrame* mapBox() const { return box_; }               // (the info popup)
+    QCheckBox* wholeFacesBox() const { return wholeFaces_; }  // Whole Faces (the Paint card's toggles row shows it as a chip)
+    // A map's row menu (lists.json's maps context) and Use for's menu, filled for the picked map.
+    void fillRowMenu(QMenu* menu);
+    void fillUseFor(QMenu* menu);
+    // Use for: node.param reads `map` (one undo step); "" or the error.
+    std::string useMapFor(const std::string& map, const std::string& node, const std::string& param);
+    // Where a map shows besides the scalp ("guides", "strands"): the window says (setShowState),
+    // and is asked (showOnRequested).
+    void setShowState(std::function<bool(const std::string& where, const std::string& map)> state) { showState_ = std::move(state); }
     // Mode, Value + Fill and the color (its channels, Fill): the Paint card's (brush_panel.h).
     QWidget* paintControls() const { return paintControls_; }
 
@@ -133,6 +145,8 @@ signals:
     // it and paints it (MainWindow::paintParam).
     void paintParamRequested(const std::string& node, const std::string& param, const std::string& kind);
     void mapNodeRequested(const std::string& map);  // Add Map Node: a Map node reading the map, to wire
+    void readerRequested(const std::string& node);  // Show in Graph: the Graph Editor on the node reading the map
+    void showOnRequested(const QString& where, const std::string& map, bool on);  // the info's Guides or Strands chip
 
 protected:
     void showEvent(QShowEvent* event) override;
@@ -143,6 +157,8 @@ private:
     void refreshTargets();      // the For choices from the document's graph (when its nodes changed)
     void targetChanged();       // the form follows For (named for the setting, gray, on the scalp)
     void refreshRows();         // the paint, show and Read by rows for the picked map
+    void refreshShowOn();       // the info's Show on chips
+    QWidget* rowFor(QListWidgetItem* item, const QString& text, bool color, bool unused);
     void applyPaintSettings();  // the value, color and channels to the session
     void itemRenamed(QListWidgetItem* item);
     std::string done(const std::string& error, const std::string& select = {});  // after an edit: refreshed, picked, edited()
@@ -156,8 +172,15 @@ private:
     bool deleteFiles_ = true;
     ListHeader* header_ = nullptr;
     ListBar* bar_ = nullptr;
-    ListBar* itemBar_ = nullptr;
-    QFrame* box_ = nullptr;
+    QFrame* box_ = nullptr;  // (the info popup)
+    PopupPanel* infoPopup_ = nullptr;
+    QLabel* infoTitle_ = nullptr;
+    QLabel* kindLabel_ = nullptr;
+    QPushButton* openReader_ = nullptr;
+    QPushButton* useFor_ = nullptr;
+    QMenu* useForMenu_ = nullptr;
+    std::map<std::string, QToolButton*> showOn_;
+    std::function<bool(const std::string&, const std::string&)> showState_;
     QWidget* paintControls_ = nullptr;
     QListWidget* list_ = nullptr;
     QLabel* hint_ = nullptr;  // shown while the list is empty

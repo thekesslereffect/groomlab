@@ -83,6 +83,19 @@ def node_actions(self, name):
         textures.setChecked(bool(groom) and bool(cmds.getAttr(groom + ".displayCardTextures")))
         textures.toggled.connect(lambda on: groom and groomlab.card_display(groom, textures=on))
         buttons.append(textures)
+        # The share of the strands the viewport's cards are made from (the groom's cardDensity; it
+        # left the Attribute Editor for here, beside the cards it sets).
+        density = QtWidgets.QDoubleSpinBox()
+        density.setObjectName("nodeAction_CardDensity")
+        density.setRange(0.0, 1.0)
+        density.setSingleStep(0.05)
+        density.setDecimals(2)
+        density.setPrefix("Density ")
+        density.setToolTip("The strand density the viewport's cards are made from (1: every strand; the bake "
+                           "and exports always use every strand)")
+        density.setValue(float(cmds.getAttr(groom + ".cardDensity")) if groom else 1.0)
+        density.valueChanged.connect(lambda v: groom and cmds.setAttr(groom + ".cardDensity", float(v)))
+        buttons.append(density)
         lod = QtWidgets.QPushButton("LOD")
         lod.setToolTip("Set this node for a budget: triangles, card count, texture variations, atlas size")
         lod_menu = QtWidgets.QMenu(lod)

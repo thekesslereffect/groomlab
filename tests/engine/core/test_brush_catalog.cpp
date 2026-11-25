@@ -15,7 +15,7 @@ namespace groomlab {
 
 TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
     const std::vector<BrushEntry>& catalog = brushCatalog();
-    ASSERT_EQ(catalog.size(), 19u);
+    ASSERT_EQ(catalog.size(), 20u);
     std::set<std::string> ids;
     int lastCategory = -1;
     for (std::size_t i = 0; i < catalog.size(); ++i) {
@@ -46,6 +46,18 @@ TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
     EXPECT_TRUE(brushEntry("shape")->hasSetting("tubeChannel"));
     EXPECT_TRUE(brushEntry("shape")->hasSetting("tube"));
     EXPECT_FALSE(brushEntry("shape")->hasSetting("collide")) << "it moves no guide point";
+    // Roots: its own Create tool (it makes tubes), next to Place and Draw; Tube only edits them. Both
+    // show the tube hierarchy's levels.
+    ASSERT_TRUE(brushEntry("roots"));
+    EXPECT_EQ(brushEntry("roots")->label, "Roots");
+    EXPECT_EQ(brushEntry("roots")->category, BrushCategory::Create);
+    EXPECT_EQ(brushEntry("roots")->order, brushEntry("draw")->order + 1);
+    EXPECT_EQ(brushEntry("roots")->icon, "roots");
+    EXPECT_TRUE(brushEntry("roots")->hasSetting("rootTubes"));
+    EXPECT_FALSE(brushEntry("roots")->hasSetting("radius")) << "it clicks CVs: no brush circle";
+    EXPECT_FALSE(brushEntry("roots")->corrective);
+    EXPECT_FALSE(brushEntry("shape")->hasSetting("rootTubes"));
+    for (const char* tool : {"roots", "shape"}) EXPECT_TRUE(brushEntry(tool)->hasSetting("tubeLevels")) << tool;
     EXPECT_EQ(brushEntry("grab"), nullptr) << "Comb does what Grab did";
     EXPECT_EQ(brushEntry("clump"), nullptr) << "the Paint brush paints the clump attribute";
     EXPECT_EQ(brushEntry("density"), nullptr) << "Paint on a setting's map (+ New Map > for a setting)";
@@ -60,7 +72,7 @@ TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
 TEST(BrushCatalog, EveryStrokeToolModeIsListedWithItsSettings) {
     // Every mode the stroke tools take is in the catalog, and the hosts' own tools too.
     for (const char* mode : {"comb", "smooth", "lift", "length", "shape", "paint", "cut", "twist", "attract", "erase",
-                             "slide", "place", "draw", "clone", "part", "flow", "lengths"}) {
+                             "slide", "place", "draw", "clone", "part", "flow", "lengths", "roots"}) {
         const BrushEntry* e = brushEntry(mode);
         ASSERT_TRUE(e) << mode;
         BrushToolSettings s;

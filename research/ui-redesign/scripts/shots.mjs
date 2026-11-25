@@ -31,6 +31,18 @@ const shots = {
   ...Object.fromEntries(directions.map((d) => [`${d}-nodes`, `direction=${d}&graph=2`])),
   "quiet-paper": "direction=quiet&theme=paper",
   parts: "direction=quiet&page=components",
+  // The Simple (Maya-first) mock (src/simple): Groom Tools in Maya, per page and a few tools.
+  "simple-tools": "page=simple",
+  "simple-place": "page=simple&tool=place",
+  "simple-tube": "page=simple&tool=shape",
+  "simple-tube-roots": "page=simple&tool=shape&tube=roots",
+  "simple-tube-shape": "page=simple&tool=shape&tube=shape",
+  "simple-paint": "page=simple&tab=paint",
+  "simple-layer": "page=simple&layer=1",
+  "simple-photos": "page=simple&tab=photos&photo=front",
+  "simple-empty": "page=simple&empty=1",
+  "simple-search": "page=simple&search=1",
+  "simple-graph": "page=simple&graph=1",
 };
 
 const pick = process.argv.slice(2);

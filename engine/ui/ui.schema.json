@@ -194,7 +194,7 @@
         "shortcut": {"type": "string"},
         "shortcutPart": {"type": "integer", "minimum": 0},
         "icon": {"type": "string"},
-        "checkable": {"type": "boolean"},
+        "checkable": {"type": "boolean"}, "destructive": {"type": "boolean"},
         "hosts": {"$ref": "#/$defs/hosts"},
         "needs": {"$ref": "#/$defs/conditions"},
         "enabled": {"$ref": "#/$defs/conditions"}

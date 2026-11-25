@@ -27,6 +27,7 @@
 #include <nlohmann/json.hpp>
 
 #include "brush_session.h"
+#include "groomlab/editor/map_edits.h"
 #include "glass.h"
 #include "groom_document.h"
 #include "groomlab/stroke.h"
@@ -121,7 +122,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     list_->setObjectName(QStringLiteral("mapsList"));
     plainRows(list_);
     list_->setToolTip(tr("A map is a 0-1 value painted on the scalp that any param can read (in the Graph Editor, right-click a "
-                         "param > Paint). Double-click: rename; right-click: more"));
+                         "param > Paint). Double-click: rename. Its info (what reads it, Use for, where it shows) and its menu: on the row"));
     list_->setEditTriggers(QAbstractItemView::NoEditTriggers);  // a double-click edits the name alone (editSelectedName)
     list_->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(list_);
@@ -225,7 +226,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     paintLayout->setSpacing(4);
     {
         FlowLayout* row = nullptr;
-        paintLayout->addWidget(segmentRow(paintBox, &row, tr("Mode")));
+        paintLayout->addWidget(segmentRow(paintBox, &row));
         auto* group = new QButtonGroup(paintBox);
         group->setExclusive(true);
         for (const ui::json& choice : defs().choices("paintMode")) {
@@ -330,13 +331,21 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
         });
     }
 
-    // ---- The picked map's box: rename, convert, delete; where it shows; what reads it.
-    QVBoxLayout* boxRows = nullptr;
-    box_ = itemBox(host, &boxRows);
-    box_->setObjectName(QStringLiteral("mapBox"));
-    itemBar_ = new ListBar(box_);
-    itemBar_->setObjectName(QStringLiteral("mapItemBar"));
-    boxRows->addWidget(itemBar_);
+    // ---- A map row's info (its ⓘ): its kind, what reads it (Show in Graph), Use for (drive a
+    // setting with it), where it shows; its menu (Rename, Convert to, the image, Delete) is the
+    // row's last icon and the list's right-click.
+    infoPopup_ = new PopupPanel(this, 270);
+    infoPopup_->setObjectName(QStringLiteral("mapInfoPopup"));
+    box_ = infoPopup_;
+    QVBoxLayout* boxRows = infoPopup_->rows();
+    infoTitle_ = new QLabel(box_);
+    infoTitle_->setProperty("role", "listTitle");
+    boxRows->addWidget(infoTitle_);
+    kindLabel_ = new QLabel(box_);
+    kindLabel_->setObjectName(QStringLiteral("mapKind"));
+    kindLabel_->setProperty("role", "hint");
+    kindLabel_->setWordWrap(true);
+    boxRows->addWidget(kindLabel_);
     // Show on scalp: a switch (a check box, not a chip that reads as a choice), the channel beside it.
     // A field row: the name, the channel at the value column, the switch at the row's end.
     auto* showBox = new QFrame(box_);
@@ -374,7 +383,64 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     users_->setObjectName(QStringLiteral("mapUsers"));
     users_->setWordWrap(true);
     users_->setProperty("role", "hint");
-    boxRows->addWidget(users_);
+    boxRows->insertWidget(boxRows->indexOf(kindLabel_) + 1, users_);
+    {
+        // Read by: the Graph Editor on the node reading it; Use for ▾: a setting wired to it.
+        auto* links = new QHBoxLayout();
+        links->setContentsMargins(0, 0, 0, 0);
+        links->setSpacing(4);
+        openReader_ = new QPushButton(tr("Show in Graph"), box_);
+        openReader_->setObjectName(QStringLiteral("mapShowInGraph"));
+        openReader_->setToolTip(tr("Open the Graph Editor on the node that reads this map"));
+        connect(openReader_, &QPushButton::clicked, this, [this] {
+            const std::string picked = selectedMap();
+            if (!document_ || picked.empty()) return;
+            const auto users = document_->mapUsers(picked);
+            infoPopup_->hide();
+            if (!users.empty()) emit readerRequested(users.front().first);
+        });
+        links->addWidget(openReader_);
+        useFor_ = new QPushButton(tr("Use for  \u25BE"), box_);
+        useFor_->setObjectName(QStringLiteral("mapUseFor"));
+        useFor_->setToolTip(tr("Drive a setting with this map (the param reads it: its value at white, 0 at black)"));
+        useForMenu_ = new QMenu(useFor_);
+        useForMenu_->setObjectName(QStringLiteral("mapUseForMenu"));
+        useForMenu_->setToolTipsVisible(true);
+        connect(useForMenu_, &QMenu::aboutToShow, this, [this] { fillUseFor(useForMenu_); });
+        useFor_->setMenu(useForMenu_);
+        links->addWidget(useFor_);
+        links->addStretch(1);
+        boxRows->insertLayout(boxRows->indexOf(users_) + 1, links);
+        // Show on: the guides (a guide map's layer colors them), the strands (a scalp map read at
+        // each root), the scalp (the switch below, its channel beside it).
+        auto* showOn = new QLabel(tr("Show on"), box_);
+        showOn->setProperty("role", "hint");
+        boxRows->addWidget(showOn);
+        FlowLayout* chips = nullptr;
+        boxRows->addWidget(chipRow(box_, &chips));
+        const std::pair<const char*, QString> places[] = {{"guides", tr("Guides")}, {"strands", tr("Strands")}, {"scalp", tr("Scalp")}};
+        for (const auto& [key, label] : places) {
+            QToolButton* c = makeChip(label, key == std::string("guides")    ? tr("Color the guides by the map (a guide map)")
+                                             : key == std::string("strands") ? tr("Color the strands by the map at their roots (a scalp map)")
+                                                                              : tr("Show the map on the scalp (black to white)"),
+                                      box_);
+            c->setObjectName(QStringLiteral("paintShowOn_") + QLatin1String(key));
+            chips->addWidget(c);
+            showOn_[key] = c;
+            const std::string where = key;
+            connect(c, &QToolButton::clicked, this, [this, where](bool on) {
+                const std::string picked = selectedMap();
+                if (picked.empty()) return;
+                if (where == "scalp") show_->setChecked(on);
+                else emit showOnRequested(QString::fromStdString(where), picked, on);
+                refreshShowOn();
+            });
+        }
+    }
+    infoPopup_->onShow([this] {
+        refreshRows();
+        refreshShowOn();
+    });
     useMap_ = new QPushButton(tr("Add Map Node"), box_);
     useMap_->setObjectName(QStringLiteral("mapAddNode"));
     useMap_->setToolTip(tr("A Map node reading this map in the graph: wire it into the setting it should drive"));
@@ -384,7 +450,13 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
         if (!picked.empty()) emit mapNodeRequested(picked);
     });
     boxRows->addWidget(useMap_, 0, Qt::AlignLeft);
-    layout->addWidget(box_);
+    // Show on scalp is the Scalp chip (its switch kept, hidden); a color map's channel the scalp
+    // shows, last.
+    showLabel->setText(tr("Scalp shows"));
+    showLabel->setToolTip(qs(defs().get("choices/scalpChannel").value("tip", std::string())));
+    show_->hide();
+    boxRows->removeWidget(showBox);
+    boxRows->addWidget(showBox);
     fitRows(list_);
     setEnabled(false);
 }
@@ -393,10 +465,105 @@ void MapsPanel::setActions(const ui::Bindings& bindings, const ui::FillOptions& 
     bindings_ = bindings;
     options_ = options;
     options_.liveShortcuts = false;
-    // + New Map and Import in the header (glyphs), the picked map's rename, convert, delete in its box.
+    // + New Map and Import in the header (glyphs); a map's info and menu on its row.
     bar_->build(defs().get("lists/maps/bar"), bindings_, options_, ListBar::Part::Labeled);
-    itemBar_->build(defs().get("lists/maps/bar"), bindings_, options_, ListBar::Part::Glyphs);
-    if (QToolButton* convert = itemBar_->button("map.convert")) convert->setObjectName(QStringLiteral("paintConvert"));
+    shownKey_.clear();
+    refresh();
+}
+
+void MapsPanel::fillRowMenu(QMenu* menu) {
+    // A map's menu (lists.json's maps context): Rename first, Convert to, the image, Delete last.
+    ui::FillOptions options = options_;
+    options.resolve.state = menuState();
+    ui::fillMenu(menu, defs().get("lists/maps/context"), bindings_, options);
+}
+
+void MapsPanel::fillUseFor(QMenu* menu) {
+    // Use for: the common settings the graph has, then every other mappable param (the core's
+    // list, every host's: stroke.h settingTargetsJson); a param already reading it greyed.
+    menu->clear();
+    const std::string picked = selectedMap();
+    if (!document_ || picked.empty()) return;
+    nlohmann::json targets;
+    try {
+        targets = nlohmann::json::parse(settingTargetsJson(document_->graph().dump()));
+    } catch (const std::exception&) {
+        return;
+    }
+    std::set<std::pair<std::string, std::string>> used;
+    for (const auto& u : document_->mapUsers(picked)) used.insert(u);
+    auto add = [this, &used, &picked](QMenu* into, const nlohmann::json& t, const QString& text) {
+        const std::string node = t.value("node", std::string()), param = t.value("param", std::string());
+        QAction* a = into->addAction(text);
+        a->setToolTip(qs(t.value("hint", std::string())));
+        a->setEnabled(!node.empty() && !used.count({node, param}));
+        connect(a, &QAction::triggered, this, [this, node, param, picked] { useMapFor(picked, node, param); });
+    };
+    for (const nlohmann::json& t : targets.value("settings", nlohmann::json::array())) {
+        if (t.value("node", std::string()).empty()) continue;
+        add(menu, t, QStringLiteral("%1  (%2.%3)").arg(qs(t.value("label", std::string())), qs(t.value("node", std::string())),
+                                                       qs(t.value("param", std::string()))));
+    }
+    const nlohmann::json& others = targets.value("others", nlohmann::json::array());
+    if (!others.empty()) {
+        QMenu* sub = menu->addMenu(tr("Other"));
+        sub->setToolTipsVisible(true);
+        for (const nlohmann::json& t : others) add(sub, t, qs(t.value("id", std::string())));
+    }
+    if (menu->isEmpty()) menu->addAction(tr("The graph has no param a map can drive"))->setEnabled(false);
+}
+
+std::string MapsPanel::useMapFor(const std::string& map, const std::string& node, const std::string& param) {
+    // node.param reads the map (the editor's paramPaint with the map by name: every host's link),
+    // one undo step.
+    if (!document_) return "no groom";
+    ParamPaintRequest request;
+    request.name = map;
+    request.kind = selectedKind().empty() ? std::string("vertices") : selectedKind();
+    const std::string error = document_->paintParam(node, param, request);
+    if (!error.empty()) {
+        emit message(tr("Cannot use %1 for %2.%3: %4").arg(qs(map), qs(node), qs(param), qs(error)));
+        return error;
+    }
+    emit message(tr("%1.%2 reads %3 now").arg(qs(node), qs(param), qs(map)));
+    emit edited();
+    shownKey_.clear();
+    refresh();
+    return {};
+}
+
+void MapsPanel::refreshShowOn() {
+    const std::string picked = selectedMap();
+    const std::string kind = selectedKind();
+    for (const auto& [key, chip] : showOn_) {
+        const QSignalBlocker block(chip);
+        const bool can = !picked.empty() && (key == "guides" ? kind == "guides" : key == "strands" ? kind != "guides" : true);
+        chip->setEnabled(can);
+        chip->setChecked(can && (key == "scalp" ? show_->isChecked() : showState_ && showState_(key, picked)));
+    }
+}
+
+QWidget* MapsPanel::rowFor(QListWidgetItem* item, const QString& text, bool color, bool unused) {
+    // A map's row: its name (a lost image marked), RGBA on a color map, then ⓘ (a dot: nothing reads
+    // it yet) and the menu.
+    const std::string name = item->data(Qt::UserRole).toString().toStdString();
+    auto pick = [this, item] {
+        if (list_->currentItem() != item) list_->setCurrentItem(item);
+    };
+    QToolButton* info = popupButton(QStringLiteral("info"),
+                                    unused ? tr("Nothing reads %1 yet: Use for picks a setting").arg(qs(name))
+                                           : tr("What reads %1, Use for, where it shows").arg(qs(name)),
+                                    infoPopup_, pick, list_);
+    info->setObjectName(QStringLiteral("mapInfo_") + qs(name));
+    if (unused) {
+        info->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_info.svg"), theme::accentInk(), 14, devicePixelRatioF())));
+        info->setProperty("unused", true);
+    }
+    QToolButton* more = rowMenuButton(tr("Rename, convert, the image, delete"), [this](QMenu* menu) { fillRowMenu(menu); }, pick, list_);
+    more->setObjectName(QStringLiteral("mapMenu_") + qs(name));
+    auto* row = new ListRow(text, color ? QStringLiteral("RGBA") : QString(), {info, more}, list_);
+    if (item->data(kMissingRole).isValid()) row->label()->setStyleSheet(QStringLiteral("color: %1;").arg(theme::warningText().name()));
+    return row;
 }
 
 void MapsPanel::setDocument(GroomDocument* document) {
@@ -468,8 +635,14 @@ std::set<std::string> MapsPanel::menuState() const {
 
 QMenu* MapsPanel::contextMenu(const QPoint& pos) {
     fresh();
-    if (QListWidgetItem* item = list_->itemAt(pos)) list_->setCurrentItem(item);
-    return listMenu(this, defs().get("lists/maps/context"), bindings_, options_, menuState());
+    QListWidgetItem* item = list_->itemAt(pos);
+    if (!item) return listMenu(this, defs().get("lists/maps/bar"), bindings_, options_, {});  // (no map: New and Import)
+    list_->setCurrentItem(item);
+    auto* menu = new QMenu(this);
+    menu->setObjectName(QStringLiteral("listContextMenu"));
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    fillRowMenu(menu);
+    return menu;
 }
 
 void MapsPanel::editSelectedName() {
@@ -479,6 +652,7 @@ void MapsPanel::editSelectedName() {
         updating_ = true;
         item->setText(item->data(Qt::UserRole).toString());
         updating_ = false;
+        if (QWidget* row = list_->itemWidget(item)) row->hide();  // (the editor over the bare name)
         list_->editItem(item);
     }
 }
@@ -536,6 +710,9 @@ void MapsPanel::refresh() {
             key += "|" + m.name + ":" + m.kind + ":" + std::to_string(m.channels) + ":" + m.texture + ":" + missing.back();
         }
     }
+    if (document_) {
+        for (const PaintedMap& m : maps) key += document_->mapUsers(m.name).empty() ? "-" : "+";  // (the ⓘ's dot)
+    }
     if (key != shownKey_) {
         shownKey_ = key;
         ++rebuilds_;
@@ -546,11 +723,9 @@ void MapsPanel::refresh() {
             const PaintedMap& m = maps[i];
             const bool color = m.channels == kColorMap;
             const bool lost = !missing[i].empty();
-            auto* item = new QListWidgetItem(QStringLiteral("%1%2   (%3%4)")
-                                                 .arg(lost ? QStringLiteral("⚠ ") : QString(), qs(m.name), kindLabel(m.kind),
-                                                      color ? tr(", color") : QString()),
-                                             list_);
-            item->setIcon(mapIcon(color, devicePixelRatioF()));
+            // One line: the row widget shows the name (the item's own text empty, but while renamed).
+            auto* item = new QListWidgetItem(QString(), list_);
+            item->setSizeHint(QSize(0, 26));
             item->setData(Qt::UserRole, qs(m.name));
             item->setData(kKindRole, qs(m.kind));
             item->setData(kChannelsRole, color ? kColorMap : kGrayMap);
@@ -563,6 +738,8 @@ void MapsPanel::refresh() {
                 tip = tr("The image is missing: %1\nRight-click > Relink Image... to point the map at it.").arg(qs(missing[i]));
             }
             item->setToolTip(tip);
+            list_->setItemWidget(item, rowFor(item, (lost ? QStringLiteral("⚠ ") : QString()) + qs(m.name), color,
+                                              document_ && document_->mapUsers(m.name).empty()));
             if (m.name == current) list_->setCurrentItem(item);
         }
         if (!list_->currentItem() && list_->count() > 0) list_->setCurrentRow(0);
@@ -691,6 +868,7 @@ void MapsPanel::refreshRows() {
     if (document_) {
         show_->setChecked(!picked.empty() && document_->scalpMapDisplay() == picked);
         channel_->setVisible(color);
+        channel_->parentWidget()->setVisible(color);  // (the Scalp shows row)
         const int index = channel_->findData(qs(document_->scalpMapChannel()));
         channel_->setCurrentIndex(std::max(0, index));
         // What reads it (Maya's map_users).
@@ -699,13 +877,18 @@ void MapsPanel::refreshRows() {
             for (const auto& [node, param] : document_->mapUsers(picked)) users << qs(node) + QLatin1Char('.') + qs(param);
         }
         users_->setText(!users.isEmpty() ? tr("Read by %1").arg(users.join(QStringLiteral(", ")))
-                        : !picked.empty() ? tr("Not used by the graph yet.")
+                        : !picked.empty() ? tr("Not used by the graph yet: Use for picks a setting.")
                                           : QString());
+        openReader_->setEnabled(!users.isEmpty());
+        infoTitle_->setText(qs(picked));
+        const QString kindTip = choiceTip("mapKind", selectedKind());
+        kindLabel_->setText(picked.empty() ? QString()
+                                           : kindTip.section(QLatin1Char('.'), 0, 0) + (color ? tr(", in color") : QString()));
         users_->setToolTip(users.isEmpty() && !picked.empty()
                                ? tr("+ New Map > For a setting makes a map a setting reads; or in the Graph Editor, right-click a param > "
                                     "Paint, or add a Map node.")
                                : QString());
-        useMap_->setVisible(users.isEmpty() && !picked.empty());
+        useMap_->hide();  // (Use for wires it)
     } else {
         users_->clear();
         useMap_->hide();
@@ -715,10 +898,8 @@ void MapsPanel::refreshRows() {
     show_->setEnabled(has);
     valueRow_->setEnabled(has);
     colorRow_->setEnabled(has);
-    box_->setVisible(has);
+    useFor_->setEnabled(has);
     bar_->refresh();
-    itemBar_->refresh();
-    itemBar_->setTitle(QString());  // the box is the picked map's (the row above names it: its actions alone)
     updating_ = false;
 }
 

@@ -14,6 +14,14 @@ npm run dev
 Open http://localhost:5199 (or start `ui-lab` from `.claude/launch.json`). The app's icons and
 fonts are read straight from `hosts/app/icons` and `hosts/app/fonts`, so the mock shows what the app ships.
 
+## Simple (start here)
+
+The page that opens first is **Simple**: GroomLab as it sits in Maya (Maya's chrome around the
+Groom Tools dock, the Attribute Editor, the Graph Editor and a regrouped GroomLab menu), rearranged
+to show less at once: brushes in their four groups, a short tool card with the rest under "More
+settings", the active brush's keys in Maya's Help Line, Find Command over every action. Why, and
+what moved where: [SIMPLE.md](SIMPLE.md). The lab's **Today** tab is the older app-workspace mock.
+
 ## Use
 
 The **Design lab** panel on the right flips every option live:

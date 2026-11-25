@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""GUI test for the Tube tool's root-first mode in Maya (needs a Maya UI session): the core's root
+"""GUI test for the Roots brush (root-first tubes) in Maya (needs a Maya UI session): the core's root
 tool (root_tube_tool.h) run by GroomLab's brush context, its clicks through -debugStroke (the same
 code as the mouse, from view coordinates). Its behaviour itself is pinned by the core's tests
 (tests/engine/core/test_root_tube_tool.cpp); this checks Maya's wiring: the clicks reach the tool,
@@ -128,4 +128,53 @@ def edit_and_leave():
     check("and the guides as they were", groomlab.guides_visible(state["groom"]) == shown)
     tool.leave()
     check("leaving puts the tool away", not tool.poll().get("active"))
+    soon(roots_brush)
+
+
+def roots_brush():
+    # The Roots brush (its own tile, Create): picking it starts the root tool drawing a root (no
+    # brush stroke on the Tube brush's "shape" mode); its card the levels and the root block, no
+    # brush settings; another brush leaves root mode. Tube keeps its id and edits tubes only.
+    import groomlab
+    from groomlab.ui import palette, root_tube_tool
+    window = palette.show()
+    try:
+        window.groom_picked(window.grooms.findData(state["groom"]))
+        window.buttons["roots"].click()
+        tool = root_tube_tool.TOOL
+        check("Roots: the root tool, drawing a root",
+              tool.active() and tool.mode == "place" and window.tool == "roots"
+              and cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True) == "roots")
+        check("Roots' card: the levels and the root block, no brush settings",
+              window.root_card.root_block.isVisibleTo(window) and window.root_card.hierarchy_block.isVisibleTo(window)
+              and not window.brush_block.isVisibleTo(window) and not window.tube_panel.profile_block.isVisibleTo(window))
+        # The root tubes drawn as the guides display says: picking Roots sends its look, and a
+        # switch flipped there reaches the tool (and the groom) at once.
+        ctx = groomlab.BRUSH_CONTEXT
+        look = lambda: tuple(cmds.groomLabBrushCtx(ctx, query=True, **{k: True}) for k in  # noqa: E731
+                             ("tubeColors", "tubeLevelColors", "tubeShaded", "tubeWireframe"))
+        check("Roots takes the guides display's tube look",
+              look() == (window.tube_colors.isChecked(), window.tube_level_colors.isChecked(),
+                         window.tube_shaded.isChecked(), window.tube_wireframe.isChecked()))
+        window.tube_level_colors.setChecked(not window.tube_level_colors.isChecked())
+        check("Colors per level reaches the tool", look()[1] == window.tube_level_colors.isChecked())
+        window.tube_level_colors.setChecked(not window.tube_level_colors.isChecked())
+        window.root_card.select_root.click()
+        check("Select root from the card", tool.mode == "select" and window.tool == "roots")
+        window.root_card.select_root.click()
+        check("Select root again: back to Draw", tool.mode == "place" and window.tool == "roots")
+        window.poll()
+        check("the poll keeps the Roots tile on", window.tool == "roots" and window.buttons["roots"].isChecked())
+        window.buttons["shape"].click()
+        check("another brush leaves root mode", not tool.poll().get("active") and window.tool == "shape"
+              and cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True) == "shape")
+        check("Tube's card: no root block", not window.root_card.root_block.isVisibleTo(window)
+              and window.root_card.hierarchy_block.isVisibleTo(window))
+        window.buttons["comb"].click()  # another tool up: the tubes' look still reaches the tool
+        window.tube_colors.setChecked(not window.tube_colors.isChecked())
+        check("Colors with Comb up reaches the tool", look()[0] == window.tube_colors.isChecked())
+        window.tube_colors.setChecked(not window.tube_colors.isChecked())
+    finally:
+        window.stop_tool()
+        window.close()
     finish()

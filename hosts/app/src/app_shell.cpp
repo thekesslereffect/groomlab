@@ -9,6 +9,7 @@
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMainWindow>
 #include <QSplitter>
 #include <QStyle>
@@ -80,32 +81,10 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     for (Panel p : {Panel::Guides, Panel::Maps, Panel::Correctives, Panel::Brush}) {
         sections_[static_cast<std::size_t>(p)] = groomToolsWidget_;
     }
-    // The rail at the dock's outer edge holds the Groom Tools' pages (Tools, Paint, Correctives,
-    // Photos: their tab bar, hidden, keeps which is open); the open page's icon folds the dock.
-    auto* leftBody = new QWidget();
-    {
-        auto* row = new QHBoxLayout(leftBody);
-        row->setContentsMargins(0, 0, 0, 0);
-        row->setSpacing(0);
-        leftRail_ = new IconRail(IconRail::Side::Left, leftBody);
-        QTabBar* pages = groomToolsWidget_->tabBar();
-        // The pages' icons from the shared definitions (palette/tabs: the hosts' order and glyphs).
-        const ui::json& tabs = ui::Definitions::shipped().get("palette/tabs");
-        for (int i = 0; i < pages->count(); ++i) {
-            const std::string icon = i < static_cast<int>(tabs.size()) ? tabs[static_cast<std::size_t>(i)].value("icon", std::string("ui_tools")) : "ui_tools";
-            leftRail_->addPage(QStringLiteral(":/groomlab/icons/%1.svg").arg(QString::fromStdString(icon)), pages->tabText(i), QStringLiteral("leftRail_%1").arg(i));
-        }
-        groomToolsWidget_->setTabsShown(false);
-        pages->hide();
-        leftRail_->setCurrent(pages->currentIndex());
-        connect(leftRail_, &IconRail::picked, pages, &QTabBar::setCurrentIndex);
-        connect(pages, &QTabBar::currentChanged, leftRail_, &IconRail::setCurrent);
-        connect(leftRail_, &IconRail::collapseRequested, this, [this](bool fold) { foldDock(true, fold); });
-        leftContent_ = groomToolsWidget_;
-        row->addWidget(leftRail_);
-        row->addWidget(groomToolsWidget_, 1);
-    }
-    groomTools_ = makeDock(tr("Groom Tools"), "groomToolsDock", leftBody);
+    // No icon rail: the panel's labeled tabs are the one way to its pages (the Simple layout),
+    // Shift+1..4 their keys; Ctrl+[ folds the dock away.
+    leftContent_ = groomToolsWidget_;
+    groomTools_ = makeDock(tr("Groom Tools"), "groomToolsDock", groomToolsWidget_);
     window_->addDockWidget(Qt::LeftDockWidgetArea, groomTools_);
 
     // ---- Properties (right): the mode's panel.
@@ -245,12 +224,15 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     }
     // The rails are the side docks' outer edges: those docks stay at the sides (or float).
     for (QDockWidget* dock : {groomTools_, properties_}) dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-    // The Groom Tools' pages from the keyboard (Shift+1..4, as Ctrl+1..4 the Properties').
-    for (int i = 0; i < leftRail_->count(); ++i) {
+    // The Groom Tools' pages from the keyboard (Shift+1..4, as Ctrl+1..4 the Properties'), the key
+    // in each tab's tooltip.
+    QTabBar* pages = groomToolsWidget_->tabBar();
+    for (int i = 0; i < pages->count(); ++i) {
         auto* key = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key(Qt::Key_1 + i)), window_);
         key->setContext(Qt::WindowShortcut);
         connect(key, &QShortcut::activated, this, [this, i] { showToolsPage(i); });
-        leftRail_->setPageKey(i, key->key().toString(QKeySequence::NativeText));
+        const QString tip = pages->tabToolTip(i).isEmpty() ? pages->tabText(i) : pages->tabToolTip(i);
+        pages->setTabToolTip(i, QStringLiteral("%1 (%2)").arg(tip, key->key().toString(QKeySequence::NativeText)));
     }
 
     // ---- The Graph Editor (bottom): the canvas, the selected node's settings at its right.
@@ -282,8 +264,9 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     nodeSide_->setMinimumWidth(200);
     graphSplit_->setCollapsible(0, false);
     graphSplit_->setSizes({640, 360});
-    // Its bar, as Maya's Graph Editor's tool bar: Add Node, Presets, the status line, then the
-    // Edit menu (the three dots). The window fills the menus (the shared definitions: graph_ui.json).
+    // Its bar, as Maya's Graph Editor's (the Simple layout): Add Node, Presets, a find-node box, the
+    // status line, then the Edit menu (the three dots: undo, layout and Align, Wire Style, groups,
+    // units, theme, Snap). The window fills the menus (the shared definitions: graph_ui.json).
     graphBar_ = new QWidget();
     graphBar_->setObjectName(QStringLiteral("graphBar"));
     graphBar_->setAttribute(Qt::WA_StyledBackground, true);
@@ -306,8 +289,18 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
         graphPresets_ = menuButton(tr("Presets  \u25BE"), "graphPresetsButton",
                                    tr("Start from a look (hair, fur, feathers), a technique to learn from (blending, layers, maps, motion...), "
                                       "save this graph as a preset, or copy and paste the whole graph as text to share it"));
-        // The wire style and the Align buttons, as icons (the Graph Editor's bar, Maya's too).
-        auto iconButton = [this, row](const QString& icon, const QString& name, const QString& tip) {
+        // Find: a node by name (Enter: the first match picked and framed).
+        graphFind_ = new QLineEdit(graphBar_);
+        graphFind_->setObjectName(QStringLiteral("graphFind"));
+        graphFind_->setPlaceholderText(tr("Find node"));
+        graphFind_->setClearButtonEnabled(true);
+        graphFind_->setToolTip(tr("Find a node by its name or type: Enter picks the first match and frames it"));
+        graphFind_->setFixedWidth(150);
+        graphFind_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+        row->addWidget(graphFind_);
+        // The wire style and the Align buttons: in the Edit menu (graph_ui.json's editMenu holds
+        // both), not on the bar. Made and kept here, hidden: scripts and the tests read them.
+        auto iconButton = [this](const QString& icon, const QString& name, const QString& tip) {
             auto* b = new QToolButton(graphBar_);
             b->setObjectName(name);
             b->setToolTip(tip);
@@ -315,35 +308,18 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
             b->setIconSize(QSize(18, 18));
             b->setAutoRaise(true);
             b->setToolButtonStyle(Qt::ToolButtonIconOnly);
-            // (They give way in a narrow dock: they never set its least width.)
-            b->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-            row->addWidget(b);
+            b->hide();
             return b;
         };
-        auto divider = [this, row] {
-            auto* line = new QFrame(graphBar_);
-            line->setFrameShape(QFrame::VLine);
-            line->setFixedHeight(16);
-            line->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-            line->setStyleSheet(QStringLiteral("color: %1;").arg(theme::divider().name()));
-            row->addSpacing(2);
-            row->addWidget(line);
-            row->addSpacing(2);
-        };
-        divider();
         graphWire_ = iconButton(QStringLiteral("wire_smooth"), QStringLiteral("graphWireButton"), tr("Wire style: Smooth, Square or Rounded"));
         graphWire_->setPopupMode(QToolButton::InstantPopup);
-        divider();
         const std::pair<const char*, QString> aligns[] = {
             {"left", tr("Align left edges")}, {"centerX", tr("Align centers (a vertical line)")}, {"right", tr("Align right edges")},
             {"distributeY", tr("Space evenly down")}, {nullptr, {}},
             {"top", tr("Align top edges")}, {"centerY", tr("Align middles (a horizontal line)")}, {"bottom", tr("Align bottom edges")},
             {nullptr, {}}, {"distributeX", tr("Space evenly across")}};
         for (const auto& [mode, tip] : aligns) {
-            if (!mode) {
-                divider();
-                continue;
-            }
+            if (!mode) continue;
             graphAlign_.push_back(iconButton(QStringLiteral("align_%1").arg(QLatin1String(mode)), QStringLiteral("graphAlign_%1").arg(QLatin1String(mode)), tip));
         }
         graphStatus_ = new QLabel(graphBar_);
@@ -365,9 +341,9 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
         graphSnap_->setToolTip(tr("Nodes and pins you drag land on the grid"));
         graphSnap_->setCheckable(true);
         graphSnap_->setAutoRaise(true);
-        row->addWidget(graphSnap_);
+        graphSnap_->hide();  // (Snap to Grid: a checkable entry of the Edit menu)
         graphEdit_ = menuButton(QStringLiteral("\u00B7\u00B7\u00B7"), "graphEditButton",
-                                tr("Edit: undo, framing, layout, groups, Copy and Paste Graph, units, theme"));
+                                tr("Edit: undo, framing, layout and Align, Wire Style, groups, Copy and Paste Graph, units, theme, Snap"));
         const QString chip = theme::uiColor("hover").name();
         graphBar_->setStyleSheet(QStringLiteral("#graphBar { background: %1; border-bottom: 1px solid %2; }"
                                                 "#graphBar QToolButton { color: %3; font-weight: 500; padding: 3px 9px; border: none; border-radius: 5px; }"
@@ -428,9 +404,9 @@ void AppShell::resetLayout() {
     foldDock(false, false);
     // The side docks a share of the window's width, the Graph Editor a third of its height.
     const int w = std::max(window_->width(), 800), h = std::max(window_->height(), 500);
-    // (each with its icon rail on top of its content's width)
+    // (Properties with its icon rail on top of its content's width)
     window_->resizeDocks({groomTools_, properties_},
-                         {std::clamp(w * 18 / 100, 210, 320) + IconRail::railWidth(), std::clamp(w * 21 / 100, 250, 360) + IconRail::railWidth()},
+                         {std::clamp(w * 18 / 100, 210, 320), std::clamp(w * 21 / 100, 250, 360) + IconRail::railWidth()},
                          Qt::Horizontal);
     window_->resizeDocks({graphDock_}, {std::clamp(h * 34 / 100, 200, 420)}, Qt::Vertical);
     // The graph about two thirds of the Graph Editor, its node's settings the rest (proportions:
@@ -473,10 +449,23 @@ void AppShell::setMode(Mode mode) {
 
 void AppShell::foldDock(bool left, bool fold) {
     // Folded: the dock down to its rail (the viewport takes the room); unfolded: back to its width.
-    QDockWidget* dock = left ? groomTools_ : properties_;
-    QWidget* content = left ? leftContent_ : rightContent_;
-    IconRail* rail = left ? leftRail_ : rightRail_;
-    int& width = left ? leftWidth_ : rightWidth_;
+    // The Groom Tools have no rail: folded, the dock is away altogether.
+    if (left) {
+        if (fold == folded(true)) return;
+        if (fold) {
+            if (groomTools_->isFloating()) return;  // (a floating dock does not fold)
+            leftWidth_ = groomTools_->width();
+            groomTools_->hide();
+        } else {
+            groomTools_->show();
+            window_->resizeDocks({groomTools_}, {std::max(leftWidth_, theme::component("iconRail", "openMin", 220))}, Qt::Horizontal);
+        }
+        return;
+    }
+    QDockWidget* dock = properties_;
+    QWidget* content = rightContent_;
+    IconRail* rail = rightRail_;
+    int& width = rightWidth_;
     if (fold == rail->collapsed()) return;
     if (fold) {
         if (content->isVisible()) width = dock->width();
@@ -499,7 +488,7 @@ void AppShell::showToolsPage(int index) {
 }
 
 void AppShell::setFoldKeys(const QString& left, const QString& right) {
-    leftRail_->setFoldKey(left);
+    (void)left;  // (the Groom Tools have no rail to show it: View > Panels does)
     rightRail_->setFoldKey(right);
 }
 
@@ -514,20 +503,21 @@ void AppShell::toggleFold(bool left) {
     foldDock(left, !folded(left));
 }
 
-bool AppShell::folded(bool left) const { return (left ? leftRail_ : rightRail_)->collapsed(); }
+bool AppShell::folded(bool left) const { return left ? groomTools_->isHidden() : rightRail_->collapsed(); }
 
 int AppShell::openWidth(bool left) const {
-    const QWidget* content = left ? leftContent_ : rightContent_;
-    return content->isVisible() ? (left ? groomTools_ : properties_)->width() : (left ? leftWidth_ : rightWidth_);
+    if (left) return groomTools_->isHidden() ? leftWidth_ : groomTools_->width();
+    return rightContent_->isVisible() ? properties_->width() : rightWidth_;
 }
 
 void AppShell::restoreFold(bool left, bool fold, int width) {
-    if (fold) foldDock(left, true);
+    if (fold && !left) foldDock(left, true);  // (the Groom Tools: hidden with the saved state)
     (left ? leftWidth_ : rightWidth_) = width;  // (the width it opens at, not the rail's)
 }
 
 void AppShell::placeRail(bool left, Qt::DockWidgetArea area) {
-    IconRail* rail = left ? leftRail_ : rightRail_;
+    if (left) return;  // (the Groom Tools have no rail)
+    IconRail* rail = rightRail_;
     if (area != Qt::LeftDockWidgetArea && area != Qt::RightDockWidgetArea) return;
     const IconRail::Side side = area == Qt::LeftDockWidgetArea ? IconRail::Side::Left : IconRail::Side::Right;
     if (side == rail->side()) return;
@@ -703,7 +693,7 @@ void AppShell::showPanel(Panel which, bool show) {
                 groomTools_->show();
                 groomTools_->raise();
                 groomToolsWidget_->showTab(tab);
-            } else if (which != Panel::Brush && which != Panel::Guides && groomToolsWidget_->currentTab() == tab) {
+            } else if (which == Panel::Maps && groomToolsWidget_->currentTab() == tab) {
                 groomToolsWidget_->showTab(QStringLiteral("tools"));
             }
             break;
@@ -738,7 +728,7 @@ bool AppShell::panelShown(Panel which) const {
         case Panel::Guides:
             return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("tools");
         case Panel::Maps: return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("paint");
-        case Panel::Correctives: return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("correctives");
+        case Panel::Correctives: return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("tools");
         case Panel::Brush: return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("tools");
         case Panel::Display: return !properties_->isHidden() && propertiesStack_->currentWidget() == displayPage_;
         case Panel::Node: return !graphDock_->isHidden();

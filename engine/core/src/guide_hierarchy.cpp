@@ -2188,7 +2188,33 @@ CustomTubeShapePtr GuideHierarchy::tubeShape(const std::string& name) const {
     return it == tubeShapes_.end() ? nullptr : it->second;
 }
 
+std::vector<CustomTubeShapePtr> GuideHierarchy::libraryTubeShapes() const {
+    std::vector<CustomTubeShapePtr> out;
+    for (const auto& [name, shape] : tubeShapes_) {
+        if (!isOwnedTubeShape(name)) out.push_back(shape);
+    }
+    return out;
+}
+
+namespace {
+std::string ownedRefusal(const std::string& name) {
+    return "'" + name + "' is a root tube's drawn root, not a library shape: the Roots brush reshapes it";
+}
+}  // namespace
+
 CustomTubeShapePtr GuideHierarchy::setTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth) {
+    if (isOwnedTubeShape(name)) throw std::invalid_argument(ownedRefusal(name));
+    return storeTubeShape(name, points, smooth);
+}
+
+CustomTubeShapePtr GuideHierarchy::setOwnedTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth) {
+    if (!isOwnedTubeShape(name)) {
+        throw std::invalid_argument("'" + name + "' is not a root tube's shape (" + kOwnedTubeShapePrefix + "<n>)");
+    }
+    return storeTubeShape(name, points, smooth);
+}
+
+CustomTubeShapePtr GuideHierarchy::storeTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth) {
     CustomTubeShapePtr shape = makeCustomTubeShape(name, points, smooth);  // throws before anything changes
     invalidateHash();
     tubeShapes_[name] = shape;
@@ -2203,7 +2229,11 @@ CustomTubeShapePtr GuideHierarchy::setTubeShape(const std::string& name, const s
 void GuideHierarchy::renameTubeShape(const std::string& from, const std::string& to) {
     const auto it = tubeShapes_.find(from);
     if (it == tubeShapes_.end()) throw std::invalid_argument("no tube shape named '" + from + "'");
+    if (isOwnedTubeShape(from)) throw std::invalid_argument(ownedRefusal(from));
     if (from == to) return;
+    if (isOwnedTubeShape(to)) {
+        throw std::invalid_argument("'" + std::string(kOwnedTubeShapePrefix) + "' names are kept for root tubes' drawn roots");
+    }
     checkTubeShapeName(to);
     if (tubeShapes_.count(to)) throw std::invalid_argument("a tube shape named '" + to + "' exists");
     invalidateHash();
@@ -2255,6 +2285,7 @@ void GuideHierarchy::setRootSubdivisions(std::vector<RootSubdivisionRecord> reco
 
 std::size_t GuideHierarchy::removeTubeShape(const std::string& name) {
     if (!tubeShapes_.count(name)) throw std::invalid_argument("no tube shape named '" + name + "'");
+    if (isOwnedTubeShape(name)) throw std::invalid_argument(ownedRefusal(name) + " (it goes with its last guide)");
     invalidateHash();
     tubeShapes_.erase(name);
     std::size_t reverted = 0;
@@ -3048,15 +3079,23 @@ TubeTargets tubeTargetsOf(const GuideHierarchy& h, const std::vector<GuideId>& s
     auto note = [](std::vector<std::string>& into, const std::string& name) {
         if (std::find(into.begin(), into.end(), name) == into.end()) into.push_back(name);
     };
+    // (The guides split into a level below: a split tube's parent.)
+    std::set<GuideId> split;
+    for (const HierarchyGuide& g : h.guides()) {
+        if (g.isChild() && isRootTube(g.tube, 0)) split.insert(g.parent);
+    }
     for (const GuideId id : out.guides) {
-        const TubeProfile& tube = h.guide(id)->tube;
+        const HierarchyGuide& g = *h.guide(id);
+        const TubeProfile& tube = g.tube;
         note(out.shapes, tube.shapeName());
         note(out.midShapes, tube.midShape ? tube.midShape->name() : std::string());
         note(out.tipShapes, tube.tipShape ? tube.tipShape->name() : std::string());
+        if (isRootTube(tube, 0)) ++out.rootTubes;
+        if ((g.isChild() && isRootTube(tube, 0)) || split.count(id)) ++out.splitTubes;
     }
     for (const HierarchyGuide& g : h.guides()) {
         std::vector<std::string> own;
-        note(own, g.tube.shapeName());
+        if (!isOwnedTubeShape(g.tube.shapeName())) note(own, g.tube.shapeName());
         if (g.tube.midShape) note(own, g.tube.midShape->name());
         if (g.tube.tipShape) note(own, g.tube.tipShape->name());
         for (const std::string& name : own) {

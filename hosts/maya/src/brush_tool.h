@@ -131,6 +131,8 @@ public:
 
     void getClassName(MString& name) const override;  // "groomLabBrush": Tool Settings MEL procs
     void toolOnSetup(MEvent& event) override;
+    // Maya's Help Line while the brush is up: the active brush's keys (-helpText; empty: the general text).
+    void setHelpText(const MString& text);
     void toolOffCleanup() override;
     // Esc: while the brushes shape a Sculpt node (Sculpt Sections, Brush This Node's Guides) and no
     // stroke is going, they shape the guides again (groomlab.sculpts.leave, on idle).
@@ -174,6 +176,7 @@ public:
     bool tubeLevelColors = false;
     // The Tube card's Always visible: the tubes drawn whichever tool is up (GroomShape::setTubesAlwaysVisible).
     bool tubesAlwaysVisible = false;
+    MString helpText_;  // (setHelpText)
 
     BrushToolSettings& settings() { return tool_.settings; }
     BrushTool& brushTool() { return tool_; }  // (Clone: its source, Pick Source)

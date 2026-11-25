@@ -16,11 +16,13 @@
 // (invalidate: a stroke marks it stale; it catches up when it shows or is asked for its group).
 
 #include <functional>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <QColor>
 #include <QString>
 #include <QWidget>
 
@@ -44,6 +46,7 @@ namespace groomlab::app {
 class GroomDocument;
 class ListBar;
 class ListHeader;
+class PopupPanel;
 class ValueSlider;
 
 class GuidesPanel : public QWidget {
@@ -135,11 +138,16 @@ public:
     // The pieces (tests, screenshots).
     QTreeWidget* tree() const { return tree_; }
     ListHeader* header() const { return header_; }
-    ListBar* bar() const { return bar_; }          // the header's: + New Group
-    ListBar* itemBar() const { return itemBar_; }  // the picked group's: Rename, Select, Delete
-    QFrame* groupBox() const { return box_; }
-    QPushButton* editsButton() const { return edits_; }
+    ListBar* bar() const { return bar_; }  // the header's: + New Group
+    // A row's segments icon's popup: Segments, By length, what it applies to.
+    PopupPanel* segmentsPopup() const { return segmentsPopup_; }
+    QFrame* groupBox() const { return box_; }  // (the segments popup)
+    QPushButton* editsButton() const { return edits_; }  // (not shown: the rows' menus hold the edits)
     QMenu* editsMenu() const { return editsMenu_; }
+    // A row's menu as its ⋯ opens it (lists.json's groups context, Generate Children a submenu of
+    // counts) for the current group.
+    void fillRowMenu(QMenu* menu);
+    QColor groupColor(const std::string& name) const;  // the color the group's row (and the viewport) shows it in
 
 signals:
     // The document's guides changed through this panel: the host evaluates and redraws.
@@ -157,6 +165,7 @@ private:
     // An Edit Guides op of the editor run as one edit (its label every host's), `done` what it did.
     bool guideOp(const char* what, const GuideOp& op, GuideOpResult* done = nullptr);
     void itemChanged(QTreeWidgetItem* item, int column);
+    QWidget* rowIcons(QTreeWidgetItem* item, int segments, bool shown);
     std::string groupOf(QTreeWidgetItem* item) const;
     void fresh() const;  // refreshed first when stale
     void refreshRows();  // the selection line, the enabled states (cheap)
@@ -177,7 +186,9 @@ private:
     QLabel* emptyIcon_ = nullptr;  // the empty state's icon over it
     QPushButton* bake_ = nullptr;  // ... the graph makes guides: bake them to brush
     std::string graphGuidesNode() const;  // the last node handing on guides ("" none)
-    ListBar* itemBar_ = nullptr;
+    PopupPanel* segmentsPopup_ = nullptr;
+    QLabel* segmentsScope_ = nullptr;
+    std::map<std::string, QColor> colors_;  // each group's row color
     QLabel* selection_ = nullptr;
     QPushButton* edits_ = nullptr;
     QMenu* editsMenu_ = nullptr;

@@ -1216,6 +1216,7 @@ def step_brush_pack():
     tools.activate("paint")
     check("Paint picked in the Groom Tools is the context's mode",
           cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True) == "paint")
+    tools.more_section.set_expanded(True)  # (the curves are in the card's More settings)
     check("the Paint card shows the falloff curve, not the root-to-tip curve",
           tools.falloff_curve_box.isVisibleTo(tools) and not tools.strength_curve_box.isVisibleTo(tools))
     tools.activate("comb")
@@ -1229,6 +1230,9 @@ def step_brush_pack():
     check("the symmetry box sends topology",
           cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, symmetry=True) == "topology")
     tools.symmetry.setChecked(False)
+    check("the brush's keys are in Maya's Help Line",
+          "radius / strength" in tools.help_text("comb") and tools.help_text("comb").startswith("Comb"))
+    tools.more_section.set_expanded(False)
     tools.stop_tool()
     later(step_budgets)
 

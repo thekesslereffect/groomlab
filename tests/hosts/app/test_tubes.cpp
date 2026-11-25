@@ -15,10 +15,13 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QIcon>
+#include <QImage>
 #include <QResizeEvent>
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QScrollArea>
@@ -47,6 +50,7 @@
 #include "param_panel.h"
 #include "tube_panel.h"
 #include "tube_shape_editor.h"
+#include "theme.h"
 
 namespace groomlab::app {
 namespace {
@@ -447,24 +451,54 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     EXPECT_TRUE(card->isAncestorOf(tubes)) << "the tubes' blocks are the card's";
     EXPECT_FALSE(tubes->isHidden());
     EXPECT_EQ(tubes->mode(), TubePanel::Mode::Edit);
-    // Shape's Profile block: the picker with Apply beside it, the outline editor (at most 200 px
-    // square), Mirror and Smooth (a library shape's); the library's glyphs in its header.
+    // No job switch any more (Maya's): the levels' row, what the brush paints, the brush, then the
+    // Profile block always and Selected tubes folded; the root block is the Roots brush's.
+    EXPECT_EQ(card->findChild<QWidget*>(QStringLiteral("tubeJobs")), nullptr);
     CardBlock* profile = tubes->profileBlock();
     EXPECT_FALSE(profile->isHidden());
+    EXPECT_FALSE(tubes->levelsBlock()->isHidden());
+    EXPECT_TRUE(tubes->rootsBlock()->isHidden()) << "the Roots brush's";
+    EXPECT_FALSE(tubes->selectedBlock()->isHidden());
+    EXPECT_TRUE(tubes->selectedBlock()->folded()) << "Selected tubes: folded";
+    // The Profile block: Root, Mid and Tip tiles (their outlines as icons), the editor (132 px)
+    // beside the picked profile's picker, Apply and Hold; the library in a ⋯ menu.
+    EXPECT_TRUE(profile->titleLabel()->isHidden()) << "untitled";
+    for (int k = 0; k < 3; ++k) {
+        QToolButton* tile = tubes->profileTile(k);
+        ASSERT_NE(tile, nullptr);
+        EXPECT_TRUE(profile->isAncestorOf(tile));
+        EXPECT_FALSE(tile->icon().isNull()) << "its outline";
+    }
+    EXPECT_TRUE(tubes->profileTile(0)->isChecked());
     EXPECT_TRUE(profile->isAncestorOf(tubes->editor()));
     EXPECT_TRUE(profile->isAncestorOf(tubes->applyButton()));
     EXPECT_TRUE(profile->isAncestorOf(tubes->shapeBox()));
-    EXPECT_EQ(tubes->shapeBox()->parentWidget(), tubes->applyButton()->parentWidget()) << "Apply beside the picker";
-    EXPECT_LE(tubes->editor()->maximumWidth(), 200);
-    EXPECT_LE(tubes->editor()->height(), 200);
+    EXPECT_EQ(tubes->shapeBox()->parentWidget(), tubes->applyButton()->parentWidget()) << "Apply under the picker";
+    EXPECT_EQ(tubes->editor()->width(), 132);
+    tubes->setActiveProfile(2);
+    EXPECT_TRUE(tubes->profileBox(2)->isVisibleTo(profile)) << "the Tip page beside the editor";
+    EXPECT_FALSE(tubes->shapeBox()->isVisibleTo(profile));
+    tubes->setActiveProfile(0);
     for (QWidget* w : {static_cast<QWidget*>(tubes->newButton()), static_cast<QWidget*>(tubes->renameButton()),
                        static_cast<QWidget*>(tubes->duplicateButton()), static_cast<QWidget*>(tubes->deleteButton())}) {
         EXPECT_TRUE(profile->isAncestorOf(w));
-        EXPECT_EQ(qobject_cast<QToolButton*>(w)->property("role").toString(), QStringLiteral("glyph"));
+        EXPECT_TRUE(w->isHidden()) << "the library's actions: its ⋯ menu";
     }
-    EXPECT_TRUE(tubes->selectedBlock()->isAncestorOf(tubes->widthSlider())) << "Selected guides: Width, Flatness, Twist";
+    {
+        QMenu menu;
+        tubes->fillLibraryMenu(&menu);
+        QStringList texts;
+        for (QAction* a : menu.actions()) {
+            if (!a->isSeparator()) texts << a->text();
+        }
+        EXPECT_EQ(texts, (QStringList{QStringLiteral("Rename..."), QStringLiteral("New Shape"), QStringLiteral("Duplicate"),
+                                      QStringLiteral("Delete Shape")}));
+        EXPECT_TRUE(menu.actions().back()->property("destructive").toBool()) << "Delete Shape in red";
+    }
+    EXPECT_TRUE(tubes->selectedBlock()->isAncestorOf(tubes->widthSlider())) << "Selected tubes: Width, Flatness, Twist";
     EXPECT_TRUE(tubes->selectedBlock()->isAncestorOf(tubes->smoothButton()));
     EXPECT_TRUE(tubes->tubeBlock()->isHidden());
+    // What the brush paints on the tubes (Paints, untitled).
     auto* box = card->findChild<QWidget*>(QStringLiteral("tubeChannelBox"));
     ASSERT_NE(box, nullptr);
     EXPECT_FALSE(box->isHidden());
@@ -495,6 +529,17 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     EXPECT_FALSE(tubes->preview()->editable()) << "a small read-only preview";
     tools.setTool("select");
     EXPECT_TRUE(tubes->isHidden()) << "Select's card is the selection's: the tubes are the Tube brush's";
+    // The Roots brush: the levels' row and the root block, no brush, no Profile.
+    session.setTool("roots");
+    tools.setTool("roots");
+    EXPECT_FALSE(tubes->isHidden());
+    EXPECT_EQ(tubes->mode(), TubePanel::Mode::Roots);
+    EXPECT_FALSE(tubes->rootsBlock()->isHidden());
+    EXPECT_FALSE(tubes->levelsBlock()->isHidden());
+    EXPECT_TRUE(tubes->profileBlock()->isHidden());
+    EXPECT_TRUE(tubes->selectedBlock()->isHidden());
+    EXPECT_TRUE(card->findChild<CardBlock*>(QStringLiteral("brushBlock"))->isHidden());
+    EXPECT_TRUE(tubes->drawRootButton()->isChecked()) << "the Roots brush picked: its next click draws a root";
 }
 
 TEST(AppGroomTools, PickingAToolKeepsThePanelsScroll) {
@@ -563,15 +608,69 @@ TEST(AppGroomTools, PickingAToolKeepsThePanelsScroll) {
     EXPECT_EQ(bar->value(), 0);
 }
 
+TEST(AppGroomTools, PillsWrapLeftToRightAtTheirOwnWidths) {
+    // A pill row (the tool card's toggles, the guides' display popup): each pill its text's width,
+    // 6 px apart, a new row when the next would run past the edge; a pill a row's height less 2,
+    // fully round, the theme's sheet giving its off and on looks.
+    QWidget host;
+    host.setStyleSheet(theme::styleSheet());
+    FlowLayout* flow = nullptr;
+    QWidget* row = pillRow(&host, &flow);
+    std::vector<QToolButton*> pills;
+    for (const char* text : {"Mirror", "Pressure", "Keep off scalp", "Stretch"}) {
+        pills.push_back(makePill(QString::fromLatin1(text), {}, row));
+        flow->addWidget(pills.back());
+    }
+    pills[1]->setChecked(true);
+    for (QToolButton* p : pills) p->ensurePolished();
+    const int height = theme::rowHeight() - 2;
+    EXPECT_EQ(pills[0]->maximumHeight(), height) << "a row's height less 2";
+    EXPECT_LT(pills[0]->sizeHint().width(), pills[2]->sizeHint().width()) << "each its text's width";
+    const QString sheet = theme::styleSheet();
+    EXPECT_TRUE(sheet.contains(QStringLiteral("border-radius: %1px").arg((theme::rowHeight() - 2) / 2)));
+    EXPECT_TRUE(sheet.contains(theme::uiColor("selection").name())) << "on: the selection fill";
+    // Wide: one row, left to right, 6 px apart.
+    int wide = 0;
+    for (QToolButton* p : pills) wide += p->sizeHint().width() + 6;
+    flow->setGeometry(QRect(0, 0, wide, flow->heightForWidth(wide)));
+    for (std::size_t i = 0; i < pills.size(); ++i) {
+        EXPECT_EQ(pills[i]->width(), pills[i]->sizeHint().width());
+        EXPECT_EQ(pills[i]->height(), height);
+        EXPECT_EQ(pills[i]->y(), 0);
+        if (i > 0) EXPECT_EQ(pills[i]->x(), pills[i - 1]->geometry().right() + 1 + 6);
+    }
+    EXPECT_EQ(flow->heightForWidth(wide), height);
+    // Narrow: the pill that would run past the edge starts the next row at the left.
+    const int narrow = pills[0]->sizeHint().width() + 6 + pills[1]->sizeHint().width() + 4;
+    flow->setGeometry(QRect(0, 0, narrow, flow->heightForWidth(narrow)));
+    EXPECT_EQ(pills[1]->y(), 0);
+    EXPECT_EQ(pills[2]->x(), 0);
+    EXPECT_EQ(pills[2]->y(), height + 6);
+    EXPECT_GT(flow->heightForWidth(narrow), flow->heightForWidth(wide));
+    // In a popup (the guides' display): as tall as its pills wrapped at the popup's own width.
+    QWidget anchor;
+    anchor.resize(20, 20);
+    anchor.show();
+    PopupPanel popup(nullptr, narrow + 16);
+    popup.setStyleSheet(theme::styleSheet());
+    FlowLayout* popupFlow = nullptr;
+    QWidget* popupRow = pillRow(&popup, &popupFlow);
+    for (const char* text : {"Mirror", "Pressure", "Keep off scalp", "Stretch"}) popupFlow->addWidget(makePill(QString::fromLatin1(text), {}, popupRow));
+    popup.add(popupRow);
+    popup.showUnder(&anchor);
+    EXPECT_GE(popup.height(), popupFlow->heightForWidth(narrow) + 16) << "the wrapped rows fit";
+    popup.hide();
+}
+
 TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
-    // The grid: every tile one height and minimum width (labeled 56 x 62, icons alone 46 x 46; 32 px
-    // icons); as many to a row as (width + spacing) / (tile + spacing), at most four, the row's
-    // width split evenly between them.
+    // The grid: every tile one height and minimum width (labeled 50 x 56, icons alone 44 x 44; 28 px
+    // two-tone icons in their category's color); as many to a row as (width + spacing) / (tile +
+    // spacing), at most five, the row's width split evenly between them.
     GroomTools tools;
     tools.setGroomName(QStringLiteral("sample"));
-    EXPECT_TRUE(tools.topPart()->isAncestorOf(tools.tabBar()));
+    EXPECT_FALSE(tools.scrollArea()->isAncestorOf(tools.tabBar())) << "the pages' tabs pinned under the header";
     EXPECT_TRUE(tools.topPart()->isAncestorOf(tools.tile("comb")));
-    EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.topPart())) << "the panel scrolls: the tabs and the grid too";
+    EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.topPart())) << "the panel scrolls: the grid too";
     // The header pinned over the scroll area (issue 73): the eyes, the Graph Editor and More stay in view.
     for (QWidget* w : {static_cast<QWidget*>(tools.eyeButton()), static_cast<QWidget*>(tools.guidesEyeButton()),
                        static_cast<QWidget*>(tools.graphButton())}) {
@@ -583,11 +682,11 @@ TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
     ASSERT_NE(grid, nullptr);
     for (const bool labels : {true, false}) {
         tools.setTileLabels(labels);
-        const QSize tile = labels ? QSize(56, 62) : QSize(46, 46);
+        const QSize tile = labels ? QSize(50, 56) : QSize(44, 44);
         EXPECT_EQ(grid->tile(), tile) << "labels " << labels;
         for (const int width : {120, 200, 252, 320, 480}) {
             const int columns = grid->columnsFor(width);
-            EXPECT_EQ(columns, std::min(4, (width + grid->spacing()) / (tile.width() + grid->spacing()))) << width << ": as many as fit, at most four";
+            EXPECT_EQ(columns, std::min(5, (width + grid->spacing()) / (tile.width() + grid->spacing()))) << width << ": as many as fit, at most five";
             grid->resize(width, grid->heightForWidth(width));
             QResizeEvent resized(grid->size(), QSize());  // a hidden widget gets its resize event on show
             QCoreApplication::sendEvent(grid, &resized);
@@ -607,10 +706,26 @@ TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
         EXPECT_GT(grid->heightForWidth(120), grid->heightForWidth(480)) << "narrower: more rows";
     }
     QAbstractButton* comb = tools.tile("comb");
-    EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(32, 32));
-    // The Paint tab: Paint is one full-width button over the maps, not a tile in a grid.
+    EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(28, 28));
+    // Two-tone artwork in the tool's category color (the theme's icons.shape for Comb), greyed when
+    // the tile is disabled (a tool that can't edit the picked corrective).
+    auto hasColor = [](const QImage& image, const QColor& color) {
+        for (int y = 0; y < image.height(); ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+                const QColor c = image.pixelColor(x, y);
+                if (c.alpha() > 240 && std::abs(c.red() - color.red()) + std::abs(c.green() - color.green()) + std::abs(c.blue() - color.blue()) < 24) return true;
+            }
+        }
+        return false;
+    };
+    const QColor shape = theme::toolIconColor(groomlab::BrushCategory::Shape, "comb");
+    const QIcon combIcon = comb->icon();
+    EXPECT_TRUE(hasColor(combIcon.pixmap(QSize(24, 24), QIcon::Normal, QIcon::Off).toImage(), shape)) << "the category's color at rest";
+    EXPECT_FALSE(hasColor(combIcon.pixmap(QSize(24, 24), QIcon::Disabled, QIcon::Off).toImage(), shape)) << "greyed when disabled";
+    // The Paint tab is painting: no Paint tile shows (it is kept, hidden, not in a grid).
     auto* paint = qobject_cast<QToolButton*>(tools.tile("paint"));
     ASSERT_NE(paint, nullptr);
+    EXPECT_FALSE(paint->isVisibleTo(&tools));
     EXPECT_EQ(qobject_cast<ToolGrid*>(paint->parentWidget()), nullptr);
     EXPECT_EQ(paint->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
     EXPECT_EQ(paint->sizePolicy().horizontalPolicy(), QSizePolicy::Expanding);
@@ -630,17 +745,19 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
     BrushPanel* card = tools.card();
     using Titles = std::vector<std::string>;
     const std::vector<std::pair<std::string, Titles>> cases = {
-        {"comb", {"Brush", "Applies to"}},  // Stretch: a Brush chip
-        {"smooth", {"Brush", "Evens out", "Applies to"}},
-        {"flow", {"Brush", "Flow", "Applies to"}},  // Mirror (issue 105)
-        {"place", {"New guides", "Tube", "Applies to"}},
-        {"draw", {"New guides", "Tube", "Applies to"}},
-        {"shape", {"Brush", "Paints", "Tube roots", "Tube hierarchy", "Profile", "Selected guides", "Applies to"}},
-        {"select", {"Applies to"}},
-        {"erase", {"Brush", "Erases", "Applies to"}},
-        {"lengths", {"Keys", "Applies to"}},
-        {"part", {"Parts", "Applies to"}},
-        {"freeze", {"Brush", "Applies to"}},
+        // (Applies to and Mirror across: in More settings, folded; the new guides' Tube there too.)
+        {"comb", {"Brush"}},  // Stretch: a toggles row chip
+        {"smooth", {"Brush", "Evens out"}},
+        {"flow", {"Brush", "Flow"}},  // Mirror (issue 105)
+        {"place", {"New guides"}},
+        {"draw", {"New guides"}},
+        {"shape", {"Tube hierarchy", "Paints", "Brush", "Profile", "Selected tubes"}},  // the levels' row first
+        {"roots", {"Tube hierarchy", "Tube roots"}},
+        {"select", {}},
+        {"erase", {"Brush", "Erases"}},
+        {"lengths", {"Keys"}},
+        {"part", {"Parts"}},
+        {"freeze", {"Brush"}},
     };
     for (const auto& [tool, want] : cases) {
         tools.setTool(tool);
@@ -660,16 +777,26 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
     tools.setTool("comb");
     ASSERT_NE(card->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr);
     EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardTitle"))->text(), QStringLiteral("Comb"));
-    EXPECT_FALSE(card->findChild<QLabel*>(QStringLiteral("toolCardHint"))->isHidden());
+    EXPECT_TRUE(card->findChild<QLabel*>(QStringLiteral("toolCardHint"))->isHidden()) << "one header line: the hint is the title's tip";
+    EXPECT_FALSE(card->findChild<QLabel*>(QStringLiteral("toolCardTitle"))->toolTip().isEmpty());
+    EXPECT_TRUE(card->editing().contains(QStringLiteral(" on Base groom"))) << card->editing().toStdString();
     EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardShort")), nullptr);
     EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Page Up / Down")));
     EXPECT_FALSE(tools.tile("part")->toolTip().contains(QStringLiteral("Page Up / Down"))) << "not a brush";
     EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("gestures")), nullptr);
-    // Mirror: Symmetry and its mode inside Applies to (not for Flow).
-    auto* applies = card->findChild<CardBlock*>(QStringLiteral("appliesBlock"));
-    ASSERT_NE(applies, nullptr);
-    EXPECT_TRUE(applies->isAncestorOf(tools.symmetryBox()));
-    EXPECT_TRUE(applies->isAncestorOf(tools.symmetryMode()));
+    // Mirror: the toggles row's first chip; across what in More settings.
+    auto* toggles = card->findChild<QWidget*>(QStringLiteral("brushToggles"));
+    auto* more = card->findChild<QWidget*>(QStringLiteral("moreSettings"));
+    ASSERT_TRUE(toggles && more);
+    EXPECT_TRUE(toggles->isAncestorOf(tools.symmetryBox()));
+    EXPECT_TRUE(more->isAncestorOf(tools.symmetryMode()));
+    // The toggles are pills (the Simple layout's Chip), each its text's width.
+    for (const char* name : {"symmetryOn", "pressure", "collide", "stretch", "straighten", "chip_paintWholeFaces"}) {
+        auto* pill = toggles->findChild<QToolButton*>(QLatin1String(name));
+        ASSERT_NE(pill, nullptr) << name;
+        EXPECT_EQ(pill->property("role").toString(), QStringLiteral("pill")) << name;
+        EXPECT_EQ(pill->sizePolicy().horizontalPolicy(), QSizePolicy::Fixed) << name;
+    }
     // No tool: one muted line, no card.
     tools.setTool({});
     EXPECT_TRUE(card->isHidden());
@@ -678,9 +805,9 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
 }
 
 TEST(AppTubes, TubeRootsAndTheHierarchyFromTheCard) {
-    // The Tube card's Tube roots (the core's root tool through the brush session) and Tube
-    // hierarchy blocks, as Maya's root_tube_card.py: a mode's button starts it and again leaves
-    // it; Finish edit while editing; Add splits a level deeper (shown, picked), Remove takes it back.
+    // The Roots card's root block (the core's root tool through the brush session) and the levels'
+    // row, as Maya's root_tube_card.py: a mode's button starts it and again goes back to Draw root;
+    // Finish edit while editing; Add splits a level deeper (shown, picked), Remove takes it back.
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
     BrushSession session;
@@ -690,36 +817,53 @@ TEST(AppTubes, TubeRootsAndTheHierarchyFromTheCard) {
     session.setView(camera, 800, 600);
     TubePanel panel;
     panel.setSession(&session);
-    panel.setMode(TubePanel::Mode::Edit);
+    panel.setMode(TubePanel::Mode::Roots);
     EXPECT_FALSE(panel.rootsBlock()->isHidden());
     EXPECT_FALSE(panel.levelsBlock()->isHidden());
     EXPECT_TRUE(panel.colors()) << "Colors on, as Maya's";
     EXPECT_FALSE(panel.alwaysVisible());
     int changes = 0;
     QObject::connect(&panel, &TubePanel::rootModeChanged, [&changes] { ++changes; });
-    // Draw root: the root mode, placing; the card's id stays the Tube tool's; again: left.
+    // Draw root: the root mode, placing; the card's id the Roots brush's; again: Draw root again
+    // (the outline being drawn dropped).
     panel.drawRootButton()->click();
     EXPECT_TRUE(session.rootMode());
     EXPECT_EQ(session.roots().mode(), RootTubeTool::Mode::Place);
-    EXPECT_EQ(session.toolId(), "shape");
+    EXPECT_EQ(session.toolId(), "roots");
     EXPECT_TRUE(panel.drawRootButton()->isChecked());
     EXPECT_GT(changes, 0);
     panel.drawRootButton()->click();
-    EXPECT_FALSE(session.rootMode());
-    EXPECT_EQ(session.settings().modeName(), "shape");
+    EXPECT_TRUE(session.rootMode());
+    EXPECT_EQ(session.roots().mode(), RootTubeTool::Mode::Place);
+    EXPECT_TRUE(panel.drawRootButton()->isChecked());
     // Edit roots on a groom with no root tubes: drawing one instead, as Maya's tool says.
     panel.editRootsButton()->click();
     EXPECT_TRUE(session.rootMode());
     EXPECT_EQ(session.roots().mode(), RootTubeTool::Mode::Place);
     EXPECT_TRUE(panel.drawRootButton()->isChecked());
     EXPECT_EQ(panel.editRootsButton()->text(), QStringLiteral("Edit roots"));
-    panel.drawRootButton()->click();
-    EXPECT_FALSE(session.rootMode());
-    // Select root: Delete and Duplicate wait for a root picked.
+    // Select root: Delete and Duplicate wait for a root picked; again: back to Draw root.
     panel.selectRootButton()->click();
     EXPECT_EQ(session.roots().mode(), RootTubeTool::Mode::Select);
     EXPECT_FALSE(panel.deleteRootsButton()->isEnabled());
     EXPECT_FALSE(panel.duplicateRootsButton()->isEnabled());
+    panel.selectRootButton()->click();
+    EXPECT_EQ(session.roots().mode(), RootTubeTool::Mode::Place);
+    EXPECT_FALSE(panel.selectRootButton()->isChecked());
+    panel.selectRootButton()->click();
+    EXPECT_EQ(session.roots().mode(), RootTubeTool::Mode::Select);
+    // The levels' ⋯: Lock view, Mixed view, Colors per level (checked as they stand).
+    {
+        QMenu menu;
+        panel.fillLevelMenu(&menu);
+        ASSERT_EQ(menu.actions().size(), 3);
+        EXPECT_EQ(menu.actions()[0]->text(), QStringLiteral("Lock view"));
+        EXPECT_TRUE(menu.actions()[1]->isChecked()) << "Mixed view on";
+        EXPECT_FALSE(panel.levelColors());
+        menu.actions()[2]->trigger();
+        EXPECT_TRUE(panel.levelColors());
+        menu.actions()[2]->trigger();
+    }
     session.setTool("comb");  // another tool: the root mode put away
     EXPECT_FALSE(session.rootMode());
     EXPECT_EQ(session.toolId(), "comb");
@@ -791,15 +935,16 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     BrushPanel* card = tools.card();
     EXPECT_EQ(card->tool(), "paint") << "the Paint tab's card is Paint's";
     EXPECT_FALSE(card->isHidden());
-    // What a stroke paints first (untitled under the header), then Brush, titled, with the stamp.
-    EXPECT_EQ(card->blockTitles(), (std::vector<std::string>{"Paint", "Brush", "Applies to"}));
+    // What a stroke paints first (untitled under the header), then the brush's numbers; the stamp in More.
+    EXPECT_EQ(card->blockTitles(), (std::vector<std::string>{"Paint", "Brush"}));
+    EXPECT_TRUE(card->editing().startsWith(QStringLiteral("no map yet")) || card->editing().startsWith(QStringLiteral("on "))) << card->editing().toStdString();
     auto* block = card->findChild<CardBlock*>(QStringLiteral("paintBlock"));
     ASSERT_NE(block, nullptr);
     auto* brushBlock = card->findChild<CardBlock*>(QStringLiteral("brushBlock"));
     ASSERT_NE(brushBlock, nullptr);
     EXPECT_TRUE(block->titleLabel()->isHidden());
-    EXPECT_FALSE(brushBlock->titleLabel()->isHidden());
-    EXPECT_TRUE(brushBlock->isAncestorOf(card->findChild<QWidget*>(QStringLiteral("alphaBox"))));
+    EXPECT_TRUE(brushBlock->titleLabel()->isHidden()) << "the card's header names the tool";
+    EXPECT_TRUE(card->findChild<QWidget*>(QStringLiteral("moreSettings"))->isAncestorOf(card->findChild<QWidget*>(QStringLiteral("alphaBox"))));
     EXPECT_TRUE(block->isAncestorOf(maps.paintControls())) << "Mode, Value + Fill, the color: the card's";
     EXPECT_FALSE(maps.isAncestorOf(maps.paintControls()));
     auto* fill = card->findChild<QPushButton*>(QStringLiteral("paintFill"));
@@ -815,6 +960,9 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     EXPECT_FALSE(session.settings().paintWholeFaces);
     wholeFaces->setChecked(true);
     EXPECT_TRUE(session.settings().paintWholeFaces);
+    auto* wholeChip = card->findChild<QAbstractButton*>(QStringLiteral("chip_paintWholeFaces"));
+    ASSERT_TRUE(wholeChip) << "Whole faces: the toggles row's chip";
+    EXPECT_TRUE(wholeChip->isChecked());
     wholeFaces->setChecked(false);
     EXPECT_FALSE(session.settings().paintWholeFaces);
     // The tool's card right under the grid, the tab's list under it; on Paint the Maps list first
@@ -822,7 +970,7 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     EXPECT_EQ(maps.bar()->ids(), (std::vector<std::string>{"map.new", "map.import"}));
     QLayout* work = tools.card()->parentWidget()->layout();
     ASSERT_NE(work, nullptr);
-    EXPECT_LT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_paint"))), work->indexOf(tools.card())) << "Paint: the maps first";
+    EXPECT_GT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_paint"))), work->indexOf(tools.card())) << "Paint: the card over the maps";
     ASSERT_TRUE(tools.showTab(QStringLiteral("tools")));
     EXPECT_GT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_tools"))), work->indexOf(tools.card())) << "Tools: the card first";
     // Photos: no card.
@@ -856,7 +1004,7 @@ TEST(AppGroomTools, GuideGroupsAlwaysOpenAndAPickedRowSetsTheGroup) {
     EXPECT_EQ(tree->columnCount(), 3) << "the dot and name, the count, the eye";
     EXPECT_EQ(guides.header()->countLabel()->text(), QString::number(doc->session().authoredHierarchy()->groups().size()));
     EXPECT_TRUE(tree->isVisible());
-    EXPECT_TRUE(guides.groupBox()->isVisible()) << "the picked group's box";
+    EXPECT_FALSE(guides.groupBox()->isVisible()) << "a row's segments: a popup under its icon";
     // A click on a row: the brushes' group (and level).
     QTreeWidgetItem* row = tree->topLevelItem(tree->topLevelItemCount() - 1);
     const std::string name = row->data(0, Qt::UserRole).toString().toStdString();

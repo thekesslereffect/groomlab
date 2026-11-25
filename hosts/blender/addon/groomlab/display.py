@@ -70,7 +70,7 @@ class GroomDisplay(object):
         self.point_size = 6.0
         self.brush = Item("brush")
         self.brush_version = 0
-        # The Tube tool's root mode (RootOverlayGeometry): fills, edges, CVs and middles, in order.
+        # The Roots brush's root tool (RootOverlayGeometry): fills, edges, CVs and middles, in order.
         self.roots = {}
         self.ring = None
         self.overlay_pull = 0.0
@@ -136,6 +136,7 @@ def settings_for(scalp, scene):
     t = scene.groomlab_tools
     s = {"guides": bool(d.show_guides), "tubes": bool(d.show_tubes), "flow": bool(d.show_flow),
          "guidePoints": d.guide_points, "guideColorMode": d.guide_color_mode,
+         "guideWidth": float(d.guide_width), "guideSmoothing": 4 if d.guides_smoothed else 1,
          # The automatic guide colors start from the groom's own hue (its name, as Maya's transform).
          "guideColorSeed": scalp.name, "theme": tools.theme()}
     if d.guide_color_mode == "layer" and d.guide_color_layer:
@@ -147,8 +148,8 @@ def settings_for(scalp, scene):
     if painting and t.show_on_guides and m is not None and m.kind == "guides":
         s["guideColorMode"] = "layer"
         s["guideColorLayer"] = m.name
-    if t.tool == "shape" or (t.tubes_always and t.tool):
-        # While the Tube tool is on (its root mode too; Always visible: any tool): every tube it can
+    if t.tool in ("shape", "roots") or (t.tubes_always and t.tool):
+        # While the Tube or Roots brush is on (Always visible: any tool): every tube it can
         # shape as a wire and/or shaded, in its root tube's color (Maya's Tube card switches).
         s["tubeWires"] = bool(t.tube_wireframe)
         s["tubeShaded"] = bool(t.tube_shaded)

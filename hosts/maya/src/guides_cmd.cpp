@@ -188,7 +188,8 @@ nlohmann::json shapeOpJson(const MString& text) {
     }
 }
 
-// The library as JSON: [{"name", "points": [[u, v], ...], "smooth", "users", "outline"}, ...].
+// The library as JSON: [{"name", "points": [[u, v], ...], "smooth", "users", "outline", "owned"}, ...]
+// ("owned": a root tube's drawn root, isOwnedTubeShape: no picker lists it).
 std::string tubeShapesJson(const GuideHierarchy& h) {
     nlohmann::json out = nlohmann::json::array();
     for (const auto& [name, shape] : h.tubeShapes()) {
@@ -196,7 +197,7 @@ std::string tubeShapesJson(const GuideHierarchy& h) {
         for (const SectionPoint& p : shape->points) points.push_back({p.u, p.v});
         for (const SectionPoint& p : shape->outline.points) outline.push_back({p.u, p.v});
         out.push_back({{"name", name}, {"points", points}, {"smooth", shape->smooth}, {"users", h.tubeShapeUsers(name)},
-                       {"outline", outline}});
+                       {"outline", outline}, {"owned", isOwnedTubeShape(name)}});
     }
     return out.dump();
 }
@@ -672,6 +673,8 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             out["shapes"] = targets.shapes;
             out["midShapes"] = targets.midShapes;
             out["tipShapes"] = targets.tipShapes;
+            out["rootTubes"] = targets.rootTubes;
+            out["splitTubes"] = targets.splitTubes;
             out["inUse"] = nlohmann::json::array();
             for (const auto& [name, count] : targets.inUse) out["inUse"].push_back({{"name", name}, {"guides", count}});
             out["tube"] = targets.guides.empty() ? nlohmann::json()
@@ -1202,7 +1205,10 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 // widths at the size shown): every host's (the editor's editTubes, guide_edits.h).
                 const std::vector<GuideId> ids = targets();
                 if (ids.empty()) return fail(kName, "-setTube: no guides (give -guide, -group or -level, or select some)");
-                setResult(static_cast<int>(editTubes(*h, ids, flagString(db, kSetTube[0], "").asChar())));
+                // (A root tube keeps its drawn root: a Root profile goes to the others, said.)
+                std::string note;
+                setResult(static_cast<int>(editTubes(*h, ids, flagString(db, kSetTube[0], "").asChar(), &note)));
+                if (!note.empty()) MGlobal::displayWarning(MString("GroomLab: ") + note.c_str());
             } else if (db.isFlagSet(kEditTubeShape[0])) {
                 // {"op": "add" | "set" | "rename" | "remove", "name", "points", "smooth", "to"}: the
                 // library edited, every guide taking the shape following (remove: round): every
@@ -1214,6 +1220,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 edit.to = op.value("to", std::string());
                 if (op.contains("smooth")) edit.smooth = op["smooth"].get<bool>();
                 if (op.contains("points")) edit.points = shapePoints(op["points"]);
+                edit.owned = op.value("owned", false);  // (a root tube's drawn root: the root tools' scripts)
                 setResult(static_cast<int>(editTubeShape(*h, edit)));
                 auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
                 if (shape) shape->setPreviewHierarchy(nullptr);  // a live preview of the shape ends with its commit

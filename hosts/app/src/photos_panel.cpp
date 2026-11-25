@@ -14,6 +14,8 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSignalBlocker>
+#include <QTimer>
 #include <QToolButton>
 #include <QVector3D>
 #include <QVBoxLayout>
@@ -25,6 +27,7 @@
 #include "groom_document.h"
 #include "card_parts.h"
 #include "list_bar.h"
+#include "param_editors.h"
 #include "theme.h"
 
 namespace groomlab::app {
@@ -70,15 +73,6 @@ ReferencePhotoEditor::State stateOf(const json& photo) {
 constexpr double kDefaultFocalMm = 50.0;
 double focalGuess(double width) { return std::max(width, 1.0) * kDefaultFocalMm / 36.0; }
 
-QToolButton* chip(const QString& text, const QString& tip, QWidget* parent) {
-    auto* b = new QToolButton(parent);
-    b->setText(text);
-    b->setToolTip(tip);
-    b->setProperty("role", "chip");
-    b->setCheckable(true);
-    return b;
-}
-
 QLabel* hint(QWidget* parent, const char* role = "hint") {
     auto* l = new QLabel(parent);
     l->setProperty("role", role);
@@ -105,19 +99,19 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     list_ = new QListWidget(this);
     list_->setObjectName(QStringLiteral("referenceList"));
     plainRows(list_);
-    list_->setIconSize(QSize(48, 36));
-    list_->setToolTip(tr("The reference photos. Double-click: look through it; right-click: more"));
+    list_->setToolTip(tr("The reference photos. Click: look through it (again: back to the camera before). The settings, in "
+                         "front / behind, the eye, the lock and the menu: on the row"));
     list_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(list_, &QListWidget::currentRowChanged, this, [this](int) {
         if (updating_) return;
-        // Looking through a photo: the picked one is looked through instead (Back to Perspective still
-        // returns to the camera before).
+        // Looking through a photo: the picked one is looked through instead (a click on the one
+        // looked through still goes back to the camera before).
         if (const int i = current(); i >= 0 && !looking_.isEmpty() && name(i) != looking_) emit lookThroughRequested(i, true);
         refreshControls();
     });
-    connect(list_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) {
-        if (current() >= 0) emit lookThroughRequested(current(), true);
-    });
+    // lists.json photos.click: a click on a photo looks through it; on the one looked through,
+    // back to the camera before.
+    connect(list_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) { clickRow(list_->row(item)); });
     connect(list_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         if (QMenu* menu = contextMenu(pos)) menu->popup(list_->viewport()->mapToGlobal(pos));
     });
@@ -127,39 +121,15 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     empty_->setWordWrap(true);
     outer->addWidget(empty_);
 
-    // The picked photo's box: rename, delete; how it shows: looking through, locked, the photo's
-    // opacity, side and visibility; its focal length; Align Photo...
-    QVBoxLayout* layout = nullptr;
-    box_ = itemBox(this, &layout);
-    box_->setObjectName(QStringLiteral("photoBox"));
-    itemBar_ = new ListBar(box_);
-    itemBar_->setObjectName(QStringLiteral("photoItemBar"));
-    layout->addWidget(itemBar_);
-    outer->addWidget(box_);
-    auto* row = new QHBoxLayout();
-    row->setSpacing(6);
-    look_ = new QPushButton(tr("Look Through"), this);
-    look_->setObjectName(QStringLiteral("referenceLook"));
-    look_->setCheckable(true);
-    look_->setToolTip(tr("Show the photo's camera in the viewport (again: back to the camera it showed before)"));
-    connect(look_, &QPushButton::clicked, this, [this](bool on) {
-        if (current() >= 0) emit lookThroughRequested(current(), on);
-    });
-    row->addWidget(look_, 1);
-    lock_ = chip(tr("Lock"), tr("Lock the camera where it is: its position, rotation, focal length and the photo on it (tumbling through it "
-                                "does nothing)"),
-                 this);
-    lock_->setObjectName(QStringLiteral("referenceLock"));
-    connect(lock_, &QToolButton::toggled, this, [this](bool on) {
-        if (updating_ || current() < 0) return;
-        Display d = display(current());
-        d.locked = on;
-        setDisplay(current(), d);
-    });
-    row->addWidget(lock_);
-    layout->addLayout(row);
-
-    opacity_ = new ValueSlider(this);
+    // A photo's settings (opacity, the lens, where the alignment stands) in a popup under the
+    // row's sliders icon; in front / behind, the eye and the lock are the row's icons; Rename,
+    // Align Photo, Select Camera and Remove its menu (lists.json's photos context).
+    settingsPopup_ = new PopupPanel(this, 260);
+    settingsPopup_->setObjectName(QStringLiteral("photoSettingsPopup"));
+    box_ = settingsPopup_;
+    QVBoxLayout* layout = settingsPopup_->rows();
+    settingsPopup_->onShow([this] { refreshControls(); });
+    opacity_ = new ValueSlider(settingsPopup_);
     opacity_->setObjectName(QStringLiteral("referenceOpacity"));
     opacity_->setCaption(tr("Opacity"));
     opacity_->setRange(0.0, 1.0);
@@ -180,7 +150,7 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
 
     // The photo camera's focal length (mm on a 36 mm film back), by hand: Keep focal length turns on,
     // so a solve keeps it. A locked camera keeps its own.
-    focal_ = new ValueSlider(this);
+    focal_ = new ValueSlider(settingsPopup_);
     focal_->setObjectName(QStringLiteral("referenceFocal"));
     focal_->setCaption(tr("Focal length"));
     focal_->setRange(10.0, 200.0);
@@ -217,67 +187,16 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     });
     layout->addWidget(focal_);
 
-    auto* sides = new QHBoxLayout();
-    sides->setSpacing(4);
-    const ui::json& depth = defs().get("choices/photoDepth");
-    auto* depthLabel = new QLabel(qs(depth.value("label", std::string("Photo"))), this);
-    depthLabel->setProperty("role", "propLabel");
-    sides->addWidget(depthLabel);
-    for (const ui::json& c : depth.at("items")) {
-        const bool isFront = c.value("value", std::string()) == "front";
-        QToolButton* b = chip(qs(c.value("label", std::string())), qs(c.value("tip", std::string())), this);
-        b->setObjectName(QStringLiteral("referenceDepth_") + qs(c.value("value", std::string())));
-        b->setAutoExclusive(true);
-        connect(b, &QToolButton::clicked, this, [this, isFront] {
-            if (updating_ || current() < 0) return;
-            Display d = display(current());
-            d.front = isFront;
-            setDisplay(current(), d);
-        });
-        (isFront ? front_ : behind_) = b;
-        sides->addWidget(b);
-    }
-    sides->addStretch(1);
-    visible_ = new QToolButton(this);  // the eye, as the groom's in the header
-    visible_->setObjectName(QStringLiteral("referenceVisible"));
-    visible_->setCheckable(true);
-    visible_->setChecked(true);
-    visible_->setAutoRaise(true);
-    visible_->setProperty("role", "glyph");
-    visible_->setIconSize(QSize(16, 16));
-    visible_->setFixedSize(26, 26);
-    {
-        QIcon eye;
-        eye.addPixmap(tintedIcon(QStringLiteral(":/groomlab/icons/ui_eye.svg"), theme::textMuted(), 16, devicePixelRatioF()), QIcon::Normal, QIcon::Off);
-        eye.addPixmap(tintedIcon(QStringLiteral(":/groomlab/icons/ui_eye.svg"), theme::text(), 16, devicePixelRatioF()), QIcon::Normal, QIcon::On);
-        visible_->setIcon(eye);
-    }
-    visible_->setToolTip(tr("Show or hide the photo (the camera stays)"));
-    connect(visible_, &QToolButton::toggled, this, [this](bool on) {
-        if (updating_ || current() < 0) return;
-        Display d = display(current());
-        d.visible = on;
-        setDisplay(current(), d);
-    });
-    sides->addWidget(visible_);
-    layout->addLayout(sides);
-
-    // Align Photo...: the Photos window (the photo and the mesh side by side), and where it stands.
-    {
-        const ui::json& alignBar = lists.at("alignBar").at(0);
-        align_ = new QPushButton(qs(alignBar.value("label", std::string())), this);
-        align_->setObjectName(QStringLiteral("referenceAlign"));
-        align_->setToolTip(qs(defs().action(alignBar.value("id", std::string())).value("tip", std::string())));
-        connect(align_, &QPushButton::clicked, this, [this] {
-            if (current() >= 0) emit alignRequested(current());
-        });
-        layout->addWidget(align_);
-    }
-    alignAbout_ = hint(this);
+    alignAbout_ = hint(settingsPopup_);
     alignAbout_->setObjectName(QStringLiteral("referenceAlignAbout"));
     layout->addWidget(alignAbout_);
 
-    // Morph to Photos: the scalp shaped so the lined-up photos' pairs land (KeenTools-style pins).
+    // Morph to Photos (the app's own): the scalp shaped so the lined-up photos' pairs land
+    // (KeenTools-style pins), folded under the list.
+    auto* morphBody = new QWidget(this);
+    layout = new QVBoxLayout(morphBody);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(4);
     {
         auto* row = new QHBoxLayout();
         row->setSpacing(4);
@@ -317,20 +236,10 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
         layout->addWidget(unmorph_);
     }
 
-    // Guides from photos (experimental, folded): the Photos window's Guides stage does the work.
-    auto* guides = new QWidget(this);
-    auto* guidesColumn = new QVBoxLayout(guides);
-    guidesColumn->setContentsMargins(0, 0, 0, 0);
-    guidesColumn->setSpacing(4);
-    guidesHint_ = hint(guides);
-    guidesHint_->setObjectName(QStringLiteral("referenceGuidesHint"));
-    guidesColumn->addWidget(guidesHint_);
-    guidesBar_ = new ListBar(guides);
-    guidesColumn->addWidget(guidesBar_);
-    guidesSection_ = new Section(tr("Guides from photos"), guides, false, this);
-    guidesSection_->setObjectName(QStringLiteral("photosGuidesSection"));
-    guidesSection_->header()->setToolTip(tr("Experimental: trace guides from two or more aligned photos"));
-    outer->addWidget(guidesSection_);
+    morphSection_ = new Section(tr("Morph to photos"), morphBody, false, this);
+    morphSection_->setObjectName(QStringLiteral("photosMorphSection"));
+    morphSection_->header()->setToolTip(tr("Shape the scalp so the lined-up photos' pairs land on their photo points"));
+    outer->addWidget(morphSection_);
     outer->addStretch(1);
     refresh();
 }
@@ -412,12 +321,91 @@ void PhotosPanel::setActions(const ui::Bindings& bindings, const ui::FillOptions
     bindings_ = bindings;
     options_ = options;
     options_.liveShortcuts = false;
-    // Import Photo... in the header (a glyph), the picked photo's rename and delete in its box.
+    // Import (and Add Camera where a host has it) in the header (glyphs); a photo's icons and menu
+    // on its row.
     bar_->build(defs().get("lists/photos/bar"), bindings_, options_, ListBar::Part::Labeled);
-    itemBar_->build(defs().get("lists/photos/bar"), bindings_, options_, ListBar::Part::Glyphs);
-    guidesBar_->build(defs().get("lists/photos/guidesBar"), bindings_, options_);
     if (QToolButton* b = bar_->button("photo.import")) b->setObjectName(QStringLiteral("referenceImport"));
-    if (QToolButton* b = guidesBar_->button("photos.guides")) b->setObjectName(QStringLiteral("referenceOpenWindow"));
+    refresh();
+}
+
+void PhotosPanel::clickRow(int index) {
+    // A click on a photo: look through its camera; on the one looked through: back to the camera
+    // before (the photo unpicked).
+    if (index < 0 || index >= count()) return;
+    if (!looking_.isEmpty() && name(index) == looking_) {
+        emit lookThroughRequested(index, false);
+        {
+            const QSignalBlocker block(list_);
+            list_->clearSelection();
+            list_->setCurrentRow(-1);
+        }
+        refresh();
+        return;
+    }
+    const bool looking = !looking_.isEmpty();
+    select(index);  // (looking through another photo already: the pick looks through this one)
+    if (!looking || name(index) != looking_) emit lookThroughRequested(index, true);
+    refresh();
+}
+
+void PhotosPanel::fillRowMenu(QMenu* menu) {
+    ui::FillOptions options = options_;
+    options.resolve.state = menuState();
+    ui::fillMenu(menu, defs().get("lists/photos/context"), bindings_, options);
+}
+
+QWidget* PhotosPanel::rowFor(int index) {
+    // A photo's row (ROW_ORDER): the camera mark while looking through it and its name, then its
+    // settings (a popup), in front / behind, the eye, the lock (in the accent while locked), the menu.
+    const Display d = display(index);
+    const QString n = name(index);
+    auto pick = [this, index] {
+        if (current() != index) select(index);
+    };
+    QToolButton* settings = popupButton(QStringLiteral("sliders"), tr("Opacity and focal length"), settingsPopup_, pick, list_);
+    settings->setObjectName(QStringLiteral("photoSettings_") + n);
+    QToolButton* side = rowGlyph(d.front ? QStringLiteral("front") : QStringLiteral("behind"),
+                                 d.front ? tr("In front of the mesh: click to draw it behind") : tr("Behind the mesh: click to draw it in front"),
+                                 list_);
+    side->setObjectName(QStringLiteral("photoSide_") + n);
+    connect(side, &QToolButton::clicked, this, [this, index] {
+        QTimer::singleShot(0, this, [this, index] {
+            Display now = display(index);
+            now.front = !now.front;
+            setDisplay(index, now);
+            refresh();
+        });
+    });
+    QToolButton* eye = rowGlyph(d.visible ? QStringLiteral("eye") : QStringLiteral("eye_off"), tr("Show or hide the photo (the camera stays)"), list_);
+    eye->setObjectName(QStringLiteral("photoEye_") + n);
+    connect(eye, &QToolButton::clicked, this, [this, index] {
+        QTimer::singleShot(0, this, [this, index] {
+            Display now = display(index);
+            now.visible = !now.visible;
+            setDisplay(index, now);
+            refresh();
+        });
+    });
+    QToolButton* lock = rowGlyph(d.locked ? QStringLiteral("lock") : QStringLiteral("lock_open"),
+                                 d.locked ? tr("Locked: the camera can't move. Click to unlock")
+                                          : tr("Lock the camera: its position, rotation, focal length and the photo on it (tumbling "
+                                               "through it does nothing)"),
+                                 list_, {}, d.locked);
+    lock->setObjectName(QStringLiteral("photoLock_") + n);
+    connect(lock, &QToolButton::clicked, this, [this, index] {
+        QTimer::singleShot(0, this, [this, index] {
+            Display now = display(index);
+            now.locked = !now.locked;
+            setDisplay(index, now);
+            refresh();
+        });
+    });
+    QToolButton* more = rowMenuButton(tr("Rename, Align Photo, Select Camera, Remove"), [this](QMenu* menu) { fillRowMenu(menu); }, pick, list_);
+    more->setObjectName(QStringLiteral("photoMenu_") + n);
+    const bool viewing = !looking_.isEmpty() && n == looking_;
+    auto* row = new ListRow((viewing ? QStringLiteral("\u25C9 ") : QString()) + n, QString(), {settings, side, eye, lock, more}, list_);
+    if (viewing) row->label()->setStyleSheet(QStringLiteral("color: %1;").arg(theme::accentInk().name()));
+    return row;
 }
 
 json PhotosPanel::photos() const {
@@ -648,8 +636,9 @@ QString PhotosPanel::alignText() const {
 // ---- Looking through ----------------------------------------------------------------------------------
 
 void PhotosPanel::setLookingThrough(const QString& name) {
+    if (looking_ == name) return;
     looking_ = name;
-    refreshControls();
+    refresh();  // (the rows' camera mark)
 }
 
 int PhotosPanel::lookingIndex() const {
@@ -668,8 +657,14 @@ std::set<std::string> PhotosPanel::menuState() const {
 }
 
 QMenu* PhotosPanel::contextMenu(const QPoint& pos) {
-    if (QListWidgetItem* item = list_->itemAt(pos)) list_->setCurrentItem(item);
-    return listMenu(this, defs().get("lists/photos/context"), bindings_, options_, menuState());
+    QListWidgetItem* item = list_->itemAt(pos);
+    if (!item) return listMenu(this, defs().get("lists/photos/bar"), bindings_, options_, menuState());  // (no photo: Import)
+    list_->setCurrentItem(item);
+    auto* menu = new QMenu(this);
+    menu->setObjectName(QStringLiteral("listContextMenu"));
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    fillRowMenu(menu);
+    return menu;
 }
 
 // ---- What it shows ------------------------------------------------------------------------------------
@@ -681,78 +676,51 @@ void PhotosPanel::refresh() {
     list_->clear();
     for (const json& p : all) {
         const QString path = qs(p.value("image", std::string()));
-        const json shown = p.value("display", json::object());
-        const bool locked = shown.is_object() && shown.value("locked", false);
-        auto* item = new QListWidgetItem(QStringLiteral("%1\n%2 x %3%4")
-                                             .arg(qs(p.value("name", std::string())))
-                                             .arg(p.value("width", 0))
-                                             .arg(p.value("height", 0))
-                                             .arg(locked ? tr("  ·  locked") : QString()));
-        item->setToolTip(path);
-        const QImage image = picture(list_->count());
-        if (!image.isNull()) item->setIcon(QIcon(QPixmap::fromImage(image.scaled(list_->iconSize() * 2, Qt::KeepAspectRatio, Qt::SmoothTransformation))));
+        // One line: the row widget shows the name and its icons (the item's own text empty).
+        auto* item = new QListWidgetItem(QString());
+        item->setSizeHint(QSize(0, 26));
+        item->setData(Qt::UserRole, qs(p.value("name", std::string())));
+        item->setToolTip(QStringLiteral("%1\n%2 x %3").arg(path).arg(p.value("width", 0)).arg(p.value("height", 0)));
         list_->addItem(item);
+        list_->setItemWidget(item, rowFor(list_->count() - 1));
     }
-    if (list_->count() > 0) list_->setCurrentRow(std::clamp(was, 0, list_->count() - 1));
+    // The photo looked through is the one picked (looked through from anywhere: the viewport's
+    // menu, a script); else the one picked before; none stays none (a photo left: no row falls
+    // back to the first).
+    const int looked = lookingIndex();
+    const int pick = looked >= 0 ? looked : was >= 0 && list_->count() > 0 ? std::clamp(was, 0, list_->count() - 1) : -1;
+    if (pick >= 0) {
+        list_->setCurrentRow(pick);
+    } else {
+        list_->clearSelection();
+        list_->setCurrentRow(-1);
+    }
     updating_ = false;
     header_->setCount(list_->count());
     empty_->setVisible(list_->count() == 0);
-    box_->setVisible(list_->count() > 0);
+    morphSection_->setVisible(list_->count() > 0);
     fitRows(list_);
     bar_->refresh();
-    itemBar_->refresh();
-    guidesBar_->refresh();
     refreshControls();
 }
 
 void PhotosPanel::refreshControls() {
     const int i = current();
     const bool on = i >= 0;
-    for (QWidget* w : {static_cast<QWidget*>(look_), static_cast<QWidget*>(lock_), static_cast<QWidget*>(opacity_),
-                       static_cast<QWidget*>(front_), static_cast<QWidget*>(behind_), static_cast<QWidget*>(visible_),
-                       static_cast<QWidget*>(align_)}) {
-        w->setEnabled(on);
-    }
+    opacity_->setEnabled(on);
     updating_ = true;
     const Display d = display(i);
-    lock_->setChecked(on && d.locked);
     if (!opacity_->editing()) opacity_->setValue(d.opacity);
-    focal_->setEnabled(on && !d.locked);  // (a locked camera keeps its focal length)
+    focal_->setEnabled(on && !d.locked);  // (a locked camera keeps its focal length: greyed)
     if (const std::optional<RefCamera> c = on ? camera(i) : std::nullopt; c && c->focalPx > 0.0 && !focal_->editing()) {
         focal_->setValue(c->focalPx * 36.0 / std::max(imageSize(i).width(), 1));
     }
-    front_->setChecked(d.front);
-    behind_->setChecked(!d.front);
-    visible_->setChecked(d.visible);
-    const bool looking = on && !looking_.isEmpty() && name(i) == looking_;
-    look_->setChecked(looking);
-    look_->setText(looking ? tr("Back to Perspective") : tr("Look Through"));
     updating_ = false;
     bar_->refresh();
-    itemBar_->refresh();
-    itemBar_->setTitle(on ? name(i) : QString());  // the box is the picked photo's
     alignAbout_->setText(alignText());
     if (morph_) {
         morph_->setEnabled(document_ != nullptr && count() > 0);
         unmorph_->setEnabled(morphCage_ != nullptr && morphDocument_ == document_);
-    }
-    // Where Guides from Photos stands: the photos, their landmarks and arrows, the next step.
-    const json all = photos();
-    if (all.empty()) {
-        guidesHint_->setText(tr("Open Guides from Photos, import a photo of the groom and line it up with a few landmarks."));
-    } else {
-        QStringList rows;
-        for (const json& p : all) {
-            const ReferencePhotoEditor::State s = stateOf(p);
-            const int pairs = static_cast<int>(s.landmarks.pairCount()), strokes = static_cast<int>(s.strokes.size());
-            rows << tr("%1: %2 landmark pair%3, %4 guide line%5")
-                        .arg(qs(p.value("name", std::string())))
-                        .arg(pairs)
-                        .arg(pairs == 1 ? QString() : QStringLiteral("s"))
-                        .arg(strokes)
-                        .arg(strokes == 1 ? QString() : QStringLiteral("s"));
-        }
-        guidesHint_->setText(rows.join(QStringLiteral("; ")) + tr(". Generate in Guides from Photos."));
     }
 }
 

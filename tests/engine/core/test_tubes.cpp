@@ -2067,8 +2067,8 @@ TEST(TubeShapes, OwnedShapesGoWithTheirLastGuide) {
     GuideHierarchy h;
     const GroupId g = h.addGroup("tubes");
     const std::vector<SectionPoint> square{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
-    h.setTubeShape(std::string(kOwnedTubeShapePrefix) + "1", square, false);
-    h.setTubeShape(std::string(kOwnedTubeShapePrefix) + "2", square, false);
+    h.setOwnedTubeShape(std::string(kOwnedTubeShapePrefix) + "1", square, false);
+    h.setOwnedTubeShape(std::string(kOwnedTubeShapePrefix) + "2", square, false);
     h.setTubeShape("keep", square, false);
     TubeProfile owned;
     owned.custom = h.tubeShape(std::string(kOwnedTubeShapePrefix) + "1");

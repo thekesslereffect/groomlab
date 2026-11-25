@@ -4,8 +4,8 @@ against engine/ui/ui.schema.json, every id a container lists defined, every refe
 action used somewhere. With the groomlab_core module importable, also against the core: shortcut ids
 (shortcuts.h), the marking menu's tools (brush_catalog.h) and the built-in tube shapes. properties.json
 against Maya's Attribute Editor (AEgroomLabShapeTemplate.mel: its sections, controls, custom blocks
-and separators in order, its annotations as the tips, the attributes' nice names as the labels; the
-Hair Color rows as ae.py's COLOR_ROWS) and Blender's properties (props.py). Maya's and
+and separators in order, its annotations as the tips, the attributes' nice names as the labels) and
+Blender's properties (props.py). Maya's and
 Blender's loaders (definitions.py) are held to the cases in resolve_cases.json, as the app's is by
 its own test (AppUi.ResolveMatchesTheSharedCases).
 
@@ -346,7 +346,6 @@ def check_core(doc):
 # -- properties.json against Maya's Attribute Editor -----------------------------------------------
 
 AE_TEMPLATE = os.path.join(ROOT, "hosts", "maya", "scripts", "AEgroomLabShapeTemplate.mel")
-AE_PY = os.path.join(ROOT, "hosts", "maya", "scripts", "groomlab", "ui", "ae.py")
 SHAPE_CPP = os.path.join(ROOT, "hosts", "maya", "src", "groom_shape.cpp")
 BLENDER_PROPS = os.path.join(ROOT, "hosts", "blender", "addon", "groomlab", "props.py")
 
@@ -432,7 +431,7 @@ def nice_name(attr, overrides):
 
 def check_properties(doc):
     """properties.json as Maya's Attribute Editor lays the groom out (Maya's look is the reference:
-    a change goes into both), Hair Color's rows as ae.py's, Blender's properties as props.py has them."""
+    a change goes into both), Blender's properties as props.py has them."""
     props = doc["properties"]
     ids = set()
 
@@ -495,28 +494,6 @@ def check_properties(doc):
                     fail("properties.json: %r's label %r is not Maya's %r" % (item["id"], item["label"], want))
             walk_labels(section.get("sections", []))
     walk_labels(props["sections"])
-
-    # The Hair Color rows: ae.py's COLOR_ROWS (param, label, kind, tip) in order, each shown in the
-    # mode _COLOR_ONLY says.
-    try:
-        import ast
-        with io.open(AE_PY, encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-
-        def literal(name):
-            return next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
-                        and any(getattr(t, "id", "") == name for t in n.targets))
-        rows, only = literal("COLOR_ROWS"), literal("_COLOR_ONLY")
-    except (IOError, OSError, StopIteration, ValueError, SyntaxError) as e:
-        fail("properties.json: cannot read ae.py's COLOR_ROWS: %s" % e)
-        rows, only = [], {}
-    color = [i for s in props["sections"] for i in s["items"] if i != "-" and i.get("custom") == "AEgroomLabColor"]
-    parts = color[0].get("parts", []) if color else []
-    if rows and [(p["id"], p["label"], p.get("kind"), p.get("tip", "")) for p in parts] != [tuple(r) for r in rows]:
-        fail("properties.json: the Hair Color parts are not ae.py's COLOR_ROWS (param, label, kind, tip, in order)")
-    for p in parts:
-        if only.get(p["id"]) != p.get("only"):
-            fail("properties.json: Hair Color's %r shows in mode %r in ae.py, not %r" % (p["id"], only.get(p["id"]), p.get("only")))
 
     # Blender's properties exist.
     try:

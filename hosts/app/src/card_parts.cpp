@@ -9,7 +9,9 @@
 #include <QIcon>
 #include <QLabel>
 #include <QListView>
+#include <QMenu>
 #include <QPushButton>
+#include <QScreen>
 #include <QSignalBlocker>
 #include <QToolButton>
 #include <QTreeView>
@@ -71,10 +73,30 @@ void FlowLayout::setGeometry(const QRect& rect) {
 }
 
 int FlowLayout::place(const QRect& rect, bool apply) const {
-    // An even grid of chips: as many equal columns (at most three) as the widest chip allows, each
-    // chip a column wide, so rows line up and no chip is left alone at its own width.
     const QMargins m = contentsMargins();
     const QRect area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom());
+    if (natural_) {
+        // Each item at its own width (never wider than the row), left to right, a new row when the
+        // next one would run past the right edge.
+        int x = area.x(), y = area.y(), line = 0, placed = 0;
+        for (QLayoutItem* item : items_) {
+            if (item->isEmpty()) continue;
+            QSize s = item->sizeHint();
+            s.setWidth(std::min(s.width(), std::max(1, area.width())));
+            if (placed > 0 && x + s.width() > area.x() + area.width()) {
+                x = area.x();
+                y += line + gap_;
+                line = 0;
+            }
+            if (apply) item->setGeometry(QRect(QPoint(x, y), s));
+            x += s.width() + gap_;
+            line = std::max(line, s.height());
+            ++placed;
+        }
+        return placed ? y + line - rect.y() + m.bottom() : 0;
+    }
+    // An even grid of chips: as many equal columns (at most three) as the widest chip allows, each
+    // chip a column wide, so rows line up and no chip is left alone at its own width.
     std::vector<QLayoutItem*> shown;
     int widest = 0;
     for (QLayoutItem* item : items_) {
@@ -162,10 +184,43 @@ CardBlock::CardBlock(const QString& title, QWidget* parent) : QFrame(parent) {
     title_->setMinimumHeight(22);
     head_->addWidget(title_, 1);
     column->addLayout(head_);
-    rows_ = new QVBoxLayout();
+    body_ = new QWidget(this);
+    rows_ = new QVBoxLayout(body_);
     rows_->setContentsMargins(0, 0, 0, 0);
     rows_->setSpacing(4);
-    column->addLayout(rows_);
+    column->addWidget(body_);
+    heading_ = title;
+}
+
+void CardBlock::setFoldable(bool folded) {
+    if (!fold_) {
+        fold_ = new QPushButton(this);
+        fold_->setCheckable(true);
+        fold_->setFlat(true);
+        fold_->setProperty("role", "section");
+        fold_->setCursor(Qt::PointingHandCursor);
+        fold_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        fold_->setToolTip(title_->toolTip());
+        connect(fold_, &QPushButton::toggled, this, [this](bool open) { setFolded(!open); });
+        head_->insertWidget(0, fold_, 1);
+        title_->hide();
+    }
+    setFolded(folded);
+}
+
+void CardBlock::setFolded(bool folded) {
+    folded_ = folded;
+    body_->setVisible(!folded);
+    if (!fold_) return;
+    const QSignalBlocker block(fold_);
+    fold_->setChecked(!folded);
+    setSectionHeader(fold_, heading_, !folded);
+}
+
+void CardBlock::setHeading(const QString& text) {
+    heading_ = text;
+    title_->setText(text);
+    if (fold_) setSectionHeader(fold_, heading_, !folded_);
 }
 
 void CardBlock::addAction(QWidget* action) {
@@ -198,6 +253,24 @@ QWidget* chipRow(QWidget* parent, FlowLayout** flow, const QString& label) {
     auto* chips = new QWidget(row);
     *flow = new FlowLayout(chips, 4);
     column->addWidget(chips);
+    return row;
+}
+
+void pillStyle(QToolButton* button) {
+    button->setProperty("role", "pill");
+    button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+}
+
+QToolButton* makePill(const QString& text, const QString& tip, QWidget* parent) {
+    QToolButton* pill = makeChip(text, tip, parent);
+    pillStyle(pill);
+    return pill;
+}
+
+QWidget* pillRow(QWidget* parent, FlowLayout** flow, const QString& label) {
+    QWidget* row = chipRow(parent, flow, label);
+    (*flow)->setNatural(true);
+    (*flow)->setGap(6);
     return row;
 }
 
@@ -291,6 +364,130 @@ QFrame* itemBox(QWidget* parent, QVBoxLayout** rows) {
     column->setSpacing(4);
     *rows = column;
     return box;
+}
+
+// ---- List rows -------------------------------------------------------------------------------------
+
+PopupPanel::PopupPanel(QWidget* parent, int width) : QFrame(parent, Qt::Popup | Qt::FramelessWindowHint) {
+    setProperty("role", "popupPanel");
+    setAttribute(Qt::WA_StyledBackground, true);
+    setFixedWidth(width);
+    // A card on the panel (the menus' look: the field's fill, the popups' edge).
+    setStyleSheet(QStringLiteral("QFrame[role=\"popupPanel\"] { background: %1; border: 1px solid %2; border-radius: %3px; }")
+                      .arg(theme::uiColor("field").isValid() ? theme::uiColor("field").name() : theme::card().name(),
+                           theme::uiColor("popupEdge").isValid() ? theme::uiColor("popupEdge").name() : theme::divider().name())
+                      .arg(theme::cardRadius()));
+    rows_ = new QVBoxLayout(this);
+    rows_->setContentsMargins(8, 8, 8, 8);
+    rows_->setSpacing(6);
+}
+
+void PopupPanel::add(QWidget* widget) { rows_->addWidget(widget); }
+
+void PopupPanel::add(QLayout* layout) { rows_->addLayout(layout); }
+
+void PopupPanel::showUnder(QWidget* anchor) {
+    for (const auto& fill : fills_) fill();
+    adjustSize();
+    // As tall as its rows at its own (fixed) width: a row of pills wraps there (adjustSize asks
+    // the height for the rows' one-line width).
+    if (rows_->hasHeightForWidth()) resize(width(), rows_->totalHeightForWidth(width()));
+    QPoint at = anchor->mapToGlobal(QPoint(anchor->width() - width(), anchor->height() + 2));
+    // No room on the left of the anchor inside its window (a header button near the dock's edge):
+    // the popup's left edge at the window's instead.
+    if (QWidget* window = anchor->window()) at.setX(std::max(at.x(), window->mapToGlobal(QPoint(0, 0)).x() + 4));
+    if (QScreen* screen = anchor->screen()) {
+        const QRect room = screen->availableGeometry();
+        at.setX(std::clamp(at.x(), room.left(), std::max(room.left(), room.right() - width())));
+        if (at.y() + height() > room.bottom()) at.setY(anchor->mapToGlobal(QPoint(0, 0)).y() - height() - 2);
+    }
+    move(at);
+    show();
+}
+
+QToolButton* rowGlyph(const QString& icon, const QString& tip, QWidget* parent, const QString& text, bool on) {
+    auto* b = new QToolButton(parent);
+    b->setProperty("role", "glyph");
+    b->setAutoRaise(true);
+    b->setToolTip(tip);
+    b->setIconSize(QSize(14, 14));
+    const qreal dpr = parent ? parent->devicePixelRatioF() : 1.0;
+    if (on) {
+        QIcon accent(tintedIcon(QStringLiteral(":/groomlab/icons/ui_%1.svg").arg(icon), theme::accentInk(), 14, dpr));
+        b->setIcon(accent);
+    } else {
+        b->setIcon(lineIcon(icon, dpr, 14));
+    }
+    if (!text.isEmpty()) {
+        b->setText(text);
+        b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        b->setStyleSheet(QStringLiteral("QToolButton { color: %1; font-size: 11px; padding: 0 2px; }").arg(theme::textMuted().name()));
+        b->setFixedHeight(22);
+        b->setMinimumWidth(22);
+    } else {
+        b->setFixedSize(22, 22);
+    }
+    return b;
+}
+
+QToolButton* popupButton(const QString& icon, const QString& tip, PopupPanel* panel, std::function<void()> before, QWidget* parent,
+                         const QString& text) {
+    QToolButton* b = rowGlyph(icon, tip, parent, text);
+    QObject::connect(b, &QToolButton::clicked, b, [b, panel, before] {
+        if (before) before();
+        if (panel) panel->showUnder(b);
+    });
+    return b;
+}
+
+QToolButton* rowMenuButton(const QString& tip, std::function<void(QMenu*)> fill, std::function<void()> before, QWidget* parent) {
+    QToolButton* b = rowGlyph(QStringLiteral("more"), tip, parent);
+    auto* menu = new QMenu(b);
+    menu->setToolTipsVisible(true);
+    QObject::connect(menu, &QMenu::aboutToShow, menu, [menu, fill, before] {
+        if (before) before();
+        for (QMenu* sub : menu->findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly)) sub->deleteLater();
+        menu->clear();
+        if (fill) fill(menu);
+    });
+    b->setMenu(menu);
+    b->setPopupMode(QToolButton::InstantPopup);
+    b->setStyleSheet(QStringLiteral("QToolButton::menu-indicator { image: none; width: 0px; }"));
+    return b;
+}
+
+QWidget* rowStrip(const std::vector<QWidget*>& icons, QWidget* parent) {
+    auto* strip = new QWidget(parent);
+    strip->setObjectName(QStringLiteral("rowStrip"));
+    auto* row = new QHBoxLayout(strip);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(0);
+    for (QWidget* w : icons) {
+        if (!w) continue;
+        w->setParent(strip);
+        row->addWidget(w);
+    }
+    strip->setAttribute(Qt::WA_TranslucentBackground, true);
+    return strip;
+}
+
+ListRow::ListRow(const QString& text, const QString& tag, const std::vector<QWidget*>& icons, QWidget* parent) : QWidget(parent) {
+    setObjectName(QStringLiteral("listRow"));
+    auto* row = new QHBoxLayout(this);
+    row->setContentsMargins(6, 0, 0, 0);
+    row->setSpacing(4);
+    label_ = new QLabel(text, this);
+    label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    label_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    label_->setToolTip(text);
+    row->addWidget(label_, 1);
+    tag_ = new QLabel(tag, this);
+    tag_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px;").arg(theme::textMuted().name()));
+    tag_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    tag_->setVisible(!tag.isEmpty());
+    row->addWidget(tag_);
+    row->addWidget(rowStrip(icons, this));
+    setAttribute(Qt::WA_TranslucentBackground, true);
 }
 
 void plainRows(QAbstractItemView* view) {

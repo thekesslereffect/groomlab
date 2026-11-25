@@ -1029,6 +1029,11 @@ public:
         std::vector<std::pair<std::string, int>> inUse;  // each shape the groom's guides take, and how many
         std::optional<TubeProfile> tube;  // the first one's (widths as stored)
         float scale = 1.0f;               // the hierarchy's: shown width = stored width * scale
+        // Of the guides: the root tubes (their Root profile is their drawn root) and those in a tube
+        // hierarchy's split levels (a Mid or Tip profile does not carry into them): the core's
+        // tubeTargetsOf.
+        std::size_t rootTubes = 0;
+        std::size_t splitTubes = 0;
     };
     TubeTargets tubeTargets() const;
     struct TubeShapeInfo {
@@ -1038,11 +1043,17 @@ public:
         bool smooth = true;
         std::size_t users = 0;  // guides taking it (library shapes)
     };
-    // The built-ins (tubeShapeNames' order), then the groom's library by name.
+    // The built-ins (tubeShapeNames' order), then the groom's library by name (libraryTubeShapes:
+    // not the owned shapes, a root tube's drawn root, which no picker lists).
     std::vector<TubeShapeInfo> tubeShapes() const;
+    // An owned shape (isOwnedTubeShape: a root tube's drawn root) by name, for the Profile block's
+    // read-only "Drawn root"; none when the groom has no such shape.
+    std::optional<TubeShapeInfo> ownedTubeShape(const std::string& name) const;
     // An edit of each guide's tube as editedTube reads it ({"shape", "width", "aspect", "twist",
     // "scaleWidth", "smooth", "passes", "samples"}; widths as shown), named `label`.
-    std::string editTubes(const std::vector<GuideId>& guides, const nlohmann::json& edit, const std::string& label = "set tube");
+    // *note: what the core says of root tubes that kept their drawn root ("" none: rootTubesKeptNote).
+    std::string editTubes(const std::vector<GuideId>& guides, const nlohmann::json& edit, const std::string& label = "set tube",
+                          std::string* note = nullptr);
     std::string scaleTubes(const std::vector<GuideId>& guides, float factor);  // every width times factor, the taper kept
     // The lists evened out along each guide (`channel`: the Shape brush's width, flatness or
     // twist, or all), the root's and tip's sections kept.

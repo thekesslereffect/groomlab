@@ -33,6 +33,8 @@ GroomDocument::TubeTargets GroomDocument::tubeTargets() const {
     out.midShapes = targets.midShapes;
     out.tipShapes = targets.tipShapes;
     out.inUse = targets.inUse;
+    out.rootTubes = targets.rootTubes;
+    out.splitTubes = targets.splitTubes;
     if (!out.guides.empty()) out.tube = h->guide(out.guides.front())->tube;
     return out;
 }
@@ -48,25 +50,44 @@ std::vector<GroomDocument::TubeShapeInfo> GroomDocument::tubeShapes() const {
         out.push_back(std::move(info));
     }
     if (const std::shared_ptr<const GuideHierarchy> h = session().storedHierarchy()) {
-        for (const auto& [name, shape] : h->tubeShapes()) {
+        for (const CustomTubeShapePtr& shape : h->libraryTubeShapes()) {
             TubeShapeInfo info;
-            info.name = name;
+            info.name = shape->name;
             info.builtin = false;
             info.points = shape->points;
             info.smooth = shape->smooth;
-            info.users = h->tubeShapeUsers(name);
+            info.users = h->tubeShapeUsers(shape->name);
             out.push_back(std::move(info));
         }
     }
     return out;
 }
 
-std::string GroomDocument::editTubes(const std::vector<GuideId>& guides, const json& edit, const std::string& label) {
+std::optional<GroomDocument::TubeShapeInfo> GroomDocument::ownedTubeShape(const std::string& name) const {
+    if (!isOwnedTubeShape(name)) return std::nullopt;
+    const std::shared_ptr<const GuideHierarchy> h = session().storedHierarchy();
+    const CustomTubeShapePtr shape = h ? h->tubeShape(name) : nullptr;
+    if (!shape) return std::nullopt;
+    TubeShapeInfo info;
+    info.name = name;
+    info.builtin = false;
+    info.points = shape->points;
+    info.smooth = shape->smooth;
+    info.users = h->tubeShapeUsers(name);
+    return info;
+}
+
+std::string GroomDocument::editTubes(const std::vector<GuideId>& guides, const json& edit, const std::string& label,
+                                     std::string* note) {
+    if (note) note->clear();
     if (guides.empty()) return "no guides selected or soloed to edit";
     endTubePreview();
     const std::string text = edit.dump();
-    // Every host's (the editor's editTubes, guide_edits.h).
-    return editGuides(label, [&](GuideHierarchy& h) { groomlab::editTubes(h, guides, text); });
+    // Every host's (the editor's editTubes, guide_edits.h): root tubes keep their drawn root.
+    std::string kept;
+    const std::string error = editGuides(label, [&](GuideHierarchy& h) { groomlab::editTubes(h, guides, text, &kept); });
+    if (note && error.empty()) *note = kept;
+    return error;
 }
 
 std::string GroomDocument::scaleTubes(const std::vector<GuideId>& guides, float factor) {

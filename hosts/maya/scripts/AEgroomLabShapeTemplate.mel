@@ -30,8 +30,6 @@ global proc AEgroomLabScaleNew(string $attr) { python("import groomlab.ui.ae as 
 global proc AEgroomLabScaleReplace(string $attr) { python("import groomlab.ui.ae as a; a.scale_replace('" + $attr + "')"); }
 global proc AEgroomLabControlsNew(string $attr) { python("import groomlab.ui.ae as a; a.controls_new('" + $attr + "')"); }
 global proc AEgroomLabControlsReplace(string $attr) { python("import groomlab.ui.ae as a; a.controls_replace('" + $attr + "')"); }
-global proc AEgroomLabColorNew(string $attr) { python("import groomlab.ui.ae as a; a.color_new('" + $attr + "')"); }
-global proc AEgroomLabColorReplace(string $attr) { python("import groomlab.ui.ae as a; a.color_replace('" + $attr + "')"); }
 global proc AEgroomLabStrandColorsNew(string $attr) { python("import groomlab.ui.ae as a; a.strand_colors_new('" + $attr + "')"); }
 global proc AEgroomLabStrandColorsReplace(string $attr) { python("import groomlab.ui.ae as a; a.strand_colors_replace('" + $attr + "')"); }
 
@@ -68,31 +66,15 @@ global proc AEgroomLabShapeTemplate(string $nodeName)
         editorTemplate -beginLayout "Controls" -collapse (size($controls) == 0);
             editorTemplate -callCustom "AEgroomLabControlsNew" "AEgroomLabControlsReplace" "graph";
         editorTemplate -endLayout;
-        // The hair's color: the HairColor node making the output, its everyday params here.
-        editorTemplate -beginLayout "Hair Color" -collapse 0;
-            editorTemplate -callCustom "AEgroomLabColorNew" "AEgroomLabColorReplace" "graph";
-        editorTemplate -endLayout;
-
-        // What shows in the viewport: the everyday switches open, the fine tuning folded.
-        editorTemplate -beginLayout "Display" -collapse 0;
-            editorTemplate -addControl "displayHair";
-            editorTemplate -addControl "displayGuides";
-            editorTemplate -addControl "displayFlow";
-            editorTemplate -addControl "displayTubes";
-            editorTemplate -addControl "displayInstances";
-            editorTemplate -addSeparator;
+        // What shows in the viewport (folded). The guides' display, the hair / guides / flow / tubes
+        // / instances switches are in the Groom Tools (the eyes and the guides menu); the hair's
+        // color is the HairColor node's; the cards' display the Cards node's; the sculpt display
+        // the Correctives section's.
+        editorTemplate -beginLayout "Display" -collapse 1;
             editorTemplate -addControl "strandColorMode";
             // What the mode reads (a strand channel, a color set), the range and Auto Range.
             editorTemplate -callCustom "AEgroomLabStrandColorsNew" "AEgroomLabStrandColorsReplace" "strandColorSource";
-            editorTemplate -beginLayout "Guides" -collapse 1;
-                editorTemplate -addControl "displayOverlaysOnTop";
-                editorTemplate -addControl "guideWidth";
-                editorTemplate -addControl "guidePoints";
-                editorTemplate -addControl "guideSmoothing";
-                editorTemplate -addControl "isolateGroup";
-                editorTemplate -addControl "guideColorMode";
-            editorTemplate -endLayout;
-            editorTemplate -beginLayout "Strand Shading" -collapse 1;
+            editorTemplate -beginLayout "Viewport Quality" -collapse 1;
                 editorTemplate -addControl "displayLighting";
                 editorTemplate -addControl "displayHairShading";
                 editorTemplate -addControl "displaySelfShadowing";
@@ -110,21 +92,8 @@ global proc AEgroomLabShapeTemplate(string $nodeName)
             editorTemplate -endLayout;
         editorTemplate -endLayout;
 
-        editorTemplate -beginLayout "Sculpting" -collapse 1;
-            editorTemplate -addControl "sculptDisplay";
-            editorTemplate -addControl "sculptDensity";
-            editorTemplate -addControl "softSelectRadius";
-        editorTemplate -endLayout;
-
-        editorTemplate -beginLayout "Game Cards" -collapse 1;
-            editorTemplate -addControl "displayCards";
-            editorTemplate -addControl "displayCardTextures";
-            editorTemplate -addControl "cardDensity";
-        editorTemplate -endLayout;
-
         editorTemplate -beginLayout "Rendering" -collapse 1;
             editorTemplate -addControl "renderMode";
-            editorTemplate -addControl "groomFile";
             // Render overrides: the render (Arnold, exports with render overrides) changes them, the
             // viewport and the groom stay as groomed.
             editorTemplate -beginLayout "Render Overrides" -collapse 1;
@@ -157,7 +126,13 @@ global proc AEgroomLabShapeTemplate(string $nodeName)
                             // sculpt): not settings to type; the strand colors' source and range in
                             // their own rows (under Strand Color Mode)
                             "hiddenGuideGroups", "guideColorLayer", "shotSculpt", "shotLayer", "braidTubes",
-                            "strandColorSource", "strandColorMin", "strandColorMax"};
+                            "strandColorSource", "strandColorMin", "strandColorMax",
+                            // in the Groom Tools (the eyes, the guides menu, Correctives, Select), the
+                            // Cards node's panel, or the Inputs' file row
+                            "displayHair", "displayGuides", "displayFlow", "displayTubes", "displayInstances",
+                            "displayOverlaysOnTop", "guideWidth", "guidePoints", "guideSmoothing", "isolateGroup",
+                            "guideColorMode", "sculptDisplay", "sculptDensity", "softSelectRadius", "displayCards",
+                            "displayCardTextures", "cardDensity", "groomFile"};
         for ($attr in $hidden) editorTemplate -suppress $attr;
         // Controls show in their own section, not under Extra Attributes.
         for ($attr in $controls) editorTemplate -suppress $attr;

@@ -19,8 +19,9 @@ DISCORD_URL = actions.DISCORD_URL
 REPO_URL = "https://github.com/thekesslereffect/groomlab"  # the source: open source (Apache-2.0; this add-on GPL)
 ABOUT = ("Hair, fur and feather grooming in Blender: the Groom Tools for the guides, the Graph Editor for the "
          "look, Cycles and EEVEE renders, and a .groom file Maya and the GroomLab app open as it is.")
-# The Groom Tools' tabs Blender has (palette.json's tabs: all of them).
-TABS = ("tools", "paint", "correctives", "photos")
+# The Groom Tools' pages Blender has (palette.json's tabs but the app's Outliner; Correctives is a
+# section of Tools).
+TABS = ("tools", "paint", "photos")
 # A bar entry's glyph (lists.json) as a Blender icon.
 GLYPHS = {"rename": "GREASEPENCIL", "select": "RESTRICT_SELECT_OFF", "delete": "TRASH", "convert": "FILE_REFRESH",
           "up": "TRIA_UP", "down": "TRIA_DOWN", "solo": "SOLO_OFF"}
@@ -125,9 +126,11 @@ def draw_action(layout, item, context, text=None, icon=None, emboss=True):
     idname, props = actions.binding(item["id"])
     label = item["label"] if text is None else text
     where = layout
-    if not item.get("enabled", True):
+    destructive = bool(definitions.action(item["id"]).get("destructive"))
+    if not item.get("enabled", True) or destructive:
         where = layout.row()
-        where.enabled = False
+        where.enabled = item.get("enabled", True)
+        where.alert = destructive  # (Delete and Remove in the error red, as Maya's danger_action)
     if idname.startswith("prop:"):
         data = context.scene
         path = idname[len("prop:"):].split(".")
@@ -159,15 +162,29 @@ def draw_action(layout, item, context, text=None, icon=None, emboss=True):
 
 
 def draw_items(layout, items, key, context):
-    """Resolved items into a Blender menu (or a panel's column): actions, dividers, submenus."""
+    """Resolved items into a Blender menu (or a panel's column): actions, dividers, submenus. In a
+    guide group's menu, Generate Children is a submenu of counts (Maya's)."""
     for item in items:
         kind = item["kind"]
         if kind == "divider":
             layout.separator()
         elif kind == "submenu":
             layout.menu(submenu_idname(key, item["id"]), text=item["label"])
+        elif kind == "action" and item["id"] == "guides.children" and key == "groups":
+            layout.menu(GROOMLAB_MT_children_counts.__name__, text="Generate Children")
         elif kind == "action":
             draw_action(layout, item, context)
+
+
+class GROOMLAB_MT_children_counts(bpy.types.Menu):
+    """Children for the selected guides, else the picked group: how many per guide"""
+    bl_label = "Generate Children"
+    COUNTS = (1, 2, 3, 4, 6, 8)
+
+    def draw(self, context):
+        for n in self.COUNTS:
+            op = self.layout.operator("groomlab.guides_edit", text="%d per guide" % n)
+            op.action, op.count = "CHILDREN", n
 
 
 def draw_container(layout, path, key, context, conditions=True):
@@ -399,7 +416,7 @@ _classes = []
 
 
 def register():
-    _classes[:] = [GROOMLAB_OT_groom_tools, GROOMLAB_OT_shortcuts, GROOMLAB_OT_about] + definition_menus()
+    _classes[:] = [GROOMLAB_OT_groom_tools, GROOMLAB_OT_shortcuts, GROOMLAB_OT_about, GROOMLAB_MT_children_counts] +         definition_menus()
     for c in _classes:
         bpy.utils.register_class(c)
     bpy.types.TOPBAR_MT_editor_menus.append(draw_topbar)

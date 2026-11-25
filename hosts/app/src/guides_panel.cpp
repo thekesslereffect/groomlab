@@ -23,7 +23,10 @@
 #include <QSpinBox>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QToolButton>
 #include <QVBoxLayout>
+
+#include <tuple>
 
 #include "groom_document.h"
 #include "groomlab/editor/guide_edits.h"
@@ -59,28 +62,25 @@ QColor shownColor(const std::array<float, 3>& linear) {
     return QColor(channel(linear[0]), channel(linear[1]), channel(linear[2]));
 }
 
-// The swatch: the color the group draws in, filled; a dashed outline when it is the automatic one
-// (Maya's dashed swatch: no color of its own).
-QIcon swatchIcon(const QColor& color, bool own, qreal dpr) {
+// The swatch: the color the group draws in, a solid dot, its own color or the automatic one alike
+// (the mock's; the row's tip says which).
+QIcon swatchIcon(const QColor& color, qreal dpr) {
     const int size = 12;
     QPixmap pixmap(QSize(size, size) * dpr);
     pixmap.setDevicePixelRatio(dpr);
     pixmap.fill(Qt::transparent);
     QPainter p(&pixmap);
     p.setRenderHint(QPainter::Antialiasing, true);
-    const QRectF r(1.5, 1.5, size - 3.0, size - 3.0);
-    if (own) {
-        p.setPen(Qt::NoPen);
-        p.setBrush(color);
-        p.drawEllipse(r);
-    } else {
-        p.setBrush(color);
-        QPen pen(theme::textDim(), 1.0, Qt::DotLine);
-        p.setPen(pen);
-        p.drawEllipse(r);
-    }
+    const QRectF r(2.0, 2.0, size - 4.0, size - 4.0);
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    p.drawEllipse(r);
     p.end();
-    return QIcon(pixmap);
+    // The same dot on the picked row (Qt's Selected mode would tint it toward the selection: the
+    // header's "● group" dot and the viewport show the group's own color).
+    QIcon icon;
+    for (const QIcon::Mode mode : {QIcon::Normal, QIcon::Active, QIcon::Selected}) icon.addPixmap(pixmap, mode);
+    return icon;
 }
 
 }  // namespace
@@ -116,10 +116,10 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     tree_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     tree_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     tree_->header()->setSectionResizeMode(2, QHeaderView::Fixed);
-    tree_->header()->resizeSection(2, 24);
+    tree_->header()->resizeSection(2, 92);  // the row's icons: segments, eye, menu
     tree_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
-    tree_->setToolTip(tr("Click: brushes and new guides use this group. Double-click the name: rename. Eye: show or hide. "
-                         "Right-click: more (its color...)"));
+    tree_->setToolTip(tr("Click: brushes and new guides use this group. Double-click the name: rename. The segments, the eye and "
+                         "the menu (or right-click): on the row"));
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(tree_);
     empty_ = new QLabel(tr("No editable guides yet: Place or Draw starts the first group."), this);
@@ -160,13 +160,12 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
         if (QMenu* menu = contextMenu(pos)) menu->popup(tree_->viewport()->mapToGlobal(pos));
     });
 
-    // The picked group's box: rename, select, delete; Segments; Edit Guides ▾ and its children count.
-    QVBoxLayout* rows = nullptr;
-    box_ = itemBox(this, &rows);
-    box_->setObjectName(QStringLiteral("groupBox"));
-    itemBar_ = new ListBar(box_);
-    itemBar_->setObjectName(QStringLiteral("groupItemBar"));
-    rows->addWidget(itemBar_);
+    // A row's settings: Segments (By length, and what it applies to) in a popup under the row's
+    // segments icon; the edits (Rename, Select, Generate Children, Mirror...) in its menu.
+    segmentsPopup_ = new PopupPanel(this, 250);
+    segmentsPopup_->setObjectName(QStringLiteral("guideSegmentsPopup"));
+    box_ = segmentsPopup_;
+    QVBoxLayout* rows = segmentsPopup_->rows();
     selection_ = new QLabel(tr("No guides selected"), box_);
     selection_->setProperty("role", "hint");
     selection_->hide();  // (the viewport's status says it)
@@ -204,23 +203,25 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     connect(byLength_, &QCheckBox::toggled, this, [this](bool on) {
         resampleGuides(static_cast<int>(std::lround(segments_->value())), on ? 1 : 0);
     });
+    segmentsScope_ = new QLabel(box_);
+    segmentsScope_->setObjectName(QStringLiteral("guideSegmentsScope"));
+    segmentsScope_->setProperty("role", "hint");
+    segmentsScope_->setWordWrap(true);
+    rows->addWidget(segmentsScope_);
 
-    // Edits on many guides: one menu, the children count beside it.
-    auto* row = new QHBoxLayout();
-    row->setSpacing(4);
+    // Edit Guides (lists.json's edits): a row's menu holds them now; this menu (not shown) is the
+    // edits alone, for scripts and the tests.
     const ui::json& edits = lists.at("edits");
-    edits_ = new QPushButton(qs(edits.value("label", std::string())) + QStringLiteral("  ▾"), box_);
+    edits_ = new QPushButton(qs(edits.value("label", std::string())) + QStringLiteral("  ▾"), this);
     edits_->setObjectName(QStringLiteral("editGuides"));
-    edits_->setProperty("role", "disclosure");  // opens a menu: outlined, the row's width
     edits_->setToolTip(qs(edits.value("tip", std::string())));
+    edits_->hide();
     editsMenu_ = new QMenu(edits_);
     editsMenu_->setObjectName(QStringLiteral("editGuidesMenu"));
     edits_->setMenu(editsMenu_);
-    row->addWidget(edits_, 1);
-    rows->addLayout(row);
-    // Edit Guides > Children's count, on a line of its own (beside the menu it would widen a
-    // narrow dock).
-    count_ = new ValueSlider(box_);
+    // Generate Children's count: the last picked in a row menu's Generate Children submenu (1, 2,
+    // 3, 4, 6, 8 per guide); kept here, not shown.
+    count_ = new ValueSlider(this);
     count_->setObjectName(QStringLiteral("childrenCount"));
     count_->setCaption(tr("Children per guide"));
     count_->setInteger(true);
@@ -229,8 +230,7 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     count_->setValue(5);
     count_->setFormat([](double v) { return QString::number(std::lround(v)); });
     count_->setToolTip(tr("Children per guide for Edit Guides > Children (the selected guides, else the picked group)"));
-    rows->addWidget(count_);
-    layout->addWidget(box_);
+    count_->hide();
 
     // The parts and flow the brushes laid (parts.h, flow.h): listed by name, removed, cleared
     // (off in the Groom Tools: the Part and Flow tools' cards hold them).
@@ -266,9 +266,9 @@ void GuidesPanel::setActions(const ui::Bindings& bindings, const ui::FillOptions
     bindings_ = bindings;
     options_ = options;
     options_.liveShortcuts = false;
-    // + New Group in the header (a + glyph), the picked group's glyphs in its box.
+    // + New Group in the header (a + glyph); a row's segments, eye and menu on the row.
     bar_->build(defs().get("lists/groups/bar"), bindings_, options_, ListBar::Part::Labeled);
-    itemBar_->build(defs().get("lists/groups/bar"), bindings_, options_, ListBar::Part::Glyphs);
+    shownKey_.clear();
     editsMenu_->clear();
     ui::FillOptions edits = options_;
     edits.resolve.state.reset();  // every entry; the bindings say what is enabled
@@ -282,7 +282,78 @@ void GuidesPanel::setActions(const ui::Bindings& bindings, const ui::FillOptions
         return out;
     };
     ui::fillMenu(editsMenu_, defs().get("lists/groups/edits"), bindings_, edits);
-    refreshRows();
+    refresh();
+}
+
+void GuidesPanel::fillRowMenu(QMenu* menu) {
+    // A row's menu: lists.json's groups context (Rename first, the edits, its color, Delete last),
+    // Generate Children a submenu of counts.
+    ui::FillOptions options = options_;
+    options.resolve.state = menuState();
+    options.resolve.generators["guideGroups"] = [this](const ui::json& entry) {
+        ui::json out = ui::json::array();
+        for (const std::string& name : groupsBesideSelection()) out.push_back({{"id", entry.value("action", std::string())}, {"value", name}, {"label", name}});
+        return out;
+    };
+    const std::map<std::string, QAction*> made = ui::fillMenu(menu, defs().get("lists/groups/context"), bindings_, options);
+    const auto children = made.find("guides.children");
+    const auto bound = bindings_.find("guides.children");
+    if (children == made.end() || bound == bindings_.end()) return;
+    QAction* action = children->second;
+    auto* target = qobject_cast<QMenu*>(action->parent()) ? qobject_cast<QMenu*>(action->parent()) : menu;
+    auto* sub = new QMenu(defs().action("guides.children").value("label", std::string("Children")) == "Children"
+                              ? tr("Generate Children")
+                              : action->text().section(QLatin1Char('\t'), 0, 0),
+                          target);
+    sub->setObjectName(QStringLiteral("menu_generateChildren"));
+    sub->setToolTipsVisible(true);
+    sub->menuAction()->setToolTip(action->toolTip());
+    const ui::Binding binding = bound->second;
+    for (const int n : {1, 2, 3, 4, 6, 8}) {
+        QAction* a = sub->addAction(tr("%n per guide", "", n));
+        a->setObjectName(QStringLiteral("generateChildren_%1").arg(n));
+        connect(a, &QAction::triggered, this, [this, n, binding] {
+            count_->setValue(n);
+            binding.trigger(ui::json(), false);
+        });
+    }
+    target->insertMenu(action, sub);
+    target->removeAction(action);
+}
+
+QWidget* GuidesPanel::rowIcons(QTreeWidgetItem* item, int segments, bool shown) {
+    // A row's icons (ROW_ORDER): the segments (a popup), the eye, the menu.
+    const std::string name = groupOf(item);
+    auto pick = [this, item, name] {
+        if (tree_->currentItem() != item) tree_->setCurrentItem(item);
+        emit groupClicked(name);
+        refreshRows();
+    };
+    QToolButton* seg = popupButton(QStringLiteral("segments"), tr("Segments: %1 (click to change; By length)").arg(segments), segmentsPopup_, pick,
+                                   tree_, segments > 0 ? QString::number(segments) : QString());
+    seg->setObjectName(QStringLiteral("groupSegments_") + qs(name));
+    QToolButton* eye = rowGlyph(shown ? QStringLiteral("eye") : QStringLiteral("eye_off"),
+                                shown ? tr("Hide %1 in the viewport").arg(qs(name)) : tr("%1 is hidden: click to show it").arg(qs(name)), tree_);
+    eye->setObjectName(QStringLiteral("groupEye_") + qs(name));
+    connect(eye, &QToolButton::clicked, this, [this, name] {
+        if (!document_) return;
+        QTimer::singleShot(0, this, [this, name] {
+            if (!document_) return;
+            document_->setGroupHidden(name, !document_->hiddenGroups().count(name));
+            refresh();
+            emit displayChanged();
+        });
+    });
+    QToolButton* more = rowMenuButton(tr("Rename, select, children, mirror, move, color, delete"), [this](QMenu* menu) { fillRowMenu(menu); },
+                                      pick, tree_);
+    more->setObjectName(QStringLiteral("groupMenu_") + qs(name));
+    return rowStrip({seg, eye, more}, tree_);
+}
+
+QColor GuidesPanel::groupColor(const std::string& name) const {
+    fresh();  // (the colors as the rows show them now)
+    const auto it = colors_.find(name);
+    return it == colors_.end() ? QColor() : it->second;
 }
 
 void GuidesPanel::setDocument(GroomDocument* document) {
@@ -327,9 +398,17 @@ std::set<std::string> GuidesPanel::menuState() const {
 
 QMenu* GuidesPanel::contextMenu(const QPoint& pos) {
     fresh();
-    if (QTreeWidgetItem* item = tree_->itemAt(pos)) tree_->setCurrentItem(item);
-    else tree_->setCurrentItem(nullptr);  // the empty space: what needs no group (New Group)
-    return listMenu(this, defs().get("lists/groups/context"), bindings_, options_, menuState());
+    QTreeWidgetItem* item = tree_->itemAt(pos);
+    if (!item) {
+        tree_->setCurrentItem(nullptr);  // the empty space: what needs no group (New Group)
+        return listMenu(this, defs().get("lists/groups/bar"), bindings_, options_, {});
+    }
+    tree_->setCurrentItem(item);  // its row's menu
+    auto* menu = new QMenu(this);
+    menu->setObjectName(QStringLiteral("listContextMenu"));
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    fillRowMenu(menu);
+    return menu;
 }
 
 void GuidesPanel::editCurrentName() {
@@ -360,10 +439,15 @@ void GuidesPanel::refresh() {
     HierarchyPtr h = document_ ? document_->session().authoredHierarchy() : nullptr;
     std::string key = document_ ? std::to_string(reinterpret_cast<std::uintptr_t>(document_)) : std::string("-");
     std::map<GroupId, int> counts;
+    std::map<GroupId, std::size_t> points;  // (the rows' segments follow a resample)
     if (h) {
-        for (const HierarchyGuide& g : h->guides()) ++counts[g.group];
+        for (const HierarchyGuide& g : h->guides()) {
+            ++counts[g.group];
+            points[g.group] += g.points.size();
+        }
         for (const GuideGroup& g : h->groups()) {
-            key += "|" + g.name + ":" + std::to_string(g.parent) + ":" + std::to_string(counts[g.id]) + (g.hasColor ? "c" : "");
+            key += "|" + g.name + ":" + std::to_string(g.parent) + ":" + std::to_string(counts[g.id]) + ":" + std::to_string(points[g.id]) +
+                   ":" + std::to_string(g.segments) + (g.hasColor ? "c" : "");
         }
         key += "#" + document_->hiddenGroupsText() + "#" + document_->groupColorsText();
     }
@@ -377,6 +461,8 @@ void GuidesPanel::refresh() {
         updating_ = true;
         const std::string current = groupOf(tree_->currentItem());
         tree_->clear();
+        colors_.clear();
+        std::vector<std::tuple<QTreeWidgetItem*, int, bool>> strips;
         QTreeWidgetItem* select = nullptr;
         if (h) {
             const std::set<std::string>& hidden = document_->hiddenGroups();
@@ -392,8 +478,6 @@ void GuidesPanel::refresh() {
                 item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
                 item->setForeground(1, theme::textDim());  // the count: readable on the selection tone too
                 if (off) item->setForeground(0, theme::textMuted());
-                item->setIcon(2, lineIcon(off ? QStringLiteral("eye_off") : QStringLiteral("eye"), devicePixelRatioF(), 14));
-                item->setToolTip(2, off ? tr("%1 is hidden: click to show it").arg(qs(group.name)) : tr("Hide %1 in the viewport").arg(qs(group.name)));
                 item->setData(0, Qt::UserRole, qs(group.name));
                 item->setFlags(item->flags() | Qt::ItemIsEditable);
                 const auto own = colors.find(group.name);
@@ -401,7 +485,19 @@ void GuidesPanel::refresh() {
                 const QColor color = own != colors.end() ? QColor(qs(own->second))
                                      : group.hasColor    ? shownColor(group.color)
                                      : shownColor(shown != automatic.end() ? shown->second : std::array<float, 3>{0.5f, 0.5f, 0.5f});
-                item->setIcon(0, swatchIcon(color, own != colors.end() || group.hasColor, devicePixelRatioF()));
+                item->setIcon(0, swatchIcon(color, devicePixelRatioF()));
+                colors_[group.name] = color;
+                // The segments the row shows: its guides' most common count, else the group's own.
+                std::map<int, int> segCounts;
+                for (const HierarchyGuide& g : h->guides()) {
+                    if (g.group == group.id) ++segCounts[static_cast<int>(g.points.size()) - 1];
+                }
+                int common = group.segments;
+                int most = 0;
+                for (const auto& [n, k] : segCounts) {
+                    if (k > most) most = k, common = n;
+                }
+                strips.emplace_back(item, common, !off);
                 QString tip = tr("%1: click to brush it and place into it; double-click to rename").arg(qs(group.name));
                 tip += own != colors.end() ? tr("\nIts own color (right-click > Default Color to clear)")
                                            : tr("\nAn automatic color (right-click > Color... to pick one)");
@@ -417,6 +513,7 @@ void GuidesPanel::refresh() {
         }
         if (select) tree_->setCurrentItem(select);
         else if (tree_->topLevelItemCount() > 0) tree_->setCurrentItem(tree_->topLevelItem(0));
+        for (const auto& [item, segments, shown] : strips) tree_->setItemWidget(item, 2, rowIcons(item, segments, shown));
         updating_ = false;
         header_->setCount(document_ ? (h ? static_cast<int>(h->groups().size()) : 0) : -1);
         fitRows(tree_);
@@ -436,12 +533,11 @@ void GuidesPanel::refreshRows() {
     const std::size_t n = document_ ? document_->selection().size() : 0;
     selection_->setText(n == 0 ? tr("No guides selected") : tr("%n guide(s) selected", "", static_cast<int>(n)));
     bar_->refresh();
-    itemBar_->refresh();
-    // The box is the picked group's (none picked: every group's, Segments on every guide).
+    // The segments popup is the picked group's (none picked: every guide's), or the selection's.
     const std::string group = currentGroup();
-    // (A picked group: the row above names it, the drawer's bar holds its actions alone.)
-    itemBar_->setMutedTitle(true);
-    itemBar_->setTitle(group.empty() ? tr("All groups") : tr("%1 segments per guide").arg(std::lround(segments_->value())));
+    segmentsScope_->setText(n > 0 ? tr("Applies to the %n selected guide(s)", "", static_cast<int>(n))
+                            : group.empty() ? tr("Applies to every guide")
+                                            : tr("Applies to every guide in %1").arg(qs(group)));
     // Segments by Length: on where the picked group goes by length (a selection keeps the switch).
     if (byLength_ && document_ && n == 0 && !group.empty()) {
         const HierarchyPtr authored = document_->session().authoredHierarchy();
@@ -449,7 +545,6 @@ void GuidesPanel::refreshRows() {
         const QSignalBlocker block(byLength_);
         byLength_->setChecked(g && g->segmentLength > 0.0f);
     }
-    box_->setVisible(tree_->topLevelItemCount() > 0);
     tree_->setVisible(tree_->topLevelItemCount() > 0);
     // No group of its own: say where the guides shown come from, and how to brush them.
     const bool none = document_ && tree_->topLevelItemCount() == 0;

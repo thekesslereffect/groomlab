@@ -34,7 +34,7 @@
 // it with its floating UI after the first frame and quits (no dialog ever opens). --display
 // sets the display options (strand colors, the map on the scalp, the guides, the card view).
 // --theme picks this run's theme (View > Theme saves one for every start; scripted runs use the
-// default, Charcoal, unless --theme says otherwise).
+// default, Playful, unless --theme says otherwise).
 
 #include <algorithm>
 #include <cstdio>
@@ -439,10 +439,10 @@ int main(int argc, char** argv) {
                         "                [--screenshot out.png [--size WxH] [--frames N]] [--benchmark N]\n"
                         "                [--live-benchmark N [--live-mode orbit|hover|stroke|param|param-commit]]\n"
                         "                [--gpu-preview on|off] [--benchmark-drag node.param=from,to[,steps]]... [--benchmark-orbit N] [--draw-dabs]\n"
-                        "                [--display name=value]... [--theme charcoal|paper|playful|studio]\n"
+                        "                [--display name=value]... [--theme playful|charcoal|paper|studio]\n"
                         "                [--ui-screenshot out.png [--ui-mode groom|look|cards|export] [--ui-graph] [--ui-panel name]\n"
                         "                                         [--ui-look-tab material|lighting|render[,more]] [--ui-node name]\n"
-                        "                                         [--ui-hover rail|panels|all|labels] [--ui-preset name] [--ui-menu presets|add|edit|node|groups|editguides|maps|convert|correctives|marking|bar:Menu/Submenu]\n"
+                        "                                         [--ui-hover rail|panels|all|labels] [--ui-preset name] [--ui-menu presets|add|edit|node|groups|editguides|maps|convert|correctives|marking|guidedisplay|find|mapinfo|photosettings|segments|weight|groupmenu|bar:Menu/Submenu]\n"
                         "                                         [--ui-prompt unsaved|reload|info|error|autosave] [--ui-theme name]\n"
                         "                                         [--ui-paint-param node.param]]\n"
                         "surface presets: clay, scalp, plastic, metal, skin, skin light, skin dark, eye brown, eye blue, eye green\n"

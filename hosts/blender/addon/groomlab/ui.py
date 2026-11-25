@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The GroomLab panel of the 3D view's sidebar, under Groom Tools: the groom, its status, files and
-exports. Presets and the graph's nodes live in the Graph Editor (its Presets menu and sidebar), as in
-Maya, not in the 3D view."""
+"""The GroomLab panel of the 3D view's sidebar, under Groom Tools: the current groom's status, files
+and exports (Groom Tools picks the groom and shows how to start one: one picker, one empty state).
+Presets and the graph's nodes live in the Graph Editor (its Presets menu and sidebar), as in Maya,
+not in the 3D view."""
 
 
 import bpy
@@ -29,23 +30,20 @@ def _wrap(layout, text, icon="NONE", width=48):
 
 
 class VIEW3D_PT_groomlab(bpy.types.Panel):
+    """The current groom's own state (the Groom Tools above pick it and hold the empty state)."""
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "GroomLab"
     bl_label = "GroomLab"
     bl_order = 1  # under Groom Tools (palette.py)
 
+    @classmethod
+    def poll(cls, context):
+        return active_groom(context) is not None
+
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
-        layout.prop(scene.groomlab, "groom")
         scalp = active_groom(context)
-        if scalp is None:
-            # The empty state the Groom Tools panel shows too (palette.py): one name, one button.
-            layout.label(text="Select the scalp mesh, then:")
-            layout.operator("groomlab.add_groom", text="Create Groom from Selection", icon="ADD")
-            layout.operator("groomlab.load_groom", text="Open Groom File...", icon="FILE_FOLDER")
-            return
         obj = context.active_object
         if obj is not None and obj.type == "MESH" and obj.groomlab.role == "NONE":
             layout.operator("groomlab.add_groom", text="Create Groom from Selection", icon="ADD")

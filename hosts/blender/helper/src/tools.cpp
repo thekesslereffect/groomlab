@@ -1404,14 +1404,15 @@ json guideSegments(ToolState& t, const json& args) {
 json tubeEdit(ToolState& t, const json& args, const std::string& label, const json& edit) {
     const std::string text = tubeEditToGroom(t.session.space, edit);
     std::size_t changed = 0;
+    std::string note;  // (root tubes that kept their drawn root: editTubes says how many)
     editGuides(t, label, [&](GuideHierarchy& h) {
         try {  // every host's (the editor's editTubes, guide_edits.h)
-            changed = editTubes(h, targetGuides(t, h, args, false, label), text);
+            changed = editTubes(h, targetGuides(t, h, args, false, label), text, &note);
         } catch (const GuideEditError& e) {
             fail(e.code, e.what());
         }
     });
-    return {{"changed", changed}, {"undo", undoJson(t)}};
+    return {{"changed", changed}, {"note", note}, {"undo", undoJson(t)}};
 }
 
 json tubeSet(ToolState& t, const json& args) {
@@ -1472,6 +1473,8 @@ json tubeTargets(ToolState& t) {
             {"midShapes", targets.midShapes},
             {"tipShapes", targets.tipShapes},
             {"inUse", inUse},
+            {"rootTubes", targets.rootTubes},    // (their Root profile is their drawn root)
+            {"splitTubes", targets.splitTubes},  // (a Mid or Tip profile does not carry into the split levels)
             {"tube", targets.guides.empty() ? json(nullptr)
                                             : tubeToHost(t.session.space, tubeToJson(h->guide(targets.guides.front())->tube, h->scale()))},
             {"card", targets.guides.empty() ? json(nullptr) : tubeCardJson(t.session.space, h->guide(targets.guides.front())->tube, h->scale())}};
@@ -1483,7 +1486,8 @@ json sectionPointsJson(const std::vector<SectionPoint>& points) {
     return out;
 }
 
-// The shapes guides can take: the built-ins, then the groom's library (saved with its guides).
+// The shapes guides can take: the built-ins, then the groom's library (saved with its guides), its
+// owned shapes (the root tubes' drawn roots) marked "owned".
 json tubeShapes(ToolState& t) {
     json out = json::array();
     for (const std::string& name : tubeShapeNames()) {
@@ -1500,6 +1504,8 @@ json tubeShapes(ToolState& t) {
                            {"points", sectionPointsJson(shape->points)},
                            {"smooth", shape->smooth},
                            {"users", h->tubeShapeUsers(name)},
+                           // A root tube's drawn root (isOwnedTubeShape): listed for its outline, in no picker.
+                           {"owned", isOwnedTubeShape(name)},
                            {"outline", sectionPointsJson(shape->outline.points)}});
         }
     }

@@ -490,20 +490,25 @@ def _points(points):
     return pts
 
 
-def tube_shapes(groom):
+def tube_shapes(groom, owned=False):
     """The tube shapes guides can take: the built-ins (round, ribbon, teardrop, blade) and the groom's
     library of custom shapes, saved with its guides. Each a dict: name, builtin (bool), points
     ((u, v) control points in the -1..1 square, counter-clockwise; a built-in's draw it closely),
-    smooth (a smooth curve through them, else straight edges) and users (how many guides take it;
-    None for a built-in)."""
+    smooth (a smooth curve through them, else straight edges), users (how many guides take it;
+    None for a built-in) and owned. `owned`: the root tubes' drawn roots too (the core's
+    isOwnedTubeShape, "rootTube_<n>": each its root tube's own, which no picker lists and only the
+    root tools change); by default the library as artists see it, without them."""
     import groomlab_core
     out = []
     for name in TUBE_SHAPES:
         points, smooth = groomlab_core.builtin_tube_shape_points(name)
-        out.append({"name": name, "builtin": True, "points": [tuple(p) for p in points], "smooth": smooth, "users": None})
+        out.append({"name": name, "builtin": True, "points": [tuple(p) for p in points], "smooth": smooth, "users": None,
+                    "owned": False})
     for s in _library(groom):
+        if s.get("owned") and not owned:
+            continue
         out.append({"name": s["name"], "builtin": False, "points": [tuple(p) for p in s["points"]],
-                    "smooth": bool(s["smooth"]), "users": int(s["users"])})
+                    "smooth": bool(s["smooth"]), "users": int(s["users"]), "owned": bool(s.get("owned"))})
     return out
 
 

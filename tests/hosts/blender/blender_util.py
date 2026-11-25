@@ -121,6 +121,11 @@ class FakeLayout(object):
             pass
         return Props()
 
+    def popover(self, panel, **kwargs):
+        if not hasattr(bpy.types, panel):
+            raise AttributeError("no panel %s" % panel)
+        self.log.append(("popover", panel))
+
     def template_list(self, list_type, list_id, data, prop, active_data, active_prop, **kwargs):
         cls = getattr(bpy.types, list_type)
         for name, obj in ((prop, data), (active_prop, active_data)):

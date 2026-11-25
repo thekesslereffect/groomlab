@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// The Groom Tools' Photos tab, from engine/ui/lists.json's photos (the bar, the right-click menus)
-// as the redesign lays it out: Photos (the header: how many, Import Photo...; the list), the picked
-// photo's box (Rename, Delete and the rows below), then Guides from photos, folded. Reference photos
-// to groom to, each a camera.
+// The Groom Tools' Photos tab, from engine/ui/lists.json's photos (the bar, the row menus) as the
+// Simple layout lays it out: Photos (the header: how many, Import), one line per photo, nothing
+// expands; Morph to photos (the app's own) folded under it. Reference photos to groom to, each a
+// camera.
 //
-//   list          the photos (a thumbnail, the name, the size, locked); double-click: Look Through
-//   Look Through  the viewport shows the photo's camera with the photo fitted in the frame (again:
-//                 back to the camera it showed before); Lock keeps the camera where it is (tumbling
-//                 through it does nothing; unlocked, tumbling lines it up by eye)
-//   Opacity, Focal Length, Photo (In front / Behind) and the eye: how the photo shows while looking
-//                 through it (a focal length set by hand turns Keep focal length on)
-//   Align Photo...  the Photos window (reference_window.h) on the picked photo, its Align stage: the
-//                 photo and the mesh side by side, landmark pairs clicked on each; below it, where
-//                 the alignment stands
-//   Guides from Photos  the same window's Guides stage
+//   a click       looks through the photo's camera (lists.json photos.click), the photo fitted in
+//                 the frame (a camera mark on its row); a click on the one looked through: back to
+//                 the camera it showed before
+//   the row's icons  (ROW_ORDER) sliders: a popup with Opacity and Focal length (greyed while
+//                 locked; a focal length set by hand turns Keep focal length on) and where the
+//                 alignment stands; In front / Behind the mesh; the eye; the lock (the camera kept
+//                 where it is, tumbling through it does nothing: in the accent while locked); ⋯
+//                 (Rename, Align Photo: the Photos window, reference_window.h, its Align stage;
+//                 Remove in red)
 //
 // The photos are the groom's (GroomDocument::referencePhotos, its file's "referencePhotos": the
 // same records the Photos window and Blender's Photos edit), each with its "display" (opacity,
@@ -50,6 +49,7 @@ namespace groomlab::app {
 class GroomDocument;
 class ListBar;
 class ListHeader;
+class PopupPanel;
 class Section;
 class ValueSlider;
 
@@ -63,7 +63,7 @@ public:
     explicit PhotosPanel(QWidget* parent = nullptr);
 
     void setDocument(GroomDocument* document);  // null: nothing to list
-    // The window's bindings: the bars (photos, guides) and the right-click menu.
+    // The window's bindings: the header's bar and the rows' menus.
     void setActions(const ui::Bindings& bindings, const ui::FillOptions& options);
     void refresh();  // the list and the picked photo's controls from the document
 
@@ -111,14 +111,16 @@ public:
 
     // The right-click menu (not shown: the caller pops it up; it deletes itself).
     QMenu* contextMenu(const QPoint& pos);
+    // A click on a photo's row: look through it, or (the one looked through) back to the camera before.
+    void clickRow(int index);
+    void fillRowMenu(QMenu* menu);  // a row's ⋯: lists.json's photos context
     std::set<std::string> menuState() const;  // "photo" with one picked
 
     // ---- The pieces (tests) ------------------------------------------------------------------------
     QListWidget* list() const { return list_; }
-    QPushButton* lookButton() const { return look_; }
-    QToolButton* lockButton() const { return lock_; }
     ValueSlider* focalSlider() const { return focal_; }
-    QPushButton* alignButton() const { return align_; }
+    ValueSlider* opacitySlider() const { return opacity_; }
+    PopupPanel* settingsPopup() const { return settingsPopup_; }  // a row's sliders icon's
 
     // Morph to Photos: the groom's scalp as it was before the first morph (kept while the panel
     // shows that groom, so morphs never stack) moved so every lined-up photo's pairs land on their
@@ -127,9 +129,8 @@ public:
     // The scalp before the first morph (null: none yet).
     std::shared_ptr<const ScalpMesh> unmorphedScalp() const { return morphCage_; }
     QPushButton* morphButton() const { return morph_; }
-    ListBar* bar() const { return bar_; }          // the header's: Import Photo...
-    ListBar* itemBar() const { return itemBar_; }  // the picked photo's: Rename, Delete
-    Section* guidesSection() const { return guidesSection_; }  // Guides from photos (folded)
+    ListBar* bar() const { return bar_; }  // the header's: Import
+    Section* morphSection() const { return morphSection_; }  // Morph to photos (folded)
 
 signals:
     void lookThroughRequested(int index, bool on);
@@ -144,6 +145,7 @@ private:
     nlohmann::json photos() const;  // the document's records (an array)
     void store(const nlohmann::json& photos);
     void refreshControls();
+    QWidget* rowFor(int index);  // a photo's row: its name and icons
     QString uniqueName(const QString& wanted, int except = -1) const;
 
     GroomDocument* document_ = nullptr;
@@ -154,19 +156,13 @@ private:
     mutable QMap<QString, QImage> pictures_;  // by file
     ListHeader* header_ = nullptr;
     ListBar* bar_ = nullptr;
-    ListBar* itemBar_ = nullptr;
-    QFrame* box_ = nullptr;
+    QFrame* box_ = nullptr;  // (the settings popup)
+    PopupPanel* settingsPopup_ = nullptr;
     QLabel* empty_ = nullptr;
-    Section* guidesSection_ = nullptr;
+    Section* morphSection_ = nullptr;
     QListWidget* list_ = nullptr;
-    QPushButton* look_ = nullptr;
-    QToolButton* lock_ = nullptr;
     ValueSlider* opacity_ = nullptr;
     ValueSlider* focal_ = nullptr;  // the photo camera's focal length (mm, a 36 mm film back)
-    QToolButton* front_ = nullptr;
-    QToolButton* behind_ = nullptr;
-    QToolButton* visible_ = nullptr;
-    QPushButton* align_ = nullptr;
     QLabel* alignAbout_ = nullptr;
     QPushButton* morph_ = nullptr;
     QPushButton* unmorph_ = nullptr;
@@ -176,8 +172,7 @@ private:
     // the groom it was taken from (another groom shown starts over).
     std::shared_ptr<const ScalpMesh> morphCage_, morphRefined_;
     const GroomDocument* morphDocument_ = nullptr;
-    QLabel* guidesHint_ = nullptr;
-    ListBar* guidesBar_ = nullptr;
+
 };
 
 }  // namespace groomlab::app

@@ -126,55 +126,11 @@
         ]
       },
       {
-        "id": "hairColor",
-        "label": "Hair Color",
-        "expanded": true,
-        "items": [
-          {
-            "id": "hairColorRows",
-            "label": "Hair Color",
-            "custom": "AEgroomLabColor",
-            "maya": "graph",
-            "app": "hairColor",
-            "tip": "The hair's color: the HairColor node making the output, its everyday params here (the Graph Editor has the rest)",
-            "parts": [
-              {"id": "mode", "label": "Mode", "kind": "mode", "tip": "Natural (the melanin mode): pigment and redness, and a dye, as real hair. Picked color (the color mode): the color you pick, as it shows and renders (white hair: white)"},
-              {"id": "color", "label": "Color", "kind": "color", "only": "color", "tip": "The hair's color as it shows and renders (mode Color)"},
-              {"id": "melanin", "label": "Melanin", "kind": "float", "only": "melanin", "tip": "Pigment: 0 white or blond, 1 black"},
-              {"id": "redness", "label": "Redness", "kind": "float", "only": "melanin", "tip": "Share of red pigment: 0 brown or black, 1 red"},
-              {"id": "dye", "label": "Dye", "kind": "color", "only": "melanin", "tip": "A color dyeing the pigment (white: none)"},
-              {"id": "result", "label": "Result", "kind": "result", "only": "melanin", "tip": "The color the pigment and dye make, before the randomness (what renders, a hair color as aiStandardHair's base color)"},
-              {"id": "greys", "label": "Greys", "kind": "float", "only": "melanin", "tip": "Share of grey and white strands"},
-              {"id": "-Randomness", "label": "Randomness", "kind": "heading"},
-              {"id": "melaninRandom", "label": "Melanin Random", "kind": "float", "only": "melanin", "tip": "Each strand's melanin up to this much more or less"},
-              {"id": "valueRandom", "label": "Value Random", "kind": "float", "only": "color", "tip": "Each strand up to this share lighter or darker"},
-              {"id": "hueRandom", "label": "Hue Random", "kind": "float", "tip": "Each strand's hue turned, up to half a turn either way at 1"},
-              {"id": "saturationRandom", "label": "Saturation Random", "kind": "float", "tip": "Each strand's saturation up to this share more or less"},
-              {"id": "clumpShare", "label": "Clump Share", "kind": "float", "tip": "How much of the randomness the strands of one clump share: 0 each its own, 1 the whole clump alike (needs a Clump before HairColor)"},
-              {"id": "-Tips", "label": "Tips", "kind": "heading"},
-              {"id": "tipColor", "label": "Tip Color", "kind": "color", "tip": "The color the strands blend to toward the tip (with Tip Strength above 0)"},
-              {"id": "tipStrength", "label": "Tip Strength", "kind": "float", "tip": "How far toward Tip Color the tips go, 0-1 (along the node's tipProfile)"},
-              {"id": "tipOffsetRandom", "label": "Tip Offset Random", "kind": "float", "tip": "Each strand's tip color starts at its own place"},
-              {"id": "-Highlight", "label": "Highlight", "kind": "heading"},
-              {"id": "specular", "label": "Specular", "kind": "float", "tip": "Highlight strength (0.3: aiStandardHair's full specular tint)"},
-              {"id": "roughness", "label": "Roughness", "kind": "float", "tip": "Highlight spread, 0 sharp to 1 broad"}
-            ]
-          }
-        ]
-      },
-      {
         "id": "display",
         "label": "Display",
-        "expanded": true,
         "items": [
-          {"id": "displayHair", "label": "Display Hair", "hosts": ["maya"], "maya": "displayHair", "tip": "The hair in the viewport: the strands, instances, scales, cards and strand meshes (the Groom Tools' eye; the guides stay, renders keep it)"},
-          {"id": "displayGuides", "label": "Display Guides", "labels": {"app": "Guides"}, "maya": "displayGuides", "app": "guides", "tip": "The guides in the viewport"},
-          {"id": "displayFlow", "label": "Display Flow", "labels": {"app": "Flow"}, "maya": "displayFlow", "app": "flow", "tip": "The flow arrows and the field they make (a pale preview)"},
-          {"id": "displayTubes", "label": "Display Tubes", "labels": {"app": "Tubes"}, "maya": "displayTubes", "app": "tubes", "tip": "Each guide's tube, the volume its children and Interpolate's Fill Tubes fill: its shape and sections along it"},
-          {"id": "displayInstances", "label": "Display Instances", "labels": {"app": "Instances"}, "maya": "displayInstances", "app": "instances", "tip": "Each Instance node's copies of its prototype mesh (else small markers)"},
           {"id": "showScalp", "label": "Scalp", "hosts": ["app"], "app": "scalp", "tip": "The scalp mesh in the viewport"},
           {"id": "gpuPreview", "label": "GPU Preview", "hosts": ["app"], "app": "gpuPreview", "tip": "Slider, seed and profile drags of Noise, Curl, Width, Clump, Length and Interpolate, and brush dabs, previewed by the GPU (Direct3D 11, OpenGL); the release commits on the CPU"},
-          "-",
           {"id": "strandColorMode", "label": "Strand Color Mode", "labels": {"app": "Strand Colors"}, "maya": "strandColorMode", "app": "colorMode", "tip": "What colors the strands: the look (lit), a color set of the scalp at the root, a per-strand channel over the range below (a ramp from blue to red), a random color per strand, the clump each strand belongs to, or how dense the strands are"},
           {"id": "strandColorRows", "label": "Strand Colors", "custom": "AEgroomLabStrandColors", "hosts": ["maya"], "maya": "strandColorSource", "tip": "What the mode reads (Source: a strand channel, the channel grouping the clumps, a color set of the scalp), the attribute's range (Min blue, Max red) and Auto Range (the range at the source's lowest and highest value on the strands shown)"},
           {"id": "strandColorSource", "label": "Source", "hosts": ["app"], "app": "colorSource", "tip": "The color set or the strand channel read (clumpId, melanin, length...; Clump: clumpId, region)"},
@@ -185,21 +141,8 @@
         ],
         "sections": [
           {
-            "id": "guidesDisplay",
-            "label": "Guides",
-            "items": [
-              {"id": "displayOverlaysOnTop", "label": "Display Overlays On Top", "labels": {"app": "Overlays on Top"}, "maya": "displayOverlaysOnTop", "app": "overlaysOnTop", "tip": "Guides, their dots, parts and flow arrows over the strands, tubes and cards (not through the head and the other meshes); off, depth-tested like everything else"},
-              {"id": "guideWidth", "label": "Guide Width", "maya": "guideWidth", "app": "guideWidth", "tip": "The guides' width in pixels (selected guides one more)"},
-              {"id": "guidePoints", "label": "Guide Points", "maya": "guidePoints", "app": "guidePoints", "tip": "The guides' points as dots: off, roots and tips, or all"},
-              {"id": "guideSmoothing", "label": "Guide Smoothing", "maya": "guideSmoothing", "app": "guideSmoothing", "tip": "Guides draw as a smooth curve through their points: this many pieces per segment (1: straight segments)"},
-              {"id": "isolateGroup", "label": "Isolate Group", "maya": "isolateGroup", "app": "isolateGroup", "tip": "One guide group at full color with its child groups, the others dimmed (empty: none; the Groom Tools' Isolate sets it)"},
-              {"id": "guideColorMode", "label": "Guide Color", "maya": "guideColorMode", "app": "guideColorMode", "tip": "Each guide group's own color, or a painted guide layer from black to white"},
-              {"id": "guideColorLayer", "label": "Guide Layer", "hosts": ["app"], "app": "guideColorLayer", "tip": "The painted guide layer Guide Color shows (Painted Layer), black 0 to white 1"}
-            ]
-          },
-          {
             "id": "strandShading",
-            "label": "Strand Shading",
+            "label": "Viewport Quality",
             "items": [
               {"id": "displayLighting", "label": "Display Lighting", "labels": {"app": "Lit Lines"}, "maya": "displayLighting", "app": "lighting", "tip": "The strands lit by the lights (Kajiya-Kay lines)", "tips": {"app": "The line path's Kajiya-Kay shading (Lookdev off)"}},
               {"id": "displayHairShading", "label": "Display Hair Shading", "labels": {"app": "Lookdev"}, "maya": "displayHairShading", "app": "lookdev", "tip": "How the strands are shaded: Maya's own, or GroomLab's hair shading (the look as the render has it)", "tips": {"app": "The strands as shaded ribbons under the look's material and lights, as the render shades them (off: lines)"}},
@@ -220,29 +163,11 @@
         ]
       },
       {
-        "id": "sculpting",
-        "label": "Sculpting",
-        "items": [
-          {"id": "sculptDisplay", "label": "Sculpt Display", "maya": "sculptDisplay", "app": "sculptDisplay", "tip": "The strands while a stroke is live: as they are, dimmed, or the guides alone"},
-          {"id": "sculptDensity", "label": "Sculpt Density", "maya": "sculptDensity", "app": "sculptDensity", "tip": "The share of the strands evaluated while a stroke is live (all of them again when it ends)"},
-          {"id": "softSelectRadius", "label": "Soft Select Radius", "maya": "softSelectRadius", "app": "softSelectRadius", "tip": "Guides near the selected ones weigh in, falling off over this distance (0: off)"}
-        ]
-      },
-      {
-        "id": "gameCards",
-        "label": "Game Cards",
-        "items": [
-          {"id": "displayCards", "label": "Display Cards", "labels": {"app": "Card View"}, "maya": "displayCards", "app": "cardsView", "tip": "The Cards nodes' cards instead of the strands (when the graph has a Cards node)"},
-          {"id": "displayCardTextures", "label": "Display Card Textures", "maya": "displayCardTextures", "app": "cardTextures", "tip": "The cards with their baked maps"},
-          {"id": "cardDensity", "label": "Card Density", "maya": "cardDensity", "app": "cardDensity", "tip": "The strand density the viewport's cards are built from (the bake and the export use every strand): lower only to rough cards in on a heavy groom"}
-        ]
-      },
-      {
         "id": "rendering",
         "label": "Rendering",
         "items": [
           {"id": "renderMode", "label": "Render Mode", "hosts": ["maya"], "maya": "renderMode", "tip": "How Arnold renders the groom: as curves Maya hands it, or from the groom file by the procedural"},
-          {"id": "groomFile", "label": "Groom File", "hosts": ["maya", "blender"], "maya": "groomFile", "blender": "groom_file", "tip": "The groom file this groom is linked to (imported from, saved to)"}
+          {"id": "groomFile", "label": "Groom File", "hosts": ["blender"], "blender": "groom_file", "tip": "The groom file this groom is linked to (imported from, saved to)"}
         ],
         "sections": [
           {

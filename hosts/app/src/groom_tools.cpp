@@ -16,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QListWidget>
 #include <QMenu>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -34,6 +35,7 @@
 
 #include "brush_panel.h"
 #include "brush_session.h"
+#include "correctives_panel.h"
 #include "groom_document.h"
 #include "guides_panel.h"
 #include "maps_panel.h"
@@ -50,7 +52,7 @@ const ui::Definitions& defs() { return ui::Definitions::shipped(); }
 QString qs(const std::string& s) { return QString::fromStdString(s); }
 
 // At most this many tiles to a row, however wide the dock.
-constexpr int kMaxTileColumns = 4;
+constexpr int kMaxTileColumns = 5;
 
 // Scroll bar `bar` to `value` and keep it there for `followMs` while what was just shown is laid
 // out: the card's lists and blocks fill in over a few events, and the range only grows to `value`
@@ -331,9 +333,10 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     top->setContentsMargins(0, 0, 0, 0);
     top->setSpacing(6);
     outer->addWidget(top_);
-    // The header: the groom's name, its eyes, the Graph Editor, More. Pinned over the scroll area
-    // (issue 73: in view however far the panel scrolls), as Maya's and Blender's put them on the
-    // page rail.
+    // The header: the groom picker, its eyes (the guides' a split button: the eye, and the arrow
+    // opening how they draw), the Graph Editor, Find Command, More. Pinned over the scroll area
+    // (issue 73: in view however far the panel scrolls), the pages' tabs under it (the Simple
+    // layout, research/ui-redesign/SIMPLE.md: what you work on first, then how).
     const ui::json& header = palette.at("header");
     header_ = new QWidget(this);
     header_->setObjectName(QStringLiteral("groomToolsHeader"));
@@ -341,12 +344,37 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     head->setContentsMargins(12, 10, 12, 0);  // (the column's gutter, as the content's)
     head->setSpacing(2);
     frame->insertWidget(0, header_);
-    groomName_ = new QLabel(header_);
-    groomName_->setObjectName(QStringLiteral("groomName"));
-    groomName_->setProperty("role", "title");
-    groomName_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    groomName_->setToolTip(tr("The groom every tool works on: the open one"));
-    head->addWidget(groomName_, 1);
+    // The groom picker: the open groom's name, its menu the document's grooms (the Outliner's).
+    groomPicker_ = new QToolButton(header_);
+    groomPicker_->setObjectName(QStringLiteral("groomName"));
+    groomPicker_->setProperty("role", "title");
+    groomPicker_->setAutoRaise(true);
+    groomPicker_->setPopupMode(QToolButton::InstantPopup);
+    groomPicker_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    groomPicker_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    groomPicker_->setStyleSheet(QStringLiteral("QToolButton { color: %1; font-size: 14px; font-weight: 600; text-align: left; padding: 2px 4px; "
+                                               "border: none; border-radius: %2px; }"
+                                               "QToolButton:hover { background: %3; }"
+                                               "QToolButton::menu-indicator { image: none; width: 0px; }")
+                                    .arg(theme::text().name())
+                                    .arg(theme::smallRadius())
+                                    .arg(theme::chip().name(QColor::HexArgb)));
+    groomMenu_ = new QMenu(groomPicker_);
+    groomMenu_->setObjectName(QStringLiteral("groomPickerMenu"));
+    connect(groomMenu_, &QMenu::aboutToShow, this, [this] {
+        groomMenu_->clear();
+        for (int i = 0; i < static_cast<int>(grooms_.size()); ++i) {
+            QAction* a = groomMenu_->addAction(grooms_[static_cast<std::size_t>(i)]);
+            a->setCheckable(true);
+            a->setChecked(i == groomIndex_);
+            connect(a, &QAction::triggered, this, [this, i] {
+                if (i != groomIndex_) emit groomPicked(i);
+            });
+        }
+        if (grooms_.empty()) groomMenu_->addAction(tr("No groom open"))->setEnabled(false);
+    });
+    groomPicker_->setMenu(groomMenu_);
+    head->addWidget(groomPicker_, 1);
     // The hair's eye: the strands alone (instances, cards too); the guides are the next eye's.
     eye_ = glyphButton("eye", tr("Show or hide the hair"), header_);
     eye_->setObjectName(QStringLiteral("hairVisible"));
@@ -358,19 +386,44 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     });
     head->addWidget(eye_);
     // The guides' eye: every guide group at once (Properties > Guides; Maya's displayGuides).
-    guidesEye_ = glyphButton("groups", tr("Show or hide the guides, every guide group"), header_);
+    // (lucide "spline": a curve between two points; hidden: the same at half strength, struck through.)
+    guidesEye_ = glyphButton("guides", tr("Show or hide the guides, every guide group"), header_);
     guidesEye_->setObjectName(QStringLiteral("guidesVisible"));
     guidesEye_->setCheckable(true);
+    {
+        const qreal dpr = devicePixelRatioF();
+        QIcon icon;
+        icon.addPixmap(tintedIcon(uiIcon("guides"), theme::text(), 16, dpr), QIcon::Normal, QIcon::On);
+        icon.addPixmap(tintedIcon(uiIcon("guides"), theme::text(), 16, dpr), QIcon::Active, QIcon::On);
+        icon.addPixmap(tintedIcon(uiIcon("guides_off"), theme::textDim(), 16, dpr), QIcon::Normal, QIcon::Off);
+        icon.addPixmap(tintedIcon(uiIcon("guides_off"), theme::text(), 16, dpr), QIcon::Active, QIcon::Off);
+        guidesEye_->setIcon(icon);
+    }
     guidesEye_->setChecked(true);
     connect(guidesEye_, &QToolButton::toggled, this, [this](bool on) {
         guidesEye_->setToolTip(on ? tr("Show or hide the guides, every guide group") : tr("The guides are hidden: click to show them"));
         if (!updating_) emit guidesVisibilityToggled(on);
     });
     head->addWidget(guidesEye_);
+    // The arrow beside it: how the guides draw (Flow, Tubes, Instances, Smoothed, Width, Points,
+    // Colors, then the tubes' display): the window fills the popup (guideDisplayPopup).
+    guideDisplay_ = new PopupPanel(this, 270);
+    guideDisplay_->setObjectName(QStringLiteral("guideDisplayPopup"));
+    guidesDisplay_ = glyphButton("chevron_down", tr("How the guides draw: flow, tubes, instances, width, points, colors"), header_);
+    guidesDisplay_->setObjectName(QStringLiteral("guidesDisplay"));
+    guidesDisplay_->setFixedSize(14, 26);
+    guidesDisplay_->setIconSize(QSize(10, 10));
+    connect(guidesDisplay_, &QToolButton::clicked, this, [this] { guideDisplay_->showUnder(guidesDisplay_); });
+    head->addWidget(guidesDisplay_);
     graph_ = glyphButton("graph", withShortcut(qs(header.at("graph").value("tip", std::string())), "view.graph"), header_);
     graph_->setObjectName(QStringLiteral("openGraph"));
     connect(graph_, &QToolButton::clicked, this, &GroomTools::graphRequested);
     head->addWidget(graph_);
+    // Find Command: every command, brush and graph preset by name (Ctrl+K).
+    find_ = glyphButton("search", qs(defs().action("commands.find").value("tip", std::string())) + tr(" (Ctrl+K)"), header_);
+    find_->setObjectName(QStringLiteral("findCommand"));
+    connect(find_, &QToolButton::clicked, this, &GroomTools::findRequested);
+    head->addWidget(find_);
     more_ = glyphButton("more", qs(header.at("more").value("tip", std::string())), header_);
     more_->setObjectName(QStringLiteral("groomToolsMore"));
     more_->setPopupMode(QToolButton::InstantPopup);
@@ -385,18 +438,24 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     status_->setVisible(false);
     top->addWidget(status_);
 
-    // The tabs (palette.tabs), underlined as the Properties dock's.
-    tabs_ = new QTabBar(top_);
+    // The pages (palette.tabs) as labeled tabs on one track (Tools · Paint · Photos, the app's
+    // Outliner), pinned under the header.
+    auto* pages = new QWidget(this);
+    pages->setObjectName(QStringLiteral("groomPages"));
+    auto* pagesRow = new QHBoxLayout(pages);
+    pagesRow->setContentsMargins(12, 6, 12, 4);
+    pagesRow->setSpacing(0);
+    tabs_ = new QTabBar(pages);
     tabs_->setObjectName(QStringLiteral("groomTabs"));
-    tabs_->setExpanding(false);
     tabs_->setUsesScrollButtons(false);
-    tabs_->setElideMode(Qt::ElideRight);
     tabs_->setDrawBase(false);
     tabs_->setDocumentMode(true);
     tabs_->setProperty("role", "pills");
     tabs_->setExpanding(true);  // the track the panel's width, the tabs sharing it
-    tabs_->setElideMode(Qt::ElideNone);
-    top->addWidget(tabs_);
+    tabs_->setElideMode(Qt::ElideRight);
+    pagesRow->addWidget(tabs_, 1);
+    frame->insertWidget(1, pages);
+    pages_ = pages;
 
     // The tool grid: the tiles by category (Paint's on the Paint tab), Unfreeze All beside Freeze.
     auto tileGrid = [this](BrushCategory category, QWidget* parent) {
@@ -440,15 +499,17 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     tools->setSpacing(8);
     for (BrushCategory category : brushCategories()) {
         if (category == BrushCategory::Paint) continue;  // beside the maps they paint
-        // Each category a tray: its name inside, over its tiles.
+        // Each category a tray of its tiles, without its name (the tray's tooltip says it: the
+        // tiles speak for it once learnt).
         auto* tray = new QFrame(toolsGrid_);
         tray->setObjectName(QStringLiteral("tray_") + QString::fromLatin1(brushCategoryName(category)).toLower());
         tray->setProperty("role", "tray");
+        tray->setToolTip(QString::fromLatin1(brushCategoryName(category)));
         auto* trayLayout = new QVBoxLayout(tray);
-        trayLayout->setContentsMargins(8, 8, 8, 8);
+        trayLayout->setContentsMargins(4, 4, 4, 4);
         trayLayout->setSpacing(4);
         QLabel* name = label(QString::fromLatin1(brushCategoryName(category)), "category", tray);
-        trayLayout->addWidget(name);
+        name->hide();
         gridLabels_.push_back(name);
         trayLayout->addWidget(tileGrid(category, tray));
         tools->addWidget(tray);
@@ -460,7 +521,8 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     paintGrid_->setAttribute(Qt::WA_StyledBackground, true);
     auto* paintTiles = new QVBoxLayout(paintGrid_);
     paintTiles->setContentsMargins(8, 8, 8, 8);
-    // The Paint tab: Paint as one full-width button over the maps.
+    // The Paint tab is painting (no tile: entering it starts Paint on the picked map); its tile
+    // is kept, hidden, for the window's and the tests' tile("paint").
     for (const groomlab::BrushEntry* e : brushesInCategory(BrushCategory::Paint)) {
         QToolButton* b = makeTile(e->id, qs(e->label), tileTip(*e));
         b->setProperty("wide", true);
@@ -468,19 +530,22 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         paintTiles->addWidget(b);
     }
     top->addWidget(paintGrid_);
+    paintGrid_->hide();
 
     // ---- Under the top: the empty state, the tab's list, the card.
-    // No groom: how to start one (palette.empty; its buttons with the bindings).
+    // No groom: one card saying what is needed (a mesh file: the viewport's start card's New Groom
+    // on Mesh), the other ways to start under it (palette.empty: the samples, an import).
     empty_ = new QFrame(content);
     empty_->setObjectName(QStringLiteral("groomToolsEmpty"));
-    empty_->setProperty("role", "empty");
+    empty_->setProperty("role", "tray");
+    empty_->setAttribute(Qt::WA_StyledBackground, true);
     emptyItems_ = new QVBoxLayout(empty_);
     emptyItems_->setContentsMargins(12, 12, 12, 12);
     emptyItems_->setSpacing(8);
-    // Secondary to the viewport's start card (one start surface): a quiet heading, outlined actions, no card.
-    if (!theme::glassy()) empty_->setProperty("role", "emptyQuiet");
-    emptyItems_->addWidget(label(tr("More ways to start"), theme::glassy() ? "title" : "subheading", empty_));
-    emptyItems_->addWidget(label(tr("Try a sample head, or bring a groom in from Alembic curves or a groom file."), "about", empty_));
+    emptyItems_->addWidget(label(tr("No groom yet"), "subheading", empty_));
+    emptyItems_->addWidget(label(tr("A groom grows on a scalp mesh: pick its .obj or .abc file (New Groom on Mesh, in the viewport's start "
+                                    "card), or start from a sample."),
+                                 "about", empty_));
     outer->addWidget(empty_);
 
     work_ = new QWidget(content);
@@ -505,6 +570,22 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         tabIds_.push_back(id);
         const int index = tabs_->addTab(qs(tab.value("label", std::string())));
         tabs_->setTabToolTip(index, qs(tab.value("tip", std::string())));
+        tabs_->setTabData(index, qs(id));
+        // A tab's other sections (palette.sections: Correctives on Tools), each its own card under it.
+        for (const ui::json& section : palette.at("sections")) {
+            const std::string sid = section.value("id", std::string());
+            const ui::json shown = section.value("tabs", ui::json::array());
+            if (sid == "groups" || std::find(shown.begin(), shown.end(), id) == shown.end()) continue;
+            auto* card = new QWidget(work_);
+            card->setObjectName(QStringLiteral("list_") + qs(sid));
+            card->setLayout(new QVBoxLayout());
+            card->setProperty("role", "tray");
+            card->setAttribute(Qt::WA_StyledBackground, true);
+            card->layout()->setContentsMargins(10, 4, 10, 10);
+            work->addWidget(card);
+            lists_[sid] = card;
+            sectionTabs_[sid] = id;
+        }
     }
 
     // Over the list: the tool's card (what the picked tool does, right under its tile), the
@@ -525,6 +606,20 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     connect(tubes_, &TubePanel::displayChanged, this, &GroomTools::settingsChanged);  // (the brush's tubes drawn again)
     connect(tubes_, &TubePanel::rootModeChanged, this, &GroomTools::rootModeChanged);
     card_->setTubes(tubes_);
+    // The guides' display popup: the window's rows (Flow, Tubes, Instances, Smoothed, Width,
+    // Points, Colors: guideDisplayRows), then the tubes' display (Maya's Tube card's Visibility).
+    {
+        auto* rows = new QWidget(guideDisplay_);
+        rows->setObjectName(QStringLiteral("guideDisplayRows"));
+        guideRows_ = new QVBoxLayout(rows);
+        guideRows_->setContentsMargins(0, 0, 0, 0);
+        guideRows_->setSpacing(6);
+        guideDisplay_->add(rows);
+        guideDisplay_->add(label(tr("Tubes"), "listTitle", guideDisplay_));
+        tubes_->displayBlock()->setParent(guideDisplay_);
+        guideDisplay_->add(tubes_->displayBlock());
+        tubes_->displayBlock()->show();
+    }
     noTool_ = label(tr("Pick a tool, then drag over the groom in the viewport."), "hint", work_);
     noTool_->setObjectName(QStringLiteral("noTool"));
     if (!theme::glassy()) {
@@ -543,9 +638,6 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         if (index < 0 || index >= static_cast<int>(tabIds_.size())) return;
         const std::string tab = tabIds_[static_cast<std::size_t>(index)];
         emit tabChanged(qs(tab));
-        // Correctives: a tool whose tile is gone here (it can't record into a corrective) stops.
-        const groomlab::BrushEntry* e = brushEntry(tool_);
-        if (tab == "correctives" && !tool_.empty() && !(e && e->corrective)) emit toolStopRequested();
     });
     // Isolate: the picked group (and its child groups) at full color, the others dimmed (the eye
     // in the Guide groups header).
@@ -559,6 +651,15 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
 
     setTool({});
     refreshVisibility();
+}
+
+GroomTools::~GroomTools() {
+    // The panels it hosts are its children, deleted by QWidget's destructor after this one has run:
+    // their signals (a list cleared as it goes) must not reach the half-destroyed dock.
+    for (QObject* sender : {static_cast<QObject*>(maps_ ? maps_->list() : nullptr), static_cast<QObject*>(maps_.data()),
+                            static_cast<QObject*>(correctives_.data()), static_cast<QObject*>(guides_.data())}) {
+        if (sender) QObject::disconnect(sender, nullptr, this, nullptr);
+    }
 }
 
 QToolButton* GroomTools::makeTile(const std::string& id, const QString& text, const QString& tip) {
@@ -605,13 +706,13 @@ void GroomTools::setBindings(const ui::Bindings& bindings, const ui::FillOptions
     resolve.keep = [&bindings](const std::string& id) { return bindings.count(id) > 0; };
     resolve.dropGenerators = true;
     for (const ui::Item& item : defs().resolve(defs().get("palette/empty/items"), resolve)) {
-        // The app's start card in the viewport holds New Groom on Mesh (and Open): the dock keeps
-        // the other ways to start (a sample mesh, an import), not a second primary.
+        // One card: what is needed (the line above: a mesh file); the viewport's start card holds
+        // New Groom on Mesh (and Open), so no second primary here: a sample mesh or an import.
         if (item.kind == ui::Item::Kind::Action && item.id == "groom.create") continue;
         if (item.kind == ui::Item::Kind::Action) {
             auto* b = new QPushButton(qs(item.label), empty_);
             b->setObjectName(QStringLiteral("empty_") + qs(item.id));
-            b->setProperty("role", theme::glassy() ? "primary" : "disclosure");
+            b->setProperty("role", item.id == "groom.create" || theme::glassy() ? "primary" : "disclosure");
             b->setToolTip(qs(item.tip));
             const ui::Binding binding = bindings.at(item.id);
             connect(b, &QPushButton::clicked, this, [binding, value = item.value] { binding.trigger(value, false); });
@@ -652,10 +753,18 @@ QToolButton* GroomTools::menuChip(const ui::Item& item, const ui::Bindings& bind
 
 void GroomTools::setGroomName(const QString& name) {
     name_ = name;
-    groomName_->setText(name.isEmpty() ? tr("No groom open") : name);
-    groomName_->setToolTip(name.isEmpty() ? tr("No groom open") : tr("The groom every tool works on: %1").arg(name));
+    groomPicker_->setText((name.isEmpty() ? tr("No groom") : name) + QStringLiteral("  ▾"));
+    groomPicker_->setToolTip(name.isEmpty() ? tr("No groom open")
+                                            : tr("The groom every tool works on: %1 (click: the document's grooms)").arg(name));
     refreshVisibility();
     refresh();
+}
+
+QString GroomTools::groomName() const { return name_; }
+
+void GroomTools::setGrooms(const QStringList& names, int current) {
+    grooms_ = names;
+    groomIndex_ = current;
 }
 
 void GroomTools::setGroups(const std::vector<GroupRow>& groups) {
@@ -686,7 +795,7 @@ std::string GroomTools::currentGroup() const {
 
 std::string GroomTools::isolatedGroup() const { return isolate_->isChecked() ? currentGroup() : std::string(); }
 
-QCheckBox* GroomTools::symmetryBox() const { return card_->symmetryBox(); }
+QAbstractButton* GroomTools::symmetryBox() const { return card_->symmetryBox(); }
 QComboBox* GroomTools::symmetryMode() const { return card_->symmetryMode(); }
 
 void GroomTools::groupPicked(const std::string& name) {
@@ -705,16 +814,17 @@ void GroomTools::groupPicked(const std::string& name) {
 
 void GroomTools::refreshTiles() {
     const qreal dpr = devicePixelRatioF();
-    const int iconSize = 32;
-    // Two-tone artwork at rest. Playful keeps it when checked; the other themes use the accent's ink.
+    const int iconSize = 28;
+    // Two-tone artwork in the tool's category color (the theme's icons.<category>) at rest. Playful
+    // (toolOn "category") keeps it when chosen; the other themes use the accent's ink. Greyed when
+    // disabled (a tool that can't edit the picked corrective).
     const bool glass = theme::glassy();
     auto toolIcon = [&](const std::string& stem, BrushCategory category) {
         const QString resource = iconPath(stem);
         const QPixmap rest = duotoneIcon(resource, theme::toolIconColor(category, stem), theme::iconInk(), iconSize, dpr);
-        // Chosen: the accent's ink; a theme with toolOn "category" (Playful) keeps the category's own color.
         const QColor onInk = glass ? theme::uiColor("accentText") : theme::toolOnCategory() ? theme::towardText(theme::toolIconColor(category, stem), 0.25) : theme::accentInk();
         const QPixmap on = !glass && theme::toolOnCategory() ? rest : duotoneIcon(resource, onInk, onInk, iconSize, dpr);
-        const QPixmap off = duotoneIcon(resource, theme::textMuted(), theme::textMuted(), iconSize, dpr);
+        const QPixmap off = tintedIcon(resource, theme::textDisabled().isValid() ? theme::textDisabled() : theme::textMuted(), iconSize, dpr);
         QIcon icon;
         icon.addPixmap(rest, QIcon::Normal, QIcon::Off);
         icon.addPixmap(on, QIcon::Normal, QIcon::On);
@@ -725,10 +835,14 @@ void GroomTools::refreshTiles() {
     };
     // Drawn again when the labels or the theme change.
     const QString look = QStringLiteral("%1:%2").arg(theme::currentTheme()).arg(tileLabels_);
+    // On a corrective (or a Sculpt node) the tools that can't edit one are greyed, not hidden: the
+    // tiles never move.
+    const bool layer = editingLayer();
     for (auto& [id, buttons] : tiles_) {
         const groomlab::BrushEntry* e = brushEntry(id);
         for (QToolButton* b : buttons) {
             b->setChecked(id == tool_);
+            b->setEnabled(!layer || (e && e->corrective) || id == "paint");
             if (b->property("iconLook").toString() == look) continue;
             b->setProperty("iconLook", look);
             b->setIcon(toolIcon(e ? e->icon : id, e ? e->category : BrushCategory::Guides));
@@ -745,14 +859,14 @@ void GroomTools::refreshTiles() {
             }
         }
     }
-    // Labeled: the name under the icon on a raised tile (Maya's tiles); else icons alone (the
-    // names in the tool tips). Either way one height and minimum width for every tile; the grid
-    // stretches them to fill its rows.
+    // Labeled: the name under the icon (Maya's tiles, 5 to a row); else icons alone (the names in
+    // the tool tips). Either way one height and minimum width for every tile; the grid stretches
+    // them to fill its rows.
     for (QToolButton* b : allTiles_) {
         b->setIconSize(QSize(iconSize, iconSize));
-        const bool wide = b->property("wide").toBool();  // Paint's: the panel's width, the name beside the icon
+        const bool wide = b->property("wide").toBool();  // Paint's (hidden): the name beside the icon
         b->setToolButtonStyle(wide ? Qt::ToolButtonTextBesideIcon : tileLabels_ ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonIconOnly);
-        const QSize size = tileLabels_ ? QSize(56, 62) : QSize(46, 46);
+        const QSize size = tileLabels_ ? QSize(50, 56) : QSize(44, 44);
         b->setMinimumSize(wide ? QSize(0, 38) : size);
         b->setMaximumSize(QWIDGETSIZE_MAX, wide ? 38 : size.height());
         if (b->objectName() == QLatin1String("unfreezeAllTile") && b->property("iconLook").toString() != look) {
@@ -804,9 +918,12 @@ void GroomTools::refreshCard() {
     const bool smooths = picked && (picked->category == BrushCategory::Shape || picked->category == BrushCategory::Trim);
     noTool_->setText(smooths ? hint + tr(" Shift+drag smooths, Ctrl+Shift+drag selects.") : hint);
     noTool_->setToolTip(picked && hint.size() < whole.size() ? whole : QString());
-    // A picked tool's line in the card's header (under its name); no tool: the line over the panel.
-    card_->setSubtitle(picked ? noTool_->text() : QString());
-    noTool_->setVisible(open && tab != "photos" && tab != "correctives" && !picked && !card_->hasSettings());
+    // The card's header is one line (the tool's icon and name, what the next stroke edits): the
+    // tool's hint stays in the title's tooltip; no tool: the line over the panel.
+    card_->setSubtitle(QString());
+    card_->setTitleTip(picked ? whole : QString());
+    card_->setEditing(picked ? editingText(shown) : QString());
+    noTool_->setVisible(open && tab != "photos" && tab != "outliner" && !picked && !card_->hasSettings());
     if (!tubes_->isHidden() && (tubesStale_ || !hadTubes)) {
         tubesStale_ = false;
         tubes_->refresh();
@@ -847,6 +964,7 @@ void GroomTools::refresh() {
         }
         updating_ = false;
     }
+    if (card_->hasSettings()) card_->setEditing(editingText(card_->tool()));  // (the group picked, a level)
     refreshTubes();
     for (auto& [button, enabled] : enables_) {
         if (button) button->setEnabled(enabled());
@@ -920,12 +1038,29 @@ void GroomTools::fitScroll(QWidget* content) {
 void GroomTools::setPaintContent(QWidget* content) {
     lists_.at("paint")->layout()->addWidget(content);
     // Mode, Value + Fill and the color: the Paint card's (its Paint block).
-    if (auto* maps = qobject_cast<MapsPanel*>(content)) card_->setPaintControls(maps->paintControls());
+    if (auto* maps = qobject_cast<MapsPanel*>(content)) {
+        maps_ = maps;
+        card_->setPaintControls(maps->paintControls());
+        card_->setWholeFaces(maps->wholeFacesBox());  // (the Paint card's toggles row: Whole faces)
+        // The Paint card's header names the map it paints.
+        connect(maps->list(), &QListWidget::currentItemChanged, this, [this] { refreshCard(); });
+    }
     fitScroll(content);
 }
 
 void GroomTools::setCorrectivesContent(QWidget* content) {
     lists_.at("correctives")->layout()->addWidget(content);
+    if (auto* correctives = qobject_cast<CorrectivesPanel*>(content)) {
+        correctives_ = correctives;
+        // A corrective picked or let go: the tiles that can't edit one greyed (the tool that can't
+        // stops), the card's header naming the layer.
+        connect(correctives, &CorrectivesPanel::targetChanged, this, [this] {
+            refreshTiles();
+            refreshCard();
+            const groomlab::BrushEntry* e = brushEntry(tool_);
+            if (editingLayer() && !tool_.empty() && tool_ != "paint" && !(e && e->corrective)) emit toolStopRequested();
+        });
+    }
     fitScroll(content);
 }
 
@@ -942,6 +1077,7 @@ void GroomTools::setGroupsContent(QWidget* content) {
         guides_ = guides;
         guides->header()->addGlyph(isolate_, 0);  // Isolate: the eye, before New Group
         connect(guides, &GuidesPanel::groupClicked, this, [this](const std::string& name) { groupPicked(name); });
+        connect(guides, &GuidesPanel::displayChanged, this, [this] { refreshCard(); });  // (a group's color)
     }
     fitScroll(content);
 }
@@ -964,37 +1100,65 @@ void GroomTools::refreshVisibility() {
     const std::string tab = currentTab().toStdString();
     empty_->setVisible(!open);
     work_->setVisible(open);
-    tabs_->setVisible(open && tabsShown_);  // (the app's rail picks the page: its tab bar stays hidden)
-    // The grid: the categories' on Tools and Correctives, the Paint tile on Paint, none on Photos.
-    toolsGrid_->setVisible(open && (tab == "tools" || tab == "correctives"));
-    // Correctives: only the tools that work on a corrective (a category with none of them goes).
-    const bool layers = tab == "correctives";
+    pages_->setVisible(open && tabsShown_);
+    tabs_->setVisible(open && tabsShown_);
+    // The grid: the categories' trays on Tools; none on Paint (the tab is painting) and Photos.
+    toolsGrid_->setVisible(open && tab == "tools");
     for (std::size_t i = 0; i < grids_.size(); ++i) {
-        grids_[i]->setShown([layers](QAbstractButton* b) {
-            const groomlab::BrushEntry* e = brushEntry(b->property("tool").toString().toStdString());
-            return !layers || (e && e->corrective);
-        });
-        // (A tray with none of its tiles shown goes, its card with it.)
+        grids_[i]->setShown([](QAbstractButton*) { return true; });
         if (i < gridLabels_.size()) gridLabels_[i]->parentWidget()->setVisible(!grids_[i]->shown().empty());
     }
-    paintGrid_->setVisible(open && tab == "paint");
-    for (auto& [id, holder] : lists_) holder->setVisible(id == tab);
-    // The card under the tools; on Paint the maps come first (what is painted, then how).
+    paintGrid_->setVisible(false);
+    // The tab's list and its sections' cards (Correctives under the guide groups on Tools).
+    for (auto& [id, holder] : lists_) {
+        const auto section = sectionTabs_.find(id);
+        holder->setVisible(section != sectionTabs_.end() ? section->second == tab : id == tab);
+    }
+    // The card under the tools, then the list (Paint: the Paint card over the maps it paints).
     if (auto* work = qobject_cast<QVBoxLayout*>(work_->layout())) {
-        const auto paint = lists_.find("paint");
-        const int want = tab == "paint" && paint != lists_.end() ? work->indexOf(paint->second) + 1 : 0;
-        if (work->indexOf(noTool_) != want && want >= 0) {
+        if (work->indexOf(noTool_) != 0 || work->indexOf(card_) != 1) {
             work->removeWidget(card_);
             work->removeWidget(noTool_);
-            const int at = tab == "paint" && paint != lists_.end() ? work->indexOf(paint->second) + 1 : 0;
-            work->insertWidget(at, noTool_);
-            work->insertWidget(at + 1, card_);
+            work->insertWidget(0, noTool_);
+            work->insertWidget(1, card_);
         }
     }
     eye_->setEnabled(open);
     guidesEye_->setEnabled(open);
+    guidesDisplay_->setEnabled(open);
     graph_->setEnabled(open);
     refreshCard();
+}
+
+bool GroomTools::editingLayer() const {
+    return correctives_ && (!correctives_->targetLayer().empty() || !correctives_->targetNode().empty());
+}
+
+QString GroomTools::editingText(const std::string& tool) const {
+    if (tool == "paint") {
+        // Paint: the map it paints (and whether the graph reads it yet).
+        const std::string map = maps_ ? maps_->selectedMap() : std::string();
+        if (map.empty()) return tr("no map yet: + under Maps");
+        const bool unused = maps_->usersText().startsWith(tr("Not used"));
+        return tr("on <b>%1</b>%2").arg(qs(map).toHtmlEscaped(), unused ? tr(" · not used yet") : QString());
+    }
+    // The picked guide group (its color's dot), on the base groom or a corrective (in the accent).
+    const std::string group = currentGroup();
+    QColor dot = theme::textMuted();
+    if (guides_ && !group.empty()) {
+        const QColor c = guides_->groupColor(group);
+        if (c.isValid()) dot = c;
+    }
+    QString layer;
+    if (correctives_) {
+        const std::string node = correctives_->targetNode(), corrective = correctives_->targetLayer();
+        if (!node.empty()) layer = qs(node);
+        else if (!corrective.empty()) layer = qs(corrective);
+    }
+    const QString on = layer.isEmpty() ? tr("Base groom")
+                                       : QStringLiteral("<span style='color:%1'>%2</span>").arg(theme::accentInk().name(), layer.toHtmlEscaped());
+    return QStringLiteral("<span style='color:%1'>●</span> %2 <span style='color:%3'>on</span> %4")
+        .arg(dot.name(), (group.empty() ? tr("All groups") : qs(group)).toHtmlEscaped(), theme::textMuted().name(), on);
 }
 
 }  // namespace groomlab::app

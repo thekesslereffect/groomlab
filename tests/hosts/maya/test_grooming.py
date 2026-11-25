@@ -3644,37 +3644,18 @@ class GroomingTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             groomlab.show_map_on_scalp(self.groom, "packed", channel="luminance")
 
-    def test_a_picked_color_is_what_the_groom_shows_and_the_ae_edits_it(self):
+    def test_a_picked_color_is_what_the_groom_shows(self):
         # HairColor's mode color: the RGB picked is the hair's color (no pigment browns it), the
         # look colors by RGB (what the viewport, create_hair_shader and Arnold's default shader
-        # read), and the Attribute Editor's Hair Color section shows and edits the node.
-        from groomlab.ui import ae
-        shown = ae.color_rows(self.groom)
-        self.assertEqual(shown["node"], "color")
-        params = [r["param"] for r in shown["rows"]]
-        self.assertIn("melanin", params)  # natural hair by default
-        self.assertNotIn("color", params)
-        # Every everyday param, the randomness in either mode, and the pigment's resulting color.
-        for param in ("redness", "dye", "result", "greys", "melaninRandom", "hueRandom", "saturationRandom", "clumpShare",
-                      "tipColor", "tipStrength", "tipOffsetRandom", "specular", "roughness"):
-            self.assertIn(param, params)
-        result = next(r for r in shown["rows"] if r["param"] == "result")["value"]
-        for got, want in zip(result, groomlab_core.melanin_color(0.35, 0.2)):
-            self.assertAlmostEqual(got, want, places=5)
-        # Each row edits its param.
-        ae.set_color_param(self.groom, "color", "hueRandom", 0.25)
-        ae.set_color_param(self.groom, "color", "saturationRandom", 0.4)
-        ae.set_color_param(self.groom, "color", "clumpShare", 1.0)
+        # read). (The color is the HairColor node's, edited in the Graph Editor: the Attribute
+        # Editor no longer repeats it.)
+        groomlab.set_param_value(self.groom, "color", "hueRandom", 0.25)
+        groomlab.set_param_value(self.groom, "color", "saturationRandom", 0.4)
+        groomlab.set_param_value(self.groom, "color", "clumpShare", 1.0)
         set_ = groomlab.hair_color_params(self.groom)
         self.assertEqual((set_["hueRandom"], set_["saturationRandom"], set_["clumpShare"]), (0.25, 0.4, 1.0))
-        self.assertIn("clumpId", ae.color_rows(self.groom)["note"])  # no Clump before it: the note says so
-        ae.set_color_param(self.groom, "color", "mode", "color")
-        ae.set_color_param(self.groom, "color", "color", [1.0, 1.0, 1.0])
-        params = [r["param"] for r in ae.color_rows(self.groom)["rows"]]
-        self.assertIn("color", params)
-        self.assertIn("valueRandom", params)
-        for param in ("melanin", "melaninRandom", "result", "greys"):
-            self.assertNotIn(param, params)
+        groomlab.set_param_value(self.groom, "color", "mode", "color")
+        groomlab.set_param_value(self.groom, "color", "color", [1.0, 1.0, 1.0])
         look = groomlab.shading.hair_look_json(self.groom)
         self.assertTrue(look["colorsByRgb"])
         self.assertEqual([round(c, 4) for c in look["dye"]], [1.0, 1.0, 1.0])
@@ -3686,9 +3667,6 @@ class GroomingTest(unittest.TestCase):
         self.assertTrue(colors)
         for c in colors:
             self.assertAlmostEqual(min(c), 1.0, places=3)  # white, not a dyed brown
-        # A tip color picked while the tips are at 0 raises them, so it shows.
-        ae.set_color_param(self.groom, "color", "tipColor", [0.9, 0.6, 0.5])
-        self.assertAlmostEqual(groomlab.hair_color_params(self.groom)["tipStrength"], 1.0)
 
     def test_a_color_maps_rgb_output_drives_a_color_param(self):
         # A Map node's rgb output linked to HairColor's color (exposed as an input): each strand the
@@ -4619,11 +4597,11 @@ class ControlsAndExamplesTest(unittest.TestCase):
             mine = theme.Theme("mine", theme.load("mine"))
             self.assertEqual(mine.hex("blue"), "#112233")
             self.assertEqual(mine.get("ui.radius"), 4)                # from studio
-            # Radii: controls the theme's, small parts 2px less (never under 2), panels 2px more.
+            # Radii: controls the theme's (list rows too, as the mock's), panels 2px more.
             with open(os.path.join(folder, "round.json"), "w") as f:
                 json.dump({"extends": "studio", "ui": {"radius": 6}}, f)
             sheet = theme.stylesheet(theme.Theme("round", theme.load("round")))
-            for radius in (6, 4, 8):
+            for radius in (6, 8):
                 self.assertIn("border-radius: %dpx" % theme.px(radius), sheet)
             # textMuted and rowHeight: the quietest text and one row's height where a theme sets
             # them; without them, textDim and the controls' own heights.
@@ -4638,10 +4616,12 @@ class ControlsAndExamplesTest(unittest.TestCase):
             sheet = theme.stylesheet(theme.Theme("loose", theme.load("loose")))
             self.assertIn('QLabel[role="count"] { color: %s' % dim, sheet)
             self.assertNotIn("padding-top: 0; padding-bottom: 0", sheet)
-            # Who never picked a theme gets Charcoal; every theme still extends Playful.
+            # Who never picked a theme gets Playful, the theme every theme extends; the shared
+            # components still come from Charcoal's file.
             cmds.optionVar(remove=theme.THEME_VAR)
             theme._current = None
-            self.assertEqual((theme.DEFAULT, theme.BASE, theme.current().key), ("charcoal", "playful", "charcoal"))
+            self.assertEqual((theme.DEFAULT, theme.BASE, theme.current().key), ("playful", "playful", "playful"))
+            self.assertEqual(theme.components(), theme.load(theme.COMPONENTS).get("components"))
             path = theme.create_theme("copy", base="playful")
             self.assertTrue(os.path.isfile(path))
             with self.assertRaises(ValueError):

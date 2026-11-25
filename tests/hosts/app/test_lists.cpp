@@ -4,6 +4,7 @@
 // window's bindings, and the document's operations they run, each one undo step (files written or
 // deleted on the way undone too). The offscreen platform; the prompts answered by their labels.
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -11,6 +12,7 @@
 
 #include <QAction>
 #include <QImage>
+#include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QPushButton>
@@ -86,12 +88,10 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     const ui::Bindings bindings = AppActions::bindings(window);
 
     // The bar and Edit Guides as lists.json writes them (From Curves is Maya's).
-    // + New Group in the header (a + glyph), the picked group's glyphs in its box.
+    // + New Group in the header (a + glyph); a group's segments, eye and menu on its row.
     EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"group.new"}));
-    EXPECT_EQ(panel->itemBar()->ids(), (std::vector<std::string>{"group.rename", "group.select", "group.delete"}));
     EXPECT_EQ(panel->bar()->button("group.new")->text(), QStringLiteral("+ New Group"));
     EXPECT_FALSE(panel->bar()->button("group.new")->icon().isNull()) << "a glyph in the header";
-    EXPECT_FALSE(panel->itemBar()->button("group.delete")->icon().isNull()) << "a glyph";
     EXPECT_EQ(shown(panel->editsMenu()),
               (std::vector<std::string>{"Children", "-", "Mirror", "-", "Reparent...", "Move to Group", "Copy Guides", "Paste Guides",
                                         "Clear Selection"}));
@@ -105,9 +105,29 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     const std::string root = panel->currentGroup();
     ASSERT_FALSE(root.empty());
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"group"}));
+    // Its row: one line, its icons in ROW_ORDER (the segments, the eye, the menu last).
+    for (const char* icon : {"groupSegments_", "groupEye_", "groupMenu_"}) {
+        EXPECT_TRUE(panel->findChild<QToolButton*>(QLatin1String(icon) + QString::fromStdString(root))) << icon;
+    }
     std::unique_ptr<QMenu> menu(panel->contextMenu(rowOf(tree, tree->currentItem())));
     ASSERT_TRUE(menu);
-    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Select Guides", "Reset Segments", "Promote / Demote...", "Paste Guides Here", "-", "Delete"}));
+    // The row's menu (lists.json's groups context): Rename first, the edits, Generate Children a
+    // submenu of counts, Delete last (in the theme's red).
+    auto contains = [](const std::vector<std::string>& items, const std::string& text) {
+        return std::find(items.begin(), items.end(), text) != items.end();
+    };
+    std::vector<std::string> items = shown(menu.get());
+    ASSERT_FALSE(items.empty());
+    EXPECT_EQ(items.front(), "Rename");
+    EXPECT_EQ(items.back(), "Delete");
+    EXPECT_TRUE(menu->actions().back()->property("destructive").toBool());
+    EXPECT_TRUE(contains(items, "Generate Children"));
+    EXPECT_TRUE(contains(items, "Select Guides"));
+    EXPECT_TRUE(contains(items, "Color..."));
+    EXPECT_FALSE(contains(items, "Default Color"));
+    QMenu* children = menu->findChild<QMenu*>(QStringLiteral("menu_generateChildren"));
+    ASSERT_TRUE(children);
+    EXPECT_EQ(shown(children), (std::vector<std::string>{"1 per guide", "2 per guide", "3 per guide", "4 per guide", "6 per guide", "8 per guide"}));
 
     // A color of its own: one undo step; Default Color offered then; the display draws it.
     ASSERT_TRUE(panel->setGroupColor(root, "#FF8800"));
@@ -115,7 +135,9 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     EXPECT_EQ(doc->undoText(), "Undo color of " + root);
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"group", "group.color"}));
     menu.reset(panel->contextMenu(rowOf(tree, tree->currentItem())));
-    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Default Color", "Select Guides", "Reset Segments", "Promote / Demote...", "Paste Guides Here", "-", "Delete"}));
+    items = shown(menu.get());
+    EXPECT_TRUE(contains(items, "Default Color"));
+    EXPECT_EQ(items.back(), "Delete");
     EXPECT_FALSE(panel->setGroupColor(root, "orange")) << "#rrggbb only";
     EXPECT_EQ(doc->undo(), "");
     EXPECT_TRUE(doc->groupColors().empty());
@@ -225,10 +247,6 @@ TEST(AppLists, MapsBarMenuAndOperations) {
     const std::filesystem::path folder = std::filesystem::u8path(path).parent_path();
 
     EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"map.new", "map.import"}));
-    EXPECT_EQ(panel->itemBar()->ids(), (std::vector<std::string>{"map.rename", "map.convert", "map.delete"}));
-    QToolButton* convert = panel->itemBar()->button("map.convert");
-    ASSERT_TRUE(convert && convert->menu());
-    EXPECT_EQ(shown(convert->menu()).size(), 3u) << "the three kinds";
 
     // A map a setting reads: Read by says so; deleting it gives the setting its own value back.
     const std::string scatter = nodeOfType(*doc, "Scatter");
@@ -241,9 +259,27 @@ TEST(AppLists, MapsBarMenuAndOperations) {
     EXPECT_EQ(doc->mapUsers(map), (std::vector<std::pair<std::string, std::string>>{{scatter, "density"}}));
     EXPECT_NE(panel->usersText().indexOf(QString::fromStdString(scatter + ".density")), -1) << panel->usersText().toStdString();
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"map", "map.scalp"}));
+    // One line per map: its ⓘ (kind, Read by, Use for, Show on) and its menu on the row.
+    EXPECT_TRUE(panel->findChild<QToolButton*>(QStringLiteral("mapInfo_") + QString::fromStdString(map)));
+    EXPECT_TRUE(panel->findChild<QToolButton*>(QStringLiteral("mapMenu_") + QString::fromStdString(map)));
     std::unique_ptr<QMenu> menu(panel->contextMenu(panel->list()->visualItemRect(panel->list()->currentItem()).center()));
-    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Map...", "Import Image as Map...", "Rename...", "Convert to", "Make Color (r g b a)", "-",
-                                                         "Relink Image...", "-", "Delete"}));
+    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"Rename...", "Convert to", "Make Color (r g b a)", "-", "Relink Image...", "-", "Delete"}));
+    QMenu* convert = menu->findChild<QMenu*>(QStringLiteral("menu_map.convert"));
+    ASSERT_TRUE(convert);
+    EXPECT_EQ(shown(convert).size(), 3u) << "the three kinds";
+    // Use for: the settings the graph has a node for (Scatter's density reads it already: greyed).
+    {
+        QMenu useFor;
+        panel->fillUseFor(&useFor);
+        bool density = false;
+        for (QAction* a : useFor.actions()) {
+            if (a->text().contains(QString::fromStdString(scatter + ".density"))) {
+                density = true;
+                EXPECT_FALSE(a->isEnabled()) << "it reads the map already";
+            }
+        }
+        EXPECT_TRUE(density);
+    }
     ASSERT_EQ(panel->removeSelected(), "");
     EXPECT_FALSE(doc->map(map));
     EXPECT_FALSE(doc->paramOrDefault(scatter, "density").is_object()) << "unlinked: the node's own value again";
@@ -283,8 +319,8 @@ TEST(AppLists, MapsBarMenuAndOperations) {
     EXPECT_TRUE(panel->deleteFiles());
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"map", "map.scalp", "map.texture"}));
     menu.reset(panel->contextMenu(panel->list()->visualItemRect(panel->list()->currentItem()).center()));
-    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Map...", "Import Image as Map...", "Rename...", "Convert to", "Make Color (r g b a)", "-",
-                                                         "Relink Image...", "Reload Image", "Show in Explorer", "-", "Delete", "Delete Its File Too"}));
+    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"Rename...", "Convert to", "Make Color (r g b a)", "-", "Relink Image...", "Reload Image",
+                                                         "Show in Explorer", "-", "Delete", "Delete Its File Too"}));
     QAction* deleteFiles = action(menu.get(), "Delete Its File Too");
     ASSERT_TRUE(deleteFiles && deleteFiles->isCheckable());
     EXPECT_TRUE(deleteFiles->isChecked());
@@ -307,7 +343,9 @@ TEST(AppLists, MapsBarMenuAndOperations) {
     panel->refresh();
     panel->selectMap("detail");
     EXPECT_EQ(panel->selectedMissing(), detail);
-    EXPECT_TRUE(panel->list()->currentItem()->text().startsWith(QStringLiteral("⚠ ")));
+    auto* lostRow = qobject_cast<ListRow*>(panel->list()->itemWidget(panel->list()->currentItem()));
+    ASSERT_TRUE(lostRow) << "one line per map: its row";
+    EXPECT_TRUE(lostRow->label()->text().startsWith(QStringLiteral("⚠ ")));
     const std::string png = (folder / "mask.png").u8string();
     QImage gray(32, 32, QImage::Format_RGBA8888);
     gray.fill(QColor(128, 128, 128));
@@ -348,8 +386,7 @@ TEST(AppLists, CorrectivesStackBarMenuAndKeys) {
     auto* panel = window.findChild<CorrectivesPanel*>();
     ASSERT_TRUE(panel);
     const ui::Bindings bindings = AppActions::bindings(window);
-    EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"corrective.new", "corrective.fixFrame"}));
-    EXPECT_EQ(panel->itemBar()->ids(), (std::vector<std::string>{"corrective.up", "corrective.down", "corrective.solo", "corrective.delete"}));
+    EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"corrective.fixFrame", "corrective.new"}));
     // Two correctives: the stack top first, the base groom at the bottom.
     bindings.at("corrective.new").trigger(nullptr, false);
     doc->setFrame(10.0);
@@ -366,8 +403,12 @@ TEST(AppLists, CorrectivesStackBarMenuAndKeys) {
     std::unique_ptr<QMenu> menu(panel->contextMenu(rowOf(tree, tree->topLevelItem(1))));
     ASSERT_TRUE(menu);
     EXPECT_EQ(panel->currentLayer(), "sculpt1");
-    EXPECT_EQ(shown(menu.get()),
-              (std::vector<std::string>{"Go to Its Frame", "Key Weight Here", "Clear Keys (every frame)", "Rename", "-", "Solo", "Delete"}));
+    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"Rename", "-", "Move Up", "Move Down", "-", "Go to Its Frame", "Key Weight Here",
+                                                         "Clear Keys (every frame)", "-", "Delete"}));
+    // One line per corrective: its weight (a popup), Solo, the eye, the menu.
+    for (const char* icon : {"correctiveWeight_sculpt1", "correctiveSolo_sculpt1", "correctiveEye_sculpt1", "correctiveMenu_sculpt1"}) {
+        EXPECT_TRUE(panel->findChild<QToolButton*>(QLatin1String(icon))) << icon;
+    }
     EXPECT_EQ(panel->contextMenu(rowOf(tree, tree->topLevelItem(2))), nullptr);
     // Up, solo (again: all on), each one undo step.
     bindings.at("corrective.up").trigger(nullptr, false);
@@ -385,7 +426,7 @@ TEST(AppLists, CorrectivesStackBarMenuAndKeys) {
     ASSERT_TRUE(panel->keyWeight("shot10"));
     c = Correctives::fromJson(doc->storedText(StrokeField::Correctives));
     EXPECT_GE(c.layer("shot10")->weightCurve.size(), 3u);
-    EXPECT_EQ(tree->topLevelItem(1)->text(2).left(1), QStringLiteral("◆"));
+    EXPECT_EQ(tree->topLevelItem(1)->text(1).left(1), QStringLiteral("◆"));
     ASSERT_TRUE(panel->clearKeys("shot10"));
     c = Correctives::fromJson(doc->storedText(StrokeField::Correctives));
     EXPECT_TRUE(c.layer("shot10")->weightCurve.empty());
@@ -417,9 +458,12 @@ TEST(AppLists, LeavingThePaintTabEndsPainting) {
     ASSERT_TRUE(maps && tools && viewport);
     ASSERT_EQ(doc->createMap("tex", "texture", false, 0.5f, 64), "");
     maps->refresh();
-    ASSERT_TRUE(tools->showTab(QStringLiteral("paint")));
-    maps->selectMap("tex");
     const int modeBefore = window.displaySettings().colorMode;
+    // The Paint tab is painting: entering it starts Paint on the picked map.
+    ASSERT_TRUE(tools->showTab(QStringLiteral("paint")));
+    EXPECT_EQ(viewport->toolMode(), Viewport::ToolMode::Brush);
+    EXPECT_EQ(window.brush().toolId(), "paint");
+    maps->selectMap("tex");
     ASSERT_TRUE(maps->paintSelected());
     EXPECT_EQ(viewport->toolMode(), Viewport::ToolMode::Brush);
     EXPECT_EQ(doc->scalpMapDisplay(), "tex");

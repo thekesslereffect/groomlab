@@ -194,14 +194,36 @@ def _selected_ids(scalp):
 
 
 def _tab_changed(self, context):
+    """Another page (Tools, Paint, Photos). The Paint page is painting: opening it starts Paint on
+    the picked map (the brush before kept); leaving it gives that brush back (none before: no tool),
+    and the strands and scalp stop showing the map, as Maya's palette does."""
     if props.is_quiet():
         return
     from . import display, tool_ops, tools
-    if self.tab != "PAINT" and self.tool == "paint":
-        # Leaving the Paint tab (back to the tools) is done painting, as in Maya's palette: the Paint
-        # brush stops and the strands and scalp stop showing the map, as Leave Tool does.
-        tool_ops.stop_tool(context)
+    from .helper_client import HelperError
     scalp = tools.active(context)
+    if self.tab == "PAINT" and self.tool != "paint" and scalp is not None and tools.is_hierarchy(scalp) \
+            and tools.current_map(context.scene) is not None:
+        with props.quiet():
+            self.paint_before = self.tool
+        try:
+            tools.pick(context, "paint")
+            tool_ops.start_modal(context)
+        except (HelperError, RuntimeError) as e:
+            tools.status(context.scene, str(getattr(e, "message", e)))
+    elif self.tab != "PAINT" and self.tool == "paint":
+        before = self.paint_before
+        with props.quiet():
+            self.paint_before = ""
+        if before and before != "paint" and tools.tool_info(before):
+            try:
+                tools.pick(context, before)
+                tool_ops.start_modal(context)
+            except (HelperError, RuntimeError) as e:
+                tools.status(context.scene, str(getattr(e, "message", e)))
+                tool_ops.stop_tool(context)
+        else:
+            tool_ops.stop_tool(context)
     display.mark(scalp)  # the paint view follows the tab
     if scalp is not None and tools.is_hierarchy(scalp):
         try:
@@ -212,7 +234,8 @@ def _tab_changed(self, context):
 
 def _corrective_index_changed(self, context):
     """A row of the Correctives list picked: what brushes edit (the base groom, a corrective, a
-    Sculpt node's guides)."""
+    Sculpt node's guides). The row brushes edit clicked again: the base groom again (Maya's). On a
+    corrective or a Sculpt node, a tool that can't edit one stops (its tile greys)."""
     if props.is_quiet() or not (0 <= self.corrective_index < len(self.correctives)):
         return
     from . import tools
@@ -220,16 +243,36 @@ def _corrective_index_changed(self, context):
     if scalp is None or not tools.is_hierarchy(scalp):
         return
     row = self.correctives[self.corrective_index]
+    again = row.kind in ("layer", "node") and self.corrective_picked == "%s:%s" % (row.kind, row.name)
     try:
-        if row.kind == "node":
-            tools.sculpt_target(scalp, node=row.name)
-        elif row.kind == "layer":
-            tools.sculpt_target(scalp, corrective=row.name)
-        else:
+        if again or row.kind == "base":
             tools.sculpt_target(scalp, base=True)
+        elif row.kind == "node":
+            tools.sculpt_target(scalp, node=row.name)
+        else:
+            tools.sculpt_target(scalp, corrective=row.name)
         tools.refresh_correctives(scalp, context.scene)
     except Exception as e:  # noqa: BLE001
         tools.status(context.scene, str(e))
+    stop_off_layer(context)
+
+
+def stop_off_layer(context):
+    """On a corrective or a Sculpt node, the active tool stops when it can't edit one (Maya's
+    show_layer_tools: its tile greys)."""
+    from . import tool_ops, tools
+    t = context.scene.groomlab_tools
+    kind, _name = tools.picked_corrective(context.scene)
+    if kind in ("layer", "node") and t.tool and not tools.edits_layers(t.tool):
+        tool_ops.stop_tool(context)
+
+
+def _tube_profile_picked(self, context):
+    """Root, Mid or Tip picked for the editor: the library row and the Smooth pill follow its shape."""
+    if props.is_quiet():
+        return
+    from . import tools
+    tools.follow_profile(self)
 
 
 def _segments(self, context):
@@ -276,6 +319,9 @@ def _tube_shape_items(self, context):
     if self.tube_mixed:
         items.append((MIXED, "Mixed", "The targeted guides have different shapes: pick one to give them all", "NONE",
                       _number(MIXED)))
+    if self.tube_root_targets or self.tube_drawn:  # (root tubes: their root is their own drawn outline)
+        items.append((DRAWN, "Drawn root", "The root tube's own outline, drawn on the scalp: the Roots brush reshapes "
+                                           "it; a Root profile picked goes to the other guides", "NONE", _number(DRAWN)))
     for c in defs.choices("tubeShape"):
         items.append((c["value"], c["label"], c.get("tip", ""), "NONE", _number(c["value"])))
     for s in self.tube_shapes:
@@ -287,6 +333,7 @@ def _tube_shape_items(self, context):
 
 _tube_cache = []
 MIXED = "__mixed__"
+DRAWN = "__drawn__"  # the root picker's "Drawn root": a root tube's own outline (no library shape is named so)
 UNSET = "__unset__"  # a mid or tip profile not set (Between, As root)
 
 
@@ -331,6 +378,14 @@ def _tube_hold(profile):
 
 
 
+def _shape_smooth(t):
+    """The Smooth pill: the library shape the editor shows takes it (one undo step)."""
+    if props.is_quiet():
+        return
+    from . import tools
+    tools.set_profile_smooth(bpy.context, bool(t.tube_shape_smooth))
+
+
 def _mirror_on(t):
     """Mirror turned on: the picked library shape made symmetric from its right side when it is not
     (every host's: tube.h mirroredSectionPoints, as Maya's and the app's editors do)."""
@@ -350,6 +405,7 @@ class GroomLabGroupItem(bpy.types.PropertyGroup):
     hidden: BoolProperty()
     depth: IntProperty()
     segment_length: FloatProperty()  # above 0: its guides go by length (issue #98)
+    segments: IntProperty()     # the group's segments (its new guides'): the row's segments button
     has_color: BoolProperty()   # its own viewport color (else `color` is its automatic one)
     color: FloatVectorProperty(size=3, subtype="COLOR_GAMMA", min=0.0, max=1.0, default=(0.5, 0.5, 0.5))
 
@@ -446,12 +502,27 @@ def _length_edit(edit, value_of):
     return update
 
 
+TAB_NUMBERS = {"tools": 0, "paint": 1, "photos": 3}
+
+
 class GroomLabTools(bpy.types.PropertyGroup):
     """Maya's Groom Tools palette, its settings by the catalog's labels and hints (brush_catalog.h)."""
     tool: StringProperty(description="The active GroomLab tool (a catalog id)")
-    tab: EnumProperty(name="Tab", items=[(t["id"].upper(), t["label"], t.get("tip", "")) for t in defs.tabs()
-                                         if t["id"] in ("tools", "paint", "correctives", "photos")],
+    # The pages (palette.json's tabs: Tools, Paint, Photos; Correctives is a section of Tools). Their
+    # numbers are the ones they had with Correctives a page (a .blend keeps the number): an old
+    # Correctives page opens as Tools (palette.current_tab).
+    tab: EnumProperty(name="Page", items=[(t["id"].upper(), t["label"], t.get("tip", ""), TAB_NUMBERS[t["id"]])
+                                          for t in defs.tabs() if t["id"] in TAB_NUMBERS],
                       default="TOOLS", update=_tab_changed)
+    paint_before: StringProperty()  # the brush before the Paint page started Paint (given back on leaving)
+    corrective_picked: StringProperty()  # "kind:name" of the Correctives row brushes edit (clicked again: base)
+    # The Tube card's Profile: which profile (Root, Mid, Tip) the editor shows, with its picker,
+    # Apply and Hold beside it.
+    tube_profile: EnumProperty(name="Profile", items=[
+        ("ROOT", "Root", "Show the root profile's shape in the editor"),
+        ("MID", "Mid", "Show the mid profile's shape in the editor"),
+        ("TIP", "Tip", "Show the tip profile's shape in the editor")],
+        default="ROOT", update=_tube_profile_picked, description="The profile the shape editor shows")
     status: StringProperty()
     strengths: StringProperty()  # {tool: strength}: each tool keeps its own, as in Maya
     brushes: StringProperty()  # {tool: {radius, falloff, falloff_curve, strength_profile}}: each brush's own
@@ -597,6 +668,16 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                          "and Draw make. The built-ins, then the groom's library of custom shapes")
     tube_choice: StringProperty(default="round")  # the shape picked (the targets', else the last picked)
     tube_mixed: BoolProperty()
+    # The targets' drawn root (an owned shape, the core's isOwnedTubeShape: "Drawn root" in the root
+    # picker), "" when they take a library or built-in shape; how many targets are root tubes (their
+    # Root profile stays their drawn root) and how many are in split levels (no Mid or Tip there).
+    tube_drawn: StringProperty()
+    tube_root_targets: IntProperty()
+    tube_split_targets: IntProperty()
+    tube_in_use: StringProperty()  # no targets: the profiles the groom's guides take, "name (n), ..."
+    tube_shape_smooth: BoolProperty(name="Smooth", default=True, update=lambda self, context: _shape_smooth(self),
+                                    description="A smooth curve through the points; off: straight edges and sharp "
+                                                "corners")
     # The mid and tip profiles (tube.h: the outline changes smoothly root to mid to tip) and how
     # much of the tube each keeps its exact shape (Maya's Tubes panel rows and Length sliders).
     tube_mid_shape: EnumProperty(name="Mid", items=_profile_items("mid"), update=_tube_profile("mid"),
@@ -681,9 +762,6 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                   description="Working on a level, also show the tubes (not the guides) of the "
                                               "levels above where no level below continues them, and their roots in "
                                               "Select root and Edit roots")
-    # The Tube card's blocks folded (a click on a block's title).
-    fold_roots: BoolProperty(name="Tube roots", default=False)
-    fold_levels: BoolProperty(name="Tube hierarchy", default=False)
     tube_shapes: CollectionProperty(type=GroomLabTubeShapeItem)
     tube_shape_index: IntProperty()
     tube_width: FloatProperty(name="Width", default=0.001, min=0.0, soft_max=0.01, subtype="DISTANCE", unit="LENGTH",
@@ -767,7 +845,6 @@ class GroomLabTools(bpy.types.PropertyGroup):
     full_density: BoolProperty(name="Full density", default=True,
                                description="Keep every strand of the preview up while a stroke is live, instead of a "
                                            "lighter share of them (slower on heavy grooms, but nothing pops)")
-    starter_dismissed: BoolProperty(default=False)
 
     @property
     def flow_sink(self):
@@ -800,6 +877,12 @@ class GroomLabGroomDisplay(bpy.types.PropertyGroup):
                                                                "A painted guide layer from black to white")],
                                    default="group", update=_display)
     guide_color_layer: StringProperty(name="Layer", update=_display, description="The painted layer the guides show")
+    # The rest of the guides' display (Maya's Attribute Editor had them; the Groom Tools' guides menu now).
+    guide_width: FloatProperty(name="Width", default=2.0, min=0.5, max=20.0, soft_min=1.0, soft_max=6.0, update=_display,
+                               description="The guides' width in pixels (selected guides one more)")
+    guides_smoothed: BoolProperty(name="Smoothed", default=True, update=_display,
+                                  description="Guides draw as a smooth curve through their points (off: straight "
+                                              "segments)")
     strand_color: EnumProperty(name=defs.get("choices/strandColor")["label"], items=STRAND_COLORS,
                                default=defs.enum_default("strandColor"), update=_display,
                                description=defs.get("choices/strandColor")["tip"])

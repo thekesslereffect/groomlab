@@ -331,12 +331,12 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `guide_segments` | `ids`, `group` or `level` (else the selection, else every guide) | `{"ids", "segments"}`: each guide's points - 1 (the Segments slider) |
 | `guides_preview` | `segments`, targets as resample | `{"previewed"}`: the guides shown resampled (`setPreviewHierarchy`, from the stored guides each time), no change, no undo step; `guides_edit resample` commits |
 | `guides_preview_end` | | `{"ended"}`: the stored guides shown again (after `guides_preview` or `tube_shape_preview`) |
-| `tube_targets` | | `{"source" (selection, solo, none), "guides", "shapes", "tube" (the first's, or null), "card" ({width, flatness, twist}: the Tube card's values for it, the core's tubeCardValues, or null)}`: what the Shape and Select cards' Profile and Selected guides edit (Maya's `-tubeTargets`: the selection, else the soloed guides) |
+| `tube_targets` | | `{"source" (selection, solo, none), "guides", "shapes", "midShapes", "tipShapes", "inUse", "rootTubes" (of the guides, the root tubes: their Root profile is their drawn root), "splitTubes" (those in a tube hierarchy's split levels: no Mid or Tip there), "tube" (the first's, or null), "card" ({width, flatness, twist}: the Tube card's values for it, the core's tubeCardValues, or null)}`: what the Tube card's Profile and Selected tubes edit (Maya's `-tubeTargets`: the selection, else the soloed guides; the core's tubeTargetsOf) |
 | `tube_get` | `guide` (an ID) | `{"tube": {"shape", "width" (host units), "aspect", "twist" (radians)}}`, lists evenly spaced root to tip |
-| `tube_set` | `shape`, `width` (host units), `aspect`, `twist` (each a number or a list root to tip), `samples`; targets `ids`, `group` or `level`, else the selection | `{"changed", "undo"}` (Maya's `-setTube`, `editedTube`) |
+| `tube_set` | `shape`, `width` (host units), `aspect`, `twist` (each a number or a list root to tip), `samples`; targets `ids`, `group` or `level`, else the selection | `{"changed", "note", "undo"}` (Maya's `-setTube`, the editor's editTubes: a root tube keeps its drawn root, `note` says how many did, "" none) |
 | `tube_scale` | `factor` (0 or more), targets | `{"changed", "undo"}`: every width times it, the taper kept |
 | `tube_smooth` | `channel` (width, flatness, twist, all), `passes` (3), targets | `{"changed", "undo"}` (`smoothedTube`, the root's and tip's kept) |
-| `tube_shapes` | | `{"shapes": [{name, builtin, points [[u, v]...], smooth, users (null for a built-in), outline?}]}`: the built-ins, then the groom's library |
+| `tube_shapes` | | `{"shapes": [{name, builtin, points [[u, v]...], smooth, users (null for a built-in), owned (a root tube's drawn root, the core's isOwnedTubeShape: in no picker), outline?}]}`: the built-ins, then the groom's library |
 | `tube_shape_add` / `tube_shape_set` | `name`, `points` [[u, v], ...] (3 or more; set: optional), `smooth` (true) | `{"users", "undo", "shapes"}`: the library edited (Maya's `-editTubeShape`), every guide taking the shape following |
 | `tube_shape_rename` | `name`, `to` | the same |
 | `tube_shape_remove` | `name` | the same; `users`: the guides that became round |
@@ -679,9 +679,14 @@ solve after each pick or move (`photos.live_solve`: 4 complete pairs keep the fo
 it unless Keep focal length; a locked camera stays). Esc or the button again closes the added half
 (`screen.area_close`, deferred out of the modal; skipped in background mode, where it never returns). After every change the scene's photos go to
 `set_reference_photos`; a groom file opened with photos and no cameras of their names gets them
-(`photos.restore_from_groom`, from `reference_photos`). Guides from Photos (`groomlab.photos_guides`:
-the GroomLab menu's item and the tab's button) sends the photos and runs `guides_from_photos` on
-every photo camera (one placed by eye counts as lined up, as in Maya).
+(`photos.restore_from_groom`, from `reference_photos`). The Photos page lists them one line each
+(Maya's Simple redesign): a click on a row looks through that camera, a click again goes back (no
+row picked then); a photo looked through some other way gets picked; the header's camera icon is
+Add View (a camera with an image as a photo) beside Import; the
+row's icons are its settings (a popover: opacity and focal length), in front / behind, the eye, the
+lock and its menu (Rename, Align Photo, Select Camera, Remove); the pairs and the scalp's morph fold
+under the list. Guides from Photos left the menus and the page (the redesign drops it);
+`photos.guides_from_photos` still runs `guides_from_photos` on every photo camera.
 
 Differences from Maya: Maya's Photos window (the photo and the mesh side by side, flow arrows and
 mask touch-ups drawn on the photo, the measured look applied to the graph) is not in Blender: the
@@ -837,7 +842,7 @@ extension zip installed by `blender --command extension install-file` into a thr
 - `blender.addon_tools`: the Groom Tools (section 8). The operators, the top bar
   menu in Maya's order, the pie menu on Y in the add-on keymap, the icons as previews; Create Groom
   making a hierarchy groom (no Blender guides object, the state kept at once); the palette drawn
-  into the stand-in layout (the first-groom steps, the tiles by category, the card showing exactly
+  into the stand-in layout (the tiles in their trays, the card headed by its brush, showing exactly
   the catalog's settings for the tool); tiles sending each tool and its settings
   (the catalog's default strength, each tool's own strength kept, unsigned tools clamped at 0);
   the modal tool's event handling (`ToolSession`) driven with synthetic events over a synthetic
@@ -997,7 +1002,8 @@ scene's groom.
 **Themes** (`themes.py`). GroomLab > Theme lists the themes as Maya's `ui/theme.py` finds them
 (GROOMLAB_THEME_PATH, the extension's user folder's `themes/`, the shipped Charcoal, Paper, Playful
 and Studio; a theme merged over the one it extends, Playful by default) and makes one active,
-remembered in the extension's `theme.json`: `uikit.theme_data()` is its data, which the window, the
+remembered in the extension's `theme.json` (Playful until one is picked: `themes.DEFAULT`; the
+components' sizes still come from Charcoal's file, `uikit.THEME_FILE`, when a theme has none): `uikit.theme_data()` is its data, which the window, the
 canvas and the node editor's colors (`blender_theme.graph_colors`) read; `themes.restyle()` drops
 their caches and redraws. New Theme from Current, Reload Theme and Open Themes Folder as in Maya.
 
@@ -1190,7 +1196,8 @@ display, menu and keys.
 | `tool_ops.py` | the tool (`groomlab.tool` picks one, `groomlab.tool_modal` runs it in the viewport: `ToolSession` turns events into the helper's commands), undo, groups, guide edits, maps, the pie menu `GROOMLAB_MT_pie` and its keymap item (hotkeys.py, tool_tabs.py) |
 | `cards_view.py` | the cards view (Maya's compare_cards, card_display, bake_cards, bake_scalp, scalp_cap): `Object.groomlab_tools.show_cards` / `card_textures` swap the strands for `<scalp>_cards` (role CARDS, from `card_view`, rebuilt by `groom.evaluate` while shown) and, after Bake Scalp (`scalp_bake`: its prefix), `<scalp>_scalpCap` (SCALP_CAP); diffuse materials (Maya's lambert) of the bake's preview and the scalp maps, coverage cut out (dithered); Bake Maps / Bake Scalp into `groomlab/<file>/cards/<groom>` (untitled: `groom.temp_root()`, taken along by the first save's `follow_files`); the Cards node's actions bind them (`prop:groom.` bindings: the active groom's settings) |
 | `display.py` | `display` into draw lists (numpy) and gpu batches, a POST_VIEW handler; strand color modes as the hair's `groomlab_display` color attribute (groom_draw_override.cpp) |
-| `palette.py` | the sidebar's **Groom Tools** panel (Tools, Paint, Correctives and Photos tabs; Photos is `photos.py`'s, section 3 "Photos") the tool grid, the tool's card (Brush, the tool's own blocks, Applies to) and the Paint and Correctives lists; then its subpanels: Guide groups (open, palette.json's one section), While sculpting and Display, folded (palette.py, tool_tabs.py) |
+| `palette.py` | the sidebar's **Groom Tools** panel in the Simple redesign's order (research/ui-redesign/SIMPLE.md): the groom picker and its buttons (the hair's eye, the guides' eye with how they draw in a popover, the Graph Editor, Find Command, More), then the pages Tools, Paint and Photos (Photos is `photos.py`'s, section 3 "Photos"). Tools: the brushes in their trays (no group names; on a corrective the tiles that can't edit one grey out), the brush's card (its icon, name and what the next stroke edits; Radius and Strength; its essentials; its toggles as pills, Mirror first; More settings folded; the Tube brush: the levels' row, Width / Flatness / Twist, Radius and Strength, its pills, More settings, then the Profile always shown (Root / Mid / Tip, in the window as tiles with their outlines; the profile's picker, Apply, Hold, a library shape's Mirror and Smooth; the editor beside them in the window; what root tubes and split levels keep; the library's ⋯) and Selected tubes · N folded with Smooth on its header; the Roots brush: the levels' row and the root tools: Draw root (where picking the brush starts; a mode's button again goes back to it, as Esc does; another brush leaves root mode), Edit roots, Select root, Undo CV, Delete, Duplicate, Subdivide with the density brush, Multiplier and Apply, Snap to neighbours and Draw guide, Point density or Length and Segments, Tip width), then the Guide groups and the Correctives (Display while sculpting folded under them). Paint: the Paint card (the page starts Paint on the picked map, leaving gives the brush before back), then the maps. Every list one line per row in one icon order (the row's settings popover, its toggles, eye, lock, its menu last: Rename first, Delete last in red); then the Display subpanel (strand colors), folded (palette.py, tool_tabs.py) |
+| `find_command.py` | Find Command (`commands.find`): Blender's search popup over every GroomLab menu command, brush and graph preset (Maya's find_command.py) |
 | `menu.py` | every menu the UI definitions describe, built from them: the top bar's **GroomLab** menu (menus.json "main"), the Groom Tools' More menu, Output and empty-state submenus, the lists' right-click menus (Blender's list item context menu, and a button beside each list); the shortcuts, the About popup (menu.py) |
 | `definitions.py`, `actions.py` | the shared UI definitions (`engine/ui/*.json`, docs/UI_DEFINITIONS.md) read with no helper running, as Maya's definitions.py (host "blender"); `actions.BINDINGS` maps each action id to an operator and its properties. An id without a binding is hidden; `blender.addon_ui` lists the ones left (its ALLOWED_MISSING: the parity checklist) |
 | `icons.py`, `icons/*.png` | Maya's icons (hosts/maya/icons/*.svg) as previews; the PNGs are rendered by `tools/make_blender_icons.py` (Pillow, the Playful theme's colors as widgets.icon gives them) and committed |
@@ -1238,9 +1245,28 @@ is read-only there): a timer writes them.
 
 Deviations Blender forces:
 
-- The palette is a sidebar panel, not a floating dockable window; tiles are icon buttons six to a
-  row, as Maya's (the tooltip's title is Blender's operator name, "GroomLab Tool", with the tool's
-  name and hint under it); the More menu has no theme menu.
+- The palette is a sidebar panel, not a floating dockable window; tiles are icon buttons five to a
+  row, as Maya's Simple trays, their icons alone unless the sidebar is wide enough for every tile's
+  whole name (Blender puts a name beside its icon, and a cut name reads worse than none; the
+  GroomLab window draws each icon over its name); the tooltip's title is Blender's operator name,
+  "GroomLab Tool", with the tool's name and hint under it; a tray has no tooltip of its own; on a
+  corrective the tiles that can't edit one grey out in their own cells. The More menu has no theme
+  menu.
+- The toggles (the brush's Mirror, Pressure, Keep off scalp...; the guides' display) are pills in
+  the GroomLab window (`palette.pills`, drawn.py's "pills" role, `uikit.Pill`: as wide as their
+  names, wrapping, fully rounded, outlined while off, the selection with the accent's edge while
+  on). Blender's own buttons can't be pills: in the sidebar and the popovers they are toggle buttons
+  as wide as their labels (rows aligned left, as many as fit the width, the rest on the next row),
+  rounded and colored by Blender's theme.
+- A row's settings (a group's segments, a corrective's weight, a map's info, a photo's opacity and
+  lens) and the guides' display open as Blender's popovers (`wm.call_panel`), in the GroomLab window
+  too; a row's menu is Blender's menu in the sidebar, the window's own in the window. A delete is
+  red where Blender draws `alert` (its menus, the window's).
+- Not here from Maya's Simple: the guides' On top (Blender's overlays share one depth buffer with
+  the hair) and Instances switches, a map's Use for (Maya's is its Python, painting.use_map: no
+  helper command yet) and the dot on an unread map's info, the brush's keys in a help line (Blender
+  shows them in the status bar). The sidebar's Tube card has no outline editor nor Root / Mid / Tip
+  outline tiles (Blender's layout can't draw them): the GroomLab window has both.
 - No middle-drag radius/strength (Blender's view rotation): B / M + drag only, as Maya's hotkeys.
 - Blender postpones its autosave while a modal operator runs: the tool's does too; leave the tool
   (Esc) now and then in long sessions, or save.

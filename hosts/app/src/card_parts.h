@@ -8,6 +8,7 @@
 // folding section (Photos' Guides from photos).
 
 #include <algorithm>
+#include <functional>
 #include <vector>
 
 #include <QFrame>
@@ -19,6 +20,7 @@ class QAbstractItemView;
 class QHBoxLayout;
 class QIcon;
 class QLabel;
+class QMenu;
 class QPushButton;
 class QToolButton;
 class QVBoxLayout;
@@ -33,6 +35,9 @@ public:
     void setMaxColumns(int columns) { maxColumns_ = std::max(1, columns); }  // (3 unless said)
     void setGap(int gap) { gap_ = gap; invalidate(); }
     void setLastRowStretch(bool stretch) { lastRowStretch_ = stretch; invalidate(); }  // (on unless said)
+    // Natural: each item at its own width, left to right, wrapping when the width runs out (a row
+    // of pills); else an even grid of columns (off unless said).
+    void setNatural(bool natural) { natural_ = natural; invalidate(); }
     ~FlowLayout() override;
     void addItem(QLayoutItem* item) override;
     int count() const override { return static_cast<int>(items_.size()); }
@@ -51,6 +56,7 @@ private:
     int gap_ = 4;
     int maxColumns_ = 3;
     bool lastRowStretch_ = true;
+    bool natural_ = false;
 };
 
 // ---- Section ---------------------------------------------------------------------------------------
@@ -85,11 +91,23 @@ public:
     void addAction(QWidget* action);  // on the title row's right, in order
     QString title() const;
     QLabel* titleLabel() const { return title_; }
+    // Foldable (Maya's Block.set_foldable): the title a header with a chevron that shows or hides
+    // the rows (the actions stay on its right); `folded` to start with.
+    void setFoldable(bool folded);
+    void setFolded(bool folded);
+    bool folded() const { return folded_; }
+    QPushButton* foldHeader() const { return fold_; }
+    // The words the title shows ("Selected tubes · 12"); title() stays the word it was given.
+    void setHeading(const QString& text);
 
 private:
     QLabel* title_ = nullptr;
+    QPushButton* fold_ = nullptr;
     QHBoxLayout* head_ = nullptr;
+    QWidget* body_ = nullptr;
     QVBoxLayout* rows_ = nullptr;
+    QString heading_;
+    bool folded_ = false;
 };
 
 // A checkable chip (QToolButton, role "chip"): the card's toggles and choices.
@@ -99,6 +117,14 @@ QToolButton* makeChip(const QString& text, const QString& tip, QWidget* parent);
 QWidget* chipRow(QWidget* parent, FlowLayout** flow, const QString& label = {});
 // A chip row for a one-of choice: the chips as segments on a sunken track.
 QWidget* segmentRow(QWidget* parent, FlowLayout** flow, const QString& label = {});
+// A pill (role "pill", the Simple layout's Chip: research/ui-redesign/src/simple/parts.tsx): a
+// checkable toggle sized to its text, a row's height less 2, fully round; off an outline in the
+// theme's line tone with dim text, on the selection fill under an accent edge. The tool card's
+// toggles row and the guides' display popup.
+QToolButton* makePill(const QString& text, const QString& tip, QWidget* parent);
+void pillStyle(QToolButton* button);  // a button made elsewhere (a chip) worn as a pill
+// A row of pills at their own widths, left to right 6 px apart, wrapping to the width.
+QWidget* pillRow(QWidget* parent, FlowLayout** flow, const QString& label = {});
 // A line glyph (a ui_<name>.svg icon in the theme's dim text, the text color while checked or
 // hovered): the card's and the lists' small actions.
 QIcon lineIcon(const QString& name, qreal devicePixelRatio, int size = 16);
@@ -126,6 +152,55 @@ private:
 
 // The picked item's own settings and actions under a list: a small bordered box (role "itemBox").
 QFrame* itemBox(QWidget* parent, QVBoxLayout** rows);
+
+// ---- List rows (research/ui-redesign/SIMPLE.md, Maya's widgets.py) ------------------------------
+// Every list row is one line, its icons in one order (ROW_ORDER): muted text (a count, a tag) ->
+// the settings popup -> state toggles (solo, in front / behind) -> the eye -> the lock -> the row's
+// menu, always last. No row expands: a row's settings open from its icon as a small popup.
+
+// A small popup card under a row's icon (a row's settings: segments, weight, map info, photo
+// settings): the widgets added stay in it, shown again each time; it closes on a click outside.
+class PopupPanel : public QFrame {
+    Q_OBJECT
+public:
+    explicit PopupPanel(QWidget* parent = nullptr, int width = 240);
+    QVBoxLayout* rows() const { return rows_; }
+    void add(QWidget* widget);
+    void add(QLayout* layout);
+    // Run before it shows (the row's values filled in).
+    void onShow(std::function<void()> fill) { fills_.push_back(std::move(fill)); }
+    // Opened under `anchor` (its right edges lined up), kept on the screen.
+    void showUnder(QWidget* anchor);
+
+private:
+    QVBoxLayout* rows_ = nullptr;
+    std::vector<std::function<void()>> fills_;
+};
+
+// A row's small icon button (22 px, a 14 px ui_<icon> glyph); `text` beside it (a count); `on`:
+// the glyph in the accent (a locked photo, a soloed layer).
+QToolButton* rowGlyph(const QString& icon, const QString& tip, QWidget* parent, const QString& text = {}, bool on = false);
+// A row icon opening `panel` under it; `before()` runs first (picks the row).
+QToolButton* popupButton(const QString& icon, const QString& tip, PopupPanel* panel, std::function<void()> before,
+                         QWidget* parent, const QString& text = {});
+// The row's menu (ROW_ORDER: always last): "more", its menu made again as it opens by `fill`
+// (`before()` first: picks the row).
+QToolButton* rowMenuButton(const QString& tip, std::function<void(QMenu*)> fill, std::function<void()> before, QWidget* parent);
+// A list row's icons on its right, in ROW_ORDER (the caller hands them in that order).
+QWidget* rowStrip(const std::vector<QWidget*>& icons, QWidget* parent = nullptr);
+// A QListWidget row (setItemWidget): its name, a muted tag, then the icons. Clicks on the name
+// reach the list (the row is picked as ever); the icons take their own.
+class ListRow : public QWidget {
+    Q_OBJECT
+public:
+    ListRow(const QString& text, const QString& tag, const std::vector<QWidget*>& icons, QWidget* parent = nullptr);
+    QLabel* label() const { return label_; }
+    QLabel* tag() const { return tag_; }
+
+private:
+    QLabel* label_ = nullptr;
+    QLabel* tag_ = nullptr;
+};
 // A list or tree as plain rows: no frame, no header, no sideways bar (role "rows").
 void plainRows(QAbstractItemView* view);
 // A plain list as tall as its rows (at least `minRows`): it never scrolls inside the column.

@@ -18,7 +18,7 @@ import bpy
 
 from . import uikit
 
-DEFAULT = "charcoal"  # the theme a user who never picked one gets (Maya's and the app's)
+DEFAULT = "playful"  # the theme a user who never picked one gets
 BASE = "playful"      # the theme every theme extends unless it says otherwise
 PATH_ENV = "GROOMLAB_THEME_PATH"
 
@@ -103,7 +103,7 @@ def _settings_path():
 
 
 def active():
-    """The active theme's name (the one picked last, else Charcoal)."""
+    """The active theme's name (the one picked last, else Playful)."""
     if _active["name"] is None:
         name = DEFAULT
         path = _settings_path()

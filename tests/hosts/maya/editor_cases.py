@@ -3008,8 +3008,7 @@ class GraphEditorTest(unittest.TestCase):
         whole = view.mapFromScene(self.editor.scene.itemsBoundingRect()).boundingRect()
         self.assertTrue(view.viewport().rect().contains(whole), (whole, view.viewport().rect()))
         framed = view.mapFromScene(self.editor.scene.itemsBoundingRect()).boundingRect()
-        if view.transform().m11() > view.READABLE * theme.scale() + 1e-6:  # it fit: all of it shows
-            self.assertTrue(view.viewport().rect().contains(framed))
+        self.assertTrue(view.viewport().rect().contains(framed))
         # Panning isn't held to the nodes: the view goes well past them.
         far = self.editor.scene.itemsBoundingRect().bottomRight() + QtCore.QPointF(3000, 3000)
         view.centerOn(far)
@@ -3098,7 +3097,7 @@ class GuidesTabTest(unittest.TestCase):
         self.events()
         tab = self.tab
         self.assertEqual(tab.segments.value(), 12)
-        self.assertIn("primary: 2", tab.segments.label())
+        self.assertIn("primary: 2", tab.segments_scope.text())
         stored = cmds.getAttr(self.groom + ".guideData")
         settle_undo()
         undo_before = cmds.undoInfo(query=True, undoName=True)
@@ -3121,33 +3120,32 @@ class GuidesTabTest(unittest.TestCase):
         # All groups picked: every guide.
         self.tools.level.setCurrentIndex(0)
         self.events()
-        self.assertIn("all 2", tab.segments.label())
+        self.assertIn("all 2", tab.segments_scope.text())
         # A selected guide: its own count, and only it is resampled.
         first = groomlab.guide_ids(self.groom, "primary")[0]
         groomlab.select_guides(self.groom, guides=[first])
         groomlab.resample_guides(self.groom, 7)
         self.events()
         self.assertEqual(tab.segments.value(), 7)
-        self.assertIn("1 selected", tab.segments.label())
+        self.assertIn("1 selected", tab.segments_scope.text())
         self.assertEqual(sorted(groomlab.guide_segments(self.groom, group="primary")), [7, 12])
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_children_count_is_inline(self):
-        # Edit Guides > Children takes its count from the spin box beside it: no prompt.
+        # The row menu's Generate Children > n per guide: no prompt.
         from groomlab.ui import menu
         tab = self.tab
-        tab.children_count.setValue(2)
-        self.assertEqual(menu.CHILDREN_COUNT, 2)
         prompt = cmds.promptDialog
 
         def no_dialog(*_, **__):
             raise AssertionError("a modal dialog opened")
         cmds.promptDialog = no_dialog
         try:
-            tab.generate_children()
+            tab.generate_children(2)
+            self.assertEqual(menu.CHILDREN_COUNT, 2)
         finally:
             cmds.promptDialog = prompt
-            tab.children_count.setValue(5)
+            menu.CHILDREN_COUNT = 5
         groups = [g["name"] for g in groomlab.list_guide_groups(self.groom)]
         self.assertEqual(len(groups), 2)
         children = next(g for g in groups if g != "primary")
@@ -3175,7 +3173,7 @@ class GuidesTabTest(unittest.TestCase):
         tree.setCurrentItem(tree.findItems("kids", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0])
         self.tab.select_group()
         self.assertEqual(len(groomlab.selected_guides(self.groom)), 2)
-        # Each group's dot in the color it draws in (its automatic one, a ring: none of its own).
+        # Each group's dot in the color it draws in, solid (its automatic one too: none of its own).
         from groomlab.ui import tool_tabs
 
         def dot(item):
@@ -3186,8 +3184,7 @@ class GuidesTabTest(unittest.TestCase):
         self.assertEqual(cmds.getAttr(self.groom + ".guideColorMode"), 0)
         automatic = dict((g["name"], g["color"]) for g in groomlab.list_guide_groups(self.groom))
         kids = tree.findItems("kids", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        self.assertEqual(dot(kids), drawn(automatic["kids"], True))
-        self.assertNotEqual(dot(kids), drawn(automatic["kids"], False))
+        self.assertEqual(dot(kids), drawn(automatic["kids"], False))
         self.assertNotEqual(automatic["kids"], automatic["primary"])
         # A group's own color, from its swatch; renaming keeps it; clearing goes back.
         self.tab.set_color("kids", "#ff8800")
@@ -3236,17 +3233,20 @@ class GuidesTabTest(unittest.TestCase):
         finally:
             editor.deleteLater()
 
+    def eye(self, name):
+        """A group row's eye (one icon of the row's strip, ROW_ORDER)."""
+        from groomlab.ui.qt import QtCore, QtWidgets
+        item = self.tab.tree.findItems(name, QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
+        return self.tab.tree.itemWidget(item, 2).findChild(QtWidgets.QToolButton, "groupEye_" + name)
+
     def test_hidden_groups_are_not_drawn_or_brushed(self):
-        from groomlab.ui.qt import QtCore
         self.tab.refresh()
-        item = self.tab.tree.findItems("primary", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        eye = self.tab.tree.itemWidget(item, 2)  # the row's eye glyph
+        eye = self.eye("primary")
         self.assertEqual(eye.glyph, "eye")
         eye.click()  # hide it
         self.assertEqual(groomlab.hidden_guide_groups(self.groom), ["primary"])
         self.events()  # the list again: the row's eye closed
-        item = self.tab.tree.findItems("primary", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        self.assertEqual(self.tab.tree.itemWidget(item, 2).glyph, "eyeOff")
+        self.assertEqual(self.eye("primary").glyph, "eyeOff")
         cmds.refresh(force=True)
         guides = cmds.groomLabGuides(self.groom, listGuides="primary")
         points = lambda: [cmds.groomLabGuides(self.groom, guidePoints=g) for g in guides]
@@ -3257,9 +3257,8 @@ class GuidesTabTest(unittest.TestCase):
         self.assertEqual(groomlab.rename_guide_group(self.groom, "primary", " main group"), "main_group")
         self.assertEqual(groomlab.hidden_guide_groups(self.groom), ["main_group"])
         self.tab.refresh()  # its eye shows it again
-        item = self.tab.tree.findItems("main_group", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        self.assertEqual(self.tab.tree.itemWidget(item, 2).glyph, "eyeOff")
-        self.tab.tree.itemWidget(item, 2).click()
+        self.assertEqual(self.eye("main_group").glyph, "eyeOff")
+        self.eye("main_group").click()
         self.assertEqual(groomlab.hidden_guide_groups(self.groom), [])
         self.events()
         groomlab.brush_stroke(self.groom, "comb", [(0, 1.5, 0), (0.8, 1.5, 0)], radius=3.0, level=-1)
@@ -3567,39 +3566,6 @@ class PaletteTickBudgetTest(unittest.TestCase):
                 "(reported only)" % (costs["sculpt"], costs["tools"]))
             self.assertEqual(len(shots.layers(groom)), 4)
         finally:
-            tools.close()
-            tools.deleteLater()
-
-
-class StarterCardTest(unittest.TestCase):
-    """The Groom Tools' first-groom checklist ticks steps off as the groom gets there."""
-
-    def test_steps_follow_the_groom(self):
-        from groomlab.ui import palette
-        cmds.file(new=True, force=True)
-        cmds.optionVar(remove=palette.STARTER_VAR)
-        groom = groomlab.create_groom(cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20)[0])
-        self.assertEqual(palette.starter_progress(groom), {"guides": False, "look": False})
-        groomlab.guides_from_curves(groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 2, 0)])])
-        done = palette.starter_progress(groom)
-        self.assertTrue(done["guides"])
-        cmds.select(groom)
-        tools = palette.ToolPalette()
-        try:
-            tools.show()
-            tools.poll()
-            card = tools.starter
-            self.assertEqual(card.isVisibleTo(tools), not all(done.values()))
-            if not done["look"]:  # the next step: marked, with how to do it
-                self.assertIn("Graph Editor", card.tip.text())
-                self.assertTrue(card.rows["look"][0].text().endswith("Give it a look"))
-                self.assertTrue(card.rows["guides"][0].text().startswith(chr(0x2713)))
-            card.dismiss()  # hidden for good
-            self.assertFalse(card.isVisibleTo(tools))
-            card.refresh(groom)
-            self.assertFalse(card.isVisibleTo(tools))
-        finally:
-            cmds.optionVar(remove=palette.STARTER_VAR)
             tools.close()
             tools.deleteLater()
 
@@ -4167,17 +4133,33 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertFalse(hasattr(window, "learning"))
         self.assertFalse(hasattr(cmds, "groomLabLicense"))
 
+    def test_find_command_opens_from_the_header(self):
+        # The Groom Tools' search button: Find Command over every menu command, brush and preset (a menu
+        # entry bound by hand, as the theme's, left out rather than breaking the list).
+        from groomlab.ui import find_command, palette
+        from groomlab.ui.qt import QtWidgets
+        window = palette.show()
+        try:
+            window.findChild(QtWidgets.QToolButton, "findCommand").click()
+            box = find_command._window
+            self.assertIsNotNone(box)
+            self.assertTrue(box.isVisible())
+            self.assertGreater(len(box._entries), 50)
+            box.box.setText("comb")
+            self.assertTrue(box.list.item(0).text().startswith("Comb"), box.list.item(0).text())
+            box.close()
+        finally:
+            window.close()
+
     def test_the_menu_is_short(self):
         from groomlab.ui import menu
         menu.install()
         try:
             labels = [cmds.menuItem(i, query=True, label=True) for i in cmds.menu(menu.MENU, query=True, itemArray=True)
                       if not cmds.menuItem(i, query=True, divider=True)]
-            self.assertEqual(labels, ["Groom Tools", "Graph Editor", "Create Groom from Selection", "Card Atlas...", "Add Sample Mesh",
-                                      "Guides from Photos (experimental)...", "Groom Files", "Import", "Add", "Simulate",
-                                      "Display", "Review", "Studio", "Render", "Export", "Utilities", "Theme",
-                                      "Install GroomLab Hotkeys",
-                                      "Radial Menu Settings...", "Help"])
+            self.assertEqual(labels, ["Groom Tools", "Graph Editor", "Find Command...", "Create Groom from Selection",
+                                      "Start From", "Add", "Groom File", "Export", "Render", "Simulate", "Utilities",
+                                      "Display", "Settings", "Help"])
 
             def entries_of(label, tooltips=True, parent=menu.MENU):
                 sub = next(parent + "|" + i for i in cmds.menu(parent, query=True, itemArray=True)
@@ -4202,17 +4184,20 @@ class DockableWindowsTest(unittest.TestCase):
                             if cmds.menuItem(i, query=True, label=True) == "Simulate")
             self.assertEqual(entries_of("Legacy", parent=simulate),
                              ["Simulate Guides (nHair)...", "Bake Simulation to Cache...", "Remove Simulation"])
-            self.assertEqual(entries_of("Review"), ["Density Heatmap", "Strand Count HUD", "Turntable",
+            render = next(menu.MENU + "|" + i for i in cmds.menu(menu.MENU, query=True, itemArray=True)
+                          if cmds.menuItem(i, query=True, label=True) == "Render")
+            self.assertEqual(entries_of("Review", parent=render), ["Density Heatmap", "Strand Count HUD", "Turntable",
                                                     "Render Turntable..."])
             for item in (menu.HEATMAP_ITEM, menu.HUD_ITEM):  # check items, their state as the menu opens
                 self.assertIn(cmds.menuItem(item, query=True, checkBox=True), (True, False))
             menu._sync_review_items()
             self.assertEqual(cmds.menuItem(menu.HUD_ITEM, query=True, checkBox=True), bool(groomlab.review.hud_visible()))
-            self.assertEqual(entries_of("Studio"), ["Portrait", "Beauty", "Rim Drama", "High Key", "Turntable",
+            self.assertEqual(entries_of("Studio", parent=render), ["Portrait", "Beauty", "Rim Drama", "High Key", "Turntable",
                                                     "Look Through Studio Camera", "Remove Studio"])
             self.assertEqual(entries_of("Render"), ["Render from Groom File...", "Render as Curves",
                                                     "Maya Hardware 2.0 (no renderer needed)...", "RenderMan (prman)...",
-                                                    "V-Ray Standalone...", "Refresh Redshift Grooms"])
+                                                    "V-Ray Standalone...", "Refresh Redshift Grooms", "Studio",
+                                                    "Review"])
             exports = entries_of("Export")
             self.assertIn("Unreal Cards...", exports)
             self.assertNotIn("Groom File...", exports)
@@ -4226,12 +4211,12 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertIn("Open source (Apache-2.0): " + menu.REPO_URL, menu.about_text())
             # Grooms to and from .groom files (the standalone app's round trip), a tooltip each.
             files = next(menu.MENU + "|" + i for i in cmds.menu(menu.MENU, query=True, itemArray=True)
-                         if cmds.menuItem(i, query=True, label=True) == "Groom Files")
+                         if cmds.menuItem(i, query=True, label=True) == "Groom File")
             entries = [files + "|" + i for i in cmds.menu(files, query=True, itemArray=True)
                        if not cmds.menuItem(files + "|" + i, query=True, divider=True)]
             self.assertEqual([cmds.menuItem(i, query=True, label=True) for i in entries],
-                             ["Import Groom File...", "Reload from Groom File", "Save to Groom File",
-                              "Save Groom File As..."])
+                             ["Save to Groom File", "Save Groom File As...", "Import Groom File...",
+                              "Reload from Groom File"])
             for entry in entries:
                 self.assertTrue(cmds.menuItem(entry, query=True, annotation=True))
             menu._sims()  # Remove Simulation's scene callbacks
@@ -4252,7 +4237,7 @@ class DockableWindowsTest(unittest.TestCase):
             entries = [utilities + "|" + i for i in cmds.menu(utilities, query=True, itemArray=True)
                        if not cmds.menuItem(i, query=True, divider=True)]
             self.assertEqual([cmds.menuItem(i, query=True, label=True) for i in entries],
-                             ["Guides to Curves", "Curves to Guides...", "Tubes to Curves...",
+                             ["Card Atlas...", "Guides to Curves", "Curves to Guides...", "Tubes to Curves...",
                               "Convert Tubes to GroomLab Tubes", "Strands to Curves...", "To Mesh...",
                               "Bake Node to Guides...", "Bake Scale Maps", "Bake Follicle Map", "Delete All Flow Arrows",
                               "Transfer Groom to Scalp...",
@@ -4476,7 +4461,7 @@ class DockableWindowsTest(unittest.TestCase):
 
     def test_tool_palette_drives_the_brush(self):
         from groomlab.ui import palette, widgets
-        from groomlab.ui.qt import QtCore
+        from groomlab.ui.qt import QtCore, QtWidgets
         groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 2, 0)])])
         groomlab.add_map(self.groom, "fur")  # maps live on guides
         cmds.select(self.groom)
@@ -4500,6 +4485,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertNotIn("grab", window.buttons)
             self.assertNotIn("clump", window.buttons)
             self.assertIn("shape", [t for t, _, _ in dict(palette.SECTIONS)["Shape"]])
+            self.assertIn("roots", [t for t, _, _ in dict(palette.SECTIONS)["Create"]])  # (draws tubes; Tube edits them)
             self.assertNotIn("tube", window.buttons)
             self.assertNotIn("straighten", palette.NAMES)  # Smooth's Straighten chip
             self.assertEqual((palette.NAMES["shape"], palette.NAMES["twist"]), ("Tube", "Swing"))
@@ -4511,7 +4497,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("paint"))  # Paint shows its maps
             window.buttons["comb"].click()  # Comb: keep lengths or stretch
             self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("tools"))  # another brush: its card
-            self.assertTrue(window.stretch.isVisibleTo(window) and window.brush_block.isAncestorOf(window.stretch))
+            self.assertTrue(window.stretch.isVisibleTo(window) and window.toggles.isAncestorOf(window.stretch))
             window.stretch.setChecked(True)
             self.assertTrue(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, stretch=True))
             window.stretch.setChecked(False)
@@ -4580,8 +4566,13 @@ class DockableWindowsTest(unittest.TestCase):
             window.buttons["shape"].click()
             self.assertEqual(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True), "shape")
             self.assertEqual(window.strength.lo, -1.0)  # Ctrl does the opposite
-            self.assertTrue(window.tube_channel_box.isVisibleTo(window))
-            self.assertTrue(window.tube_panel.profile_block.isVisibleTo(window))  # in the Shape brush's card
+            # One card, no job switch: the levels, what it paints, the profile, the selected tubes.
+            self.assertTrue(window.root_card.hierarchy_block.isVisibleTo(window))
+            self.assertFalse(window.root_card.root_block.isVisibleTo(window))  # (the Roots brush's)
+            self.assertTrue(window.tube_channel_row.isVisibleTo(window))  # what it paints
+            self.assertTrue(window.brush_block.isVisibleTo(window))
+            self.assertTrue(window.display_popup.isAncestorOf(window.tube_channel_box))  # (the guides menu)
+            self.assertTrue(window.tube_panel.profile_block.isVisibleTo(window))
             self.assertTrue(window.tube_panel.selected_block.isVisibleTo(window))
             self.assertFalse(window.tube_panel.tube_block.isVisibleTo(window))  # (Place's and Draw's)
             self.assertFalse(window.collide.isVisibleTo(window))  # it moves no guide point
@@ -4669,11 +4660,13 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual([k[0] for k in shot7["keys"]], [1.0, 7.0, 13.0])  # blends over 6 frames each side
             self.assertEqual(box.tree.topLevelItem(0).text(0), "shot7")  # top of the stack first
             self.assertEqual(box.tree.topLevelItem(2).text(0), "Base groom")
-            self.assertEqual(box.tree.topLevelItem(0).text(2), "◆ 3")
+            self.assertEqual(box.tree.topLevelItem(0).text(1), "◆ 3")  # its keys, muted
             box.solo()  # only shot7 on
             self.assertEqual([l["enabled"] for l in shots.layers(self.groom)], [False, True])
             box.solo()  # all back on
-            box.tree.topLevelItem(1).setCheckState(0, QtCore.Qt.Unchecked)  # hide sculpt1
+            eye = box.tree.itemWidget(box.tree.topLevelItem(1), 2).findChild(QtWidgets.QToolButton,
+                                                                             "correctiveEye_sculpt1")
+            eye.click()  # the row's eye: sculpt1 off
             self.assertFalse(shots.layers(self.groom)[0]["enabled"])
             box.set_weight(0.5)  # keyed: keyed here
             self.assertAlmostEqual(shots.weight_at(self.groom, "shot7", 7), 0.5, places=4)
@@ -4689,13 +4682,17 @@ class DockableWindowsTest(unittest.TestCase):
             box.delete()
             self.assertEqual(box.tree.topLevelItemCount(), 2)
             self.assertFalse(cmds.attributeQuery("shot7", node=self.groom, exists=True))
+            # Back on the base groom (a corrective picked greys the tools that can't edit one: Flow).
+            box.tree.setCurrentItem(box.tree.topLevelItem(box.tree.topLevelItemCount() - 1))
+            wait(50)
+            self.assertIsNone(shots.target(self.groom))
             # Flow: the arrows kept on the groom counted beside Clear All, which takes them all off (one step).
             groomlab.flow_stroke(self.groom, [(-0.3 + 0.1 * i, 0.9, 0.3) for i in range(7)], radius=0.2)
             window.buttons["flow"].click()
             self.assertTrue(window.flow_box.isVisibleTo(window))
             self.assertFalse(any(b.isVisibleTo(window) for b in window.tube_panel.blocks))
-            # Flow mirrors (issue 105): the Mirror row, and Mirror to Other Side in its block.
-            self.assertTrue(window.symmetry_row.isVisibleTo(window))
+            # Flow mirrors (issue 105): the Mirror chip (its axis in More), and Mirror to Other Side in its block.
+            self.assertTrue(window.symmetry.isVisibleTo(window) and window.more_body.isAncestorOf(window.symmetry_row))
             self.assertTrue(window.flow_mirror.isVisibleTo(window))
             self.assertEqual([a.text() for a in window.flow_mirror.menu().actions()],
                              [i["label"] for i in palette.definitions.resolve(
@@ -4718,9 +4715,10 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertTrue(window.guides_section.isVisibleTo(window))
             tree = window.guides_tab.tree
             self.assertEqual(tree.topLevelItem(0).text(0), "primary")
-            # The box under the list names what its glyphs act on: the picked group, else every group.
+            # The card's header names what the next stroke edits: the picked group.
             window.guides_tab.show_picked()
-            self.assertEqual(window.guides_tab.box.title.full_text(), window.current_group() or "All groups")
+            window.show_editing()
+            self.assertIn(window.current_group() or "All groups", window.card_editing.text())
             window.guides_tab.select_group()
             self.assertEqual(len(groomlab.selected_guides(self.groom)), 1)
             # Paint tab: maps follow the groom.
@@ -4730,7 +4728,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.app_events()
             from groomlab.ui.qt import QtCore as _qc
             self.assertIn("density", [window.paint_tab.list.item(i).data(_qc.Qt.UserRole) for i in range(window.paint_tab.list.count())])
-            self.assertEqual(window.paint_tab.box.title.full_text(), window.paint_tab.current())  # the picked map's box
+            self.assertEqual(window.paint_tab.info_title.text(), window.paint_tab.current())  # the map's info popup
             window.paint_tab.value.setValue(0.3)
             window.paint_tab.fill(False)
             stored = groomlab.get_hierarchy(self.groom)["guides"]
@@ -4742,8 +4740,8 @@ class DockableWindowsTest(unittest.TestCase):
             stored = groomlab.get_hierarchy(self.groom)["guides"]
             self.assertAlmostEqual(stored[0]["attributes"][window.paint_tab.current()], 0.7, places=5)
             self.assertIn("selected", window.status.text())
-            # The Paint tile again: done painting.
-            window.buttons["paint"].click()
+            # The Paint tab paints (it started Paint on the picked map); the Paint tile again: done painting.
+            self.assertEqual(window.tool, "paint")
             self.assertEqual(cmds.currentCtx(), groomlab.BRUSH_CONTEXT)
             window.buttons["paint"].click()
             self.assertNotEqual(cmds.currentCtx(), groomlab.BRUSH_CONTEXT)
@@ -4764,7 +4762,7 @@ class DockableWindowsTest(unittest.TestCase):
         window = palette.show()
         try:
             window.groom_picked(window.grooms.findData(self.groom))
-            window.buttons["shape"].click()
+            window.buttons["shape"].click()  # (the profile: always on the Tube card)
             panel = window.tube_panel
             editor = panel.editor
             groomlab.select_guides(self.groom, guides=[guides[0]])
@@ -4854,6 +4852,7 @@ class DockableWindowsTest(unittest.TestCase):
             groomlab.set_guide_attribute(self.groom, "freeze", 0.0, guides=guides)
             groomlab.clear_guide_selection(self.groom)
             window.buttons["place"].click()
+            window.more_section.set_expanded(True)  # (Place's tube: in More settings)
             self.assertTrue(panel.tube_block.isVisibleTo(window))  # Place's Tube block: what new guides get
             self.assertFalse(panel.profile_block.isVisibleTo(window))
             panel.refresh(self.groom)
@@ -4877,7 +4876,7 @@ class DockableWindowsTest(unittest.TestCase):
         window = palette.show()
         try:
             window.groom_picked(window.grooms.findData(self.groom))
-            window.buttons["shape"].click()
+            window.buttons["shape"].click()  # (the profiles: always on the Tube card)
             panel = window.tube_panel
             groomlab.select_guides(self.groom, guides=guides)
             panel.refresh(self.groom)
@@ -5112,7 +5111,8 @@ class DockableWindowsTest(unittest.TestCase):
             window.show_tab("paint")
             tab = window.paint_tab
             tab.select("crown")
-            window.buttons["paint"].click()
+            self.assertEqual(window.tool, "paint")  # the Paint tab paints the picked map
+            window.more_section.set_expanded(True)  # (the stamp: in More settings)
             self.app_events()
             ctx = groomlab.BRUSH_CONTEXT
             self.assertTrue(window.alpha_box.isVisibleTo(window))
@@ -5178,8 +5178,8 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(tab.make_map("tint", "vertices", color=True), "tint")
             self.assertEqual(tab.current(), "tint")
             self.assertEqual(tab.current_channels(), 4)
-            self.assertIn("color", tab.list.currentItem().text())
-            self.assertFalse(tab.list.currentItem().icon().isNull())
+            row = tab.list.itemWidget(tab.list.currentItem())
+            self.assertEqual((row.label.full_text(), row.tag.text()), ("tint", "RGBA"))
             self.assertTrue(tab.color_row.isVisibleTo(window))
             self.assertFalse(tab.value_row.isVisibleTo(window))
             # Painting: the tool gets the color and channels, and each change after.
@@ -5273,21 +5273,22 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertTrue(tab.select("grow"))
             self.assertEqual([a[0] for a in tab.image_actions()], ["Relink Image...", "Reload Image", "Show in Explorer"])
             self.assertEqual(tab.current_missing(), "")
-            self.assertFalse(tab.list.currentItem().text().startswith("\u26a0"))
+            label = lambda: tab.list.itemWidget(tab.list.currentItem()).label.full_text()  # noqa: E731
+            self.assertFalse(label().startswith("\u26a0"))
             moved = folder + "/elsewhere/grow.png"
             os.makedirs(os.path.dirname(moved))
             os.rename(image, moved)
             tab.refresh()
             item = tab.list.currentItem()
             self.assertEqual(tab.current(), "grow")
-            self.assertTrue(item.text().startswith("\u26a0"), item.text())
+            self.assertTrue(label().startswith("\u26a0"), label())
             self.assertIn(image, item.toolTip())
             self.assertIn("Relink Image", item.toolTip())
             self.assertEqual(tab.current_missing(), image)
             self.assertEqual(tab.relink_image(moved), "elsewhere/grow.png")
             self.app_events()
             self.assertEqual(tab.current(), "grow")
-            self.assertFalse(tab.list.currentItem().text().startswith("\u26a0"))
+            self.assertFalse(label().startswith("\u26a0"))
             self.assertIn("grow reads elsewhere/grow.png", window.status.text())
             self.assertEqual(tab.reload_image(), [moved])
             tool_tabs.reveal_file = lambda path: shown.append(path) or path
@@ -5348,33 +5349,42 @@ class ReferenceTabTest(unittest.TestCase):
         from groomlab.ui.qt import QtWidgets
         return self.tab.findChild(QtWidgets.QToolButton, name)
 
+    def row(self, cam):
+        """A photo's row widget (widgets.ListRow) in the list."""
+        for i in range(self.tab.list.count()):
+            item = self.tab.list.item(i)
+            if item.data(256) == cam:  # (Qt.UserRole)
+                return item, self.tab.list.itemWidget(item)
+        return None, None
+
     def test_the_tab_lists_references_and_drives_them(self):
         from groomlab import reference
         from groomlab.ui import palette
-        self.assertEqual(palette.TABS, ["tools", "paint", "correctives", "photos"])
-        self.tools.show_tab("sculpt")  # the old ids still work
-        self.assertEqual(self.tools.tabs.currentIndex(), palette.TABS.index("correctives"))
+        self.assertEqual(palette.TABS, ["tools", "paint", "photos"])
+        self.tools.show_tab("sculpt")  # the old ids still work (the correctives: on the Tools page)
+        self.assertEqual(self.tools.tabs.currentIndex(), palette.TABS.index("tools"))
         self.tools.show_tab("reference")
         self.assertEqual(self.tools.tabs.currentIndex(), palette.TABS.index("photos"))
         self.assertTrue(self.tab.isVisibleTo(self.tools))
-        self.assertFalse(self.tab.look.isEnabled())  # nothing to look through yet
+        self.assertFalse(self.tab.opacity.isEnabled())  # nothing picked yet
         cam = self.tab.import_photo(self.photo)
         self.assertEqual(reference.list_references(), [cam])
         self.assertEqual((self.tab.list.count(), self.tab.current()), (1, cam))
-        self.assertIn("64 x 48", self.tab.list.item(0).text())
-        self.assertFalse(self.tab.list.item(0).icon().isNull())  # the photo's thumbnail
+        item, row = self.row(cam)
+        self.assertIn("64 x 48", item.toolTip())
+        self.assertIn(cam.split("|")[-1], row.label.toolTip() or row.label.text())
         self.assertIn("Align Photo", self.tools.status.text())
-        # The controls call through to the camera and its image plane.
+        # The row's icons and its settings popup call through to the camera and its image plane.
         plane = reference.image_plane(cam)
         self.tab.opacity.committed.emit(0.3)
         self.assertAlmostEqual(cmds.getAttr(plane + ".alphaGain"), 0.3)
-        self.tab.side_buttons["behind"].click()
+        self.tab.set_depth("behind")
         self.assertEqual(reference.reference_depth(cam), "behind")
-        self.tab.side_buttons["front"].click()
+        self.tab.set_depth("front")
         self.assertEqual(reference.reference_depth(cam), "front")
-        self.tab.visible.setChecked(False)
+        self.tab.set_visible(False)
         self.assertFalse(reference.reference_visible(cam))
-        self.tab.visible.setChecked(True)
+        self.tab.set_visible(True)
         # The focal length by hand: the camera takes it and Keep focal length turns on (a solve keeps it).
         shape = cmds.listRelatives(cam, shapes=True, type="camera", fullPath=True)[0]
         self.assertFalse(reference.keep_focal(cam))
@@ -5390,41 +5400,33 @@ class ReferenceTabTest(unittest.TestCase):
         self.assertAlmostEqual(cmds.getAttr(shape + ".focalLength"), reference.DEFAULT_FOCAL)
         self.assertEqual((self.tab.focal.lo, self.tab.focal.hi), reference.FOCAL_RANGE)
         reference.set_keep_focal(cam, False)
-        self.tab.lock.click()
+        self.tab.set_locked(True)
         self.assertTrue(reference.is_locked(cam))
         self.tab.show_controls()
         self.assertFalse(self.tab.focal.isEnabled())  # a locked camera keeps its focal length
-        self.assertIn("locked", self.tab.list.item(0).text())
-        self.tab.lock.click()
+        _item, row = self.row(cam)
+        self.assertIsNotNone(row.findChild(type(row.strip.children()[-1]), "photoLock_" + cam.split("|")[-1]))
+        self.tab.set_locked(False)
         self.assertFalse(reference.is_locked(cam))
-        # Look Through and back; the button follows the viewport.
-        self.tab.look.click()
+        # A click on the photo looks through it; a click again goes back to the camera before.
+        item, _row = self.row(cam)
+        self.tab.row_clicked(item)
         self.assertEqual(reference.current_reference(self.panel), cam)
-        self.assertTrue(self.tab.look.isChecked())
-        self.assertEqual(self.tab.look.text(), "Look through")  # a chip: its name stays, checked while looking
-        self.assertIn("go back", self.tab.look.toolTip())
-        self.tab.look.click()
+        item, _row = self.row(cam)
+        self.tab.row_clicked(item)
         self.assertEqual(cmds.modelPanel(self.panel, query=True, camera=True), "persp")
-        self.assertFalse(self.tab.look.isChecked())
         # The list follows a reference looked through elsewhere.
         other = reference.import_reference(self.photo, name="side")
         self.tab.poll()
-        self.assertEqual((self.tab.list.count(), self.tab.current()), (2, cam))
+        self.assertEqual(self.tab.list.count(), 2)
         reference.look_through(other, self.panel)
         self.tab.poll()
         self.assertEqual(self.tab.current(), other)
-        self.assertTrue(self.tab.look.isChecked())
-        # Looking through one, picking the other looks through it; Back to Perspective still goes back.
+        # Looking through one, picking the other looks through it.
         self.tab.select(cam)
         self.assertEqual(reference.current_reference(self.panel), cam)
-        self.tab.poll()
-        self.assertEqual(self.tab.current(), cam)
-        self.assertTrue(self.tab.look.isChecked())
-        self.tab.look.click()
-        self.assertEqual(cmds.modelPanel(self.panel, query=True, camera=True), "persp")
-        self.tab.poll()
-        self.assertFalse(self.tab.look.isChecked())
-        self.tab.select(other)  # not looking through: picking only picks
+        item, _row = self.row(cam)
+        self.tab.row_clicked(item)  # (looking through it: back)
         self.assertEqual(cmds.modelPanel(self.panel, query=True, camera=True), "persp")
         # Remove is one undo step (no question asked: undo brings it back).
         self.tab.select(other)
@@ -5474,8 +5476,8 @@ class ReferenceTabTest(unittest.TestCase):
         self.tab.poll(full=True)
         self.assertIn("Lined up by 7 pairs", self.tab.align_about.text())
         self.assertIn("50.0 mm", self.tab.align_about.text())
-        # Align Photo...: the Photos window on the picked photo, its Align stage (landmarks only).
-        self.tab.findChild(QtWidgets.QAbstractButton, "referenceAlign").click()
+        # Align Photo... (the row's menu): the Photos window on the picked photo, its Align stage.
+        self.tab.open_window("align")
         window = reference_window.window()
         try:
             self.assertIsNotNone(window)
@@ -5486,37 +5488,18 @@ class ReferenceTabTest(unittest.TestCase):
             self.assertFalse(window.mode_buttons["flow"].isVisibleTo(window))
             self.assertEqual(window.pairs_tree.topLevelItemCount(), 7)
             self.assertAlmostEqual(window.focal.value(), cmds.getAttr(shape + ".focalLength"), places=3)
-            # Guides from Photos opens the same window at its Guides stage.
-            self.tab.findChild(QtWidgets.QToolButton, "referenceOpenWindow").click()
-            self.assertIs(reference_window.window(), window)
-            self.assertEqual(window.stage(), "guides")
-            self.assertTrue(window.guides_panel.isVisibleTo(window))
-            self.assertTrue(window.generate_button.isVisibleTo(window))
         finally:
             window.close()
 
-    def test_the_tab_opens_the_reference_window_and_the_old_flow_tool_still_draws(self):
-        """Guides from Reference lives in the Photos window's Guides stage: the tab keeps a way in and
-        where things stand. The older Reference Flow tool (looking through the camera) still draws."""
-        from groomlab.ui.qt import QtWidgets
+    def test_the_old_flow_tool_still_draws(self):
+        """The older Reference Flow tool (looking through the camera) still draws (Guides from Photos'
+        entry points left the Groom Tools: the tab is the photos alone)."""
         from maya.api import OpenMaya as om
         import maya.api.OpenMayaUI as omui
         from groomlab import from_reference, reference
-        from groomlab.ui import reference_window
         cam = self.tab.import_photo(self.photo)
         self.tools.poll()
-        self.assertIn("0 landmark pairs, 0 guide lines", self.tab.gen_hint.text())
-        self.tab.findChild(QtWidgets.QToolButton, "referenceOpenWindow").click()
-        window = reference_window.window()
-        try:
-            self.assertIsNotNone(window)
-            self.assertEqual(window.groom, self.groom)
-            self.assertEqual(reference._camera(window.current_photo()), reference._camera(cam))
-            self.assertEqual(window.stage(), "guides")
-        finally:
-            window.close()
-        wait(30)
-        self.assertFalse(cmds.objExists(reference_window.UI_GROUP))
+        self.assertFalse(hasattr(self.tab, "gen_hint"))
         # The Reference Flow tool: through the camera, a stroke from view coordinates (its hook).
         reference.look_through(cam, self.panel)
         from_reference.flow_tool(self.groom, cam)
@@ -5535,8 +5518,6 @@ class ReferenceTabTest(unittest.TestCase):
         stroke = " ".join("%d %d" % to_view(32.0, 8.0 + 3.0 * k) for k in range(11))
         cmds.groomLabReferenceFlowCtx(from_reference.FLOW_CONTEXT, edit=True, debugStroke=stroke)
         self.assertEqual(len(from_reference.reference_hints(self.groom, cam)), 1)
-        self.tools.poll()
-        self.assertIn("1 guide line", self.tab.gen_hint.text())
 
 
 def widgets_alive(widget):

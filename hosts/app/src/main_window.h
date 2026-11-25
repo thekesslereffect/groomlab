@@ -37,6 +37,7 @@
 #include "groomlab/render_overrides.h"
 
 #include "brush_session.h"
+#include "find_command.h"
 #include "gpu_preview.h"
 #include "groom_document.h"
 #include "look.h"
@@ -622,7 +623,16 @@ private:
     void buildProperties();
     void refreshProperties();
     void refreshControlSliders();
-    void refreshHairColorRows();
+    // The Groom Tools' guides arrow's popup: Flow, Tubes, Instances, Smoothed, Width, Points,
+    // Colors (the display's controls they mirror carry the settings).
+    void fillGuideDisplay();
+public:
+    // Find Command (find_command.h): every action the menu bar runs, every brush and every graph
+    // preset, searched by name; Enter runs. Opened over the window (Ctrl+K, the Groom Tools' search).
+    FindCommand* openFindCommand();
+    // Its entries (the tests read them).
+    std::vector<FindCommand::Entry> findCommandEntries();
+private:
     // The groom's HairColor node edited from the look card or the Properties' Hair Color rows: a
     // number (`live` while a slider drags: previewed, one edit at the drag's end), a color, the mode.
     void editGroomColor(const std::string& param, double value, bool live);
@@ -963,9 +973,9 @@ private:
     ValueSlider* cardDensitySlider_ = nullptr;
     QWidget* inputsBlock_ = nullptr;
     QWidget* controlsBlock_ = nullptr;
-    QWidget* hairColorBlock_ = nullptr;
+    int smoothKept_ = 4;  // the guides' smoothing to come back to (the popup's Smoothed chip)
+    std::string beforePaint_;  // the brush before the Paint tab started Paint (given back on leaving it)
     std::string controlsKey_;   // the Controls sliders shown (rebuilt when the Control nodes change)
-    std::string hairColorKey_;  // the Hair Color rows shown (rebuilt when the node or its mode changes)
     // Render overrides and level of detail (Rendering): the V-Ray and RenderMan renders and the
     // exports take them; the viewport and the groom stay as groomed.
     RenderOverrides renderOverrides_;
@@ -995,7 +1005,6 @@ private:
     // The actions that need a groom open (disabled without one), Reload a file too.
     QAction* reload_ = nullptr;
     QAction* transfer_ = nullptr;
-    QAction* reference_ = nullptr;
     QAction* deleteGuides_ = nullptr;
     bool interactive_ = false;
     bool closing_ = false;  // the prompt let the window close (or Quit): no asking again

@@ -237,17 +237,57 @@ std::string guideOpLabel(const GuideOp& op) {
     return label;
 }
 
-std::size_t editTubes(GuideHierarchy& h, const std::vector<GuideId>& guides, const std::string& edit) {
+std::string rootTubesKeptNote(std::size_t count) {
+    return count == 1 ? "1 root tube keeps its drawn root: a Root profile doesn't replace it (the Roots brush reshapes a root)"
+                      : std::to_string(count) +
+                            " root tubes keep their drawn roots: a Root profile doesn't replace them (the Roots brush reshapes a root)";
+}
+
+namespace {
+
+// The edit without its Root profile ("shape") for a root tube given another one (its drawn root
+// kept, `refused` set; "{}" when nothing else is left of it); else the edit as given.
+std::string withoutRootProfile(const TubeProfile& tube, const std::string& edit, bool* refused) {
+    *refused = false;
+    if (!isRootTube(tube, 0)) return edit;
+    nlohmann::json j;
+    try {
+        j = nlohmann::json::parse(edit);
+    } catch (const nlohmann::json::exception&) {
+        return edit;  // (editedTube says what is wrong with it)
+    }
+    if (!j.is_object() || !j.contains("shape") || !j["shape"].is_string()) return edit;
+    if (j["shape"].get<std::string>() == tube.shapeName()) return edit;  // (its own: no change)
+    *refused = true;
+    j.erase("shape");
+    return j.dump();
+}
+
+}  // namespace
+
+std::size_t editTubes(GuideHierarchy& h, const std::vector<GuideId>& guides, const std::string& edit, std::string* note) {
     if (guides.empty()) refuse("state", "no guides selected or soloed to edit");
     for (const GuideId id : guides) {
         if (!h.guide(id)) refuse("not_found", "no guide " + std::to_string(id));
     }
+    // A root tube keeps its drawn root (an owned shape): a Root profile given goes to the others.
+    std::vector<std::pair<GuideId, std::string>> edits;
+    std::size_t kept = 0;
     for (const GuideId id : guides) {
+        bool refused = false;
+        std::string own = withoutRootProfile(h.guide(id)->tube, edit, &refused);
+        if (refused) ++kept;
+        if (refused && own == "{}") continue;
+        edits.emplace_back(id, std::move(own));
+    }
+    if (edits.empty()) refuse("state", rootTubesKeptNote(kept));
+    for (const auto& [id, own] : edits) {
         const HierarchyGuide* g = h.guide(id);
-        const TubeProfile tube = core([&] { return editedTube(g->tube, edit, h.scale(), g->points.size(), &h.tubeShapes()); });
+        const TubeProfile tube = core([&] { return editedTube(g->tube, own, h.scale(), g->points.size(), &h.tubeShapes()); });
         h.setTube(id, tube);
     }
-    return guides.size();
+    if (note) *note = kept ? rootTubesKeptNote(kept) : std::string();
+    return edits.size();
 }
 
 std::size_t editTubeShape(GuideHierarchy& h, const TubeShapeOp& op) {
@@ -258,14 +298,21 @@ std::size_t editTubeShape(GuideHierarchy& h, const TubeShapeOp& op) {
         if (op.op == "set" && !old) refuse("not_found", "no tube shape named '" + op.name + "'");
         const std::vector<SectionPoint> points = op.points ? *op.points : old ? old->points : std::vector<SectionPoint>{};
         if (points.size() < 3) refuse("bad_request", "a tube shape needs at least 3 points");
-        core([&] { h.setTubeShape(op.name, points, op.smooth ? *op.smooth : old ? old->smooth : true); return 0; });
+        const bool smooth = op.smooth ? *op.smooth : old ? old->smooth : true;
+        // (An owned shape: the root tools' scripts only; the core refuses one as a library shape.)
+        core([&] { return op.owned ? h.setOwnedTubeShape(op.name, points, smooth) : h.setTubeShape(op.name, points, smooth); });
         if (op.op == "add" && !op.give.empty()) {
             if (op.profile != "shape" && op.profile != "midShape" && op.profile != "tipShape") {
                 refuse("bad_request", "a tube's profile is shape, midShape or tipShape");
             }
             const std::string give = nlohmann::json{{op.profile, op.name}}.dump();
             for (const GuideId id : op.give) {
-                if (const HierarchyGuide* g = h.guide(id)) h.setTube(id, editedTube(g->tube, give, h.scale(), g->points.size(), &h.tubeShapes()));
+                const HierarchyGuide* g = h.guide(id);
+                if (!g) continue;
+                bool refused = false;
+                withoutRootProfile(g->tube, give, &refused);
+                if (refused) continue;  // (a root tube keeps its drawn root)
+                h.setTube(id, editedTube(g->tube, give, h.scale(), g->points.size(), &h.tubeShapes()));
             }
         }
         return h.tubeShapeUsers(op.name);
@@ -276,7 +323,7 @@ std::size_t editTubeShape(GuideHierarchy& h, const TubeShapeOp& op) {
         core([&] { h.renameTubeShape(op.name, op.to); return 0; });
         return h.tubeShapeUsers(op.to);
     }
-    if (op.op == "remove") return h.removeTubeShape(op.name);
+    if (op.op == "remove") return core([&] { return h.removeTubeShape(op.name); });
     refuse("bad_request", "a tube shape edit is add, set, rename or remove, not '" + op.op + "'");
 }
 

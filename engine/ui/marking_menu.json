@@ -33,12 +33,13 @@
         {"position": "S", "action": "display.toggleGuides", "label": "Hide Guides", "offLabel": "Show Guides"},
         {"position": "NE", "label": "Groups", "icon": "ui_groups", "tip": "The guide groups to work with: pick one and the others hide (the Guides panel's eyes follow); pick more to add them, Show All for every group", "generator": "guideGroups"}
       ]},
-      {"position": "NW", "label": "Brushes A", "icon": "comb", "tip": "Draw, Comb, Slide, Smooth, Tube, Flow, Place", "items": [
+      {"position": "NW", "label": "Brushes A", "icon": "comb", "tip": "Draw, Comb, Slide, Smooth, Tube, Roots, Flow, Place", "items": [
         {"position": "W", "tool": "draw"},
         {"position": "NW", "tool": "comb"},
         {"position": "N", "tool": "slide"},
         {"position": "NE", "tool": "smooth"},
         {"position": "E", "tool": "shape"},
+        {"position": "SE", "tool": "roots"},
         {"position": "SW", "tool": "flow"},
         {"position": "S", "tool": "place"}
       ]},
@@ -65,11 +66,14 @@
           {"setting": "smoothMode", "value": "curve"}
         ],
         "shape": [
-          {"action": "tube.drawRoot", "label": "Draw Root"},
-          {"action": "tube.editRoot", "label": "Edit Roots"},
           {"setting": "tubeChannel", "value": "width"},
           {"setting": "tubeChannel", "value": "flatness"},
           {"setting": "tubeChannel", "value": "twist"},
+          {"action": "display.tubesAlways", "label": "Always Visible"}
+        ],
+        "roots": [
+          {"action": "tube.drawRoot", "label": "Draw Root"},
+          {"action": "tube.editRoot", "label": "Edit Roots"},
           {"action": "display.tubesAlways", "label": "Always Visible"}
         ]
       }

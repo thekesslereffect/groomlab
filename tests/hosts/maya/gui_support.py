@@ -19,6 +19,7 @@ Qt events to the widgets, and activate() makes a window Qt's active one without 
 """
 
 import importlib
+import io
 import os
 import re
 import time
@@ -513,7 +514,7 @@ def listen_for_warnings():
 
 def run(quit_maya=True):
     """Runs the suites (all, or those GROOMLAB_GUI_SUITES names) in this Maya session."""
-    S.log = open(os.environ.get("GROOMLAB_GUI_LOG", os.devnull), "w")
+    S.log = io.open(os.environ.get("GROOMLAB_GUI_LOG", os.devnull), "w", encoding="utf-8")  # (any test text)
     wanted = [s.strip() for s in os.environ.get("GROOMLAB_GUI_SUITES", "").split(",") if s.strip()]
     unknown = [s for s in wanted if s not in SUITES + OPT_IN_SUITES]
     queue = [s for s in SUITES if not wanted or s in wanted] + [s for s in OPT_IN_SUITES if s in wanted]

@@ -29,6 +29,7 @@ BINDINGS = {
     # The GroomLab menu (menus.json "main") and the Groom Tools' header, empty state and Output strip.
     "tools.open": ("groomlab.groom_tools", {}),
     "graph.open": ("groomlab.graph_open", {}),
+    "commands.find": ("groomlab.find_command", {}),
     "groom.create": ("groomlab.add_groom", {}),
     "file.import": ("groomlab.load_groom", {}),
     "file.reload": ("groomlab.reload_groom", {}),
@@ -99,7 +100,6 @@ BINDINGS = {
     "cards.bakeScalp": ("groomlab.cards_bake_scalp", {}),
     "node.bakeToGuides": ("groomlab.bake_to_guides", {}),
     "import.alembicCurves": ("groomlab.import_alembic_curves", {}),
-    "photos.guides": ("groomlab.photos_guides", {}),
     "help.docs": ("wm.url_open", {"url": DOCS_URL}),
     # GroomLab > Theme (themes.py): the themes listed by menus.json's "themes" generator.
     "theme.set": ("groomlab.theme_set", {"$value": "name"}),

@@ -65,8 +65,7 @@ void BrushSession::setTool(const std::string& id) {
 }
 
 std::string BrushSession::toolId() const {
-    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) return "shape";  // the Tube tool's root mode
-    return pickedTool(tool_.settings);  // (every host's: tool_settings.h)
+    return pickedTool(tool_.settings);  // (every host's: tool_settings.h; the Roots brush: "roots")
 }
 
 bool BrushSession::startRoots(RootTubeTool::Mode mode) {
@@ -85,7 +84,6 @@ bool BrushSession::startRoots(RootTubeTool::Mode mode) {
 
 void BrushSession::leaveRoots() {
     if (host_ && tool_.roots().active()) guard("roots", [&] { tool_.roots().leave(*host_); });
-    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) tool_.settings.setMode("shape");
     refreshRoots();
 }
 
@@ -122,8 +120,7 @@ void BrushSession::setDocument(GroomDocument* document) {
         } catch (const std::exception&) {
         }
     }
-    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) tool_.settings.setMode("shape");
-    rootOverlay_ = RootOverlayGeometry();
+    rootOverlay_ = RootOverlayGeometry();  // (the Roots brush stays picked: its next click starts Draw root)
     document_ = document;
     host_ = document ? std::make_unique<DocumentStrokeHost>(*document) : nullptr;
     if (host_) host_->setShotSculpt(shot_, shotSeconds_, shotFrame_, shotLayer_);

@@ -35,6 +35,7 @@ palette = importlib.import_module(bu.MODULE + ".palette")
 shading = importlib.import_module(bu.MODULE + ".shading")
 menu = importlib.import_module(bu.MODULE + ".menu")
 icons = importlib.import_module(bu.MODULE + ".icons")
+tool_props = importlib.import_module(bu.MODULE + ".tool_props")
 
 
 class Layout(bu.FakeLayout):
@@ -263,8 +264,7 @@ class ToolsTest(unittest.TestCase):
         # The menu in Maya's order (menus.json; test_addon_ui checks it whole).
         log = draw_classes([bpy.types.GROOMLAB_MT_main])
         order = [e[2] for e in log if e[0] == "op_text"]
-        self.assertEqual(order, ["Groom Tools", "Graph Editor", "Create Groom from Selection",
-                                 "Guides from Photos (experimental)..."])
+        self.assertEqual(order, ["Groom Tools", "Graph Editor", "Find Command...", "Create Groom from Selection"])
         self.assertIn(("menu", "GROOMLAB_MT_main_export"), log)
         self.assertIn(("menu", "GROOMLAB_MT_main_help"), log)
         for cls in (bpy.types.GROOMLAB_MT_main_groomfiles, bpy.types.GROOMLAB_MT_main_export,
@@ -285,27 +285,26 @@ class ToolsTest(unittest.TestCase):
         self.assertIn(groom.runtime(head).uid, tools._states)  # kept already (a crash before any save)
         t = bpy.context.scene.groomlab_tools
         self.assertEqual(t.guide_count, 0)
-        # The palette before any tool: how to start, the first-groom steps.
+        # The palette before any tool: the trays (no group names: the tiles speak for them), how to start.
         tools.catalog()
         log = draw_classes(palette.classes)
-        self.assertIn(("op_text", "groomlab.tool", "▶  Place some guides"), log)
-        self.assertTrue(any(e[0] == "label" and e[1] == "Create" for e in log))  # a category's tiles under its name
+        self.assertFalse(any(e[0] == "op_text" and e[2].startswith("▶") for e in log))  # (no first-groom card)
+        self.assertFalse(any(e[0] == "label" and e[1] == "Create" for e in log))
         self.assertTrue(any(e[0] == "label" and "Pick a tool" in e[1] for e in log))
         # The tiles: icon and name, of one size, as many to a row as fit (Blender's automatic
         # columns), each tool's name and hint in its tooltip.
         tiles = [getattr(e[2], "tool", None) for e in log if e[0] == "op_props" and e[1] == "groomlab.tool"]
         for tool in ("place", "draw", "part", "flow", "comb", "smooth", "cut", "erase", "select", "freeze"):
             self.assertIn(tool, tiles)
-        self.assertNotIn("paint", tiles)  # Paint: one full-width button on the Paint tab, over the maps
+        self.assertNotIn("paint", tiles)  # Paint: the Paint page is painting (its card, no tile)
         t.tab = "PAINT"
         painting = draw_classes([palette.VIEW3D_PT_groomlab_tools])
         painted = [getattr(e[2], "tool", None) for e in painting if e[0] == "op_props" and e[1] == "groomlab.tool"]
-        self.assertIn("paint", painted)
-        self.assertNotIn("comb", painted)
+        self.assertEqual(painted, [])
+        self.assertIn(("prop", "paint_mode"), painting)  # the Paint card
         t.tab = "TOOLS"
-        self.assertEqual(palette.tool_grid.__defaults__, (4,))  # four tiles to a row, as Maya and the app at most
+        self.assertEqual(palette.tool_grid.__defaults__, (5, (), True))  # five tiles to a row, as Maya's Simple trays
         tile_texts = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.tool"]
-        self.assertIn("▶  Place some guides", tile_texts)  # the starter's step
         for tool in ("comb", "freeze"):  # the tiles' names
             self.assertIn(tools.tool_info(tool)["label"], tile_texts)
         self.assertNotIn("", tile_texts)
@@ -384,7 +383,7 @@ class ToolsTest(unittest.TestCase):
         log = draw_classes([palette.VIEW3D_PT_groomlab_tools])
         self.assertIn(("prop", "radius"), log)
         self.assertNotIn(("prop", "stretch"), log)
-        self.assertFalse(any(e[0] == "label" and e[1] == "Lift" for e in log))  # only settings: no title
+        self.assertTrue(any(e[0] == "label" and e[1] == "Lift" for e in log))  # the card's header names the brush
         self.assertIn("B + drag", tool_ops.GROOMLAB_OT_tool.description(bpy.context, types.SimpleNamespace(tool="lift")))  # the tile's tooltip
         for gone in ("selected_only", "front_facing"):  # not in the panel: the brushes' defaults
             self.assertNotIn(("prop", gone), log)
@@ -775,11 +774,12 @@ class ToolsTest(unittest.TestCase):
         d.show_strands = True
         self.assertFalse(head.groomlab.hair.hide_viewport)
         # The palette's Display panel draws.
-        log = draw_classes([palette.VIEW3D_PT_groomlab_tools_display, palette.VIEW3D_PT_groomlab_tools_sculpting,
-                            palette.VIEW3D_PT_groomlab_tools])
+        log = draw_classes([palette.VIEW3D_PT_groomlab_tools_display, palette.VIEW3D_PT_groomlab_tools,
+                            palette.GROOMLAB_PT_guide_display])
         self.assertIn(("prop", "strand_color"), log)
         self.assertIn(("list", "groups"), log)
-        self.assertIn(("menu", "GROOMLAB_MT_guide_edits"), log)
+        self.assertIn(("prop", "guide_points"), log)  # the guides' popover
+        self.assertIn(("operator", "groomlab.row_popup"), log)  # a group row's segments and menu (Edit Guides)
         draw_classes([bpy.types.GROOMLAB_MT_guide_edits, bpy.types.GROOMLAB_MT_tools_more])
         _ = t
 
@@ -1220,8 +1220,8 @@ class ToolsTest(unittest.TestCase):
         t.paint_whole_faces = False
 
     def test_9_root_tubes_and_the_tube_hierarchy(self):
-        """The Tube card's Tube roots (the core's root tool, run by the modal tool as Maya's context
-        runs it) and Tube hierarchy blocks."""
+        """The Roots brush (the core's root tool, run by the modal tool as Maya's context runs it)
+        and the tube hierarchy's levels."""
         import math
         head = self.head
         bpy.context.view_layer.objects.active = head
@@ -1231,11 +1231,12 @@ class ToolsTest(unittest.TestCase):
         cam = self.cam
         t = bpy.context.scene.groomlab_tools
         ts = self.session()
-        self.assertEqual(bpy.ops.groomlab.tool(tool="shape"), {"FINISHED"})
         t.root_draw_path = False  # the tube straight off the scalp on the close
+        self.assertEqual(bpy.ops.groomlab.tool(tool="roots"), {"FINISHED"})  # (Draw root to start with)
         tools.refresh_info(head)
         guides = t.guide_count
-        self.assertEqual(bpy.ops.groomlab.root_tube(action="DRAW"), {"FINISHED"})
+        before = set(guides_of(head))
+        self.assertEqual(t.tool, "roots")
         self.assertEqual(t.root_mode, "place")
         self.assertEqual(hcall(head, "tool_get")["tool"], "roots")
         # Five clicks round a crown point, then the first again: the tube made, one undo step.
@@ -1261,6 +1262,21 @@ class ToolsTest(unittest.TestCase):
         self.send(ts, Event("Z", "PRESS", cx, cy, ctrl=True, shift=True))
         self.assertEqual(t.guide_count, guides + 1)
         self.assertEqual(t.root_cvs, 0)
+        # The root tube in the Tube card's Profile: its Root is its drawn root ("Drawn root", no
+        # library shape: the core's owned shape), a Root profile given goes to the others (a note).
+        made = sorted(set(guides_of(head)) - before)
+        self.assertEqual(len(made), 1)
+        tools.selection_set(head, ids=made, mode="replace")
+        tools.refresh_tubes(head)
+        self.assertEqual(t.tube_root_targets, 1)
+        self.assertTrue(t.tube_drawn)
+        self.assertEqual(t.tube_shape, tool_props.DRAWN)
+        self.assertNotIn(t.tube_drawn, [s.name for s in t.tube_shapes])  # (in no picker)
+        self.assertEqual(tools.profile_choice(t), (t.tube_drawn, "drawn"))
+        tools.set_tube(head, guides=made, shape="ribbon", twist=0.1)  # (the twist goes; the Root profile does not)
+        self.assertIn("drawn root", t.status)
+        self.assertNotEqual(tools.get_tube(head, made[0])["shape"], "ribbon")
+        tools.selection_set(head, ids=[], mode="replace")
         # Select root: a click on its middle picks it; Delete takes it away.
         self.assertEqual(bpy.ops.groomlab.root_tube(action="SELECT"), {"FINISHED"})
         self.assertEqual(t.root_mode, "select")
@@ -1275,13 +1291,19 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(t.root_selected, 1)
         self.assertEqual(bpy.ops.groomlab.root_tube(action="DELETE"), {"FINISHED"})
         self.assertEqual(t.guide_count, guides)
-        # Esc leaves the root mode for the Tube brush.
+        # Select root again goes back to Draw root, as Esc does.
+        self.assertEqual(bpy.ops.groomlab.root_tube(action="SELECT"), {"FINISHED"})
+        self.assertEqual(t.root_mode, "place")
+        self.assertEqual(bpy.ops.groomlab.root_tube(action="SELECT"), {"FINISHED"})
+        self.assertEqual(t.root_mode, "select")
         self.assertEqual(self.send(ts, Event("ESC", "PRESS", cx, cy)), {"RUNNING_MODAL"})
-        self.assertEqual(t.root_mode, "")
-        self.assertEqual(t.tool, "shape")
-        self.assertEqual(hcall(head, "tool_get")["tool"], "shape")
-        # The tubes in their colors while the Tube tool is up (Colors on by default).
+        self.assertEqual((t.tool, t.root_mode), ("roots", "place"))
+        # The tubes in their colors while the Roots brush is up (Colors on by default).
         self.assertTrue(display.settings_for(head, bpy.context.scene)["tubeColors"])
+        # Another brush leaves root mode.
+        self.assertEqual(bpy.ops.groomlab.tool(tool="shape"), {"FINISHED"})
+        self.assertEqual((t.tool, t.root_mode), ("shape", ""))
+        self.assertEqual(hcall(head, "tool_get")["tool"], "shape")
         # Tube hierarchy: Add splits the base group's tubes a level deeper, shown; Remove takes it back.
         tools.refresh_info(head)
         self.assertTrue(t.tube_base)

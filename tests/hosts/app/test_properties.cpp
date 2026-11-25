@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 
+#include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -19,6 +20,7 @@
 #include <QElapsedTimer>
 #include <QImage>
 #include <QLabel>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QToolButton>
@@ -134,14 +136,14 @@ TEST(AppProperties, TheDockFollowsTheDefinitionsInMayasOrder) {
         ids.push_back(s->objectName().toStdString());
         EXPECT_FALSE(s->isHidden()) << s->objectName().toStdString();
     }
-    EXPECT_EQ(ids, (std::vector<std::string>{"propSection_groom", "propSection_inputs", "propSection_controls", "propSection_hairColor",
-                                             "propSection_display", "propSection_guidesDisplay", "propSection_strandShading",
-                                             "propSection_sculpting", "propSection_gameCards", "propSection_rendering",
-                                             "propSection_renderOverrides", "propSection_lod"}));
-    // Open as Maya's AE opens them (Groom, Inputs, Hair Color, Display), the rest folded.
+    // (Hair Color, the guides' display, Sculpting and Game Cards are gone: the HairColor node, the
+    // Groom Tools' guides arrow, the Correctives' Display while sculpting and the Cards node have them.)
+    EXPECT_EQ(ids, (std::vector<std::string>{"propSection_groom", "propSection_inputs", "propSection_controls", "propSection_display",
+                                             "propSection_strandShading", "propSection_rendering", "propSection_renderOverrides",
+                                             "propSection_lod"}));
+    // Open as Maya's AE opens them (Groom, Inputs), the rest folded (Display too).
     EXPECT_TRUE(panel->section("groom")->expanded());
-    EXPECT_TRUE(panel->section("display")->expanded());
-    EXPECT_FALSE(panel->section("guidesDisplay")->expanded());
+    EXPECT_FALSE(panel->section("display")->expanded());
     EXPECT_FALSE(panel->section("lod")->expanded());
     // Source and the range apply to the color modes that read them.
     EXPECT_FALSE(panel->shown("colorSource"));
@@ -255,22 +257,8 @@ TEST(AppProperties, ControlsHairColorLockedAndRenderOverrides) {
     ASSERT_TRUE(window.saveTo(QString::fromStdString(path)));
     EXPECT_NEAR(readJson(path).at("controls").at(control).get<double>(), 0.25, 1e-6);
 
-    // Hair Color: the HairColor node's rows; a slider's edit is one undoable edit of the node.
-    std::string hair;
-    for (const GroomDocument::NodeInfo& n : doc->nodes()) {
-        if (n.type == "HairColor") hair = n.name;
-    }
-    if (!hair.empty()) {
-        auto* melanin = panel->findChild<ValueSlider*>(QStringLiteral("hairColor_melanin"));
-        if (doc->paramOrDefault(hair, "mode") != "color") {
-            ASSERT_TRUE(melanin) << "the Hair Color rows";
-            type(melanin, 0.8);
-            EXPECT_NEAR(doc->paramOrDefault(hair, "melanin").get<double>(), 0.8, 1e-6);
-            EXPECT_EQ(doc->undoText().rfind("Undo", 0), 0u);
-        }
-    } else {
-        EXPECT_TRUE(panel->findChild<QPushButton*>() != nullptr);
-    }
+    // No Hair Color rows: the HairColor node colors the hair (the Graph Editor, the Look card).
+    EXPECT_FALSE(panel->findChild<ValueSlider*>(QStringLiteral("hairColor_melanin")));
 
     // Locked: brushes refused (the camera stays), Unlocked: they work again.
     auto* locked = qobject_cast<QCheckBox*>(panel->control("locked"));
@@ -562,8 +550,8 @@ TEST(AppPhotos, LockedPhotoZoomsAndPansIn2DWithoutMovingTheCamera) {
     QCoreApplication::sendEvent(viewport, &wheel);
     EXPECT_FALSE(camera.zoomed2D());
     EXPECT_GT((camera.eye() - eye).length(), 1e-4f) << "unlocked, the camera moves";
-    // Back to Perspective: no 2D view left behind.
-    photos->lookButton()->click();
+    // Back to Perspective (its row clicked again): no 2D view left behind.
+    photos->clickRow(photos->lookingIndex());
     EXPECT_FALSE(camera.lookingThrough());
     EXPECT_FALSE(camera.zoomed2D());
 }
@@ -581,8 +569,7 @@ TEST(AppPhotos, LookThroughLockOpacityDepthAndAlignPhoto) {
     ASSERT_TRUE(photos && viewport);
     const ui::Bindings bindings = AppActions::bindings(window);
     EXPECT_EQ(photos->bar()->ids(), (std::vector<std::string>{"photo.import"}));
-    EXPECT_EQ(photos->itemBar()->ids(), (std::vector<std::string>{"photo.rename", "photo.remove"}));
-    EXPECT_FALSE(photos->guidesSection()->expanded()) << "Guides from photos: folded";
+    EXPECT_FALSE(photos->morphSection()->expanded()) << "Morph to photos: folded";
 
     // Import: the photo as a camera in front of the groom, 50 mm on 36, shown at 60%, in front.
     const int W = 400, H = 300;
@@ -606,8 +593,22 @@ TEST(AppPhotos, LookThroughLockOpacityDepthAndAlignPhoto) {
     const QVector3D before = camera.eye();
     bindings.at("photo.lookThrough").trigger(nullptr, false);
     ASSERT_TRUE(camera.lookingThrough());
-    EXPECT_TRUE(photos->lookButton()->isChecked());
-    EXPECT_EQ(photos->lookButton()->text(), QStringLiteral("Back to Perspective"));
+    EXPECT_EQ(photos->lookingThrough(), photos->name(0));
+    // One line per photo, nothing expands: its settings, in front / behind, the eye, the lock and
+    // its menu on the row (lists.json's photos context: Rename first, Remove last, in red).
+    for (const char* icon : {"photoSettings_front", "photoSide_front", "photoEye_front", "photoLock_front", "photoMenu_front"}) {
+        EXPECT_TRUE(photos->findChild<QToolButton*>(QLatin1String(icon))) << icon;
+    }
+    {
+        QMenu menu;
+        photos->fillRowMenu(&menu);
+        std::vector<QString> texts;
+        for (QAction* a : menu.actions()) texts.push_back(a->isSeparator() ? QStringLiteral("-") : a->text().section(QLatin1Char('\t'), 0, 0));
+        ASSERT_FALSE(texts.empty());
+        EXPECT_EQ(texts.front(), QStringLiteral("Rename..."));
+        EXPECT_EQ(texts.back(), QStringLiteral("Remove"));
+        EXPECT_TRUE(menu.actions().back()->property("destructive").toBool()) << "Remove in the theme's red";
+    }
     EXPECT_NEAR(camera.eye().z(), placed->pose.position[2], 1e-3);
     camera.projection(4.0f / 3.0f);
     EXPECT_NEAR(camera.fovDegrees(), 2.0 * std::atan(0.5 * H / placed->focalPx) * 180.0 / 3.14159265358979, 1e-3);
@@ -669,7 +670,8 @@ TEST(AppPhotos, LookThroughLockOpacityDepthAndAlignPhoto) {
     d.locked = true;
     photos->setDisplay(0, d);
     EXPECT_TRUE(camera.lookThroughLocked());
-    EXPECT_TRUE(photos->lockButton()->isChecked());
+    EXPECT_TRUE(photos->display(0).locked);
+    EXPECT_FALSE(photos->focalSlider()->isEnabled()) << "a locked camera keeps its focal length: greyed";
     const QVector3D lockedEye = camera.eye();
     camera.orbit(20.0f, 10.0f);
     camera.pan(30.0f, 10.0f, 600);
@@ -684,7 +686,7 @@ TEST(AppPhotos, LookThroughLockOpacityDepthAndAlignPhoto) {
     photos->select(0);
     EXPECT_EQ(photos->lookingThrough(), photos->name(0));
     EXPECT_TRUE(camera.lookThroughLocked());  // photo 0's lock
-    photos->lookButton()->click();  // Back to Perspective
+    photos->clickRow(0);  // the one looked through clicked again: Back to Perspective
     EXPECT_FALSE(camera.lookingThrough());
     photos->select(1);  // not looking through: picking only picks
     EXPECT_FALSE(camera.lookingThrough());
@@ -721,7 +723,7 @@ TEST(AppPhotos, LookThroughLockOpacityDepthAndAlignPhoto) {
     photos->refresh();
     photos->select(0);
     EXPECT_TRUE(photos->alignText().startsWith(QStringLiteral("Lined up by 8 pairs"))) << photos->alignText().toStdString();
-    photos->alignButton()->click();
+    bindings.at("photo.align").trigger(nullptr, false);  // (the row's menu: Align Photo...)
     ReferenceWindow* align = window.openReferenceWindow();
     ASSERT_TRUE(align && align->isVisible());
     EXPECT_EQ(align->stage(), ReferenceWindow::Stage::Align);
@@ -730,9 +732,6 @@ TEST(AppPhotos, LookThroughLockOpacityDepthAndAlignPhoto) {
     EXPECT_FALSE(align->guidesPanel()->isVisibleTo(align));
     EXPECT_FALSE(align->modeButton(ReferenceWindow::Mode::Flow)->isVisibleTo(align));
     EXPECT_TRUE(align->locked());  // the Photos tab's Lock (above)
-    bindings.at("photos.guides").trigger(nullptr, false);
-    EXPECT_EQ(align->stage(), ReferenceWindow::Stage::Guides);
-    EXPECT_TRUE(align->guidesPanel()->isVisibleTo(align));
     align->close();
 
     // Rename over the viewport's prompt; saved with the groom (display and all); Remove.

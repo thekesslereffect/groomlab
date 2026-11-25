@@ -66,7 +66,7 @@ HEAD = ('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox=
 # These SVGs are authored directly in hosts/maya/icons. Keep their outlined artwork intact.
 DESIGNED_ICONS = (
     "place", "draw", "part", "flow", "comb", "slide", "smooth", "lift", "twist", "attract",
-    "shape", "cut", "length", "lengths", "erase", "select", "freeze", "invert", "unfreeze", "clone",
+    "shape", "cut", "length", "lengths", "erase", "select", "freeze", "invert", "unfreeze", "clone", "roots",
 )
 
 

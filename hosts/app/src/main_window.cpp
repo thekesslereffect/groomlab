@@ -255,7 +255,6 @@ void MainWindow::buildMenuBar() {
     graphAction_ = made.at("graph.open");
     railLabels_ = made.at("view.railLabels");
     transfer_ = made.at("groom.transfer");
-    reference_ = made.at("photos.guides");
     deleteGuides_ = made.at("guides.deleteSelected");
     symmetryAction_ = made.at("brush.symmetry");
     // The Groom Tools' More menu, empty state and Parts buttons: the same bindings.
@@ -437,8 +436,7 @@ bool MainWindow::chooseTheme(const QString& name) {
         theme::setTheme(name);
         restyle(before, sheet);
         fitMenuCorner();  // (the new theme's font and padding)
-        shell_->leftRail()->refreshIcons();  // (the rails' icons in the new theme's tones)
-        shell_->rightRail()->refreshIcons();
+        shell_->rightRail()->refreshIcons();  // (the rail's icons in the new theme's tones)
     }
     theme::saveTheme(name);
     for (QAction* a : findChildren<QAction*>()) {

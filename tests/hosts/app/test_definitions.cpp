@@ -178,8 +178,9 @@ TEST(AppUi, TheEmbeddedFilesAreTheSourceTreesAndResolveForTheApp) {
     };
     EXPECT_EQ(find(main, "groom.create").label, "New Groom on Mesh...");
     EXPECT_EQ(find(mayaMain, "groom.create").label, "Create Groom from Selection");
-    EXPECT_EQ(find(main, "studio").tip, "Lookdev lighting presets for the viewport, in any mode");
-    EXPECT_EQ(find(mayaMain, "studio").tip, "A backdrop, Arnold area lights and a camera round the groom");
+    // (Studio: under Render now)
+    EXPECT_EQ(find(find(main, "render").items, "studio").tip, "Lookdev lighting presets for the viewport, in any mode");
+    EXPECT_EQ(find(find(mayaMain, "render").items, "studio").tip, "A backdrop, Arnold area lights and a camera round the groom");
     const auto files = find(main, "groomFiles").items;
     EXPECT_EQ(find(files, "file.saveAs").tip.find("playback"), std::string::npos);
     EXPECT_NE(find(find(mayaMain, "groomFiles").items, "file.saveAs").tip.find("playback"), std::string::npos);
@@ -249,36 +250,41 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
                                                      "Add Eye...", "-", "Quit"}));
     // The GroomLab menu as Maya's, without Maya's alone (or the FBX exports the app cannot write).
     const QMenu* groomlab = bar.actions()[3]->menu();
-    EXPECT_EQ(shown(groomlab), (std::vector<std::string>{"Groom Tools", "Graph Editor", "-", "New Groom on Mesh...", "Card Atlas...", "Add Sample Mesh",
-                                                         "Guides from Photos (experimental)...", "Groom Files", "Import", "-", "Add", "Simulate",
-                                                         "Display", "Review", "Studio", "Render", "Export", "Utilities", "-", "Theme", "Radial Menu Settings...", "Help"}));
+    EXPECT_EQ(shown(groomlab), (std::vector<std::string>{"Groom Tools", "Graph Editor", "Find Command...", "-", "New Groom on Mesh...", "Start From", "Add", "-",
+                                                         "Groom File", "Export", "Render", "Simulate", "Utilities", "-", "Display", "Settings", "Help"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Display"))),
               (std::vector<std::string>{"Show All Hair", "Hide All Hair", "-", "Show All Guides", "Hide All Guides"}));
-    EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Add Sample Mesh"))), (std::vector<std::string>{"Nika (head)", "Manny (head)", "Wolf"}));
+    // Start From: the sample meshes, then the imports (the menu regrouped by job, every id the same).
+    const QMenu* startFrom = submenu(groomlab, QStringLiteral("Start From"));
+    ASSERT_TRUE(startFrom);
+    const std::vector<std::string> starts = shown(startFrom);
+    ASSERT_GE(starts.size(), 4u);
+    EXPECT_EQ((std::vector<std::string>(starts.begin(), starts.begin() + 4)), (std::vector<std::string>{"Nika (head)", "Manny (head)", "Wolf", "-"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Add"))),
               (std::vector<std::string>{"Feathers...", "Braid on Curves...", "Bun...", "Cards", "Collider", "Wind", "Jiggle"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Simulate"))),
               (std::vector<std::string>{"Add Simulate Node", "Simulate Range", "Bake Simulation", "Clear Simulation", "-", "Export Guides for Simulation...", "Load Guide Cache..."}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Utilities"))),
-              (std::vector<std::string>{"To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "Bake Follicle Map", "-", "Delete All Flow Arrows", "-",
+              (std::vector<std::string>{"Card Atlas...", "-", "To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "Bake Follicle Map", "-", "Delete All Flow Arrows", "-",
                                         "Transfer Groom to Scalp...", "-", "Find Missing Files...", "Collect Files"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Export"))),
               (std::vector<std::string>{"Alembic...", "USD...", "V-Ray Scene...", "-", "Unreal Groom...", "Unreal Cards...", "Unity Strands (.abc)...",
                                         "Unity Feathers...", "Unity Cards...", "glTF Cards...", "Card Maps...", "-", "Scales Mesh (FBX)...", "Scales Instancer (USD)..."}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Render"))),
               (std::vector<std::string>{"Render Frame in RenderMan", "Render Turntable in RenderMan", "-", "Render Frame in V-Ray",
-                                        "Render Turntable in V-Ray", "-", "RenderMan Location...", "V-Ray Standalone Location..."}));
-    const QMenu* studio = submenu(groomlab, QStringLiteral("Studio"));
+                                        "Render Turntable in V-Ray", "-", "RenderMan Location...", "V-Ray Standalone Location...", "-", "Studio",
+                                        "Review"}));
+    const QMenu* studio = submenu(submenu(groomlab, QStringLiteral("Render")), QStringLiteral("Studio"));  // (Studio and Review: under Render)
     ASSERT_TRUE(studio);
     ASSERT_EQ(studio->actions().size(), static_cast<qsizetype>(lightingPresetNames().size()));
     EXPECT_EQ(studio->actions().front()->text(), QStringLiteral("Studio"));
     EXPECT_TRUE(studio->actions().front()->isCheckable());
-    const QMenu* themes = submenu(groomlab, QStringLiteral("Theme"));
+    const QMenu* themes = submenu(submenu(groomlab, QStringLiteral("Settings")), QStringLiteral("Theme"));  // (under Settings)
     ASSERT_TRUE(themes);
     EXPECT_EQ(shown(themes).size(), static_cast<std::size_t>(theme::themeNames().size()) + 4);  // the themes, -, New, Reload, Open Folder
     EXPECT_EQ(shown(themes).back(), "Open Themes Folder");
     // The actions other tests (and the window) find by name.
-    for (const char* name : {"saveAs", "reload", "transfer", "guidesFromReference", "deleteGuides", "railLabels", "addProp", "addEye",
+    for (const char* name : {"saveAs", "reload", "transfer", "findCommand", "deleteGuides", "railLabels", "addProp", "addEye",
                              "saveImage", "symmetry", "supportGroomLab", "vrayFrame", "vrayTurntable", "vrayLocation", "prmanFrame",
                              "prmanTurntable", "prmanLocation", "quit", "discord", "mode_groom", "mode_export", "showAllGuides",
                              "hideAllGuides", "showAllHair", "hideAllHair", "toggleGuides"}) {
@@ -297,7 +303,7 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
     EXPECT_FALSE(made.at("file.save")->isEnabled());
     EXPECT_FALSE(made.at("edit.undo")->isEnabled());
     EXPECT_EQ(made.at("edit.undo")->text(), QStringLiteral("Undo"));
-    const QMenu* groomFiles = submenu(groomlab, QStringLiteral("Groom Files"));
+    const QMenu* groomFiles = submenu(groomlab, QStringLiteral("Groom File"));
     ASSERT_TRUE(groomFiles);
     bool saveShownWithKeys = false;
     const QString saveKeys = QKeySequence(Qt::CTRL | Qt::Key_S).toString(QKeySequence::NativeText);  // Cmd+S on macOS
@@ -321,7 +327,7 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
     ASSERT_TRUE(saved);
     EXPECT_TRUE(saved->isChecked());
     // A menu holding a generator is filled again when it opens (the same entries, made afresh).
-    QMenu* themesMenu = submenu(groomlab, QStringLiteral("Theme"));
+    QMenu* themesMenu = submenu(submenu(groomlab, QStringLiteral("Settings")), QStringLiteral("Theme"));
     const std::vector<std::string> before = shown(themesMenu);
     emit themesMenu->aboutToShow();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);

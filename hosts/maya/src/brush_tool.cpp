@@ -103,6 +103,9 @@ const char* kTubeWireframeFlag[] = {"-twf", "-tubeWireframe"};  // ... and as wi
 const char* kTubeColorsFlag[] = {"-tco", "-tubeColors"};        // ... in their regions' colors
 const char* kTubeLevelColorsFlag[] = {"-tlc", "-tubeLevelColors"};  // ... each split tube a shade of its own
 const char* kTubeAlwaysFlag[] = {"-tav", "-tubesAlwaysVisible"};  // ... whichever tool is up
+// What Maya's Help Line says while the brush is up: the active brush's keys (the Groom Tools set it
+// per brush; empty: the general text).
+const char* kHelpTextFlag[] = {"-htx", "-helpText"};
 // Clone: the next press captures the guides rooted in the circle (Pick Source; query: armed), and
 // (query) how many guides the source holds.
 const char* kPickSourceFlag[] = {"-pks", "-pickSource"};
@@ -1026,11 +1029,20 @@ BrushContext::~BrushContext() = default;
 
 void BrushContext::getClassName(MString& name) const { name = "groomLabBrush"; }
 
+// The Help Line's text while no brush has set its own (the Groom Tools set each brush's keys).
+const char* const kGeneralHelp =
+    "Drag: brush the selected groom (Place: click one guide, drag for many; Draw: draw a guide "
+    "from the scalp). Ctrl: the opposite (Length shortens, Lift lays down; painting, toward 0). "
+    "Shift+drag: smooth (the guides, a painted map, the Tube brush's channel). Select guides with the "
+    "Select tool. B/M or middle-drag: radius/strength. Double-click the tool for its settings.";
+
+void BrushContext::setHelpText(const MString& text) {
+    helpText_ = text;
+    setHelpString(text.length() ? text : MString(kGeneralHelp));
+}
+
 void BrushContext::toolOnSetup(MEvent&) {
-    setHelpString("Drag: brush the selected groom (Place: click one guide, drag for many; Draw: draw a guide "
-                  "from the scalp). Ctrl: the opposite (Length shortens, Lift lays down; painting, toward 0). "
-                  "Shift+drag: smooth (the guides, a painted map, the Tube brush's channel). Select guides with the "
-                  "Select tool. B/M or middle-drag: radius/strength. Double-click the tool for its settings.");
+    setHelpString(helpText_.length() ? helpText_ : MString(kGeneralHelp));
     installPenPressure();
     active_ = true;
     if (!findGroom()) MGlobal::displayWarning("GroomLab brush: select a groom (groomLabShape) to brush");
@@ -1426,7 +1438,9 @@ void BrushContext::clearSymmetry() {
 void BrushContext::clearTubeWires() {
     if (tubeWiresOn_.isAlive() && tubeWiresOn_.isValid()) {
         MFnDependencyNode node(tubeWiresOn_.object());
-        if (auto* shape = dynamic_cast<GroomShape*>(node.userNode())) shape->setTubeWires(false);
+        if (auto* shape = dynamic_cast<GroomShape*>(node.userNode())) {
+            shape->setTubeWires(false, tubeShaded, tubeWireframe, tubeColors, tubeLevelColors);  // (its look kept)
+        }
     }
     tubeWiresOn_ = MObjectHandle();
 }
@@ -1442,7 +1456,11 @@ void BrushContext::showTubeWires() {
     if (!on || !(tubeWiresOn_.isAlive() && tubeWiresOn_.isValid() && tubeWiresOn_.object() == shape->thisMObject())) {
         clearTubeWires();  // off, or on another groom
     }
-    if (!on) return;
+    if (!on) {
+        // Another tool, or none: the look still goes to the groom (Always visible draws it).
+        if (shape) shape->setTubeWires(false, tubeShaded, tubeWireframe, tubeColors, tubeLevelColors);
+        return;
+    }
     tubeWiresOn_ = MObjectHandle(shape->thisMObject());
     shape->setTubeWires(true, tubeShaded, tubeWireframe, tubeColors, tubeLevelColors);
     // (Always visible: the look the tubes keep once the Tube brush is put down)
@@ -1668,6 +1686,7 @@ MStatus BrushContextCmd::appendSyntax() {
     s.addFlag(kTubeColorsFlag[0], kTubeColorsFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeLevelColorsFlag[0], kTubeLevelColorsFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeAlwaysFlag[0], kTubeAlwaysFlag[1], MSyntax::kBoolean);
+    s.addFlag(kHelpTextFlag[0], kHelpTextFlag[1], MSyntax::kString);
     s.addFlag(kPickSourceFlag[0], kPickSourceFlag[1], MSyntax::kBoolean);
     s.addFlag(kCloneSizeFlag[0], kCloneSizeFlag[1]);
     s.addFlag(kClearSourceFlag[0], kClearSourceFlag[1], MSyntax::kBoolean);
@@ -1714,6 +1733,7 @@ MStatus BrushContextCmd::doEditFlags() {
         if (args.isFlagSet(kTubeColorsFlag[0]) && args.getFlagArgument(kTubeColorsFlag[0], 0, b)) context_->tubeColors = b;
         if (args.isFlagSet(kTubeLevelColorsFlag[0]) && args.getFlagArgument(kTubeLevelColorsFlag[0], 0, b)) context_->tubeLevelColors = b;
         if (args.isFlagSet(kTubeAlwaysFlag[0]) && args.getFlagArgument(kTubeAlwaysFlag[0], 0, b)) context_->tubesAlwaysVisible = b;
+        if (args.isFlagSet(kHelpTextFlag[0]) && args.getFlagArgument(kHelpTextFlag[0], 0, text)) context_->setHelpText(text);
         MToolsInfo::setDirtyFlag(*context_);
         context_->showSymmetry();  // the line follows the symmetry set (or goes with it)
 

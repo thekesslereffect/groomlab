@@ -2,9 +2,9 @@
 """GroomLab UI themes: colors and shapes for the Groom Tools, the Graph Editor
 and the viewport's guides, from JSON files.
 
-Four ship with GroomLab: "charcoal" (graphite greys with sections on soft
-cards and one iris-violet accent; the default), "playful" (charcoal and
-primaries, round; the base every theme extends), "studio" (low-key DCC greys,
+Four ship with GroomLab: "playful" (charcoal and primaries, round; the default
+and the base every theme extends), "charcoal" (graphite greys with sections on
+soft cards and one blue accent), "studio" (low-key DCC greys,
 one steel-blue accent) and "paper" (light: warm paper and ink with one deep
 teal, for bright rooms and reading the groom against light). Pick one in GroomLab >
 Theme, or Theme in the Groom Tools' More menu or the Graph Editor's Edit menu
@@ -39,8 +39,9 @@ import re
 import weakref
 
 THEME_VAR = "groomLabTheme"
-DEFAULT = "charcoal"  # the theme a user who never picked one gets
+DEFAULT = "playful"   # the theme a user who never picked one gets
 BASE = "playful"      # the theme every theme extends unless it says otherwise (it sets every key)
+COMPONENTS = "charcoal"  # the theme file holding the components block (sizes and roles every host shares)
 from groomlab.shipped import shipped_dir as _shipped_dir  # noqa: E402
 SHIPPED_DIR = _shipped_dir("themes")
 # The fonts GroomLab's windows use (Inter, SIL OFL 1.1, its license beside it): the installed module's
@@ -242,7 +243,7 @@ def components():
     whatever the theme (as the app reads it)."""
     if _components[0] is None:
         try:
-            _components[0] = load(DEFAULT).get("components") or {}
+            _components[0] = load(COMPONENTS).get("components") or {}
         except (ValueError, IOError, OSError):
             _components[0] = {}
     return _components[0]
@@ -585,6 +586,14 @@ def _blend(a, b, f):
     return "#%02X%02X%02X" % tuple(int(round(x + (y - x) * f)) for x, y in zip(ra, rb))
 
 
+def _rgba(color, alpha):
+    """A hex color at `alpha` (0-1) as a style sheet's rgba()."""
+    h = color.lstrip("#")
+    if len(h) < 6:
+        return color
+    return "rgba(%d, %d, %d, %d)" % (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(round(alpha * 255)))
+
+
 def stylesheet(t=None, surface=None):
     """Qt style sheet for GroomLab's windows (made once per loaded theme and surface: the ui key
     a window's background takes, the theme's background by default)."""
@@ -686,6 +695,7 @@ def tokens(t=None, surface=None):
         "card": t.token("card"), "cardRule": t.token("cardRule"), "sunken": t.token("sunken"),
         "segOn": t.token("segmentOn"), "sliderFill": t.token("sliderFill"),
         "selection": t.hex(t.get("ui.selection") or "accent"),
+        "accentLine": _rgba(accent, 0.6),  # (a chosen pill's outline: the accent at 60%)
         "selectionText": c("ui.selectionText") if t.get("ui.selectionText") else c("ui.accentText"),
         "warning": t.hex(t.get("ui.warning", "yellow")), "white": t.hex("white"),
         "fieldEdge": t.hex(field_edge) if field_edge else "transparent",
@@ -732,6 +742,7 @@ QLabel[role="hint"] { color: %(muted)s; font-size: %(fs_small)dpx; }
 QLabel[role="title"] { color: %(text)s; font-size: %(fs_title)dpx; font-weight: 700; }
 QLabel[role="subheading"] { color: %(text)s; font-size: %(fs)dpx; font-weight: 600; }
 QLabel[role="status"] { color: %(warning)s; background: %(raised)s; border-radius: %(r)dpx; padding: {{5}}px {{8}}px; }
+QLabel[role="status"][quiet="true"] { background: transparent; }
 QLabel[role="count"] { color: %(muted)s; font-size: %(fs_small)dpx; }
 QLabel[role="block"] { color: %(dim)s; font-size: %(fs_small)dpx; font-weight: 600; }
 QToolButton[role="blockFold"], QToolButton[role="blockFold"]:hover, QToolButton[role="blockFold"]:pressed { border: none; background: transparent; padding: 0px; margin: 0px; }
@@ -800,6 +811,15 @@ QToolButton[role="chip"]:pressed, QToolButton[role="chip"]:checked { background:
     border-color: %(accentSoft)s; font-weight: 600; }
 QToolButton[role="chip"]:disabled { color: %(disabled)s; }
 QToolButton[role="chip"]::menu-indicator, QToolButton[role="glyph"]::menu-indicator { image: none; width: 0; }
+QToolButton[role="pill"], QFrame[role="toolCard"] QToolButton[role="pill"] { background: transparent;
+    border: {{1}}px solid %(hoverEdge)s; border-radius: {{11}}px; padding: {{3}}px {{10}}px; color: %(dim)s;
+    font-size: %(fs_small)dpx; font-weight: 500; }
+QToolButton[role="pill"]:hover, QFrame[role="toolCard"] QToolButton[role="pill"]:hover { background: %(hover)s; color: %(text)s; }
+QToolButton[role="pill"]:checked, QFrame[role="toolCard"] QToolButton[role="pill"]:checked { background: %(selection)s;
+    border-color: %(accentLine)s; color: %(text)s; }
+QToolButton[role="pill"]:disabled { color: %(disabled)s; }
+QToolButton[role="pill"][tile="true"], QFrame[role="toolCard"] QToolButton[role="pill"][tile="true"] {
+    border-radius: %(r)dpx; padding: {{3}}px {{2}}px; }
 QFrame[role="toolCard"] QToolButton[role="chip"], QFrame[role="itemBox"] QToolButton[role="chip"] {
     background: %(raised)s; border: {{1}}px solid transparent; color: %(dim)s; padding: {{3}}px {{8}}px; font-size: %(fs_small)dpx; }
 QFrame[role="toolCard"] QToolButton[role="chip"]:hover, QFrame[role="itemBox"] QToolButton[role="chip"]:hover {
@@ -843,10 +863,14 @@ QToolButton[role="railButton"] { background: transparent; border: none; padding:
 QToolButton[role="railButton"]:hover { background: %(railHover)s; }
 QToolButton[role="railButton"]:checked { background: %(railOn)s; }
 QListWidget[role="rows"], QTreeWidget[role="rows"] { background: transparent; border: none; padding: 0; }
-QListWidget[role="rows"]::item { border-radius: %(small)dpx; padding: {{3}}px {{2}}px; }
+QListWidget[role="rows"]::item { border-radius: %(r)dpx; padding: {{3}}px {{2}}px; }
 QTreeWidget[role="rows"]::item { border-radius: 0; padding: {{3}}px {{2}}px; }
 QListWidget[role="rows"]::item:selected, QTreeWidget[role="rows"]::item:selected { background: %(accentSoft)s; color: %(text)s; }
 QListWidget[role="rows"]::item:hover:!selected, QTreeWidget[role="rows"]::item:hover:!selected { background: %(cardRule)s; }
+QTreeWidget[role="rows"]::item:first, QTreeWidget::item:first { border-top-left-radius: %(r)dpx; border-bottom-left-radius: %(r)dpx; }
+QTreeWidget[role="rows"]::item:last, QTreeWidget::item:last { border-top-right-radius: %(r)dpx; border-bottom-right-radius: %(r)dpx; }
+QTreeWidget[role="rows"]::item:only-one, QTreeWidget::item:only-one { border-radius: %(r)dpx; }
+QTreeView::branch:selected, QTreeView::branch:hover { background: transparent; }
 QToolButton[role="glyph"][toggle="true"]:checked { background: %(selection)s; }
 QTabWidget::pane { border: none; background: transparent; }
 QTabWidget, QTabBar { background: transparent; }
@@ -870,7 +894,7 @@ QComboBox QAbstractItemView { background: %(raised)s; border: {{1}}px solid %(po
     selection-color: %(selectionText)s; outline: none; }
 QListWidget, QTreeWidget, QTableWidget, QListView, QTreeView {
     background: %(background)s; border: {{1}}px solid %(fieldEdge)s; border-radius: %(panel_r)dpx; padding: {{4}}px; outline: none; }
-QListWidget::item { border-radius: %(small)dpx; padding: {{3}}px; }
+QListWidget::item { border-radius: %(r)dpx; padding: {{3}}px; }
 QTreeWidget::item { border-radius: 0; padding: {{3}}px; }
 QTreeWidget::branch:selected { background: %(selection)s; }
 QListWidget::item:selected, QTreeWidget::item:selected { background: %(selection)s; color: %(selectionText)s; }
@@ -908,6 +932,7 @@ QScrollBar::handle:horizontal { background: %(scroll)s; border-radius: {{3}}px; 
 QScrollBar::handle:hover { background: %(scrollHover)s; }
 QScrollBar::handle:pressed { background: %(accent)s; }
 QMenu { background: %(raised)s; border: {{1}}px solid %(popupEdge)s; border-radius: %(panel_r)dpx; padding: {{4}}px; }
+QFrame#findCommand { border: {{1}}px solid %(popupEdge)s; }
 QMenu::item { padding: {{5}}px {{28}}px {{5}}px {{12}}px; border-radius: %(r)dpx; }
 QMenu::item:selected { background: %(selection)s; color: %(selectionText)s; }
 QMenu::item:disabled { color: %(disabled)s; }

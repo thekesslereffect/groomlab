@@ -103,7 +103,13 @@ std::string guideOpLabel(const GuideOp& op);
 // tube_smooth): each of `guides`' tube by `edit` (tube.h editedTube's JSON: the keys given replace
 // theirs, widths as the hierarchy stores them). Returns the guides changed. Throws GuideEditError:
 // none given ("state"), one not there ("not_found"), an edit it cannot take ("bad_request").
-std::size_t editTubes(GuideHierarchy& h, const std::vector<GuideId>& guides, const std::string& edit);
+// A root tube (isRootTube) keeps its drawn root: a Root profile ("shape") given is refused for it
+// (the rest of the edit still applies to it, the Root profile to the other guides), `note` saying
+// how many kept theirs; refused for every guide with nothing else to change: "state".
+std::size_t editTubes(GuideHierarchy& h, const std::vector<GuideId>& guides, const std::string& edit,
+                      std::string* note = nullptr);
+// What editTubes says of `count` root tubes that kept their drawn root (every host's status line).
+std::string rootTubesKeptNote(std::size_t count);
 
 // An edit of the groom's tube shape library, as asked (every host's: add, set, rename, remove).
 struct TubeShapeOp {
@@ -114,9 +120,13 @@ struct TubeShapeOp {
     std::optional<bool> smooth;                      // add (default smooth), set: kept when not given
     std::vector<GuideId> give;                       // add: these guides take it at once (as `profile`)
     std::string profile = "shape";                   // shape, midShape or tipShape
+    // add, set: an owned shape (isOwnedTubeShape, a root tube's drawn root), as the root tools'
+    // scripts make and fit them; without it an owned name is refused (rename and remove always).
+    bool owned = false;
 };
 // The library edited, every guide taking the shape following it (remove: round). Returns the
-// guides taking the shape after (remove: the ones that took it). Throws GuideEditError.
+// guides taking the shape after (remove: the ones that took it). Throws GuideEditError. A root
+// tube given a shape as its Root profile (add's `give`) keeps its drawn root, as editTubes.
 std::size_t editTubeShape(GuideHierarchy& h, const TubeShapeOp& op);
 // The edit's undo step name, every host's ("add tube shape", "edit tube shape"...).
 std::string tubeShapeLabel(const TubeShapeOp& op);

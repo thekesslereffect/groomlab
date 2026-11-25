@@ -38,6 +38,12 @@ std::vector<BrushEntry> makeCatalog() {
          {"symmetry", "collide", "newGuides", "spacing", "soloNewGuides", "tube"}},
         {"draw", "Draw", C::Create, 0, "draw", 1.0f, false, "Press on the scalp and draw a guide's shape.",
          {"symmetry", "collide", "newGuides", "soloNewGuides", "tube"}},
+        // Root tubes (root_tube_tool.h): the stroke tools' "roots" mode, its own tool since the Tube
+        // brush only edits tubes; the levels' row is the Tube brush's too.
+        {"roots", "Roots", C::Create, 0, "roots", 1.0f, false,
+         "Draw a tube root first: click its outline on the scalp CV by CV, click the first CV to close it, then "
+         "draw its guide. Edit drags a root's CVs; Select picks, moves, duplicates, subdivides and deletes roots.",
+         {"rootTubes", "tubeLevels"}},
         {"clone", "Clone", C::Create, 0, "clone", 1.0f, false,
          "Ctrl+click over guides to copy the ones rooted in the circle (or Pick Source, then click); then click "
          "anywhere to set copies down, each guide keeping its shape and children, turned to the scalp there. Drag "
@@ -71,7 +77,7 @@ std::vector<BrushEntry> makeCatalog() {
          "Paint guides' tubes near the brush: Width grows them (Ctrl shrinks), Flatness flattens them toward a "
          "ribbon (Ctrl flattens them on the other axis), Twist turns them about the guide (Ctrl the other way); Shift smooths what it "
          "paints along the guides. Children and Fill Tubes strands follow.",
-         with(without(kShaping, {"collide"}), {"tubeChannel", "tube"})},
+         with(without(kShaping, {"collide"}), {"tubeChannel", "tube", "tubeLevels"})},
         // Trim.
         {"cut", "Cut", C::Trim, 0, "cut", 1.0f, false, "Trim guides where the brush touches them.",
          with(kBrushCommon, {"targets"})},
@@ -262,6 +268,13 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
                          "the groom's shape library (custom outlines, drawn in the shape editor), the shape new guides "
                          "take (Place, Draw), and the groom's Fill Tubes (strands fill the tubes) and Tube Blend (the "
                          "soft edge round them)"},
+        {"rootTubes", "Roots", "Tubes drawn root first: Draw (the root's outline clicked on the scalp, then its guide), "
+                               "Edit (drag a root's CVs) and Select (pick, move, duplicate, delete a root; Subdivide "
+                               "cuts it into cells by a painted density); the new tubes' Length, Segments and Tip "
+                               "width, Snap to neighbours, Draw guide before extrude"},
+        {"tubeLevels", "Levels", "The tube hierarchy's levels: + splits the tubes a level deeper, - takes a split back; "
+                                 "pick a level to show and edit its tubes (Lock view, Mixed view and colors per level "
+                                 "in its menu)"},
         {"lengthKeys", "Keys", "The selected key's scale and the length it gives the guide nearest it, how guides take "
                                "a new length (scale: the shape scaled, curls kept; trim: cut or extended at the tip), "
                                "Delete Key, Clear, and Apply (sets the guides, one undo step) or Cancel. Only the "

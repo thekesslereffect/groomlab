@@ -167,6 +167,12 @@ std::map<std::string, QAction*> fillMenu(QMenu* menu, const json& entries, const
 std::map<std::string, QAction*> fillMenuBar(QMenuBar* bar, const json& entries, const Bindings& bindings,
                                             const FillOptions& options = {}, const Definitions& definitions = Definitions::shipped());
 
+// A menu entry for a destructive action (actions.json "destructive": Delete, Remove), as fillMenu
+// makes them: its text and a trash glyph in the theme's error red (a QWidgetAction; the action
+// keeps its text, tip and enabled state, and triggers as any). `slot` runs when it triggers (may be
+// empty: connect to triggered). Added to `menu`.
+QAction* dangerAction(QMenu* menu, const QString& text, std::function<void()> slot = {}, const QString& tip = {});
+
 // Every action fillMenu made under `menu` (its submenus too) takes its enabled, checked and text
 // from its binding again: after an edit, so the live shortcuts of disabled actions stay off.
 void refreshActions(QMenu* menu);

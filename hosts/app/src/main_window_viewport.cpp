@@ -599,9 +599,9 @@ void MainWindow::refreshTool() {
     const Viewport::ToolMode mode = viewport_->toolMode();
     shell_->setTool(mode == Viewport::ToolMode::Brush ? brush_.toolId() : std::string(), mode == Viewport::ToolMode::Select);
     // The Tube brush's tubes (the core's display, every host's): wires and/or shaded, as its card says.
-    // (The Tube tool's root mode is the Tube tool's too: its toolId; Always visible: any tool.)
+    // (The Roots brush's too; Always visible: any tool.)
     const TubePanel* tubes = groomTools_ ? groomTools_->tubePanel() : nullptr;
-    const bool tubeBrush = (mode == Viewport::ToolMode::Brush && brush_.toolId() == "shape") ||
+    const bool tubeBrush = (mode == Viewport::ToolMode::Brush && (brush_.toolId() == "shape" || brush_.toolId() == "roots")) ||
                            (tubes && tubes->alwaysVisible() && mode != Viewport::ToolMode::Camera);
     const bool wires = tubeBrush && tubes && tubes->wireframe(), shaded = tubeBrush && tubes && tubes->shaded();
     const bool colors = tubeBrush && tubes && tubes->colors();

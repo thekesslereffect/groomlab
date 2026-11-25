@@ -239,7 +239,7 @@ class RootTubes(unittest.TestCase):
     def test_a_deleted_root_tubes_shape_goes_with_it(self):
         guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.15), length=0.5, regions=False)
         shape = groomlab.get_tube(self.groom, guide)["shape"]
-        names = lambda: [s["name"] for s in groomlab.tube_shapes(self.groom)]  # noqa: E731
+        names = lambda: [s["name"] for s in groomlab.tube_shapes(self.groom, owned=True)]  # noqa: E731
         self.assertIn(shape, names())
         groomlab.brush_stroke(self.groom, "erase", [self.points(guide)[0]], radius=0.1)
         self.assertEqual(root_tubes.root_tubes(self.groom), [])
@@ -324,7 +324,7 @@ class RootTubes(unittest.TestCase):
         kept = [int(g["id"]) for g in groomlab.get_hierarchy(self.groom)["guides"]
                 if g.get("rootOutline") and g.get("parent") in (None, -1)]
         self.assertEqual(kept, [int(a)])
-        self.assertNotIn(shape, [x["name"] for x in groomlab.tube_shapes(self.groom)])
+        self.assertNotIn(shape, [x["name"] for x in groomlab.tube_shapes(self.groom, owned=True)])
         cmds.undo()
         self.assertEqual(count(), 14)
         levels = root_tubes.tube_levels(self.groom, picked=root_tubes.ROOT_GROUP)["levels"]

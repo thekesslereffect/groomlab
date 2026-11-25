@@ -5,13 +5,10 @@
     "main": [
       "tools.open",
       "graph.open",
+      "commands.find",
       "-",
-      "groom.create", "cardAtlas.open",
-      {"submenu": "Add Sample Mesh", "id": "samples", "tip": "A mesh to start from, at the origin and selected", "ref": "menus/samples"},
-      "photos.guides",
-      {"submenu": "Groom Files", "id": "groomFiles", "items": ["file.import", "file.reload", "-", "file.save", "file.saveAs"]},
-      {"submenu": "Import", "id": "import", "ref": "menus/import"},
-      "-",
+      "groom.create",
+      {"submenu": "Start From", "id": "samples", "tip": "A mesh to start from (at the origin and selected), or a groom brought in from XGen, Yeti or Alembic curves", "items": [{"include": "menus/samples"}, "-", {"include": "menus/import"}]},
       {"submenu": "Add", "id": "add", "items": [
         "add.feathers",
         "add.braid",
@@ -22,6 +19,10 @@
         "add.wind",
         "add.jiggle"
       ]},
+      "-",
+      {"submenu": "Groom File", "id": "groomFiles", "items": ["file.save", "file.saveAs", "file.import", "file.reload"]},
+      {"submenu": "Export", "id": "export", "ref": "menus/export"},
+      {"submenu": "Render", "id": "render", "items": [{"include": "menus/render"}, "-", {"submenu": "Studio", "id": "studio", "tip": "A backdrop, Arnold area lights and a camera round the groom", "tips": {"app": "Lookdev lighting presets for the viewport, in any mode"}, "ref": "menus/studio"}, {"submenu": "Review", "id": "review", "tip": "Check density and strand counts in the viewport, or spin the groom on a turntable", "items": ["review.heatmap", "review.hud", "review.turntable", "render.turntable"]}]},
       {"submenu": "Simulate", "id": "simulate", "items": [
         "sim.add",
         "sim.range",
@@ -41,14 +42,9 @@
           "nhair.simulate", "nhair.bake", "nhair.remove"
         ]}
       ]},
-      {"submenu": "Display", "id": "display", "tip": "Show or hide every groom, or every groom's guides (XGen's Hide All Guides)", "tips": {"app": "Show or hide the groom or its guides"}, "items": [
-        "display.showAllHair", "display.hideAllHair", "-", "display.showAllGuides", "display.hideAllGuides"
-      ]},
-      {"submenu": "Review", "id": "review", "items": ["review.heatmap", "review.hud", "review.turntable", "render.turntable"]},
-      {"submenu": "Studio", "id": "studio", "tip": "A backdrop, Arnold area lights and a camera round the groom", "tips": {"app": "Lookdev lighting presets for the viewport, in any mode"}, "ref": "menus/studio"},
-      {"submenu": "Render", "id": "render", "ref": "menus/render"},
-      {"submenu": "Export", "id": "export", "ref": "menus/export"},
       {"submenu": "Utilities", "id": "utilities", "items": [
+        "cardAtlas.open",
+        "-",
         "guides.toCurves",
         "guides.curvesToGuides",
         "tubes.toCurves",
@@ -69,9 +65,10 @@
         "files.collect"
       ]},
       "-",
-      {"ref": "menus/theme"},
-      "hotkeys.install",
-      "radial.settings",
+      {"submenu": "Display", "id": "display", "tip": "Show or hide every groom, or every groom's guides (XGen's Hide All Guides)", "tips": {"app": "Show or hide the groom or its guides"}, "items": [
+        "display.showAllHair", "display.hideAllHair", "-", "display.showAllGuides", "display.hideAllGuides"
+      ]},
+      {"submenu": "Settings", "id": "settings", "tip": "GroomLab's colors, hotkeys and radial menu", "items": [{"ref": "menus/theme"}, "hotkeys.install", "radial.settings"]},
       {"submenu": "Help", "id": "help", "ref": "menus/help"}
     ],
     "samples": ["sample.nika", "sample.manny", "sample.wolf", "sample.buddy"],
