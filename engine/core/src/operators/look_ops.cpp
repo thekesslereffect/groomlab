@@ -140,15 +140,24 @@ void keepTubeThickness(const StrandSet& in, StrandSet& out, const std::vector<fl
         const float f = std::clamp(x - static_cast<float>(a), 0.0f, 1.0f);
         return p[a] * (1.0f - f) + p[a + 1] * f;
     };
+    // What a section's tube measures (its middle, its spread, its farthest point) is read off its
+    // core strands only, the ones every preview holds: a preview spreads its strands exactly as
+    // the render does.
+    const PreviewCore core(in);
     parallelFor(0, sections.size(), [&](std::size_t g) {
         const std::vector<std::uint32_t>& list = *sections[g];
+        std::vector<std::uint32_t> measured;
+        for (const std::uint32_t s : list) {
+            if (core.core(s)) measured.push_back(s);
+        }
+        if (measured.empty()) return;  // (no strand to measure the tube by: the locks as clumped)
         std::size_t stations = 2;
-        for (const std::uint32_t s : list) stations = std::max<std::size_t>(stations, in.strandPointCount(s));
+        for (const std::uint32_t s : measured) stations = std::max<std::size_t>(stations, in.strandPointCount(s));
         std::vector<Vec3f> middle(stations, Vec3f());
         for (std::size_t j = 0; j < stations; ++j) {
             const float u = static_cast<float>(j) / static_cast<float>(stations - 1);
-            for (const std::uint32_t s : list) middle[j] = middle[j] + pointAt(in.strandPoints(s), in.strandPointCount(s), u);
-            middle[j] = middle[j] / static_cast<float>(list.size());
+            for (const std::uint32_t s : measured) middle[j] = middle[j] + pointAt(in.strandPoints(s), in.strandPointCount(s), u);
+            middle[j] = middle[j] / static_cast<float>(measured.size());
         }
         // Each clumped point (not its root): its station, its lock center's offset A and its own
         // offset from that center B (as clumped); the offsets D as they came, summed a station.
@@ -184,11 +193,13 @@ void keepTubeThickness(const StrandSet& in, StrandSet& out, const std::vector<fl
                     const float kept = std::clamp(b.dot(came) / c2, 0.0f, 1.0f);
                     b = b * (kept * kept * kept);
                 }
-                aa[j] += a.dot(a);
-                ab[j] += a.dot(b);
-                bb[j] += b.dot(b);
-                dd[j] += d.dot(d);
-                farthest[j] = std::max(farthest[j], d.length());
+                if (core.core(s)) {
+                    aa[j] += a.dot(a);
+                    ab[j] += a.dot(b);
+                    bb[j] += b.dot(b);
+                    dd[j] += d.dot(d);
+                    farthest[j] = std::max(farthest[j], d.length());
+                }
                 samples.push_back({s, static_cast<std::uint32_t>(i), j, m, a, b});
             }
         }

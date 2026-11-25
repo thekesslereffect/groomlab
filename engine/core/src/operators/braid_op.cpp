@@ -90,6 +90,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -2698,12 +2699,32 @@ private:
             return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(std::min(a, b))) << 32) |
                    static_cast<std::uint32_t>(std::max(a, b));
         };
+        // Each vertex as the first one at its place (within a millionth of the scalp's size): a seam
+        // whose sides are split vertices (a UV seam, a sphere's) joins there, and is no edge of the scalp.
+        std::vector<std::int32_t> weld;
         auto onOpenEdge = [&](const SurfacePoint& sp) {
             if (!openEdges) {
                 openEdges.emplace();
+                weld.resize(scalp->pointCount());
+                Vec3f lo = scalp->pointCount() ? scalp->points()[0] : Vec3f(), hi = lo;
+                for (const Vec3f& q : scalp->points()) {
+                    lo = Vec3f(std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z));
+                    hi = Vec3f(std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z));
+                }
+                const double cell = std::max(static_cast<double>((hi - lo).length()) * 1e-6, 1e-30);
+                std::map<std::array<std::int64_t, 3>, std::int32_t> first;
+                for (std::size_t v = 0; v < scalp->pointCount(); ++v) {
+                    const Vec3f q = scalp->points()[v] - lo;
+                    const std::array<std::int64_t, 3> at{std::llround(q.x / cell), std::llround(q.y / cell), std::llround(q.z / cell)};
+                    weld[v] = first.emplace(at, static_cast<std::int32_t>(v)).first->second;
+                }
                 std::unordered_map<std::uint64_t, int> uses;
                 for (const auto& t : scalp->triangles()) {
-                    for (int e = 0; e < 3; ++e) ++uses[edgeKey(t[static_cast<std::size_t>(e)], t[static_cast<std::size_t>((e + 1) % 3)])];
+                    for (int e = 0; e < 3; ++e) {
+                        const std::int32_t a = weld[static_cast<std::size_t>(t[static_cast<std::size_t>(e)])];
+                        const std::int32_t b = weld[static_cast<std::size_t>(t[static_cast<std::size_t>((e + 1) % 3)])];
+                        if (a != b) ++uses[edgeKey(a, b)];  // (a collapsed edge, at a pole: none)
+                    }
                 }
                 for (const auto& [key, count] : uses) {
                     if (count != 1) continue;
@@ -2717,8 +2738,10 @@ private:
             // (point = a + u (b - a) + v (c - a): on edge bc when 1 - u - v is 0, ca when u is, ab when v is)
             constexpr float kOn = 1e-4f;
             const float wa = 1.0f - sp.root.u - sp.root.v;
-            return (wa < kOn && openEdges->count(edgeKey(t[1], t[2]))) || (sp.root.u < kOn && openEdges->count(edgeKey(t[2], t[0]))) ||
-                   (sp.root.v < kOn && openEdges->count(edgeKey(t[0], t[1])));
+            const std::int32_t w0 = weld[static_cast<std::size_t>(t[0])], w1 = weld[static_cast<std::size_t>(t[1])],
+                               w2 = weld[static_cast<std::size_t>(t[2])];
+            return (wa < kOn && openEdges->count(edgeKey(w1, w2))) || (sp.root.u < kOn && openEdges->count(edgeKey(w2, w0))) ||
+                   (sp.root.v < kOn && openEdges->count(edgeKey(w0, w1)));
         };
         // How far a scalp point is from the nearest open edge (infinite: none).
         auto toOpenEdge = [&](const Vec3f& q) {
