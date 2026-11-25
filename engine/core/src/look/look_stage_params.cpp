@@ -400,6 +400,10 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             return true;
         }
         case StageKind::SelfCollide: {
+            if (params.has("mode") && params.getString("mode") == "locks") {
+                *why = r.name() + " presses locks against each other (mode locks): the CPU's";
+                return false;
+            }
             if (!mappable("strength", &s->value[0])) return false;
             const double packing = std::max(number("packing"), 1e-3);  // (as SelfCollideOp reads it)
             s->value[1] = static_cast<float>(packing);

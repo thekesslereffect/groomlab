@@ -2957,7 +2957,7 @@ TEST(AppPanels, AParamALaterVersionAddedIsLeftOutOfAnOlderNodesPanelUntilUpgrade
     EXPECT_FALSE(panel.rowShown("inflate"));
     EXPECT_EQ(panel.sectionOf("separate"), "");
     EXPECT_EQ(panel.sectionOf("inflate"), "");
-    EXPECT_EQ(panel.sectionOf("pancake"), "Loose") << "the params it always had stay";
+    EXPECT_EQ(panel.sectionOf("tieLength"), "Ties") << "the params it always had stay";
     ASSERT_EQ(doc->upgradeNode(braid), "");
     panel.showNode(braid);
     EXPECT_EQ(panel.sectionOf("separate"), "Sections");

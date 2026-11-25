@@ -363,6 +363,10 @@ Add a **Clump**. By default it picks its own clump centers among the strands (`c
   Hair with room does not move. Lower `packing` for more volume; `strength` and `profile` (along
   the strand) scale the push. It reads every strand, so it evaluates whole when you brush before
   it (the GPU preview keeps that interactive); put it after the shaping nodes and before the look.
+  With `mode` **locks** it presses whole locks against each other instead (grouped by
+  `lockChannel`: `tubeId` for filled tubes, `clumpId`, `braidSection`): overlapping locks lie flat
+  against each other, `distance` and `smoothness` ease the squash along and round each lock and
+  `volume` keeps its thickness. That mode runs on the CPU.
 - **Mirror** between the Guides node and Interpolate grooms one half and mirrors it; after the look
   it mirrors the finished hair. `mode` `add` keeps both sides.
 

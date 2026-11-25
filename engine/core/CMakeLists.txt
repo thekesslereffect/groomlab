@@ -73,6 +73,7 @@ add_library(groomlab_core_objects OBJECT
     src/length_key_tool.cpp
     src/guide_set.cpp
     src/tube.cpp
+    src/tube_press.cpp
     src/instances.cpp
     src/node_catalog.cpp
     src/node_library.cpp

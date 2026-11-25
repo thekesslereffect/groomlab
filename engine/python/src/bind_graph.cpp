@@ -1439,14 +1439,13 @@ void bindGraph(py::module_& m) {
     m.def("preset_legacy_dir", &presetLegacyDir, "The folder earlier GroomLabs saved presets to (Maya's user folder), still read.");
 
     m.def("braid_sections",
-          [](const std::string& style, int sections, bool dutch, float flatness, float pancake, float tightness, float separate,
+          [](const std::string& style, int sections, bool dutch, float flatness, float tightness, float separate,
              float inflate, int version, int perStep, int around) {
               BraidWeaveSettings settings;
               settings.style = style;
               settings.sections = sections;
               settings.dutch = dutch;
               settings.flatness = flatness;
-              settings.pancake = pancake;
               settings.tightness = tightness;
               settings.separate = separate;
               settings.inflate = inflate;
@@ -1501,7 +1500,7 @@ void bindGraph(py::module_& m) {
               return out;
           },
           py::arg("style") = std::string("three"), py::arg("sections") = 0, py::arg("dutch") = false, py::arg("flatness") = 0.3f,
-          py::arg("pancake") = 0.0f, py::arg("tightness") = 1.0f, py::arg("separate") = 1.0f, py::arg("inflate") = 0.5f,
+          py::arg("tightness") = 1.0f, py::arg("separate") = 1.0f, py::arg("inflate") = 0.5f,
           py::arg("version") = 2, py::arg("per_step") = 16, py::arg("around") = 48,
           "One cycle of a Braid's weave in the braid's cross-section (braid_tubes.h), in braid widths ([0] side to side, "
           "[1] depth), as a node of this version lays it (1: plain ellipses; 2: pressed against each other): {sections, "

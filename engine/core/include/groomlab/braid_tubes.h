@@ -40,7 +40,7 @@ struct BraidWeaveSettings {
     std::string style = "three";
     int sections = 0;
     bool dutch = false;
-    float flatness = 0.3f, pancake = 0.0f, tightness = 1.0f, separate = 1.0f, inflate = 0.5f;
+    float flatness = 0.3f, tightness = 1.0f, separate = 1.0f, inflate = 0.5f;
     int version = 2;
 };
 
@@ -52,7 +52,7 @@ struct BraidSections {
     int around = 0;                          // points round an outline
     bool round = false;                      // a rope's plies: each section's thickness along the radius from the braid's axis
     bool pressed = false;                    // a version 2 node's: the sections pressed against each other
-    float halfWidth = 0.0f, halfThick = 0.0f;  // a section's half sizes as the weave has them (pancake's loosening in)
+    float halfWidth = 0.0f, halfThick = 0.0f;  // a section's half sizes as the weave has them
     // [section][sample]: its center, and the two half axes (across its band, through it) of its
     // ellipse there. Pressed: the ellipse the braid's cross-section cuts of the section (longer the
     // way its course tilts), before the press. Else the section's own cross-section, square to its
@@ -91,7 +91,7 @@ BraidSections braidSections(const BraidWeaveSettings& settings, int perStep = 16
 
 // A Braid node's sections along its paths: per path and section a tube over the braid's woven
 // stretch (from where the hair has gathered into it, or with feed from the path's start, to where
-// the weave ends), with pancake, the press (separate, inflate), the taper, ties and a fed braid's
+// the weave ends), the press (separate, inflate), the taper, ties and a fed braid's
 // growth and lift as the hair has them. Loops are left out (hair let out of its section), and so is
 // fuzz.
 struct BraidTubes {
