@@ -1030,7 +1030,7 @@ public:
                       "strands: a Scatter, guides, single points) only says where the clumps are (their roots), each "
                       "axis the strand it gathers nearest its center's root (the hair as grown there); inputCurves: each "
                       "axis is the center curve itself (groomed clump curves, a Noise on the centers waving each clump "
-                      "as one); upstreamClump: smaller clumps inside an earlier Clump's (issue #115): it picks its own "
+                      "as one); upstreamClump: smaller clumps inside an earlier Clump's: it picks its own "
                       "centers as pick does, and each strand gathers only toward the centers inside its own upstream "
                       "clump (upstreamChannel, the clump number that Clump writes), so the big clumps keep their shape "
                       "and split into smaller ones, a big clump with no center of its own left as it is; after a "
