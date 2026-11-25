@@ -68,6 +68,8 @@ GroomSession& sessionFromFile(GroomSession& s, const GroomFile& file) {
 }  // namespace
 
 void bindSession(py::module_& m) {
+    // scalpMapDisplay's name for a field node's result (a Layers node's eye): "node:" + its name.
+    m.attr("NODE_MAP_PREFIX") = kNodeMapPrefix;
     py::class_<PyView>(m, "ViewResult",
                        "What GroomSession.view() made: the strands, the guides, parts, flow and cards it used, "
                        "versions that move only when something changed, bounds and errors.")

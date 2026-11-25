@@ -135,6 +135,20 @@ ScalpMaps scalpMapsFromGroomData(const GroomData& data);
 using ScalpCounts = std::vector<std::pair<std::string, std::size_t>>;
 bool refitVertexMaps(ScalpMaps& maps, const ScalpCounts& before, const ScalpCounts& after);
 
+// The painted vertex maps as color sets of the scalp meshes themselves (every host's maps on the
+// mesh, issue #113: the host's color set editor, its renderers and other tools read them there):
+// per scalp of `scalps` (name, vertex count; the groom's own first, as refitVertexMaps), per vertex
+// map (only those `only` names, when given), r g b a per vertex of that scalp, a gray map r = g =
+// b with alpha 1. A map painted before later scalps joined gives those scalps 0 (alpha 1); one
+// whose values fit neither the scalps nor the first of them is left out.
+struct MeshColorSet {
+    std::string scalp;        // the scalp's name in `scalps`
+    std::string name;         // the map's: the color set's name
+    std::vector<float> rgba;  // 4 per vertex of that scalp
+};
+std::vector<MeshColorSet> vertexMapColorSets(const ScalpMaps& maps, const ScalpCounts& scalps,
+                                             const std::vector<std::string>& only = {});
+
 // Which map a name means, every host's: a scalp map of `maps` first (its kind: "vertices" or
 // "texture"), else a layer of the guides `guides` ("guides"), else none (""). Its channels: 1 (gray:
 // guide layers too) or 4 (color), 0 for no map.

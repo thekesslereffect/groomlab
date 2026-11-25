@@ -645,6 +645,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
         spec = model.node_spec(name)
         # Show Tubes on its header: a Braid's section tubes, a node giving guides the tubes they carry.
         self.tubes = model.braid_tubes_offered(name)
+        # Show on Scalp on its header (issue #124): a Layers node's maps combined, on the scalp.
+        self.scalp_view = model.scalp_view_offered(name)
         self.can_view = model.viewable(name)  # View Up to Here (the core's rule, every host's)
         self.inputs = {}
         y = HEADER_H + ROW_H / 2 + 4
@@ -919,6 +921,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
             rects["clumpColors"] = QtCore.QRectF(left, 8, size, size)
         elif self.tubes:  # Show Tubes: its section tubes (a Braid's) or its guides' tubes drawn in the viewport
             rects["braidTubes"] = QtCore.QRectF(left, 8, size, size)
+        elif self.scalp_view:  # Show on Scalp: an eye, the node's maps combined on the scalp
+            rects["scalpView"] = QtCore.QRectF(left, 8, size, size)
         return rects
 
     def paint_toggles(self, painter, viewed, bypassed):
@@ -930,12 +934,13 @@ class NodeItem(QtWidgets.QGraphicsItem):
             on = (viewed if kind == "focus" else
                   self.editor.clump_colored(self.name) if kind == "clumpColors" else
                   self.editor.braid_tubes_shown(self.name) if kind == "braidTubes" else
+                  self.editor.scalp_view_shown(self.name) if kind == "scalpView" else
                   (all(p in self.editor.model.param_inputs(self.name) for p in available) if kind == "inputs" else bypassed))
             ink = getattr(self, "header_ink", None)  # on a filled header: its readable color
             idle = QtGui.QColor(ink) if ink is not None else QtGui.QColor(MUTED)
             if ink is not None:
                 idle.setAlpha(150)
-            active = FOCUS if kind in ("focus", "inputs", "clumpColors", "braidTubes") else WARNING
+            active = FOCUS if kind in ("focus", "inputs", "clumpColors", "braidTubes", "scalpView") else WARNING
             color = (ink if ink is not None else active) if on else idle
             if on:  # lit: a tile of its color under a bolder glyph (View in the blue: plainly on)
                 fill = QtGui.QColor(color)
@@ -946,7 +951,19 @@ class NodeItem(QtWidgets.QGraphicsItem):
             painter.setPen(QtGui.QPen(color, 1.8 if on else 1.6))
             painter.setBrush(QtCore.Qt.NoBrush)
             c = rect.center()
-            if kind == "focus":  # an eye
+            if kind == "scalpView" and self.viewable():  # Focus has the eye already: a color swatch
+                hues = (QtGui.QColor(240, 110, 90), QtGui.QColor(90, 200, 120), QtGui.QColor(100, 150, 245),
+                        QtGui.QColor(235, 205, 90))
+                for k, (dx, dy) in enumerate(((-5, -5), (0.5, -5), (-5, 0.5), (0.5, 0.5))):
+                    cell = QtCore.QRectF(c.x() + dx, c.y() + dy, 4.5, 4.5)
+                    if on:
+                        painter.setPen(QtCore.Qt.NoPen)
+                        painter.setBrush(hues[k])
+                    else:
+                        painter.setPen(QtGui.QPen(color, 1.2))
+                        painter.setBrush(QtCore.Qt.NoBrush)
+                    painter.drawRect(cell)
+            elif kind in ("focus", "scalpView"):  # an eye
                 path = QtGui.QPainterPath(c + QtCore.QPointF(-6.5, 0))
                 path.quadTo(c + QtCore.QPointF(0, -6), c + QtCore.QPointF(6.5, 0))
                 path.quadTo(c + QtCore.QPointF(0, 6), c + QtCore.QPointF(-6.5, 0))
@@ -997,6 +1014,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
                         later(lambda: editor.toggle_clump_colors(name))
                     elif kind == "braidTubes":
                         later(lambda: editor.toggle_braid_tubes(name))
+                    elif kind == "scalpView":
+                        later(lambda: editor.toggle_scalp_view(name))
                     else:
                         later(lambda: editor.set_bypass([name], not editor.model.bypassed(name)))
                     return
@@ -1062,6 +1081,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
                 "clumpColors": "Clump Colors: color the strands by this node's clumps (its clumpChannel); again: as they were",
                 "braidTubes": ("Show Tubes: draws the braid's section tubes in the viewport" if self.op_type == "Braid" else
                                "Show Tubes: draws the tubes of the guides this node gives in the viewport"),
+                "scalpView": ("Show on Scalp: the scalp shows this node's maps combined, and stays on it while "
+                              "you pick and paint other maps; again: off"),
                 "disable": "Bypass: pass the input straight through (%s)" % shortcut_keys("graph.bypass")}
         over = next((k for k, r in self.toggle_rects().items() if r.contains(event.pos())), None)
         self.setToolTip(tips[over] if over else (self.editor.node_errors.get(self.name)
@@ -4123,6 +4144,26 @@ class GraphEditor(QtWidgets.QWidget):
         except Exception:  # noqa: BLE001 - a node gone
             return False
 
+    # -- Show on Scalp: a Layers header's eye (the groom's scalpMapDisplay naming the node) --
+
+    def scalp_view_shown(self, name):
+        """Whether the scalp shows this node's result (its eye lit)."""
+        if not self.groom:
+            return False
+        from groomlab import painting
+        return painting.scalp_view_node(self.groom) == name
+
+    def toggle_scalp_view(self, name):
+        """A Layers node's eye: the scalp shows its maps combined, locked there while other maps are
+        picked and painted; on a lit one, off. Display only: no undo step."""
+        if not self.groom:
+            return
+        from groomlab import painting
+        groom, on = self.groom, not self.scalp_view_shown(name)
+        self.silently(lambda: painting.show_node_on_scalp(groom, name if on else None))
+        self._repaint_toggles()
+        self.report("the scalp shows %s's maps combined" % name if on else "%s no longer shown on the scalp" % name)
+
     def toggle_braid_tubes(self, name):
         """A Braid's Show Tubes: its section tubes drawn in the viewport (the hair as it is); on a lit
         one, no more. Display only: nothing evaluates again."""
@@ -5722,6 +5763,10 @@ class GraphEditor(QtWidgets.QWidget):
                 self.report(str(e))
                 return
             self._rename_color_source(name, new)
+            if self.scalp_view_shown(name):  # its eye lit: the view follows the new name
+                from groomlab import painting
+                groom = self.groom
+                self.silently(lambda: painting.show_node_on_scalp(groom, new))
             self.rebuild()
             self.changed()
 

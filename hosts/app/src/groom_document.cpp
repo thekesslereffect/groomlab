@@ -745,9 +745,10 @@ std::size_t GroomDocument::sculptedGuides(const std::string& node) const {
 }
 
 std::string GroomDocument::paintParam(const std::string& node, const std::string& name, std::string* mapName, const std::string& kind,
-                                      bool* made) {
+                                      bool* made, bool mapNode) {
     ParamPaintRequest paint;
     paint.kind = kind;
+    paint.mapNode = mapNode;
     return paintParam(node, name, paint, mapName, made);
 }
 
@@ -2461,8 +2462,18 @@ std::string GroomDocument::redo() {
 }
 
 void GroomDocument::setScalpMapDisplay(const std::string& name, const std::string& channel) {
-    scalpMapName_ = name;
     scalpMapChannel_ = channel.empty() ? "rgb" : channel;
+    if (!scalpViewNode().empty()) return;  // a node's eye lit: the scalp stays on it
+    scalpMapName_ = name;
+}
+
+void GroomDocument::showNodeOnScalp(const std::string& node) {
+    scalpMapName_ = node.empty() ? std::string() : kNodeMapPrefix + node;
+}
+
+std::string GroomDocument::scalpViewNode() const {
+    return scalpMapName_.compare(0, kNodeMapPrefix.size(), kNodeMapPrefix) == 0 ? scalpMapName_.substr(kNodeMapPrefix.size())
+                                                                                  : std::string();
 }
 
 const DisplayFrame& GroomDocument::updateDisplay(const DisplaySettings& settings) {

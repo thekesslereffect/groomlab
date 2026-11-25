@@ -810,6 +810,10 @@ class GroomLabGroomDisplay(bpy.types.PropertyGroup):
     # viewport draws, their names one a line (the core's rules, through the helper's braid_tubes).
     braid_tubes: StringProperty(name="Show Tubes", update=_display,
                                 description="The Braid nodes whose section tubes the viewport draws")
+    # Show on Scalp (the Graph Editor's eye on a Layers or ColorLayers node, issue #124): the node
+    # whose maps combined the scalp shows, locked there while other maps are picked and painted.
+    scalp_view_node: StringProperty(name="Show on Scalp", update=_display,
+                                    description="The Layers node whose maps combined the scalp shows")
     strand_color_max: FloatProperty(name="Max", default=1.0, update=_display)
     state: StringProperty()  # the groom's state (get_state) kept in the .blend: guides, maps, selection
     # Where GroomLab's own undo history stood after the groom's last edit (the helper's undoDepth):

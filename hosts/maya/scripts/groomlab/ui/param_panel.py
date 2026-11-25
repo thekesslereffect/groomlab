@@ -160,8 +160,9 @@ class ParamPanel(QtWidgets.QScrollArea):
                     unused = QtWidgets.QLabel('<span style="color:%s">guides set it</span>' % _ge.MUTED.name())
                     unused.setToolTip(SCATTER_LENGTH_TIP)
                     row.addWidget(unused)
-                elif spec.get("mappable") and self.editor.groom and gm.linkable(spec):
-                    # A mappable param: its field and the Paint chip (as in the app), right-click > Paint's choices.
+                elif (spec.get("mappable") or spec.get("colorField")) and self.editor.groom and gm.linkable(spec):
+                    # A mappable param (or a color a map colors: a ColorLayers layer's): its field and the
+                    # Paint chip (as in the app), right-click > Paint's choices.
                     widget = QtWidgets.QWidget()
                     row = QtWidgets.QHBoxLayout(widget)
                     row.setContentsMargins(0, 0, 0, 0)
@@ -1038,7 +1039,7 @@ class ParamPanel(QtWidgets.QScrollArea):
             state, values = self.key_state(name, param, state)
         if gm.linkable(spec):
             state.add("param.linkable")
-            if spec.get("mappable"):
+            if spec.get("mappable") or spec.get("colorField"):  # (a color: painted as a color map)
                 state.add("param.mappable")
         if self.editor.groom:
             state.add("groom")
@@ -1249,7 +1250,7 @@ class ParamPanel(QtWidgets.QScrollArea):
                 value = groomlab.param_value(self.editor.groom, name, spec["name"], self.editor.model)
             except (RuntimeError, ValueError):
                 pass
-        if spec["mappable"]:
+        if spec["mappable"] or (spec.get("colorField") and self.editor.model.node_type(name) == "ColorLayers"):
             return MappableEditor(self, name, spec, value)
         return self.plain_editor(name, spec, value)
 
@@ -1666,6 +1667,9 @@ class MappableEditor(QtWidgets.QWidget):
     def __init__(self, panel, node, spec, value):
         super(MappableEditor, self).__init__()
         self.panel, self.node, self.spec = panel, node, spec
+        # A color (a ColorLayers layer's): a map's r g b color it (a gray one as gray), so no
+        # component to pick; min and max still remap each channel.
+        self.color = bool(spec.get("colorField"))
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(theme.px(4))
@@ -1694,7 +1698,7 @@ class MappableEditor(QtWidgets.QWidget):
         # The number to come back to when switching off a map: the value now, else the map's
         # white value (what a map at 1 gave), else the default.
         if isinstance(value, dict):
-            self.last_plain = value.get("max", self.spec["default"])
+            self.last_plain = self.spec["default"] if self.color else value.get("max", self.spec["default"])
         else:
             self.last_plain = value
         current = "value"
@@ -1707,6 +1711,8 @@ class MappableEditor(QtWidgets.QWidget):
             self.value = self.last_plain
         else:
             plain = self.value if not isinstance(self.value, dict) else self.last_plain
+            if isinstance(plain, (list, tuple)) and plain:  # a color: white is the map at full
+                plain = 1.0
             top = float(plain) if isinstance(plain, (int, float)) and not isinstance(plain, bool) else 1.0
             self.value = {source: "", "component": "r", "min": 0.0, "max": top or 1.0}
         self.build(source)
@@ -1756,11 +1762,12 @@ class MappableEditor(QtWidgets.QWidget):
             box = suggest_box(self.value.get(source, ""), self.panel.editor.color_sets(),
                               lambda v: self.set_field(source, v), "color set on the scalp")
             form.addRow("name", box)
-            component = QtWidgets.QComboBox()
-            component.addItems(["r", "g", "b", "a", "luminance"])
-            component.setCurrentText(self.value.get("component", "r"))
-            component.currentTextChanged.connect(lambda c: self.set_field("component", c))
-            form.addRow("component", component)
+            if not self.color:
+                component = QtWidgets.QComboBox()
+                component.addItems(["r", "g", "b", "a", "luminance"])
+                component.setCurrentText(self.value.get("component", "r"))
+                component.currentTextChanged.connect(lambda c: self.set_field("component", c))
+                form.addRow("component", component)
             self.add_range(form, source)
             return
         if source == "expression":
@@ -1789,7 +1796,7 @@ class MappableEditor(QtWidgets.QWidget):
             form.addRow("file", holder)
         else:
             form.addRow({"expression": "expression", "guide": "map"}.get(source, "name"), name)
-        if source in ("texture", "colorSet"):
+        if source in ("texture", "colorSet") and not self.color:
             component = QtWidgets.QComboBox()
             component.addItems(["r", "g", "b", "a", "luminance"])
             component.setCurrentText(self.value.get("component", "r"))

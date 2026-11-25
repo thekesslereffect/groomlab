@@ -275,6 +275,7 @@ class Graph(object):
         outs = [s for s in node.outputs if s.enabled and not s.hide]
         clump = node.gl_type == "Clump"
         braid = not clump and graph_tree.shows_tubes(node)
+        on_scalp = not clump and not braid and graph_tree.shows_on_scalp(node)
         label = graph_tree.label_of(node.gl_type)
         type_row = node.name != label and node.name != node.gl_type and len(ins) <= 1 and len(outs) <= 1
         w, h = graph_arrange.card_size(node)  # (the size the core lays out: Tidy, Align)
@@ -305,6 +306,9 @@ class Graph(object):
         elif braid:  # Show Tubes, where a Clump has Clump Colors
             right -= step
             toggles.append(("tubes", (right, y, size, size)))
+        elif on_scalp:  # Show on Scalp (a Layers node's), there too
+            right -= step
+            toggles.append(("scalp", (right, y, size, size)))
         box.toggles = list(reversed(toggles))
         return box
 
@@ -863,6 +867,8 @@ def _draw_toggle(p, t, box, ident, r, viewed):
     elif ident == "tubes":
         scalp = getattr(node.id_data, "gl_scalp", None)
         on = bool(scalp) and graph_tree.braid_tubes_shown(scalp, node)
+    elif ident == "scalp":
+        on = graph_tree.scalp_view_shown(getattr(node.id_data, "gl_scalp", None), node)
     else:  # clump
         scalp = getattr(node.id_data, "gl_scalp", None)
         on = bool(scalp) and graph_tree.clump_colored(scalp, node)
@@ -880,6 +886,17 @@ def _draw_toggle(p, t, box, ident, r, viewed):
         d = rad * 0.7071
         p.lines([(c[0] - d, c[1] - d), (c[0] + d, c[1] + d)], col, width)
     elif ident == "view":
+        _eye(p, c, 6.5 * k, col, width, 2.2 * k)
+    elif ident == "scalp" and graph_tree.viewable(node):  # Show on Scalp beside View's eye: a color swatch
+        hues = ((0.87, 0.3, 0.25, 1.0), (0.25, 0.7, 0.4, 1.0), (0.3, 0.5, 0.93, 1.0), (0.9, 0.78, 0.3, 1.0))
+        cell = 4.5 * k
+        for (dx, dy), hue in zip(((-5.0, 0.5), (0.5, 0.5), (-5.0, -5.0), (0.5, -5.0)), hues):
+            q = (c[0] + dx * k, c[1] + dy * k, cell, cell)
+            if on:
+                p.rect(q, hue, 0)
+            else:
+                p.rect(q, (0, 0, 0, 0), 0, col, 1.2)
+    elif ident == "scalp":  # Show on Scalp: an eye
         _eye(p, c, 6.5 * k, col, width, 2.2 * k)
     elif ident == "inputs":
         for dy in (5.0, 9.0, 13.0):
@@ -2310,6 +2327,8 @@ def _toggle(context, tree, node, ident):
         bpy.ops.groomlab.graph_clump_colors("INVOKE_DEFAULT", node=node.gl_name)
     elif ident == "tubes":
         bpy.ops.groomlab.graph_braid_tubes("INVOKE_DEFAULT", node=node.gl_name)
+    elif ident == "scalp":
+        bpy.ops.groomlab.graph_scalp_view("INVOKE_DEFAULT", node=node.gl_name)
 
 
 class GROOMLAB_OT_graph_canvas_scroll(bpy.types.Operator):

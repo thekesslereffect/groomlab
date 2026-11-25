@@ -123,8 +123,13 @@ bool isGrayImage(const Texture& image);
 
 // A cheap hash of the file's path, size and modification time (0 if missing), for
 // cache keys of anything that reads the file. For a UDIM path, of every tile
-// that exists (0 when none does).
+// that exists (0 when none does). A live texture of the path (setLiveTexture): its version's.
 std::uint64_t fileStamp(const std::string& path);
+
+// The image a texture map's file will hold, while a brush paints it (issue #124: a Layers node
+// shown on the scalp composites the stroke as it goes): loadTexture gives `texture` for `path`,
+// and fileStamp a stamp of `version`, until it is set again or cleared (null). Process-wide.
+void setLiveTexture(const std::string& path, TexturePtr texture, std::uint64_t version);
 
 // The image sizes the core's bakes take, every host's limits: card bakes (atlases) 16 to 16384
 // square; baked maps (follicle and scale maps, card map exports, a map converted to a texture)

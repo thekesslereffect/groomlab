@@ -780,7 +780,35 @@ void ParamPanel::build() {
             row.color = color;
             row.editor = "color";
             field = color;
-            if (p.value("colorField", false)) {
+            if (p.value("colorField", false) && type == "ColorLayers") {
+                // A layer's color: a value, or a map it holds itself (as a number's: painted, a
+                // texture, a color set, an expression, or a port), the map's r g b coloring it.
+                auto* map = new MapSourceEditor(color, formHost_);
+                map->setChoices(choices);
+                map->setValue(value, exposed, fedBy);
+                connect(map, &MapSourceEditor::mapEdited, this, [this, name, map] {
+                    if (updating_) return;
+                    edit(name, map->value(), true);
+                });
+                connect(map, &MapSourceEditor::sourceChanged, this, [this, name, color](MapSourceEditor::Source source) {
+                    if (updating_ || source != MapSourceEditor::Source::Constant) return;
+                    const auto rgb = color->linear();  // back to a color: the one the editor holds
+                    edit(name, json::array({rgb[0], rgb[1], rgb[2]}), true);
+                });
+                connect(map, &MapSourceEditor::portRequested, this, [this, name](bool on) {
+                    if (updating_ || !document_ || node_.empty()) return;
+                    const std::string error = document_->exposeParam(node_, name, on);
+                    if (!error.empty()) {
+                        emit message(QString::fromStdString(error));
+                        refresh();
+                        return;
+                    }
+                    emit edited();
+                });
+                row.map = map;
+                row.editor = "map";
+                field = map;
+            } else if (p.value("colorField", false)) {
                 // A color a Map node's rgb output can drive: a port for it on the node (the color
                 // here then multiplies the map's).
                 auto* host = new QWidget(formHost_);
@@ -1230,6 +1258,7 @@ QSize ParamPanel::sizeHint() const {
 
 json ParamPanel::valueOf(const Row& row) const {
     if (row.ramp) return row.ramp->value();
+    if (row.map && row.map->source() != MapSourceEditor::Source::Constant) return row.map->value();
     if (row.color) {
         const auto rgb = row.color->linear();
         return json::array({rgb[0], rgb[1], rgb[2]});

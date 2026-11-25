@@ -810,6 +810,22 @@ class FlowLayout(QtWidgets.QLayout):
         m = self.contentsMargins()
         return size + QtCore.QSize(m.left() + m.right(), m.top() + m.bottom())
 
+    @staticmethod
+    def _least(shown, widest):
+        """The narrowest a segment may be: its widest label's text with a little room each side
+        (items without text: most of the widest one's width)."""
+        from groomlab.ui import theme
+        least = 0
+        for item in shown:
+            w = item.widget()
+            text = w.text() if w is not None and hasattr(w, "text") else ""
+            if not text:
+                return widest * 85 // 100
+            font = QtGui.QFont(w.font())
+            font.setBold(True)  # (the chosen segment's label is bold)
+            least = max(least, int(QtGui.QFontMetricsF(font).horizontalAdvance(text)) + 1 + theme.px(6))
+        return min(least, widest)
+
     def _arrange(self, rect, move):
         m = self.contentsMargins()
         area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
@@ -820,8 +836,9 @@ class FlowLayout(QtWidgets.QLayout):
         widest = max(item.sizeHint().width() for item in shown)
         n = len(shown)
         columns = max(1, min((area.width() + gap) // max(1, widest + gap), min(self.max_columns, n)))
-        # A track's few segments on one row when each still gets most of its width (their padding gives).
-        if not self.last_row_stretch and n <= self.max_columns and (area.width() - (n - 1) * gap) // n >= widest * 85 // 100:
+        # A track's segments on one row when each is still as wide as its widest word (their padding
+        # gives way first).
+        if not self.last_row_stretch and n <= self.max_columns and (area.width() - (n - 1) * gap) // n >= self._least(shown, widest):
             columns = n
         span = (area.width() - (columns - 1) * gap) // columns
         column = max(widest, span) if self.last_row_stretch else span
@@ -864,7 +881,9 @@ def seg_row(buttons, parent=None):
     row.setProperty("role", "segTrack")
     row.setAttribute(QtCore.Qt.WA_StyledBackground, True)
     pad = theme.component_px("segTrack", "padding", 2)
-    flow = FlowLayout(row, spacing=pad, max_columns=4, last_row_stretch=False)
+    # Every segment on one row while each still fits its word (FlowLayout._least); else a grid.
+    buttons = list(buttons)
+    flow = FlowLayout(row, spacing=pad, max_columns=max(4, len(buttons)), last_row_stretch=False)
     flow.setContentsMargins(pad, pad, pad, pad)
     for b in buttons:
         flow.addWidget(b)
@@ -1442,17 +1461,55 @@ class Pages(QtWidgets.QWidget):
 
 
 class StatusLabel(QtWidgets.QLabel):
-    """A message line that takes no room while it has nothing to say."""
+    """A message line that takes no room while it has nothing to say. `single_line`: always one
+    line high, shown even when empty, a longer message cut short with "..." and whole in its
+    tooltip, so nothing under it moves as messages come and go (the Groom Tools panel, issue #114)."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, single_line=False):
         super(StatusLabel, self).__init__(parent)
-        self.setWordWrap(True)
+        self.single_line = single_line
+        self.full_text = ""
         self.setProperty("role", "status")
-        self.setVisible(False)
+        if single_line:
+            self.setWordWrap(False)
+            self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
+            self.fit_height()
+        else:
+            self.setWordWrap(True)
+            self.setVisible(False)
+
+    def text(self):
+        return self.full_text if self.single_line else super(StatusLabel, self).text()
 
     def setText(self, text):
-        super(StatusLabel, self).setText(text)
-        self.setVisible(bool(text))
+        text = text or ""
+        if not self.single_line:
+            super(StatusLabel, self).setText(text)
+            self.setVisible(bool(text))
+            return
+        self.full_text = " ".join(text.split())  # (one line)
+        self.setToolTip(self.full_text)
+        self._elide()
+
+    def fit_height(self):
+        """One line high, with its margins (again after they or the font change)."""
+        m = self.contentsMargins()
+        self.setFixedHeight(self.fontMetrics().height() + m.top() + m.bottom() + 4)
+
+    def _elide(self):
+        width = max(self.contentsRect().width(), 1)
+        super(StatusLabel, self).setText(self.fontMetrics().elidedText(self.full_text, QtCore.Qt.ElideRight, width))
+
+    def resizeEvent(self, event):
+        super(StatusLabel, self).resizeEvent(event)
+        if self.single_line:
+            self._elide()
+
+    def changeEvent(self, event):
+        super(StatusLabel, self).changeEvent(event)
+        if self.single_line and event.type() == QtCore.QEvent.FontChange:
+            self.fit_height()
+            self._elide()
 
 
 class Section(QtWidgets.QWidget):

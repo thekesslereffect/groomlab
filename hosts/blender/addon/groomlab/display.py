@@ -165,9 +165,16 @@ def settings_for(scalp, scene):
     return s
 
 
-def map_for(scene):
+# scalpMapView's name for a field node's result (the core's kNodeMapPrefix).
+NODE_MAP_PREFIX = "node:"
+
+
+def map_for(scene, scalp=None):
     from . import tools
     t = scene.groomlab_tools
+    node = getattr(scalp.groomlab_tools, "scalp_view_node", "") if scalp is not None else ""
+    if node:  # a Layers node's eye: its maps combined, locked there (a texture's composite as an image)
+        return {"name": NODE_MAP_PREFIX + node, "channel": t.scalp_channel, "textured": True}
     m = tools.current_map(scene)
     if m is None or not t.show_on_scalp or not (t.tool == "paint" or t.tab == "PAINT"):
         return None
@@ -179,7 +186,8 @@ def strand_colors_for(scalp, scene=None):
     from . import tools
     scene = scene or groom.scene_of(scalp)
     t = scene.groomlab_tools if scene is not None else None
-    if t is not None and t.show_on_strands and (t.tool == "paint" or t.tab == "PAINT"):
+    locked = bool(getattr(scalp.groomlab_tools, "scalp_view_node", ""))  # a node's eye: the view stays
+    if t is not None and t.show_on_strands and not locked and (t.tool == "paint" or t.tab == "PAINT"):
         m = tools.current_map(scene)
         if m is not None:
             # Painting: the strands by the map, black 0 to white 1 (Maya's show_while_painting).
@@ -220,7 +228,7 @@ def refresh(scalp, scene=None, apply_colors=True):
     args = {"settings": settings_for(scalp, scene), "have": have, "strandColors": strand_colors_for(scalp, scene)}
     if gd.generation:
         args["generation"] = gd.generation
-    m = map_for(scene)
+    m = map_for(scene, scalp)
     if m is not None:
         args["map"] = m
     r = process.call("display", session=rt.session, **args)

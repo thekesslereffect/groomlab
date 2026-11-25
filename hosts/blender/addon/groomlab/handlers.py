@@ -16,6 +16,7 @@ def on_depsgraph(scene, depsgraph):
     found = groom.scalps()
     if not found:
         return
+    ignored = groom.take_ignored_meshes()  # meshes GroomLab wrote its maps onto: not the scalp changing
     for update in depsgraph.updates:
         idd = update.id.original if update.id is not None else None
         if idd is None:
@@ -24,7 +25,7 @@ def on_depsgraph(scene, depsgraph):
             role = idd.groomlab.role
             if role == "GUIDES" and (update.is_updated_geometry or update.is_updated_transform) and idd.groomlab.scalp:
                 groom.mark(idd.groomlab.scalp, "guides")
-            elif role == "SCALP" and update.is_updated_geometry:
+            elif role == "SCALP" and update.is_updated_geometry and idd.data.name not in ignored:
                 groom.mark(idd, "pose")  # its evaluated mesh (an armature, shape keys): the points
                                         # again; the mesh data itself comes as a Mesh update below
         elif isinstance(idd, bpy.types.Curves):
@@ -32,6 +33,8 @@ def on_depsgraph(scene, depsgraph):
                 if s.groomlab.guides is not None and s.groomlab.guides.data == idd:
                     groom.mark(s, "guides")
         elif isinstance(idd, bpy.types.Mesh):
+            if idd.name in ignored:
+                continue
             for s in found:
                 if s.data == idd:
                     groom.mark(s, "scalp")

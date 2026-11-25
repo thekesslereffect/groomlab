@@ -69,7 +69,7 @@ std::vector<BrushEntry> makeCatalog() {
          "Pull tips together toward the brush center (negative: push apart).", with(kShaping, {"targets"})},
         {"shape", "Tube", C::Shape, 0, "shape", 0.5f, true,
          "Paint guides' tubes near the brush: Width grows them (Ctrl shrinks), Flatness flattens them toward a "
-         "ribbon (Ctrl rounds them), Twist turns them about the guide (Ctrl the other way); Shift smooths what it "
+         "ribbon (Ctrl flattens them on the other axis), Twist turns them about the guide (Ctrl the other way); Shift smooths what it "
          "paints along the guides. Children and Fill Tubes strands follow.",
          with(without(kShaping, {"collide"}), {"tubeChannel", "tube"})},
         // Trim.
@@ -256,7 +256,8 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
         {"selection", "Selection", "How the lasso adds to or replaces the selection, and the soft radius"},
         {"freezeMask", "Freeze mask", "The frozen guides draw blue; Unfreeze All clears the mask"},
         {"tubeChannel", "Paints", "What the Tube brush paints on the tubes near it: their width, their flatness (toward "
-                                  "a flat ribbon) or their twist about the guide; a negative strength does the opposite"},
+                                  "a flat ribbon; a negative strength flattens the other axis) or their twist about the guide; "
+                                  "a negative strength does the opposite"},
         {"tube", "Tube", "The selected (or soloed) guides' tubes as a whole: their shape, width, flatness and twist, "
                          "the groom's shape library (custom outlines, drawn in the shape editor), the shape new guides "
                          "take (Place, Draw), and the groom's Fill Tubes (strands fill the tubes) and Tube Blend (the "

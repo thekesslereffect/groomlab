@@ -249,6 +249,10 @@ public:
     bool braidTubesShown(const std::string& node) const {
         return std::find(braidTubes_.begin(), braidTubes_.end(), node) != braidTubes_.end();
     }
+    // The node whose result the scalp shows (its header's Show on Scalp lit, issue #124; "" none):
+    // the host's to say, from its document (GroomDocument::scalpViewNode).
+    void setScalpViewNode(const std::string& node);
+    bool scalpViewShown(const std::string& node) const { return !node.empty() && scalpView_ == node; }
     void toggleViewSelected();  // V
     // Copy and paste (Ctrl+C, Ctrl+V): the clipboard's text, as Maya's Graph Editor writes it.
     void copySelected();
@@ -402,6 +406,9 @@ signals:
     // A Braid header's Show Tubes button: the host draws that node's section tubes in the viewport
     // (or, lit, no more).
     void braidTubesToggled(const std::string& node);
+    // A Layers (ColorLayers) header's Show on Scalp: the host shows that node's maps combined on the
+    // scalp, locked there while other maps are painted (or, lit, no more).
+    void scalpViewToggled(const std::string& node);
     // A node renamed through this view (after edited): the host's color source naming it follows.
     void nodeRenamed(const std::string& from, const std::string& to);
 
@@ -443,6 +450,7 @@ private:
         std::string libraryLabel;      // a node from the node library: its label
         bool updateAvailable = false;  // the library has a newer copy of it
         bool tubes = false;            // Show Tubes on its header (GraphEdit::braidTubesOffered)
+        bool scalpView = false;        // Show on Scalp on its header (GraphEdit::scalpViewOffered)
         bool viewable = false;         // View Up to Here (GraphEdit::viewable)
         int foldedIn = -1;             // the folded backdrop hiding it (an index into backdrops_)
     };
@@ -546,8 +554,11 @@ private:
     // Clump Colors (left of the other toggles).
     bool braidTubesButtonAt(const QPointF& scene, int* node) const;
     static bool showsTubes(const Node& node) { return node.tubes; }
-    // A node with a toggle of its own left of the shared ones (Clump Colors, Show Tubes).
-    static bool hasOwnToggle(const Node& node) { return clumpColorable(node) || showsTubes(node); }
+    // Show on Scalp: a Layers or ColorLayers node's button (GraphEdit::scalpViewOffered), there too.
+    bool scalpViewButtonAt(const QPointF& scene, int* node) const;
+    static bool showsOnScalp(const Node& node) { return node.scalpView; }
+    // A node with a toggle of its own left of the shared ones (Clump Colors, Show Tubes, Show on Scalp).
+    static bool hasOwnToggle(const Node& node) { return clumpColorable(node) || showsTubes(node) || showsOnScalp(node); }
     bool viewable(const Node& node) const;  // a strands output: View Up to Here can show it
     // The backdrop whose title bar (or, `grip`, resize corner) is under a scene point; -1 none.
     int backdropTitleAt(const QPointF& scene, bool* grip = nullptr) const;
@@ -625,6 +636,7 @@ private:
     std::string viewed_;  // View Up to Here ("" the output)
     std::vector<std::string> clumpColored_;  // setClumpColoredNodes
     std::vector<std::string> braidTubes_;    // setBraidTubeNodes
+    std::string scalpView_;                  // setScalpViewNode
     std::map<std::string, QPointF> laidOut_;  // positions the view chose (the document has none)
     std::string selected_;
     std::vector<std::string> selection_;

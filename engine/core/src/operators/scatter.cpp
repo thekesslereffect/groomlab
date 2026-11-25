@@ -472,7 +472,8 @@ public:
         return {
             notAnimatable({"density", 80.0, "Strands per unit area (mappable: texture, color set, expression, guide layer)", "density"})
                 .atLeast(0)
-                .soft(0, 2000),
+                .soft(0, 2000)
+                .asInput(),
             notAnimatable({"segments", std::int64_t{0},
                            "Segments its strands grow with (points: one more). 0: as many as the Resample after it asks "
                            "for, else 8. More for strands that take detailed shapes through an Interpolate (a braid's "

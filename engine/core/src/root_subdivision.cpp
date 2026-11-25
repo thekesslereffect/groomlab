@@ -4,6 +4,7 @@
 #include "groomlab/root_subdivision.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -254,12 +255,51 @@ void mergeCorners(std::vector<std::vector<P>>& cells, const std::vector<P>& outl
 
 struct Plane {
     Vec3f c, u, v, n;
+    // The scalp's height over the plane (along n) the outline gives, smooth across it: a + b x + c y
+    // + d (x^2 + y^2) fitted to the outline's CVs and the apex (0 there). Where something stands
+    // over that surface (an ear under a root drawn above it), the scalp the root is drawn on.
+    double fit[4] = {0.0, 0.0, 0.0, 0.0};
+    bool fitted = false;
     P to(const Vec3f& p) const {
         const Vec3f d = p - c;
         return {d.dot(u), d.dot(v)};
     }
     Vec3f from(const P& q) const { return c + u * static_cast<float>(q.x) + v * static_cast<float>(q.y); }
+    double height(const P& q) const { return fit[0] + fit[1] * q.x + fit[2] * q.y + fit[3] * (q.x * q.x + q.y * q.y); }
 };
+
+// a + b x + c y + d (x^2 + y^2) through `pts` (x, y, height) by least squares; false when they
+// leave it undetermined.
+bool fitHeights(const std::vector<std::array<double, 3>>& pts, double out[4]) {
+    double m[4][5] = {};
+    for (const auto& q : pts) {
+        const double row[4] = {1.0, q[0], q[1], q[0] * q[0] + q[1] * q[1]};
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) m[i][j] += row[i] * row[j];
+            m[i][4] += row[i] * q[2];
+        }
+    }
+    const double scale = std::max(m[0][0], 1e-30);
+    for (int i = 0; i < 4; ++i) m[i][i] += 1e-9 * scale;  // (a touch of ridge: a straight outline still fits)
+    for (int col = 0; col < 4; ++col) {
+        int pivot = col;
+        for (int r = col + 1; r < 4; ++r) {
+            if (std::abs(m[r][col]) > std::abs(m[pivot][col])) pivot = r;
+        }
+        if (!(std::abs(m[pivot][col]) > 1e-300)) return false;
+        for (int k = 0; k < 5; ++k) std::swap(m[col][k], m[pivot][k]);
+        for (int r = 0; r < 4; ++r) {
+            if (r == col) continue;
+            const double f = m[r][col] / m[col][col];
+            for (int k = col; k < 5; ++k) m[r][k] -= f * m[col][k];
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        out[i] = m[i][4] / m[i][i];
+        if (!std::isfinite(out[i])) return false;
+    }
+    return true;
+}
 
 Plane planeOf(const ScalpMesh& scalp, const std::vector<Vec3f>& outline) {
     // (At the root's apex, square to its patch's way out: rootOutlineCenter. Not the scalp point
@@ -271,14 +311,48 @@ Plane planeOf(const ScalpMesh& scalp, const std::vector<Vec3f>& outline) {
     const Vec3f side = std::abs(pl.n.x) < 0.9f ? Vec3f{1, 0, 0} : Vec3f{0, 1, 0};
     pl.u = pl.n.cross(side).normalized();
     pl.v = pl.n.cross(pl.u).normalized();
+    std::vector<std::array<double, 3>> pts{{0.0, 0.0, 0.0}};
+    for (const Vec3f& p : outline) {
+        const P q = pl.to(p);
+        pts.push_back({q.x, q.y, static_cast<double>((p - pl.c).dot(pl.n))});
+    }
+    pl.fitted = outline.size() >= 3 && fitHeights(pts, pl.fit);
     return pl;
 }
 
-// A point of the plane taken onto the scalp along the plane's normal (the nearer hit either way),
-// else the scalp's nearest point.
+// A point of the plane taken onto the scalp along the plane's normal: of the scalp's surfaces on
+// that line facing the plane's way, the one nearest the height the outline gives there
+// (Plane::fit), so a cell is never cut onto something standing over the scalp it is drawn on (an
+// ear under a root drawn above it: issue #110); else the nearer hit either way, else the scalp's
+// nearest point.
 SurfacePoint lift(const ScalpMesh& scalp, const Plane& pl, const P& q) {
     const Vec3f p = pl.from(q);
     const SurfacePoint near = scalp.closestPoint(p);
+    if (pl.fitted) {
+        // Every hit along the whole line (from well over the plane down through the scalp).
+        const float reach = std::max(4.0f * (near.position - p).length(), 2.0f * static_cast<float>(std::hypot(q.x, q.y))) +
+                            static_cast<float>(std::abs(pl.height(q))) + 1e-3f;
+        const float eps = 1e-5f * std::max(reach, 1e-3f);
+        Vec3f from = p + pl.n * reach;
+        const Vec3f down = pl.n * -1.0f;
+        const double want = pl.height(q);
+        SurfacePoint pick;
+        double best = std::numeric_limits<double>::infinity();
+        float gone = 0.0f;
+        for (int k = 0; k < 64; ++k) {
+            SurfacePoint hit;
+            float t = 0.0f;
+            if (!scalp.intersectRay(from, down, &hit, &t)) break;
+            gone += t + eps;
+            if (gone > 3.0f * reach) break;
+            if (scalp.normal(hit.root).dot(pl.n) > 0.0f) {
+                const double off = std::abs(static_cast<double>((hit.position - pl.c).dot(pl.n)) - want);
+                if (off < best) best = off, pick = hit;
+            }
+            from = hit.position + down * eps;
+        }
+        if (std::isfinite(best)) return pick;
+    }
     float best = std::numeric_limits<float>::infinity();
     SurfacePoint out = near;
     for (const Vec3f& way : {pl.n, pl.n * -1.0f}) {
@@ -334,7 +408,7 @@ DensityGrid densityGrid(const ScalpMesh& scalp, const Plane& pl, const std::vect
     if (!scalp.hasColorSet(map)) return g;
     for (int y = 0; y < g.ny; ++y) {
         for (int x = 0; x < g.nx; ++x) {
-            g.d[static_cast<std::size_t>(y) * g.nx + x] = subdivisionDensityAt(scalp, pl.from(g.point(x, y)), map);
+            g.d[static_cast<std::size_t>(y) * g.nx + x] = subdivisionDensityAt(scalp, lift(scalp, pl, g.point(x, y)).position, map);
         }
     }
     return g;
@@ -1038,8 +1112,7 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
         if (!g || g->points.size() < 2) continue;
         ++counts[g->points.size()];
         const SectionPoint uv = spine.rootCoords(g->points.front());
-        const float w0 = g->tube.widthAt(0.0f) * h.scale();
-        const std::vector<Vec3f> was = slicePath(scalp, source, uv.u, uv.v, std::max(w0, w0 * g->tube.aspectAt(0.0f)), h.scale());
+        const std::vector<Vec3f> was = slicePath(scalp, source, uv.u, uv.v, h.scale());
         if (was.size() < 2) continue;
         const std::vector<Vec3f> a = resamplePolyline(g->points, kAlongDeviation + 1);
         const std::vector<Vec3f> b = resamplePolyline(was, kAlongDeviation + 1);

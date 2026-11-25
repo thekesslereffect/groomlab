@@ -78,7 +78,8 @@ void clumpShape(const ParamSet& clump, const Get& get, StageParams* s) {
     s->value[3] = 0.0f;  // (the volume: value 1, mapped)
     const float repelRadius = static_cast<float>(get("repelRadius"));
     std::memcpy(&s->flag[0], &repelRadius, sizeof(float));  // the kernel reads its bits as a float
-    s->flag[1] = clump.getString("pastTip") == "extend" ? 1 : 0;
+    const std::string pastTip = clump.getString("pastTip");
+    s->flag[1] = pastTip == "extend" ? 1 : pastTip == "nearest" ? 2 : pastTip == "byPoint" ? 3 : 0;  // (look.slang ClumpCS)
     const std::string flatten = clump.getString("flatAlong");
     s->flag[2] = flatten == "random" ? 1 : flatten == "direction" ? 2 : 0;
     // The per-clump variation (by each center's ID: ClumpInputs::variation) and copy.

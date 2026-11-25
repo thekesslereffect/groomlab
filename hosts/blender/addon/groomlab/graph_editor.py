@@ -474,6 +474,25 @@ class GROOMLAB_OT_graph_braid_tubes(_GraphOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_graph_scalp_view(_GraphOperator):
+    """Show on Scalp: the scalp shows this node's maps combined, and stays on it while you pick and paint other maps; again: off"""
+    bl_idname = "groomlab.graph_scalp_view"
+    bl_label = "Show on Scalp"
+
+    node: StringProperty(options={"SKIP_SAVE"}, description="The Layers node")
+
+    def execute(self, context):
+        scalp = context_groom(context)
+        tree = graph_tree.tree_of(scalp)
+        node = graph_tree.node_named(tree, self.node)
+        if node is None or not graph_tree.shows_on_scalp(node):
+            return {"CANCELLED"}
+        on = graph_tree.toggle_scalp_view(scalp, node.gl_name)
+        self.report({"INFO"}, "the scalp shows %s's maps combined" % node.gl_name if on
+                    else "%s no longer shown on the scalp" % node.gl_name)
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_graph_bypass(_GraphOperator):
     """Bypass: pass the selected nodes' input straight through (B; Blender's M mutes the same way)"""
     bl_idname = "groomlab.graph_bypass"
@@ -1234,7 +1253,7 @@ def param_state(node, spec, scalp):
         values["why"] = why
     if spec.get("port"):
         state.add("param.linkable")
-        if spec.get("mappable"):
+        if spec.get("mappable") or (spec.get("colorField") and node.gl_type == "ColorLayers"):  # (a color: a color map)
             state.add("param.mappable")
     if spec.get("kind") == "ramp":
         state.add("param.ramp")  # (Blender's curve widget has no presets of its own: the menu's)
@@ -1430,7 +1449,9 @@ def draw_param(layout, node, spec, scene, mapped, inputs, drivers, collection, c
     if driver:
         src = graph_tree.node_named(node.id_data, driver)
         row.label(text="x %s" % driver, icon=KEY_ICONS["driven"] if src is not None and src.gl_type == "Control" else "LINKED")
-    if spec.get("mappable") and spec.get("port") and not driver:
+    # (A ColorLayers layer's color takes a map too: its r g b color the layer.)
+    color_map = spec.get("colorField") and node.gl_type == "ColorLayers"
+    if (spec.get("mappable") or color_map) and spec.get("port") and not driver:
         op = row.operator("groomlab.graph_map_source", text="", icon="IMAGE_DATA")
         op.node, op.param = node.gl_name, name
     if not (spec.get("kind") == "vec3" and unit != "color"):
@@ -1762,7 +1783,7 @@ def _draw_overlay_now():
 _keymaps = []
 
 classes = (GROOMLAB_OT_graph_open, GROOMLAB_OT_graph_add_search, GROOMLAB_OT_graph_frame, GROOMLAB_OT_graph_duplicate,
-           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_clump_colors, GROOMLAB_OT_graph_color_by_channel, GROOMLAB_OT_graph_braid_tubes, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_detach, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
+           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_clump_colors, GROOMLAB_OT_graph_color_by_channel, GROOMLAB_OT_graph_braid_tubes, GROOMLAB_OT_graph_scalp_view, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_detach, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
            GROOMLAB_OT_graph_upgrade_node, GROOMLAB_OT_graph_fold, GROOMLAB_OT_graph_pick_attribute, GROOMLAB_OT_graph_tidy, GROOMLAB_OT_graph_reload,
            GROOMLAB_OT_graph_preset, GROOMLAB_OT_graph_presets_refresh, GROOMLAB_MT_graph_presets,
            GROOMLAB_MT_graph_edit, GROOMLAB_PT_graph_node, GROOMLAB_PT_graph_groom, GROOMLAB_PT_graph_presets)

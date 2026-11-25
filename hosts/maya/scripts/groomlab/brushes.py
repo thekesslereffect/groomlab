@@ -281,6 +281,8 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
                           targets=targets,
                           maskByScalp=mask_by_scalp, **kwargs)
     if activate:
+        # (The Flow tool changes nothing as it is picked: its first stroke makes the graph's Flow
+        # node when it has none, core BrushTool::commitFlow, issue #112.)
         cmds.setToolTo(BRUSH_CONTEXT)
     return BRUSH_CONTEXT
 

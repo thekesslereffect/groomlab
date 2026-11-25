@@ -216,6 +216,10 @@ struct HairLook {
 
 // What a scalp shows of a painted map: a vertex map's values, a guide layer sampled at the
 // scalp's vertices, or a texture map's file (and the brush's image while it paints).
+// scalpMapView's name for a field node's result: "node:" and the node's name (no map's name holds
+// a colon, validMapName).
+inline const std::string kNodeMapPrefix = "node:";
+
 struct ScalpMapView {
     std::string name, kind;                            // kind: vertices, guides or texture ("": nothing to show)
     int channels = 1;                                  // the map's: 1 gray, 4 color (r g b a)
@@ -767,7 +771,9 @@ public:
     // RenderData making the output; null without), "colorNodes" ([{path, type, params}] of every
     // HairColor, Bands and FeatherColor making the output, as GroomStats::colorNodes).
     std::string hairLookJson() const;
-    // A painted map (or guide layer) by name as the scalp shows it; `channel` rgb or r g b a.
+    // A painted map (or guide layer) by name as the scalp shows it; `channel` rgb or r g b a. A name
+    // "node:<node>" (kNodeMapPrefix) shows that field node's result instead (a Layers node's maps
+    // combined: every host's eye on the node), as a vertex map: gray, or color for a color field.
     ScalpMapView scalpMapView(const std::string& name, const std::string& channel);
     GroomStats stats() const;
     std::vector<std::pair<std::string, double>> nodeTimes() const;   // ms per node, by name
@@ -1117,6 +1123,15 @@ private:
     std::uint64_t previewMapVersion_ = 0;
     std::uint64_t mapViewKey_ = 0;
     std::shared_ptr<const std::vector<float>> mapViewValues_;
+    // A field node's result shown on the scalp (nodeMapView), kept while what it reads is the same.
+    ScalpMapView nodeMapView(ScalpMapView view);
+    std::uint64_t nodeViewKey_ = 0;
+    std::shared_ptr<const std::vector<float>> nodeViewValues_;
+    std::shared_ptr<const TexturePreview> nodeViewPreview_;  // a node reading textures: its image
+    int nodeViewChannels_ = 1;
+    std::uint64_t nodeTexelRootsKey_ = 0;
+    std::vector<StrandRoot> nodeTexelRoots_;  // each texel's root on the cage (-1 face: none)
+    std::string liveTexturePath_;             // the texture set live (setLiveTexture) for the brush
     // A texture map's tile set shown (scalpMapView): its mosaic as the preview, kept per files,
     // scalp and display.
     std::shared_ptr<const TexturePreview> udimViewPreview(const ScalpMapView& view);

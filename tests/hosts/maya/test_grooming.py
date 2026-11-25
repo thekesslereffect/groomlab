@@ -4094,15 +4094,15 @@ class GroomingTest(unittest.TestCase):
 
     def test_bake_node_output_to_guides(self):
         from groomlab import bake
-        # Arrows across the top of the head, a Flow node laying the scattered strands
-        # along them, and a ToGuides node picking some of those strands: baked, the
-        # picked strands become primary guides of their own group.
+        # Arrows across the top of the head, the Flow node the first stroke puts in (issue #112)
+        # laying the strands along them, and a ToGuides node picking some of those strands:
+        # baked, the picked strands become primary guides of their own group.
         groomlab.flow_stroke(self.groom, [(-0.6 + 0.1 * i, 0.9, 0.3) for i in range(13)], radius=0.2)
         graph = groomlab.get_graph(self.groom, expand_default=True)
-        graph["nodes"] += [{"name": "flow", "type": "Flow", "params": {}},
-                           {"name": "toGuides", "type": "ToGuides", "params": {"fraction": 0.05}}]
-        graph["connections"] += [{"from": "scatter", "to": "flow", "input": "strands"},
-                                 {"from": "flow", "to": "toGuides", "input": "strands"}]
+        flows = [n["name"] for n in graph["nodes"] if n["type"] == "Flow"]
+        self.assertEqual(len(flows), 1)
+        graph["nodes"] += [{"name": "toGuides", "type": "ToGuides", "params": {"fraction": 0.05}}]
+        graph["connections"] += [{"from": flows[0], "to": "toGuides", "input": "strands"}]
         groomlab.set_graph(self.groom, graph)
         self.assertEqual(groomlab.errors(self.groom), [])
         before = len(groomlab.get_hierarchy(self.groom)["guides"])
