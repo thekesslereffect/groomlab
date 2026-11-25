@@ -36,7 +36,8 @@ enum class BrushMode {
     Slide,      // move roots along the scalp with the drag; each guide keeps its shape, turned with the surface
 };
 
-enum class PaintMode { Replace, Add, Subtract, ClampMaximum };
+// Max caps values at the chosen one (lowers higher values); Min is its opposite (raises lower ones).
+enum class PaintMode { Replace, Add, Subtract, Minimum, Maximum };
 const char* paintModeName(PaintMode mode);
 PaintMode paintModeFromString(const std::string& name);
 

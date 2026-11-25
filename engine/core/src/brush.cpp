@@ -30,7 +30,8 @@ const char* paintModeName(PaintMode mode) {
         case PaintMode::Replace: return "replace";
         case PaintMode::Add: return "add";
         case PaintMode::Subtract: return "subtract";
-        case PaintMode::ClampMaximum: return "clampMaximum";
+        case PaintMode::Minimum: return "min";
+        case PaintMode::Maximum: return "max";
     }
     return "replace";
 }
@@ -39,8 +40,10 @@ PaintMode paintModeFromString(const std::string& name) {
     if (name.empty() || name == "replace") return PaintMode::Replace;
     if (name == "add") return PaintMode::Add;
     if (name == "subtract") return PaintMode::Subtract;
-    if (name == "clampMaximum" || name == "clamp") return PaintMode::ClampMaximum;
-    throw std::invalid_argument("paint mode takes replace, add, subtract or clampMaximum");
+    if (name == "min" || name == "minimum") return PaintMode::Minimum;
+    // (Max was Clamp Maximum: its old names still read.)
+    if (name == "max" || name == "maximum" || name == "clampMaximum" || name == "clamp") return PaintMode::Maximum;
+    throw std::invalid_argument("paint mode takes replace, add, subtract, min or max");
 }
 
 StrokeSymmetry StrokeSymmetry::of(const BrushSettings& s, const ScalpMesh* scalp) {
