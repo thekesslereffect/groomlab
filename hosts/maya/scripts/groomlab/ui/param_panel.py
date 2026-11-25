@@ -168,6 +168,8 @@ class ParamPanel(QtWidgets.QScrollArea):
                     row.setContentsMargins(0, 0, 0, 0)
                     row.setSpacing(theme.px(4))
                     row.addWidget(self.editor_for(name, spec), 1)
+                    if spec.get("colorField"):  # a color: Map picks a painted map to color it (its Map node's rgb)
+                        row.addWidget(self.color_map_button(name, spec["name"]), 0, QtCore.Qt.AlignTop)
                     row.addWidget(self.paint_chip(name, spec["name"]), 0, QtCore.Qt.AlignTop)
                 else:
                     widget = self.editor_for(name, spec)
@@ -1062,6 +1064,67 @@ class ParamPanel(QtWidgets.QScrollArea):
         paint.setToolTip(container["tip"])
         widgets.fill_menu(paint, container["items"], definitions.binder(self.param_actions(name, param)))
         return paint
+
+    def color_map_button(self, name, param):
+        """A color param's Map (as a number's, MappableEditor): a menu of the groom's scalp maps; the
+        one picked colors the param through its Map node's rgb output (the core's paintParam, as
+        every host links a color), None unplugs it."""
+        button = QtWidgets.QToolButton()
+        button.setProperty("role", "glyph")
+        button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        button.setToolTip("Color this param with a painted map (a color map's r g b; a gray map as gray): its Map "
+                          "node's rgb output feeds it, times this color")
+        driver = self.editor.model.driver_of(name, param)
+        shown = None
+        if driver and self.editor.model.node_type(driver) == "Map":
+            shown = self.editor.model.param(driver, "name")
+        button.setText("◉ " + shown if shown else "Map")
+        menu = QtWidgets.QMenu(button)
+
+        def fill():
+            menu.clear()
+            none = menu.addAction("None")
+            none.setCheckable(True)
+            none.setChecked(not driver)
+            none.triggered.connect(lambda _=False: self.set_color_map(name, param, None))
+            import groomlab
+            try:
+                entries = [m for m in groomlab.maps(self.editor.groom) if m.get("kind") != "guides"]
+            except Exception:  # noqa: BLE001 - no groom
+                entries = []
+            if entries:
+                menu.addSeparator()
+            for m in entries:
+                action = menu.addAction(m["name"])
+                action.setCheckable(True)
+                action.setChecked(m["name"] == shown)
+                action.triggered.connect(lambda _=False, n=m["name"], k=m.get("kind"): self.set_color_map(name, param, n, k))
+            if not entries:
+                menu.addAction("No scalp maps yet: Paint makes one").setEnabled(False)
+        menu.aboutToShow.connect(fill)
+        button.setMenu(menu)
+        return button
+
+    def set_color_map(self, node, param, map_name, kind=None):
+        """Color node.param with map `map_name` (its Map node's rgb output), or None: unplugged."""
+        import groomlab
+        editor = self.editor
+        if not editor.apply():
+            return
+        try:
+            if map_name is None:
+                editor.model.disconnect(node, param)
+                editor.changed()
+                editor.rebuild()
+                editor.report("%s.%s is its own color again" % (node, param))
+                return
+            groomlab.paint_param(editor.groom, node, param, kind=kind or groomlab.map_kind(editor.groom, map_name),
+                                 name=map_name, paint=False)
+        except (RuntimeError, ValueError, gm.GraphError) as e:
+            editor.report(str(e))
+            return
+        editor.reload()
+        editor.report("%s.%s colored by map %s" % (node, param, map_name))
 
     def paint_chip(self, name, param):
         """The yellow Paint chip beside a mappable param, a paintbrush (the app's Paint button): a click
