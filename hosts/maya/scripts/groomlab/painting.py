@@ -331,7 +331,8 @@ def paint_map(groom, name, value=1.0, strength=0.5, color=None, channels="rgba",
     if not kind:
         raise ValueError("no map named %r" % name)
     _remember_view(groom)
-    view_map(groom, name)
+    if not scalp_view_node(groom):  # a node's eye lit: the view stays on it, the map still painted
+        view_map(groom, name)
     show_map_on_scalp(groom, name if kind != "guides" else None)
     texture = next((m["texture"] for m in maps(groom) if m["name"] == name), "") if kind == "texture" else ""
     if map_channels(groom, name) == 4 and color is None:
@@ -392,8 +393,11 @@ def end_paint_view(from_job=False):
         cmds.warning("GroomLab: painted maps not kept on the scalp: %s" % e)
     if not view:
         return
+    locked = scalp_view_node(groom)  # a node's eye lit since: it stays
     with no_undo():  # a display, not an edit: no undo step of its own
         for attr, kind, value in view:
+            if locked and attr == "scalpMapDisplay":
+                continue
             if kind == "string":
                 cmds.setAttr(groom + "." + attr, value or "", type="string")
             else:
@@ -412,17 +416,38 @@ def view_map(groom, name=None):
 
 
 MAP_DISPLAY_CHANNELS = ("rgb", "r", "g", "b", "a")
+NODE_MAP_PREFIX = getattr(groomlab_core, "NODE_MAP_PREFIX", "node:")
+
+
+def scalp_view_node(groom):
+    """The node whose result the scalp shows (a Layers node's eye lit, issue #124), or None."""
+    try:
+        shown = cmds.getAttr(groom + ".scalpMapDisplay") or ""
+    except (RuntimeError, ValueError):
+        return None
+    return shown[len(NODE_MAP_PREFIX):] if shown.startswith(NODE_MAP_PREFIX) else None
+
+
+def show_node_on_scalp(groom, node=None):
+    """Show a Layers (or ColorLayers) node's maps combined on the scalp, its eye lit; None turns it
+    off (the scalp then shows no map). While it is lit the scalp stays on that node: picking or
+    painting another map leaves the view alone (show_map_on_scalp)."""
+    cmds.setAttr(groom + ".scalpMapDisplay", NODE_MAP_PREFIX + node if node else "", type="string")
 
 
 def show_map_on_scalp(groom, name=None, channel=None):
     """Show a map on the scalp in the viewport (a gray map black to white, a color map in color,
     any kind); None hides it. `channel` ("rgb", or "r", "g", "b", "a" as gray) picks what of a
-    color map shows; None leaves it as it is."""
+    color map shows; None leaves it as it is. While a node's eye is lit (show_node_on_scalp) the
+    scalp stays on that node: nothing changes. Returns whether the scalp shows `name` now."""
     if channel is not None:
         if channel not in MAP_DISPLAY_CHANNELS:
             raise ValueError("channel is one of %s, not %r" % (MAP_DISPLAY_CHANNELS, channel))
         cmds.setAttr(groom + ".scalpMapChannel", channel, type="string")
+    if scalp_view_node(groom):
+        return False
     cmds.setAttr(groom + ".scalpMapDisplay", name or "", type="string")
+    return True
 
 
 def export_map(groom, name, path, resolution=1024):

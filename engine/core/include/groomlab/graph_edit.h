@@ -213,6 +213,10 @@ public:
     // nodes that have no button now (a node deleted, or made another type: what a host stores after
     // an edit). Both keep the other names' order. A rename: renamedBraidTubes.
     bool braidTubesOffered(const std::string& node) const;
+    // Show on Scalp (every host's eye on a Layers or ColorLayers node, issue #124): whether the node
+    // has it. Lit, the scalp shows the node's maps combined (GroomSession::scalpMapView with
+    // kNodeMapPrefix + its name), and stays on it while other maps are picked and painted.
+    bool scalpViewOffered(const std::string& node) const;
     bool braidTubesShown(const std::string& node, const std::string& shown) const;
     std::string braidTubesToggled(const std::string& node, const std::string& shown) const;
     std::string braidTubesKept(const std::string& shown) const;

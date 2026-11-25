@@ -1209,6 +1209,11 @@ class GraphModel(object):
             return None
         return self._query().value_kind_for_input(src, dst, input_name) or None
 
+    def scalp_view_offered(self, name):
+        """Whether the node has Show on Scalp: a Layers or ColorLayers node's maps combined, shown on
+        the scalp (the core's GraphEdit.scalp_view_offered)."""
+        return name in self.nodes and self._query().scalp_view_offered(name)
+
     def braid_tubes_offered(self, name):
         """Whether the node has Show Tubes: a Braid (its section tubes), or a node giving guides (the
         tubes they carry; the core's GraphEdit.braid_tubes_offered)."""

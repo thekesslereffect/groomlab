@@ -1450,7 +1450,8 @@ class PaintTab(_GroomTab):
         painted = self.__dict__.setdefault("_painted_views", {})
         if self.groom not in painted:
             painted[self.groom] = [self._views(self.groom), None]
-        groomlab.view_map(self.groom, name)
+        if not groomlab.scalp_view_node(self.groom):  # a node's eye lit: the view stays on it (issue #124)
+            groomlab.view_map(self.groom, name)
         if self.current_kind() in ("vertices", "texture"):
             groomlab.show_map_on_scalp(self.groom, name)
         painted[self.groom][1] = self._views(self.groom)  # what painting shows now

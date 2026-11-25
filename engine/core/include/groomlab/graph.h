@@ -123,6 +123,12 @@ public:
         const float v = atRoot(root);
         return {v, v, v};
     }
+    // The kind of painted map it reads: "texture" (an image at the scalp's UVs), "vertices" (a
+    // value per scalp vertex or guide: a vertex map, a guide layer), "" none (a number, an
+    // expression). A Layers node's is its layers' one kind (issue #124: never both).
+    virtual std::string mapKind() const { return {}; }
+    // The largest side of the images it reads (0: none): what a view of it is drawn at.
+    virtual int textureSize() const { return 0; }
 };
 using FieldPtr = std::shared_ptr<const FieldValue>;
 using CurvePtr = std::shared_ptr<const Ramp>;

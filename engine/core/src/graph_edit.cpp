@@ -1469,6 +1469,13 @@ bool GraphEdit::clumpColored(const std::string& node, const std::string& source)
     return true;
 }
 
+bool GraphEdit::scalpViewOffered(const std::string& node) const {
+    const nlohmann::json* n = impl_->find(node);
+    if (!n) return false;
+    const std::string type = n->value("type", std::string());
+    return type == "Layers" || type == "ColorLayers";
+}
+
 bool GraphEdit::braidTubesOffered(const std::string& node) const {
     const nlohmann::json* n = impl_->find(node);
     if (!n) return false;
