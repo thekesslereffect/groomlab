@@ -93,7 +93,7 @@ public:
         bool changed = false;                                  // any link went or was made
     };
     Detached detach(const std::string& name, double drop = 90.0);
-    // Several nodes taken out of the flow together (a shake of a selection, every host's): the links
+    // Several nodes taken out of the flow together: the links
     // among them stay; every link from outside into them and from them to outside goes, and what
     // fed the group feeds what it fed, where that fits: each link leaving member M is fed from the
     // source outside the group M's first connected inputs lead back to (through the members). The

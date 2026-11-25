@@ -3,8 +3,7 @@
 
 // How every host's node editor arranges a graph by hand (the app's node graph, Maya's Graph
 // Editor): aligning and spacing the selected nodes, laying out just the selection, backdrops that
-// grow around the nodes moved on them and fold to their title bar, the shake that pulls a node out
-// of its links, the nodes a Ctrl or Shift+drag carries (downstream or upstream) with their pins and
+// grow around the nodes moved on them and fold to their title bar, the nodes a Ctrl or Shift+drag carries (downstream or upstream) with their pins and
 // dots, Houdini's A+drag align gestures, and the three wire styles.
 // Layout only: nothing here changes what the graph evaluates. Positions are the editors' scene
 // units, y growing downward, each node's (x, y) its card's top-left.
@@ -143,30 +142,6 @@ std::map<std::string, std::pair<double, double>> alignGesture(const GraphEdit& e
                                                               const std::string& mode, double dx, double dy, double gap = 40.0);
 // The gesture modes, as above.
 std::vector<std::string> alignGestureModes();
-
-// ---- Shake to disconnect ------------------------------------------------------------------------
-// A node shaken while dragged (left and right a few times, quickly) is pulled out of its links
-// (GraphEdit::detach: what fed it feeds what it fed). Fed the cursor's positions in screen pixels
-// (so the zoom does not matter) with their times in seconds as the drag goes; true once, at the
-// move that completes a shake.
-class ShakeDetector {
-public:
-    // Turns in direction (each after at least minTravel pixels one way) within `window` seconds.
-    explicit ShakeDetector(int turns = 4, double minTravel = 18.0, double window = 0.7)
-        : turns_(turns), minTravel_(minTravel), window_(window) {}
-    void reset();
-    // A cursor position during the drag. True at the move that completes a shake (then it starts over).
-    bool add(double seconds, double x, double y);
-
-private:
-    int turns_;
-    double minTravel_, window_;
-    bool started_ = false;
-    double anchorX_ = 0.0;   // where the current stroke began (its turning point)
-    double extremeX_ = 0.0;  // how far it has gone
-    int direction_ = 0;      // -1 left, 1 right, 0 not yet
-    std::vector<double> turnTimes_;
-};
 
 // ---- Wire styles ------------------------------------------------------------------------------
 //   smooth   a curve leaving the output and reaching the input level (the default)

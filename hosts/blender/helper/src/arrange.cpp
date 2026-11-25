@@ -294,10 +294,10 @@ bool runGraphArrange(Session& s, const std::string& op, const json& args, json& 
         // The edits of the graph's links and nodes (GraphEdit).
         GraphEdit edit(g.dump());
         if (op == "detach_group") {
-            // A shake of several nodes: out of the flow together, their own links kept.
+            // Several nodes out of the flow together, their own links kept.
             const std::vector<std::string> names = stringsOf(args, "names");
             r["detached"] = names.size() == 1 ? edit.detach(names.front()).changed : edit.detachGroup(names).changed;
-            label = "shake loose";
+            label = "detach nodes";
         } else if (op == "duplicate_nodes") {
             // Ctrl+D (every host's): copies beside the nodes reading what they read.
             json made = json::array();
@@ -349,7 +349,7 @@ bool runGraphArrange(Session& s, const std::string& op, const json& args, json& 
 }
 
 bool isArrangeCommand(const std::string& cmd) {
-    static const std::set<std::string> kCommands = {"graph_carry", "align_gesture", "wire_route", "shake_test", "backdrop_layout",
+    static const std::set<std::string> kCommands = {"graph_carry", "align_gesture", "wire_route", "backdrop_layout",
                                                     "param_promotion", "compound_path"};
     return kCommands.count(cmd) > 0;
 }
@@ -428,18 +428,7 @@ json runArrangeCommand(const std::string& cmd, const json& args, const std::func
         }
         return {{"steps", steps}};
     }
-    // shake_test: the core's ShakeDetector over [[seconds, x, y]...] (the add-on's port checked
-    // against it): the indices where a shake completed.
-    ShakeDetector shake;
-    json at = json::array();
-    const json& moves = need(args, "moves");
-    if (!moves.is_array()) fail("bad_request", "moves is [[seconds, x, y]]");
-    for (std::size_t i = 0; i < moves.size(); ++i) {
-        const json& m = moves[i];
-        if (!m.is_array() || m.size() < 3) fail("bad_request", "moves is [[seconds, x, y]]");
-        if (shake.add(m[0].get<double>(), m[1].get<double>(), m[2].get<double>())) at.push_back(i);
-    }
-    return {{"shakes", at}};
+    fail("bad_request", "unknown arrange command " + cmd);
 }
 
 }  // namespace groomlab::helper

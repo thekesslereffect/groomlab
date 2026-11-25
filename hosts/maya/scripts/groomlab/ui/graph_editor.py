@@ -1001,7 +1001,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
                         later(lambda: editor.set_bypass([name], not editor.model.bypassed(name)))
                     return
         # A drag: Shift carries everything upstream, Ctrl everything downstream (not through
-        # portals), a shake pulls the nodes out of their links; Shift+click without a move adds the
+        # portals); Shift+click without a move adds the
         # node to the selection (Ctrl+click toggles it: Qt's own). Several nodes moved together take
         # the pins and dots between them.
         shift = bool(event.modifiers() & QtCore.Qt.ShiftModifier)
@@ -1009,7 +1009,6 @@ class NodeItem(QtWidgets.QGraphicsItem):
         self._press = (self.pos(), shift)
         self._before = [i for i in self.scene().selectedItems() if isinstance(i, NodeItem)] if self.scene() else []
         self._carry = []
-        self._shaken = False
         if event.button() == QtCore.Qt.LeftButton:
             moving = [self.name]
             if self.isSelected():
@@ -1020,10 +1019,6 @@ class NodeItem(QtWidgets.QGraphicsItem):
                                if n != self.name and n in self.editor.items and self.editor.items[n].isVisible()]
             if len(moving) > 1:
                 self._carry += [(item, item.pos()) for item in self.editor.carried_layout(moving)]
-        import groomlab_core
-        self._shake = groomlab_core.ShakeDetector()
-        self._clock = QtCore.QElapsedTimer()
-        self._clock.start()
         super(NodeItem, self).mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -1036,13 +1031,6 @@ class NodeItem(QtWidgets.QGraphicsItem):
             self._growing = True
             editor.begin_grow(moving)
         editor.grow_live(moving, event.screenPos())
-        shake = getattr(self, "_shake", None)
-        if shake is not None and not self._shaken and shake.add(self._clock.elapsed() / 1000.0, event.screenPos().x(), event.screenPos().y()):
-            # Shaken: out of their links at once, the drag going on (Houdini's); several keep theirs.
-            self._shaken = True
-            names = [n for n in moving if n in editor.items]
-            at = editor.view.mapToScene(editor.view.mapFromGlobal(QtGui.QCursor.pos()))
-            later(lambda: editor.shake_loose(names, at))
 
     def mouseReleaseEvent(self, event):
         press = getattr(self, "_press", None)
@@ -1055,7 +1043,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
             self.setSelected(True)
         if getattr(self, "_growing", False):
             self.editor.end_grow()
-        self._press, self._carry, self._shake, self._shaken, self._growing = None, [], None, False, False
+        self._press, self._carry, self._growing = None, [], False
 
     def mouseDoubleClickEvent(self, event):
         editor, name = self.editor, self.name
@@ -2228,7 +2216,7 @@ class GraphScene(QtWidgets.QGraphicsScene):
         self._cut_start = None
         self._cut_edges = set()
         self._grid = {}            # (zoom, dot color) -> QBrush: the dot tile at that zoom
-        self._carry = None         # nodes dragged on after their items were made again (a shake, Alt+drag copies)
+        self._carry = None         # nodes dragged on after their items were made again (Alt+drag copies)
 
     GRID_STEP = GRID
 
@@ -2390,6 +2378,10 @@ class GraphScene(QtWidgets.QGraphicsScene):
         return links
 
     def mousePressEvent(self, event):
+        if self._carry is not None:
+            # A carry whose release never came (it went elsewhere): over where it was, never moved
+            # by this new click (which would throw the carried nodes toward it).
+            self._end_carry()
         if self.cuts(event):
             self.clearSelection()
             self._begin_cut(event.scenePos())
@@ -2457,7 +2449,7 @@ class GraphScene(QtWidgets.QGraphicsScene):
 
     def carry(self, names, scene_pos):
         """Go on dragging these nodes until the button is released: their items were made again
-        under the drag (a shake pulled them loose; Alt+drag made them)."""
+        under the drag (Alt+drag made them)."""
         self._carry = (list(names), scene_pos)
 
     def _carry_to(self, pos):
@@ -2470,9 +2462,22 @@ class GraphScene(QtWidgets.QGraphicsScene):
         self._carry = (names, pos)
         self.editor.grow_live(names)
 
+    def _end_carry(self):
+        """The carried nodes stay where they are: their layout written (one undo step)."""
+        self._carry = None
+        editor = self.editor
+        editor.commit_layout()
+        editor.end_grow()
+        if getattr(editor, "_sync_after_carry", False):
+            editor._sync_after_carry = False
+            editor._graph_changed()  # the sync held off while they were dragged
+
     def mouseMoveEvent(self, event):
         if self._carry is not None:
-            self._carry_to(event.scenePos())
+            if not event.buttons() & QtCore.Qt.LeftButton:
+                self._end_carry()  # the button is up (its release went elsewhere): no jump
+            else:
+                self._carry_to(event.scenePos())
             event.accept()
             return
         if self._cut_line is not None:
@@ -2566,11 +2571,12 @@ class GraphScene(QtWidgets.QGraphicsScene):
 
     def mouseReleaseEvent(self, event):
         if self._carry is not None:
-            self._carry_to(event.scenePos())
-            self._carry = None
             event.accept()
-            self.editor.commit_layout()
-            self.editor.end_grow()
+            try:
+                if event.button() == QtCore.Qt.LeftButton:
+                    self._carry_to(event.scenePos())
+            finally:
+                self._end_carry()  # whatever happens, the carry ends with the button
             return
         if getattr(self, "_bundle", None) is not None:
             start, self._bundle = self._bundle, None
@@ -2879,14 +2885,10 @@ class GraphView(QtWidgets.QGraphicsView):
         self.frame_rect(rect)
 
     def frame_all(self):
-        """Fit the graph in the view, never zooming in past 1:1 (at Maya's interface scale) nor out
-        past READABLE: a long graph is then centered at a size its names read at (pan for the ends)."""
-        rect = self.scene().itemsBoundingRect()
-        self.frame_rect(rect)
-        least = self.READABLE * theme.scale()
-        if not rect.isEmpty() and self.transform().m11() < least:
-            self.setTransform(QtGui.QTransform.fromScale(least, least))
-            self.centerOn(rect.center())
+        """A (F with nothing selected): every node in the view however big the graph, never zoomed
+        in past 1:1 (at Maya's interface scale). (The view a graph opens at keeps a readable size:
+        frame_readable.)"""
+        self.frame_rect(self.scene().itemsBoundingRect())
 
     # The least zoom a graph opens at (x Maya's interface scale): node names stay readable.
     READABLE = 0.5
@@ -3502,6 +3504,10 @@ class GraphEditor(QtWidgets.QWidget):
     def _sync_from_groom(self):
         from maya import cmds
         self._sync_pending = False
+        if getattr(self.scene, "_carry", None) is not None:
+            # Copies still dragged (Alt+drag): synced once they are let go (not rebuilt under the drag).
+            self._sync_after_carry = True
+            return
         # Our own layout write is skipped once, by the sync it set off: an undo later that puts the
         # graph back to that same text (an edit made after a node move, undone) is a change to show.
         layout, self._layout_text = getattr(self, "_layout_text", None), None
@@ -3831,6 +3837,10 @@ class GraphEditor(QtWidgets.QWidget):
     def rebuild(self):
         selected = [i.name for i in self.scene.selectedItems() if isinstance(i, NodeItem)]
         self.scene.cancel_drag()
+        # The backdrops a drag grows are made again: a drag going on through a rebuild takes them up
+        # anew, never the deleted ones (which raised, and could leave a carry on).
+        if getattr(self, "_grow", None) is not None:
+            self._grow = None
         self.scene.blockSignals(True)
         try:
             self.scene.clear()
@@ -4614,20 +4624,6 @@ class GraphEditor(QtWidgets.QWidget):
             self.rebuild()
             self.changed()
 
-    def detach_shaken(self, names, at):
-        """A shake while dragged (Houdini's): the nodes out of their links, left where they were
-        dropped (one undo step)."""
-        self.detach_nodes(names)
-        moved = False
-        for name, pos in at.items():
-            if name in self.model.nodes:
-                self.model.set_position(name, pos.x(), pos.y())
-                moved = True
-        if moved:
-            self._layout_dirty = True
-            self.commit_layout()
-            self.rebuild()
-
     def link_first_input(self, source, node):
         """`node` fed from source (node, output) on its first input that takes it (one undo step)."""
         src, output = source
@@ -4681,30 +4677,6 @@ class GraphEditor(QtWidgets.QWidget):
         pen.setCosmetic(True)
         self._dot_preview = self.scene.addPath(path, pen)
         self._dot_preview.setZValue(-0.8)
-
-    def shake_loose(self, names, at):
-        """A shake while dragging: the nodes out of their links at once (one: what fed it feeds what
-        it fed; several: the links among them kept), left under the cursor, the drag going on."""
-        positions = dict((n, self.items[n].pos()) for n in names if n in self.items)
-        try:
-            done = self.model.detach(names[0]) if len(names) == 1 else self.model.detach_group(names)
-        except (gm.GraphError, ValueError) as e:
-            self.report(str(e))
-            return
-        if not done["changed"]:
-            return
-        for name, pos in positions.items():
-            self.model.set_position(name, pos.x(), pos.y())
-        self.end_grow()
-        self.rebuild()
-        for name in names:
-            if name in self.items:
-                self.items[name].setSelected(True)
-        self.changed()
-        self.report("shaken loose: %s out of %s links (Ctrl+Z puts them back)" % (
-            ", ".join(names), "its" if len(names) == 1 else "their"))
-        if QtWidgets.QApplication.mouseButtons() & QtCore.Qt.LeftButton:
-            self.scene.carry(names, at)
 
     def duplicate_drag(self, name, at):
         """Alt+drag on a node: it (the selection, when it is one of it) duplicated where it is, the

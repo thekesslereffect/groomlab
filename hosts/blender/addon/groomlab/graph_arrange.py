@@ -5,8 +5,8 @@ portals and dots, the link, portal and port menus, Pass Through as Output, folde
 
 The rules are the core's; what is here is the canvas' side: the cards' boxes the core lays out
 (graph units, y down, as every host's "ui"), the operators the shared menus bind (graph_ui.bind),
-and two small ports drawn every frame that the helper checks against the core (wire_route and
-ShakeDetector: tests/hosts/blender/test_helper.py)."""
+and a small port drawn every frame that the helper checks against the core (wire_route:
+tests/hosts/blender/test_helper.py)."""
 
 import math
 
@@ -196,53 +196,6 @@ def route_points(start, steps, n=20):
             pts.append((u * u * u * p0[0] + 3 * u * u * t * s[0] + 3 * u * t * t * s[2] + t * t * t * s[4],
                         u * u * u * p0[1] + 3 * u * u * t * s[1] + 3 * u * t * t * s[3] + t * t * t * s[5]))
     return pts
-
-
-# ---- Shake to disconnect (graph_arrange.h ShakeDetector; the helper's shake_test checks this port) --
-
-class ShakeDetector(object):
-    """True at the cursor move (screen pixels, seconds) that completes a shake: `turns` turns, each
-    after `min_travel` pixels one way, within `window` seconds."""
-
-    def __init__(self, turns=4, min_travel=18.0, window=0.7):
-        self.turns, self.min_travel, self.window = turns, min_travel, window
-        self.reset()
-
-    def reset(self):
-        self.started = False
-        self.direction = 0
-        self.anchor = self.extreme = 0.0
-        self.times = []
-
-    def add(self, seconds, x, y=0.0):
-        if not self.started:
-            self.started = True
-            self.anchor = self.extreme = x
-            self.direction = 0
-            self.times = []
-            return False
-        if self.direction == 0:
-            if abs(x - self.anchor) >= self.min_travel:
-                self.direction = 1 if x > self.anchor else -1
-                self.extreme = x
-            return False
-        if (x - self.extreme) * self.direction > 0.0:
-            self.extreme = x
-            return False
-        if (self.extreme - x) * self.direction < self.min_travel:
-            return False
-        if abs(self.extreme - self.anchor) >= self.min_travel:
-            self.times.append(seconds)
-        self.anchor = self.extreme
-        self.extreme = x
-        self.direction = -self.direction
-        self.times = [t for t in self.times if t >= seconds - self.window]
-        if len(self.times) >= self.turns:
-            self.times = []
-            self.anchor = self.extreme = x
-            self.direction = 0
-            return True
-        return False
 
 
 # ---- Portals: where the dots are --------------------------------------------------------------------

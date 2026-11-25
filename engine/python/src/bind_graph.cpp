@@ -857,7 +857,7 @@ void bindGraph(py::module_& m) {
              py::arg("old"), py::arg("new"));
 
     // Arranging a graph by hand (graph_arrange.h): every host's Align, Tidy Selection, backdrops,
-    // Shift+drag, shake and wire styles. Boxes are (name, x, y, w, h) tuples.
+    // Shift+drag and wire styles. Boxes are (name, x, y, w, h) tuples.
     auto boxesOf = [](const std::vector<std::tuple<std::string, double, double, double, double>>& boxes) {
         std::vector<LayoutBox> out;
         for (const auto& [name, x, y, w, h] : boxes) out.push_back({name, x, y, w, h});
@@ -930,10 +930,6 @@ void bindGraph(py::module_& m) {
                     double gap) { return alignGesture(edit, boxesOf(boxes), anchor, selected, mode, dx, dy, gap); },
           py::arg("edit"), py::arg("boxes"), py::arg("anchor"), py::arg("selected"), py::arg("mode"), py::arg("dx"), py::arg("dy"),
           py::arg("gap") = 40.0, "Houdini's A+drag: {name: (x, y)} for the nodes it lines up with the anchor (graph_arrange.h).");
-    py::class_<ShakeDetector>(m, "ShakeDetector", "A node shaken while dragged (screen pixels, seconds): graph_arrange.h.")
-        .def(py::init<int, double, double>(), py::arg("turns") = 4, py::arg("min_travel") = 18.0, py::arg("window") = 0.7)
-        .def("reset", &ShakeDetector::reset)
-        .def("add", &ShakeDetector::add, py::arg("seconds"), py::arg("x"), py::arg("y"));
     m.def("wire_styles", &wireStyles, "The wire styles: smooth, square, rounded.");
     m.def("backdrop_keeps", &backdropKeeps, py::arg("over_it"), py::arg("speed"), py::arg("left"),
           "While a node on a backdrop is dragged: whether the backdrop keeps it (grows round it) or the node leaves it.");
@@ -1119,7 +1115,7 @@ void bindGraph(py::module_& m) {
                 return out;
             },
             py::arg("names"),
-            "Several nodes out of the flow together (a shake): the links among them kept, what fed them feeding what they "
+            "Several nodes out of the flow together: the links among them kept, what fed them feeding what they "
             "fed. {'source', 'relinked', 'changed'}.")
         .def("insert_scalp",
              [](GraphEdit& e, const std::string& mesh, std::optional<double> groomSize) {

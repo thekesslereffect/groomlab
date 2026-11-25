@@ -648,7 +648,9 @@ QRectF NodeGraphView::nodeRect(const std::string& node) const {
     return QRectF(toWidget(nodes_[i].pos), nodes_[i].size * scale_);
 }
 
-void NodeGraphView::fitAll() {
+void NodeGraphView::fitAll() { fitGraph(kMinScale); }
+
+void NodeGraphView::fitGraph(qreal least) {
     if (nodes_.empty() || width() <= 0 || height() <= 0) return;
     QRectF bounds;
     for (const Node& n : nodes_) bounds |= QRectF(n.pos, n.size);
@@ -657,8 +659,9 @@ void NodeGraphView::fitAll() {
     // Room for the chrome around (the overlay's top row and pills; docked, a small margin).
     const QRectF view(fitMargins_.left(), fitMargins_.top(), std::max(100, width() - fitMargins_.left() - fitMargins_.right()),
                       std::max(100, height() - fitMargins_.top() - fitMargins_.bottom()));
-    // Never so small that the names cannot be read: a bigger graph is centered at a readable size.
-    scale_ = std::clamp(std::min(view.width() / bounds.width(), view.height() / bounds.height()), kReadableScale, 1.0);
+    // A (fitAll): all of it, however small. The view a graph opens at (frameReadable): never so
+    // small the names cannot be read, a bigger graph centered at a readable size.
+    scale_ = std::clamp(std::min(view.width() / bounds.width(), view.height() / bounds.height()), least, 1.0);
     pan_ = view.center() - bounds.center() * scale_;
     // Taller than the view at a readable size (a docked strip): the top rows from the top (the
     // main chain and its headers), not the middle of the graph with the cards cut in half.
@@ -669,7 +672,7 @@ void NodeGraphView::fitAll() {
 
 void NodeGraphView::frameReadable() {
     if (nodes_.empty() || width() <= 0 || height() <= 0) return;
-    fitAll();
+    fitGraph(kReadableScale);
     QRectF bounds;
     for (const Node& n : nodes_) bounds |= QRectF(n.pos, n.size);
     for (const Backdrop& b : backdrops_) bounds |= b.rect;
@@ -1918,9 +1921,7 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
         moveStart_ = nodes_[node].pos;
         shiftPress_ = mods.testFlag(Qt::ShiftModifier);
         ctrlPress_ = !shiftPress_ && mods.testFlag(Qt::ControlModifier);
-        shaken_ = false;
-        shake_.reset();
-        shakeClock_.start();
+        moveClock_.start();
         // A node of the selection drags the whole selection; another one is selected alone. With
         // Shift or Ctrl the selection stays as it is until the release (a click adds the node to it,
         // or toggles it), and a drag carries the node with everything upstream of it (Shift) or
@@ -2001,9 +2002,7 @@ void NodeGraphView::beginMove(int node, const std::vector<std::string>& carried)
     drag_ = Drag::Move;
     dragNode_ = node;
     moveStart_ = nodes_[node].pos;
-    shaken_ = false;
-    shake_.reset();
-    shakeClock_.start();
+    moveClock_.start();
     moveSpeed_ = 0.0;
     moving_.clear();
     for (const std::string& n : carried) {
@@ -2178,43 +2177,12 @@ void NodeGraphView::mouseMoveEvent(QMouseEvent* event) {
                 }
                 // The drag's speed (screen pixels a second, smoothed): a fast one leaves backdrops.
                 {
-                    const qint64 t = shakeClock_.elapsed();
+                    const qint64 t = moveClock_.elapsed();
                     const qreal dt = std::max<qint64>(1, t - moveTime_) / 1000.0;
                     moveTime_ = t;
                     moveSpeed_ = 0.6 * moveSpeed_ + 0.4 * (std::hypot(delta.x(), delta.y()) / dt);
                 }
                 growBackdrops();
-                // Shaken (left and right, quickly): the nodes are pulled out of their links, the drag
-                // goes on (Houdini's).
-                if (!shaken_ && document_ && shake_.add(shakeClock_.elapsed() / 1000.0, now.x(), now.y())) {
-                    shaken_ = true;
-                    std::vector<std::string> names;
-                    std::vector<std::pair<std::string, QPointF>> at;
-                    for (int i : moving_) {
-                        names.push_back(nodes_[i].name);
-                        at.emplace_back(nodes_[i].name, nodes_[i].pos);
-                    }
-                    const std::string pressed = nodes_[dragNode_].name;
-                    document_->endLayout("move nodes");
-                    int detached = 0;
-                    const std::string error = document_->detachGroup(names, &detached);  // (several: their own links kept)
-                    if (error.empty() && detached > 0) {
-                        emit status(tr("Shaken loose: %n node(s) out of their links (Ctrl+Z puts them back)", "", detached));
-                        emit edited();
-                        refresh();
-                        // Where the drag has them (the detach put them below their new link).
-                        moving_.clear();
-                        for (const auto& [name, pos] : at) {
-                            const int i = nodeIndex(name);
-                            if (i < 0) continue;
-                            nodes_[i].pos = pos;
-                            moving_.push_back(i);
-                        }
-                        dragNode_ = nodeIndex(pressed);
-                        for (Wire& w : wires_) w.path = wirePathFor(w);
-                    }
-                    document_->beginLayout();
-                }
                 // A lone node (or a chain) with no wires out of it over a wire: the wire lights up
                 // (dropped: it goes in, as Maya's Graph Editor).
                 dropWire_ = dragNode_ < 0 ? -1 : moving_.size() == 1 ? wireUnderNode(dragNode_) : wireUnderGroup(moving_, dragNode_);
@@ -2390,7 +2358,7 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
     }
     if (drag == Drag::Move && dragNode_ >= 0 && document_) {
         const bool movedAtAll = dragNode_ < static_cast<int>(nodes_.size()) && (nodes_[dragNode_].pos - moveStart_).manhattanLength() > 0.0;
-        if ((shiftPress_ || ctrlPress_) && !movedAtAll && !shaken_) {
+        if ((shiftPress_ || ctrlPress_) && !movedAtAll) {
             // Shift+click without a move: the node added to the selection (the current one); Ctrl+click
             // toggles it.
             const std::string name = nodes_[dragNode_].name;

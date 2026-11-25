@@ -170,7 +170,7 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   Graph and Paste Graph (also in the Presets menu: see Sharing a look as text), Units, Theme and
   Reload from Groom.
 - **Nodes:** Add Node inserts after the selected node. Delete (the key) removes the selection.
-  Tidy Layout re-arranges the graph. The canvas is open: pan (middle-drag or Alt+drag) and zoom (wheel) anywhere, past the nodes. A graph opens at a readable size: all of it when it fits, else Interpolate to Output (where look nodes go), or the output end. **Frame** (F) fits the selected nodes, or the whole graph; A fits everything.
+  Tidy Layout re-arranges the graph. The canvas is open: pan (middle-drag or Alt+drag) and zoom (wheel) anywhere, past the nodes. A graph opens at a readable size: all of it when it fits, else Interpolate to Output (where look nodes go), or the output end. **Frame** (F) fits the selected nodes, or the whole graph; A fits everything, zooming out as far as it takes (only the opening view keeps a readable size).
 - **Parameters:** the side panel edits the selected node, under its name, its type (in its
   category's color) and a line on what it does. Params read as words ("Guide radius"); the
   tooltip gives the param's name for scripts.
@@ -278,15 +278,13 @@ The **Graph Editor** is a dockable node editor for the selected groom:
 - **By hand** (graph_arrange.h, the app's too): Shift+drag a node to move it with everything
   upstream (nodesWithUpstream), Ctrl+drag with everything downstream (nodesWithDownstream), neither
   through a portal's exit, the pins and dots between moved nodes carried too (carriedWith;
-  Shift+click without a move adds it to the selection, Ctrl+click toggles it); shake a node while dragging to
-  take it out of its links (Detach); Shift+drag from an output to pick up all its links and drop
+  Shift+click without a move adds it to the selection, Ctrl+click toggles it); Shift+drag from an output to pick up all its links and drop
   them on another output (GraphEdit::moveOutputLinks); Tab with a link selected adds the node into
   it; Ctrl+V pastes at the cursor; Ctrl+D's copies read what their nodes read
   (GraphEdit::duplicateNodes). **Align** (node menu, **...** menu): rows, columns, edges, centers,
   even spacing, Tidy Selection (L: tidyGraph). **Wire Style** (**...** menu, optionVar `groomLabGraphWireStyle`):
   Smooth, Square or Rounded. The node in Focus glows.
-- **Round 2** (both hosts): a shake takes nodes out of their links mid-drag (several: detachGroup,
-  their own links kept); Alt+drag duplicates (pan is the middle button); a chain drops on a wire as
+- **Round 2** (both hosts): Alt+drag duplicates (pan is the middle button); a chain drops on a wire as
   one (insertNodesOnLink); **.** pins the selected link; Shift+O and the Tab search's Backdrop add
   a backdrop, whose card edits its title, "description" and "fontSize"; a backdrop grows live while
   a node is dragged slowly past its edge and lets it go when dragged out fast (backdropKeeps); the

@@ -2258,7 +2258,7 @@ def set_dot_input(scalp, portal, exit_index, into):
 # The graph's links and nodes (GraphEdit, every host's).
 
 def detach_group(scalp, names):
-    """A shake: the nodes out of the flow together, their own links kept (detachGroup)."""
+    """The nodes out of the flow together, their own links kept (detachGroup)."""
     return bool(_arrange(scalp, "detach_group", layout=False, names=list(names)).get("detached"))
 
 

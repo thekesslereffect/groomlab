@@ -5376,7 +5376,7 @@ TEST(AppPanels, GraphAlignGesturesAndBackdropCard) {
     EXPECT_TRUE(view.propertiesShown());
 }
 
-TEST(AppPanels, GraphEditsInsideACompoundAndShakesNodesLoose) {
+TEST(AppPanels, GraphEditsInsideACompoundAndAShakeOnlyMoves) {
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
     const std::string length = nodeOfType(*doc, "Length"), noise = nodeOfType(*doc, "Noise");
@@ -5398,15 +5398,15 @@ TEST(AppPanels, GraphEditsInsideACompoundAndShakesNodesLoose) {
     const QPoint from = outputAt(view, noise, 0);
     std::string downstream;
     wireFrom(view, to, &downstream);
-    // Shaken while dragged: noise is pulled out of its links, what fed it feeds what it fed.
+    // Dragged left and right quickly (a shake): it only moves, its links stay (no Shake to Disconnect).
     const QPoint grab = view.nodeRect(noise).center().toPoint();
     mouse(&view, QEvent::MouseButtonPress, grab);
     for (int i = 1; i <= 10; ++i) mouse(&view, QEvent::MouseMove, grab + QPoint((i % 2) ? 60 : 0, 4 * i));
-    mouse(&view, QEvent::MouseMove, grab + QPoint(0, 400));  // (dropped away from any wire)
+    mouse(&view, QEvent::MouseMove, grab + QPoint(0, 400));
     mouse(&view, QEvent::MouseButtonRelease, grab + QPoint(0, 400));
-    EXPECT_FALSE(linked(*doc, noise, to));
-    EXPECT_FALSE(linked(*doc, length, noise));
-    EXPECT_TRUE(linked(*doc, length, to));
+    EXPECT_TRUE(linked(*doc, noise, to));
+    EXPECT_TRUE(linked(*doc, length, noise));
+    EXPECT_NEAR(view.nodeRect(noise).center().y(), grab.y() + 400, 2.0) << "moved where it was let go";
     (void)from;
     // Grouped, then edited inside: a node added there is in the compound's graph.
     view.setSelection({length});
@@ -5475,41 +5475,37 @@ TEST(AppPanels, GraphDuplicatesWithAltDragAndPinsWithAPeriod) {
     EXPECT_GT(view.backdropTitleBar(0).height(), 28.0 * view.viewScale());
 }
 
-TEST(AppPanels, GraphShakesAndDropsGroupsAsOne) {
+TEST(AppPanels, GraphDropsAChainOnAWireAsOne) {
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
-    const std::string length = nodeOfType(*doc, "Length"), noise = nodeOfType(*doc, "Noise");
+    const std::string noise = nodeOfType(*doc, "Noise");
+    // A chain of two nodes of its own, out of the flow: width feeding curl.
+    std::string head, tail;
+    ASSERT_EQ(doc->addNode("Width", 0.0f, 700.0f, &head), "");
+    ASSERT_EQ(doc->addNode("Curl", 300.0f, 700.0f, &tail), "");
+    ASSERT_EQ(doc->connectNodes(head, "", tail, "strands"), "");
     std::string to;
     NodeGraphView view;
     view.resize(1400, 900);
     view.setDocument(doc.get());
     ASSERT_GE(wireFrom(view, noise, &to), 0);
-    // length and noise shaken together: the link between them stays.
-    view.setSelection({length, noise});
-    const QPoint grab = view.nodeRect(noise).center().toPoint();
-    mouse(&view, QEvent::MouseButtonPress, grab);
-    for (int i = 1; i <= 10; ++i) mouse(&view, QEvent::MouseMove, grab + QPoint((i % 2) ? 60 : 0, 30 * i));
-    mouse(&view, QEvent::MouseMove, grab + QPoint(0, 600));
-    mouse(&view, QEvent::MouseButtonRelease, grab + QPoint(0, 600));
-    EXPECT_TRUE(linked(*doc, length, noise));
-    EXPECT_FALSE(linked(*doc, noise, to));
-    // Both dropped back on the wire that took their place: in again, as one.
-    std::string from;
     int over = -1;
     for (int i = 0; i < view.wireCount(); ++i) {
         std::string f, o, t, in;
-        if (view.wireLink(i, &f, &o, &t, &in) && t == to) over = i, from = f;
+        if (view.wireLink(i, &f, &o, &t, &in) && f == noise && t == to) over = i;
     }
     ASSERT_GE(over, 0);
-    view.setSelection({length, noise});
-    const QPoint start = view.nodeRect(noise).center().toPoint();
+    // Both dropped on noise's wire out: in it, as one (noise -> width -> curl -> what noise fed).
+    view.setSelection({head, tail});
+    const QPoint start = view.nodeRect(tail).center().toPoint();
     const QPoint target = (view.wirePathOf(over).pointAtPercent(0.5) * view.viewScale() + view.viewPan()).toPoint();
     mouse(&view, QEvent::MouseButtonPress, start);
     mouse(&view, QEvent::MouseMove, start + (target - start) / 2);
     mouse(&view, QEvent::MouseMove, target);
     mouse(&view, QEvent::MouseButtonRelease, target);
-    EXPECT_TRUE(linked(*doc, from, length));
-    EXPECT_TRUE(linked(*doc, noise, to));
+    EXPECT_TRUE(linked(*doc, noise, head));
+    EXPECT_TRUE(linked(*doc, head, tail));
+    EXPECT_TRUE(linked(*doc, tail, to));
 }
 
 TEST(AppPanels, GraphDotsAreNamedFedAndTakeAnotherDotsSignal) {

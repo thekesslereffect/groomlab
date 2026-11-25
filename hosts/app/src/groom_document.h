@@ -353,8 +353,6 @@ public:
     // what it fed, the output passes to it, and the node waits unlinked below. One undo step; "" or
     // why not (nothing changes then). *detached: how many had a link to drop.
     std::string detachNodes(const std::vector<std::string>& nodes, int* detached = nullptr);
-    // Several nodes shaken loose together (GraphEdit::detachGroup): the links among them kept. One step.
-    std::string detachGroup(const std::vector<std::string>& nodes, int* detached = nullptr);
     // A chain dropped on a wire as one (graph_inserts.h insertNodesOnLink). One undo step.
     std::string insertNodesOnLink(const std::vector<std::string>& nodes, const NodeLink& link);
     // Dots (graph_portals.h): a free dot at (x, y) (fed from from's `output` when given: an exit of
