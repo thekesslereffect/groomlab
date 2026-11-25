@@ -2876,11 +2876,81 @@ std::shared_ptr<const TexturePreview> GroomSession::udimViewPreview(const ScalpM
     return udimViewPreview_;
 }
 
+ScalpMapView GroomSession::nodeMapView(ScalpMapView view) {
+    // A field node's result (a Layers node's maps combined): evaluated with the session's inputs,
+    // read at each vertex of the cage (the roots a Scatter makes lie on it), shown on the scalp as
+    // a vertex map is (refined to a subdivided scalp's vertices). Nothing when the node gives no
+    // field or fails (its error shows on the node).
+    const std::string node = view.name.substr(kNodeMapPrefix.size());
+    {
+        std::vector<std::string> errors;
+        bindScalp(errors);  // the scalp with the maps as they are now (vertex maps as its color sets)
+    }
+    if (!scalp_) return view;
+    const ScalpMesh& cage = cageScalp_ ? *cageScalp_ : *scalp_;
+    std::uint64_t key = hashCombine(hashText(hash64(0x5CA1DD), view.name), hashText(0, data_.graphJson));
+    key = hashCombine(hashCombine(key, scalpMapsHash_), hashCombine(cage.contentHash(), scalp_->contentHash()));
+    key = hashCombine(hashCombine(key, reinterpret_cast<std::uintptr_t>(activeHierarchy_.get())), hashFloat(0, static_cast<float>(time_)));
+    view.version = hashCombine(key, hashText(hash64(0x5CA1AB), view.channel));
+    if (key == nodeViewKey_) {
+        view.kind = nodeViewValues_ ? "vertices" : "";
+        view.channels = nodeViewChannels_;
+        view.values = nodeViewValues_;
+        return view;
+    }
+    nodeViewKey_ = key;
+    nodeViewValues_.reset();
+    nodeViewChannels_ = 1;
+    FieldPtr field;
+    try {
+        field = valueAs<FieldPtr>(evaluateNode(node, 1.0f, time_));
+    } catch (const std::exception&) {
+        return view;
+    }
+    if (!field) return view;
+    const bool color = field->isColor();
+    const std::size_t per = color ? 4 : 1;
+    // Each vertex as a root at a corner of a triangle using it (barycentric u, v: corner 0 at 0 0,
+    // corner 1 at 1 0, corner 2 at 0 1).
+    std::vector<StrandRoot> roots(cage.pointCount());
+    for (std::size_t t = 0; t < cage.triangles().size(); ++t) {
+        const auto& tri = cage.triangles()[t];
+        for (int c = 0; c < 3; ++c) {
+            StrandRoot& r = roots[static_cast<std::size_t>(tri[c])];
+            if (r.face >= 0) continue;
+            r.face = static_cast<std::int32_t>(t);
+            r.u = c == 1 ? 1.0f : 0.0f;
+            r.v = c == 2 ? 1.0f : 0.0f;
+        }
+    }
+    std::vector<float> values(cage.pointCount() * per, 0.0f);
+    parallelFor(0, roots.size(), [&](std::size_t i) {
+        if (roots[i].face < 0) return;
+        if (color) {
+            const std::array<float, 3> c = field->colorAtRoot(roots[i]);
+            for (std::size_t k = 0; k < 3; ++k) values[i * 4 + k] = c[k];
+            values[i * 4 + 3] = 1.0f;
+        } else {
+            values[i] = field->atRoot(roots[i]);
+        }
+    });
+    const int levels = scalp_->subdivisionLevel();
+    nodeViewValues_ = levels == 0 ? std::make_shared<const std::vector<float>>(std::move(values))
+                                  : std::make_shared<const std::vector<float>>(
+                                        SubdivisionPlan::of(cage, levels)->refineVertexValues(values, static_cast<int>(per)));
+    nodeViewChannels_ = static_cast<int>(per);
+    view.kind = "vertices";
+    view.channels = nodeViewChannels_;
+    view.values = nodeViewValues_;
+    return view;
+}
+
 ScalpMapView GroomSession::scalpMapView(const std::string& name, const std::string& channel) {
     ScalpMapView view;
     view.name = name;
     view.channel = channel;
     if (view.channel != "r" && view.channel != "g" && view.channel != "b" && view.channel != "a") view.channel = "rgb";
+    if (view.name.compare(0, kNodeMapPrefix.size(), kNodeMapPrefix) == 0) return nodeMapView(std::move(view));
     if (view.name.empty() || !scalp_) return view;
     const auto it = scalpMaps_.maps.find(view.name);
     const bool previewing = previewMapName_ == view.name;

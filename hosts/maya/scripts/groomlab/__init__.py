@@ -76,7 +76,7 @@ from groomlab.painting import (  # noqa: F401
     guide_map, import_map, list_maps, map_channels, map_kind, map_nodes, map_texture, map_users, maps, missing_files,
     missing_map_files, paint_map, paint_param, paint_scalp_map, param_map, reload_map, remove_map, rename_map,
     selected_faces, selected_scalp_faces,
-    set_map_channels, set_map_texture, setting_targets, show_map_on_scalp, texture_map, unfreeze_all, invert_frozen, use_map, view_map,
+    set_map_channels, set_map_texture, setting_targets, show_map_on_scalp, show_node_on_scalp, scalp_view_node, texture_map, unfreeze_all, invert_frozen, use_map, view_map,
     _map_texture_default)
 from groomlab.flow import (  # noqa: F401
     FLOW_SINKS, add_flow_node, add_part, add_part_node, clear_flow, clear_parts, draw_part_tool, flow_arrows, flow_counts,

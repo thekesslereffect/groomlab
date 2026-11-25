@@ -17,6 +17,7 @@
 
 #include "groomlab/display.h"
 #include "groomlab/groom_file.h"
+#include "groomlab/graph_edit.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/flow.h"
 #include "groomlab/guide_hierarchy.h"
@@ -523,6 +524,47 @@ TEST(Subdivision, VertexMapsOnTheRefinedScalp) {
     ASSERT_EQ(view.kind, "vertices");
     EXPECT_EQ(view.values->size(), scalp->pointCount());
     EXPECT_EQ(session.cageScalp()->pointCount(), head->pointCount());
+}
+
+TEST(Subdivision, ALayersNodeShowsItsMapsCombinedOnTheScalp) {
+    // A Layers node's eye (issue #124): the scalp shows the node's result, its layers' maps
+    // combined, per vertex as a vertex map is; it follows the maps as they are painted.
+    const auto head = quadSphere(10, 12);
+    GroomData data;
+    data.graphJson = R"({"version": 1, "nodes": [
+        {"name": "crownMap", "type": "Map", "params": {"name": "crown"}},
+        {"name": "layers", "type": "Layers", "params": {"layers": 2, "layer1": 0.25}, "paramInputs": ["layer2Opacity"]},
+        {"name": "output", "type": "Output"}],
+      "connections": [{"from": "crownMap", "to": "layers", "input": "layer2Opacity"}], "output": "output"})";
+    data.scalp = head;
+    GroomSession session(data);
+    ScalpMaps maps;
+    ScalpMapEntry entry;
+    entry.kind = "vertices";
+    for (std::size_t v = 0; v < head->pointCount(); ++v) entry.values.push_back(head->points()[v].y > 0.0f ? 1.0f : 0.0f);
+    maps.maps["crown"] = entry;
+    session.setScalpMaps(maps);
+    EXPECT_TRUE(GraphEdit(data.graphJson).scalpViewOffered("layers"));
+    EXPECT_FALSE(GraphEdit(data.graphJson).scalpViewOffered("crownMap"));
+
+    const ScalpMapView view = session.scalpMapView(kNodeMapPrefix + "layers", "rgb");
+    ASSERT_EQ(view.kind, "vertices");
+    EXPECT_EQ(view.channels, 1);
+    ASSERT_EQ(view.values->size(), head->pointCount());
+    // Layer 1 (0.25) under a white layer 2 whose opacity is the crown map: white on the crown.
+    for (std::size_t v = 0; v < head->pointCount(); ++v) {
+        EXPECT_NEAR((*view.values)[v], entry.values[v] > 0.5f ? 1.0f : 0.25f, 1e-4f) << v;
+    }
+    // The same inputs: the same view (kept); a map painted: shown again.
+    EXPECT_EQ(session.scalpMapView(kNodeMapPrefix + "layers", "rgb").version, view.version);
+    for (float& x : maps.maps["crown"].values) x = 0.0f;
+    session.setScalpMaps(maps);
+    const ScalpMapView painted = session.scalpMapView(kNodeMapPrefix + "layers", "rgb");
+    EXPECT_NE(painted.version, view.version);
+    for (float x : *painted.values) EXPECT_NEAR(x, 0.25f, 1e-4f);
+    // A node that gives no field, or none of that name: nothing shown.
+    EXPECT_EQ(session.scalpMapView(kNodeMapPrefix + "output", "rgb").kind, "");
+    EXPECT_EQ(session.scalpMapView(kNodeMapPrefix + "gone", "rgb").kind, "");
 }
 
 TEST(Subdivision, ColliderMeshNodeRefines) {
