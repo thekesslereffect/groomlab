@@ -1764,6 +1764,21 @@ TEST(GraphEdit, AClumpWiredAfterAClumpClumpsInsideItsClumps) {
         expectInside(edit, small, "clumpId", "subClumpId");
         EXPECT_EQ(params(edit, bigger).value("centersFrom", std::string("pick")), "pick");
     }
+    {  // A Curl coherent by the clumps of the Clump a bigger one is put in before: it keeps reading
+       // that Clump's (now subClumpId), so the bigger one's later name or removal leaves it fed.
+        nlohmann::json curled = g;
+        curled["nodes"][1] = {{"name", "big"}, {"type", "Curl"}, {"params", {{"coherence", "clump"}}}};
+        curled["nodes"][3] = {{"name", "w"}, {"type", "Curl"}, {"params", {{"coherence", "clump"}}}};
+        GraphEdit edit(curled.dump());
+        const std::string small = edit.addNode("Clump", "small");
+        insertOnLink(edit, "big", "n", "strands", small);
+        EXPECT_EQ(params(edit, "w").value("clumpChannel", std::string("clumpId")), "clumpId");
+        const std::string bigger = edit.addNode("Clump", "bigger");
+        insertOnLink(edit, "s", "big", "strands", bigger);
+        expectInside(edit, small, "clumpId", "subClumpId");
+        EXPECT_EQ(params(edit, "w").value("clumpChannel", std::string()), "subClumpId") << "reads the small clumps still";
+        EXPECT_EQ(params(edit, "big").value("clumpChannel", std::string("clumpId")), "clumpId") << "not after it";
+    }
     {  // Left alone: a choice made, a Clump given centers, connect alone.
         GraphEdit edit(g.dump());
         const std::string chose = edit.addNode("Clump", "chose", R"({"centersFrom": "inputCurves"})");

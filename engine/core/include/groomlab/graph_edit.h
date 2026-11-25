@@ -81,7 +81,8 @@ public:
     // A Clump the user just wired into a chain after another Clump (issue #115): its strands
     // coming through that Clump (along each node's first input), it is set to clump inside that
     // one's clumps (centersFrom upstreamClump, upstreamChannel that Clump's clumpChannel, its own
-    // clumpChannel subClumpId where it would take the same); after a Braid (the nearer of the
+    // clumpChannel subClumpId where it would take the same, the nodes after it that read its clumps,
+    // a Curl's coherence clump, following that name); after a Braid (the nearer of the
     // two), along each braid's sections (upstreamChannel braidSection). Once: only while its
     // centersFrom is still pick and nothing feeds its centers (a choice the user made stays). connectByHand on a
     // Clump's strands and the inserts (graph_inserts.h, Add Node After) call it; connect alone

@@ -792,6 +792,44 @@ void GraphEdit::connect(const std::string& src, const std::string& dst, const st
     impl_->connect(src, dst, input, output);
 }
 
+// The nodes reading channel `name` as `writer` writes it, in the graph `graphJson` (graphChannels:
+// `writer` the last node writing it before them), through a param holding the name (not an
+// attribute map), as (node, param).
+static std::vector<std::pair<std::string, std::string>> channelReaders(const std::string& graphJson, const std::string& writer,
+                                                                       const std::string& name) {
+    std::vector<std::pair<std::string, std::string>> out;
+    try {
+        for (const auto& [node, channels] : graphChannels(graphJson)) {
+            for (const ChannelRead& r : channels.reads) {
+                if (r.reaches && r.node == writer && r.name == name && r.param.find('.') == std::string::npos) {
+                    out.emplace_back(node, r.param);
+                }
+            }
+        }
+    } catch (const std::exception&) {
+        // (A graph the channels cannot be read from: nothing follows.)
+    }
+    return out;
+}
+
+// A Clump set to clump inside an upstream Clump's clumps (issue #115) writes its own under another
+// name (subClumpId) when it would take that one's: the nodes after it reading its clumps (a Curl's
+// coherence clump, a later Clump's regionChannel; `readers`, found before the rename) read the new
+// name, so they keep reading this Clump's clumps, never the upstream one's (and nothing once that
+// one is gone or writes another name).
+static void followRenamedChannel(json& nodes, const std::vector<std::pair<std::string, std::string>>& readers, const std::string& was,
+                                 const std::string& now) {
+    for (const auto& [reader, param] : readers) {
+        for (json& n : nodes) {
+            if (!n.is_object() || n.value("name", std::string()) != reader) continue;
+            json& params = n["params"];
+            if (!params.is_object()) params = json::object();
+            const auto it = params.find(param);
+            if (it == params.end() || (it->is_string() && it->get<std::string>() == was)) params[param] = now;
+        }
+    }
+}
+
 bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, const std::string& input,
                               const std::string& output) {
     const std::string kind = valueKindForInput(src, dst, input);
@@ -851,6 +889,7 @@ bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, co
                 if (it != n["params"].end() && it->is_string()) upChannel = it->get<std::string>();
             }
         }
+        const std::string before = toJson();  // (who reads its clumps, before it writes them as subClumpId)
         for (json& n : impl_->nodes()) {
             if (!n.is_object() || n.value("name", std::string()) != dst) continue;
             json& params = n["params"];
@@ -861,7 +900,10 @@ bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, co
             params["upstreamChannel"] = upChannel;
             const auto own = params.find("clumpChannel");
             const std::string ownChannel = own != params.end() && own->is_string() ? own->get<std::string>() : std::string("clumpId");
-            if (!upChannel.empty() && ownChannel == upChannel) params["clumpChannel"] = "subClumpId";
+            if (!upChannel.empty() && ownChannel == upChannel) {
+                params["clumpChannel"] = "subClumpId";
+                followRenamedChannel(impl_->nodes(), channelReaders(before, dst, ownChannel), ownChannel, "subClumpId");
+            }
             return true;
         }
         return false;
@@ -934,11 +976,17 @@ bool GraphEdit::adoptUpstreamClump(const std::string& node) {
             if (it != n["params"].end() && it->is_string() && !it->get<std::string>().empty()) upChannel = it->get<std::string>();
         }
     }
-    params["centersFrom"] = "upstreamClump";
-    params["upstreamChannel"] = upChannel;
     const auto own = params.find("clumpChannel");
     const std::string ownChannel = own != params.end() && own->is_string() ? own->get<std::string>() : std::string("clumpId");
-    if (ownChannel == upChannel) params["clumpChannel"] = "subClumpId";
+    // (Who reads its clumps, before it writes them as subClumpId.)
+    const auto readers = ownChannel == upChannel ? channelReaders(toJson(), node, ownChannel)
+                                                 : std::vector<std::pair<std::string, std::string>>();
+    params["centersFrom"] = "upstreamClump";
+    params["upstreamChannel"] = upChannel;
+    if (ownChannel == upChannel) {
+        params["clumpChannel"] = "subClumpId";
+        followRenamedChannel(impl_->nodes(), readers, ownChannel, "subClumpId");
+    }
     return true;
 }
 

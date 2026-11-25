@@ -25,6 +25,10 @@ def write(scalp, rt, force=False):
     mesh = getattr(scalp, "data", None)
     if mesh is None or not hasattr(mesh, "color_attributes"):
         return None
+    if mesh.is_editmode:
+        # In Edit Mode the mesh's attributes hold no data (Blender's edit mesh has them, and puts its
+        # own back on leaving it): written at the next map change or save after it, as not written yet.
+        return None
     try:
         r = process.call("map_color_sets", session=rt.session, have="" if force else _written.get(rt.uid, ""))
     except HelperError as e:
@@ -32,12 +36,12 @@ def write(scalp, rt, force=False):
         return None
     if "sets" not in r:
         return None  # the same maps as written last
-    _written[rt.uid] = r.get("hash", "")
     if int(r.get("vertices") or 0) != len(mesh.vertices):
         if scalp.name not in _warned:
             _warned.add(scalp.name)
             print("GroomLab: %s's mesh does not match the groom's scalp (%d vertices, the maps %d): its maps are "
                   "not written to it" % (scalp.name, len(mesh.vertices), int(r.get("vertices") or 0)))
+        _written[rt.uid] = r.get("hash", "")  # (not asked again until the maps change)
         return None
     try:
         owned = set(json.loads(mesh.get(OWNED_KEY, "[]")))
@@ -65,4 +69,5 @@ def write(scalp, rt, force=False):
             mesh.color_attributes.remove(attribute)
     mesh[OWNED_KEY] = json.dumps(sorted(names))
     mesh.update()
+    _written[rt.uid] = r.get("hash", "")  # (only once written: a write skipped is made again)
     return sorted(names)
