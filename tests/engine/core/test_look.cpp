@@ -2323,6 +2323,20 @@ TEST(Braid, SectionsPassOverAndUnderEachOtherNotThrough) {
     EXPECT_EQ(close, 0u);
 }
 
+TEST(Braid, FeedUntilZeroIsAPonytailBraidThatGathers) {
+    // feed with feedUntil 0 picks up nothing along the path: a ponytail braid, its hair gathered in
+    // over `gather` as without feed (not every strand run straight from its root to the path's).
+    const auto braided = [](bool feed, double feedUntil, double gather) {
+        BraidScene scene("three");
+        scene.setParam("feed", feed);
+        scene.setParam("feedUntil", feedUntil);
+        scene.setParam("gather", gather);
+        return scene.lg.eval(scene.braid)->contentHash();
+    };
+    EXPECT_EQ(braided(true, 0.0, 0.4), braided(false, 0.0, 0.4));
+    EXPECT_NE(braided(true, 0.0, 0.4), braided(true, 0.0, 0.1)) << "gather counts";
+}
+
 TEST(Braid, FedStrandsEndWhereThePathEnds) {
     // A 0.6 long row picking up strands 1.0 long: fitted, none runs past the row's end.
     BraidScene row("cornrow", {{0.2f, 0.01f, 0.5f}, {0.8f, 0.01f, 0.5f}});
@@ -3672,48 +3686,13 @@ TEST(Braid, NoHairPassesThroughABeadOnACurvingBraid) {
     }
 }
 
-TEST(Braid, PancakeLoosensAndLoopsPullSectionsOut) {
-    // pancake: the braid fuller across; loops: a few bundles reach out well past the braid (each
-    // a bundle: many strands together), the rest staying in it; the same draw every time.
-    auto spread = [](double pancake, double loops) {
-        BraidScene scene("three");
-        scene.setParam("tail", 0.0);
-        scene.setParam("widthProfile", Ramp::constant(1.0f));
-        scene.setParam("pancake", pancake);
-        scene.setParam("loops", loops);
-        scene.setParam("loopSize", 0.8);
-        const StrandsPtr out = scene.lg.eval(scene.braid);
-        const std::vector<float>* ids = out->strandChannel("braidId");
-        std::size_t far = 0;
-        float most = 0.0f;
-        for (std::size_t s = 0; s < out->strandCount(); ++s) {
-            if ((*ids)[s] < 0.0f) continue;
-            float reach = 0.0f;
-            for (std::size_t i = out->strandPointCount(s) / 4; i < out->strandPointCount(s); ++i) {
-                const Vec3f q = out->strandPoints(s)[i];
-                reach = std::max(reach, std::hypot(q.x - 0.5f, q.z - 0.5f));
-            }
-            most = std::max(most, reach);
-            far += reach > 0.2f ? 1 : 0;  // past the braid (0.25 wide, its sections within 0.5 of it)
-        }
-        return std::make_pair(most, far);
-    };
-    const auto plain = spread(0.0, 0.0), loose = spread(0.8, 0.0), looped = spread(0.0, 0.4);
-    EXPECT_GT(loose.first, 1.15f * plain.first);
-    EXPECT_EQ(plain.second, 0u);
-    EXPECT_GT(looped.second, 10u);    // whole bundles out
-    EXPECT_GT(looped.first, 0.2f);
-    EXPECT_EQ(spread(0.0, 0.4), looped);
-}
-
 // ---- Version 2: the sections pressed against each other (separate, inflate) ----
 
 const char* const kBraidStyles[] = {"three", "four", "five", "fishtail", "rope", "cornrow"};
 
-BraidSections sectionsOf(const char* style, float pancake, float inflate, int version = 2, int perStep = 16) {
+BraidSections sectionsOf(const char* style, float inflate, int version = 2, int perStep = 16) {
     BraidWeaveSettings settings;
     settings.style = style;
-    settings.pancake = pancake;
     settings.inflate = inflate;
     settings.version = version;
     return braidSections(settings, perStep);
@@ -3791,13 +3770,11 @@ TEST(Braid, AVersionOneNodeBraidsAsBeforeWhateverSeparateAndInflateHold) {
     for (const char* style : kBraidStyles) {
         BraidScene plain(style);
         plain.lg.g.node(plain.braid).setNodeVersion(1);
-        plain.setParam("pancake", 0.3);
         const StrandsPtr was = plain.lg.eval(plain.braid);
         ASSERT_TRUE(was->validate()) << style;
         for (const std::array<double, 2> held : {std::array<double, 2>{0.0, 0.5}, {1.0, 0.0}, {1.0, 1.0}, {0.4, 0.7}}) {
             BraidScene scene(style);
             scene.lg.g.node(scene.braid).setNodeVersion(1);
-            scene.setParam("pancake", 0.3);
             scene.setParam("separate", held[0]);
             scene.setParam("inflate", held[1]);
             const StrandsPtr out = scene.lg.eval(scene.braid);
@@ -3809,7 +3786,6 @@ TEST(Braid, AVersionOneNodeBraidsAsBeforeWhateverSeparateAndInflateHold) {
         }
         BraidScene pressed(style);
         EXPECT_EQ(pressed.lg.g.node(pressed.braid).nodeVersion(), 2) << "a new node is the newest";
-        pressed.setParam("pancake", 0.3);
         const StrandsPtr out = pressed.lg.eval(pressed.braid);
         ASSERT_TRUE(out->validate()) << style;
         ASSERT_EQ(out->strandCount(), was->strandCount()) << style;
@@ -3834,7 +3810,6 @@ TEST(Braid, AVersionOneNodeBraidsAsBeforeWhateverSeparateAndInflateHold) {
         // separate 0 on a version 2 node: its sections plain ellipses again (not version 1's points:
         // its hair is laid in the braid's cross-section), another braid than pressed.
         BraidScene off(style);
-        off.setParam("pancake", 0.3);
         off.setParam("separate", 0.0);
         EXPECT_NE(off.lg.eval(off.braid)->contentHash(), out->contentHash()) << style;
     }
@@ -4051,7 +4026,7 @@ TEST(Braid, PressedSectionsAreTubesAlongTheirOwnCourses) {
             const BraidTubes tubes = braidTubes(scene.lg.g, scene.braid, ctx, detail);
             ASSERT_TRUE(tubes.pressed) << style;
             ASSERT_EQ(tubes.around, 48);
-            ASSERT_EQ(tubes.tubes.size(), static_cast<std::size_t>(sectionsOf(style, 0.0f, 0.5f).sections)) << style;
+            ASSERT_EQ(tubes.tubes.size(), static_cast<std::size_t>(sectionsOf(style, 0.5f).sections)) << style;
             const TubeWalls walls(tubes);
             const float through = deepestInAnother(tubes, walls) / width;
             const RingStats rings = ringsOf(tubes);
@@ -4281,7 +4256,7 @@ TEST(Braid, AFreeEndLeavesTheSectionsForOneBundleAlongThePath) {
         const std::vector<float>* ids = hair->strandChannel("braidId");
         const std::vector<float>* tail = hair->pointChannel("braidTail");
         ASSERT_TRUE(ids && tail) << what;
-        const BraidSections sections = sectionsOf(c.style, 0.0f, 0.5f, c.version);
+        const BraidSections sections = sectionsOf(c.style, 0.5f, c.version);
         const float bundle = width * std::sqrt(static_cast<float>(sections.sections) * sections.halfWidth * sections.halfThick);
         float farthest = 0.0f, nearest = 1e30f, wander = 0.0f, inWeave = 0.0f, acrossRelease = 0.0f;
         std::vector<float> radii;

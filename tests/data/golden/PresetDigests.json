@@ -196,28 +196,6 @@
    "strands": 5073,
    "widths": "61797d7892f46d6a"
   },
-  "braids_loose": {
-   "channels": {
-    "point.braidPress": "0f79bf9f08487f4e",
-    "point.braidTail": "f7773e44c21b231e",
-    "point.braidWoven": "a9555a3e513f2a45",
-    "strand.braidFlat": "30608ee6eb63767c",
-    "strand.braidId": "a629115accb4e184",
-    "strand.braidSection": "65092a2d8b2df533",
-    "strand.colorB": "4a741e546dd869a7",
-    "strand.colorG": "db7ef9c139c76486",
-    "strand.colorR": "549d7c4e72a8a5e9",
-    "strand.melanin": "c720e5903ce46757",
-    "strand.melaninRedness": "ba12ffef6db79a34"
-   },
-   "everything": "a3323957867b64ab",
-   "ids": "20ed751c376a9e91",
-   "points": 89901,
-   "positions": "4c0900b0e4cbd31e",
-   "roots": "3489599712871aca",
-   "strands": 5073,
-   "widths": "31c57b7493db3602"
-  },
   "braids_twists": {
    "channels": {
     "point.braidPress": "657462c6556324db",

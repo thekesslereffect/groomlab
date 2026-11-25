@@ -799,8 +799,6 @@ TEST(Incremental, ABraidAgainGivesThePointsOfItsPathsTables) {
             auto& p = c.node(op::kBraid).params();
             p.set("style", std::string(look.style));
             p.set("end", std::string(look.end));
-            p.set("pancake", look.pancake);
-            p.set("loops", look.loops);
             p.set("ties", look.ties);
             p.set("tail", 0.3);
             p.set("separate", look.separate);

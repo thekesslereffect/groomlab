@@ -380,7 +380,6 @@ gets more clumps of the same size than a head, not the same number stretched ove
 | Braids | `braids_twists` | Two-strand twists all over the head: the Braid's `rope` style (`sections` 3 for three-strand twists) |
 | Braids | `braids_cornrows` | Cornrows along rows you draw (the braids group): `feed` picks the hair up into every crossing from its side, the rows parting halfway, hanging as braids past `feedUntil`, a bead at each end |
 | Braids | `braids_french` | A French braid along one path you draw down the back: fed from both sides down the head, hanging free past `feedUntil`, a hair tie and a tuft at the end (`dutch` for a Dutch braid) |
-| Braids | `braids_loose` | A loose braid along one path you draw (over a shoulder, down the back): `pancake` pulls it apart by hand, `loops` and `loopSize` pull sections of hair out of the braid and back |
 | Braids | `braids_fishtail_ponytail` | A fishtail ponytail from one path you draw from its base: the hair within `region` sweeps over the scalp into it, a hair tie at the base and the end |
 | Hair | `parted_style` | A part drawn with the Part tool: Interpolate and Clump respect it, the Part node opens it |
 | Hair | `tube_locks` | Tube locks (anime): Interpolate with `fillTubes` and `tubeBlend` fills each guide's tube, a Clump with `followTubes` and soft clumps, light Noise, HairColor, tapered Width, Resample; place guides, shape their tubes with the Shape brush |

@@ -47,7 +47,7 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   Editor (Maya, Blender and the app; where a Clump node has Clump Colors), draws the tube each
   section's hair runs in: solid, lit, each section in its own color, in the viewport over the
   hair (the woven hair lies inside its tube; fed and loose hair stay in view). Handy while tuning
-  `inflate`, `separate`, `pancake`, `flatness`, `tightness` and `width`: the tubes follow every
+  `inflate`, `separate`, `flatness`, `tightness` and `width`: the tubes follow every
   edit, and a version 2 node's are its pressed tubes: rings square to each section's own course,
   flat where two sections touch. A version 1 node has no `separate` or `inflate` (its panel lists
   them after **Upgrade**). Click it again to hide them. Several Braid nodes can show theirs at once; a node with
@@ -121,10 +121,6 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   at the other end shrink into one bundle before the tail, which then fans, tufts or goes free
   from it), so there is no hard first or last crossing. Loose hair is the job of the nodes after
   the Braid: a Noise or a Flyaway, masked by `braidWoven` or `braidTail` where wanted.
-- **Loose braids:** `pancake` pulls the sections apart and loosens them (a braid pulled out by
-  hand); `loops` is the share of the crossings where a bundle of one section's hair breaks away
-  from the braid in an arc (`loopSize` braid widths out, each a little more or less) and comes
-  back, as sections do from a loose braid. Ties still hold them (the `braids_loose` preset).
 - **Sections pressed against each other** (Braid version 2: `separate`, `inflate`): each section
   is a tube swept along its own course, its rings square to that course, and the tubes lie against
   each other: flat where one touches another (the surface halfway between the two), round where it
@@ -146,7 +142,7 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   and `flatness` say, whatever `inflate`: the sections grow fat for their spacing, the braid no
   bigger. `separate` (1 by default) is how far they are pressed against each other: at 0 they
   are plain round tubes, as fat as `inflate` makes them, that pass through each other where they
-  cross (and reach farther as they grow). Ties, the taper, `pancake`, `loops` and a fed braid's
+  cross (and reach farther as they grow). Ties, the taper and a fed braid's
   pick-up read the same tubes. The scalp collides with the braid, fed or not: a braid is raised
   only as far as keeps its underside out of the scalp, so one drawn along the scalp lies on it and
   one whose guide is drawn above the scalp or leaves the head stays on its guide (version 1 raised

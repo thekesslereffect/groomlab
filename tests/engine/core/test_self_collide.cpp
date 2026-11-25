@@ -450,5 +450,158 @@ TEST(SelfCollide, Picture) {
     write(*out, "self_collide_after.txt");
 }
 
+
+// ---- Mode locks: whole locks pressed against each other (tube_press.h pressLocks) --------------
+
+namespace locks {
+
+// A lock of strands: 37 strands (rings of 1, 6, 12, 18) filling a round section `radius` wide
+// about a straight course from `from` to `to`, 24 points each, its strands' tubeId `id`.
+void addLock(StrandSet& s, int id, const Vec3f& from, const Vec3f& to, float radius) {
+    const Vec3f along = (to - from).normalized();
+    const Vec3f axis = std::abs(along.y) < 0.9f ? Vec3f{0.0f, 1.0f, 0.0f} : Vec3f{1.0f, 0.0f, 0.0f};
+    const Vec3f n = (axis - along * axis.dot(along)).normalized(), b = along.cross(n);
+    constexpr int kPoints = 24;
+    std::vector<Vec3f> points(kPoints);
+    const std::vector<float> widths(kPoints, 0.01f);
+    int strand = 0;
+    for (const int ring : {0, 1, 2, 3}) {
+        const int count = ring == 0 ? 1 : 6 * ring;
+        for (int k = 0; k < count; ++k) {
+            const float a = 2.0f * kPi * static_cast<float>(k) / static_cast<float>(count);
+            const float r = radius * static_cast<float>(ring) / 3.0f;
+            for (int i = 0; i < kPoints; ++i) {
+                const float t = static_cast<float>(i) / (kPoints - 1);
+                points[static_cast<std::size_t>(i)] = from + (to - from) * t + n * (r * std::cos(a)) + b * (r * std::sin(a));
+            }
+            s.addStrand(static_cast<StrandId>(id * 1000 + strand++), points, widths);
+        }
+    }
+}
+
+void setLocks(StrandSet& s, const std::vector<int>& perLock) {
+    std::vector<float>& ids = s.addStrandChannel("tubeId", -1.0f);
+    std::size_t at = 0;
+    for (std::size_t l = 0; l < perLock.size(); ++l) {
+        for (int k = 0; k < 37; ++k) ids[at++] = static_cast<float>(perLock[l]);
+    }
+}
+
+// Lock 0 along z below, lock 1 along x above, crossing at the origin: their sections 0.5 wide,
+// their courses 0.5 apart in y, so they overlap by half a section where they cross.
+StrandsPtr crossingLocks() {
+    auto s = std::make_shared<StrandSet>();
+    addLock(*s, 0, {0.0f, -0.25f, -2.0f}, {0.0f, -0.25f, 2.0f}, 0.5f);
+    addLock(*s, 1, {-2.0f, 0.25f, 0.0f}, {2.0f, 0.25f, 0.0f}, 0.5f);
+    setLocks(*s, {0, 1});
+    return s;
+}
+
+std::map<std::string, ParamValue> lockParams(double distance = 1.0, double smoothness = 0.5, double volume = 0.0) {
+    return {{"mode", std::string("locks")},
+            {"distance", distance},
+            {"smoothness", smoothness},
+            {"volume", volume},
+            {"profile", Ramp::constant(1.0f)}};
+}
+
+// Over the points within `near` of the crossing (in x and z), lock 0's highest and lock 1's lowest.
+std::pair<float, float> facing(const StrandSet& s, float near = 0.15f) {
+    float top = -1e9f, bottom = 1e9f;
+    for (std::size_t strand = 0; strand < s.strandCount(); ++strand) {
+        const bool first = strand < 37;
+        const Vec3f* p = s.strandPoints(strand);
+        for (std::size_t i = 0; i < s.strandPointCount(strand); ++i) {
+            if (std::abs(p[i].x) > near || std::abs(p[i].z) > near) continue;
+            if (first) top = std::max(top, p[i].y);
+            else bottom = std::min(bottom, p[i].y);
+        }
+    }
+    return {top, bottom};
+}
+
+}  // namespace locks
+
+TEST(SelfCollideLocks, CrossingLocksArePressedApart) {
+    const StrandsPtr in = locks::crossingLocks();
+    const auto [topBefore, bottomBefore] = locks::facing(*in);
+    EXPECT_GT(topBefore - bottomBefore, 0.4f);  // (half a section through each other)
+    for (const double smoothness : {0.0, 0.5, 1.0}) {
+        for (const double volume : {0.0, 1.0}) {
+            const StrandsPtr out = selfCollide(in, nullptr, locks::lockParams(1.0, smoothness, volume));
+            const auto [top, bottom] = locks::facing(*out);
+            EXPECT_LT(top - bottom, 0.03f) << "smoothness " << smoothness << " volume " << volume;
+            // Each lock squashed in, not shoved aside: without volume its far side stays where it was
+            // (with it, it bulges out there).
+            float lowest = 1e9f;
+            for (std::size_t strand = 0; strand < 37; ++strand) {
+                const Vec3f* p = out->strandPoints(strand);
+                for (std::size_t i = 0; i < out->strandPointCount(strand); ++i) lowest = std::min(lowest, p[i].y);
+            }
+            if (volume == 0.0) EXPECT_NEAR(lowest, -0.75f, 0.02f);
+            else EXPECT_LT(lowest, -0.8f);
+        }
+    }
+}
+
+TEST(SelfCollideLocks, LocksApartAndHairInNoLockStay) {
+    auto s = std::make_shared<StrandSet>();
+    locks::addLock(*s, 0, {-2.0f, 0.0f, -2.0f}, {-2.0f, 0.0f, 2.0f}, 0.5f);
+    locks::addLock(*s, 1, {2.0f, 0.0f, -2.0f}, {2.0f, 0.0f, 2.0f}, 0.5f);
+    locks::setLocks(*s, {0, 1});
+    EXPECT_EQ(selfCollide(s, nullptr, locks::lockParams()), s);  // (nothing pressed: the input handed on)
+
+    // Lock 1's hair in no lock: lock 0 meets nothing.
+    StrandsPtr crossing = locks::crossingLocks();
+    auto none = std::make_shared<StrandSet>(*crossing);
+    std::vector<float>& ids = *none->mutableStrandChannel("tubeId");
+    for (std::size_t k = 37; k < ids.size(); ++k) ids[k] = -1.0f;
+    EXPECT_EQ(selfCollide(none, nullptr, locks::lockParams()), none);
+    // No lockChannel channel of that name: the same.
+    auto params = locks::lockParams();
+    params["lockChannel"] = std::string("clumpId");
+    EXPECT_EQ(selfCollide(crossing, nullptr, params), crossing);
+}
+
+TEST(SelfCollideLocks, DistanceEasesTheSwellAlongTheLock) {
+    // With volume, lock 0 swells where lock 1 presses it; past the contact (z 1, half a section
+    // beyond its edge) it swells only with a distance to ease it along.
+    const StrandsPtr in = locks::crossingLocks();
+    const auto moved = [&](double distance) {
+        const StrandsPtr out = selfCollide(in, nullptr, locks::lockParams(distance, 0.0, 1.0));
+        float most = 0.0f;
+        for (std::size_t strand = 0; strand < 37; ++strand) {
+            const Vec3f* a = in->strandPoints(strand);
+            const Vec3f* b = out->strandPoints(strand);
+            for (std::size_t i = 0; i < in->strandPointCount(strand); ++i) {
+                if (std::abs(a[i].z - 1.0f) < 0.1f) most = std::max(most, (b[i] - a[i]).length());
+            }
+        }
+        return most;
+    };
+    EXPECT_LT(moved(0.0), 0.005f);
+    EXPECT_GT(moved(2.0), 0.01f);
+}
+
+TEST(SelfCollideLocks, VolumeSwellsTheFreeSide) {
+    // Lock 0 pressed flat on top where lock 1 lies across it: with volume its hair goes to its free
+    // side (down: lock 1 holds its sides), at most a quarter past its size; without, it stays.
+    const StrandsPtr in = locks::crossingLocks();
+    const auto lowest = [&](double volume) {
+        const StrandsPtr out = selfCollide(in, nullptr, locks::lockParams(1.0, 0.5, volume));
+        float low = 1e9f;
+        for (std::size_t strand = 0; strand < 37; ++strand) {
+            const Vec3f* p = out->strandPoints(strand);
+            for (std::size_t i = 0; i < out->strandPointCount(strand); ++i) {
+                if (std::abs(p[i].z) < 0.1f) low = std::min(low, p[i].y);
+            }
+        }
+        return low;
+    };
+    EXPECT_NEAR(lowest(0.0), -0.75f, 0.02f);
+    EXPECT_LT(lowest(1.0), -0.8f);
+    EXPECT_GT(lowest(1.0), -0.25f - 0.5f * 1.25f - 0.02f);
+}
+
 }  // namespace
 }  // namespace groomlab

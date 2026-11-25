@@ -1322,13 +1322,13 @@ class GraphEditorTest(unittest.TestCase):
 
         self.editor.scene.clearSelection()
         self.editor.items[name].setSelected(True)
-        self.assertTrue({"separate", "inflate", "pancake"} <= listed())
+        self.assertTrue({"separate", "inflate", "flatness"} <= listed())
         self.editor.model.nodes[name]["version"] = 1
         self.editor.scene.clearSelection()
         self.editor.items[name].setSelected(True)
         self.assertEqual(self.editor.model.node_version(name)[0], 1)
         self.assertFalse({"separate", "inflate"} & listed())
-        self.assertIn("pancake", listed())
+        self.assertIn("flatness", listed())
         # (A Braid has actions: its title, and Upgrade with it, is pinned over the params, outside the
         # scrolled body.)
         upgrade = self.editor.findChild(QtWidgets.QToolButton, "upgradeNode")

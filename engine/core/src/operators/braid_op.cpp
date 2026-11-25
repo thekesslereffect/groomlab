@@ -59,12 +59,6 @@
 // `along` input: beads, cuffs and hair ties (groomlab:bead, groomlab:cuff,
 // groomlab:hairTie; sizeMode fitStrand, fitWidth).
 //
-// Loose braids: `pancake` pulls the sections apart and loosens them (a braid pulled
-// out by hand); with `loops`, in a share of the sections' stretches between
-// crossings the hair on the section's outer side bows out off the braid's side
-// (`loopSize` braid widths) and goes back in before the next crossing, as a loose
-// braid's sections do. Ties hold them all the same.
-//
 // Version 2 (a node saved before keeps version 1 until it is upgraded: the sections plain
 // elliptical tubes that pass through each other where they cross): the sections are pressed
 // against each other. Each has an outline of its own in the braid's cross-section: grown
@@ -497,14 +491,9 @@ constexpr float kSteepest = 1.73f;
 
 // Section `section` at `steps` cut by the braid's cross-section. `tilt`: the weave's steps a braid
 // width along the braid (what a course's slope a step comes to a unit along).
-SectionCut cutOf(const Weave& w, int section, float steps, float pancake, float tilt) {
+SectionCut cutOf(const Weave& w, int section, float steps, float tilt) {
     std::array<float, 2> slope{};
     std::array<float, 2> c = w.at(section, steps, &slope);
-    if (pancake > 0.0f) {  // pulled apart: the sections out from the middle (Braider::sectionAt)
-        const float out = 1.0f + 0.45f * pancake;
-        c = {c[0] * out, c[1] * (1.0f + 0.25f * pancake)};
-        slope = {slope[0] * out, slope[1] * (1.0f + 0.25f * pancake)};
-    }
     float side = slope[0] * tilt, depth = slope[1] * tilt;
     const float steep = std::sqrt(side * side + depth * depth);
     if (steep > kSteepest) {
@@ -631,7 +620,7 @@ int repeatOf(const Weave& w, std::vector<int>& next) {
 constexpr double kMostInflate = 4.0;
 
 // Presses a weave's sections against each other (above). `tilt`: cutOf's.
-Pressed pressSections(const Weave& w, float pancake, float inflate, float tilt) {
+Pressed pressSections(const Weave& w, float inflate, float tilt) {
     constexpr int kAround = Pressed::kAround, kPerStep = Pressed::kPerStep;
     constexpr double kGrow = 1.6;    // the growth at inflate 1
     constexpr double kRoom = 1.25;   // the most a tube spreads where it is free, past its grown size, to keep the area others press out of it
@@ -657,8 +646,7 @@ Pressed pressSections(const Weave& w, float pancake, float inflate, float tilt) 
         }
     }
     const std::size_t sections = static_cast<std::size_t>(n);
-    const double loose = 1.0 + 0.6 * pancake;
-    const double a = w.halfWidth * loose, b = w.halfThick * loose;
+    const double a = w.halfWidth, b = w.halfThick;
     // (square roots, not hypot: the same bits on every platform)
     const auto far = [](double x, double y) { return std::sqrt(x * x + y * y); };
     // The reach of the plain tubes, side to side and in depth (version 1's weave where this one is
@@ -669,7 +657,7 @@ Pressed pressSections(const Weave& w, float pancake, float inflate, float tilt) 
         const Weave& was = w.plain ? *w.plain : w;
         for (int k = 0; k < was.sections; ++k) {
             for (int i = 0; i < was.cycle * kPerStep; ++i) {
-                const SectionCut cut = cutOf(was, k, static_cast<float>(i) / static_cast<float>(kPerStep), pancake, tilt);
+                const SectionCut cut = cutOf(was, k, static_cast<float>(i) / static_cast<float>(kPerStep), tilt);
                 reachPlain = {std::max(reachPlain[0], std::abs(static_cast<double>(cut.center[0])) + far(cut.acrossFlat[0] * a, cut.thickFlat[0] * b)),
                               std::max(reachPlain[1], std::abs(static_cast<double>(cut.center[1])) + far(cut.acrossFlat[1] * a, cut.thickFlat[1] * b))};
             }
@@ -679,7 +667,7 @@ Pressed pressSections(const Weave& w, float pancake, float inflate, float tilt) 
     for (int i = 0; i < out.span; ++i) {
         std::array<double, 2> at[Weave::kMostSections];
         for (int k = 0; k < n; ++k) {
-            const SectionCut cut = cutOf(w, k, static_cast<float>(i) / static_cast<float>(kPerStep), pancake, tilt);
+            const SectionCut cut = cutOf(w, k, static_cast<float>(i) / static_cast<float>(kPerStep), tilt);
             at[k] = {cut.center[0] / a, cut.center[1] / b};
         }
         for (int k = 0; k < n; ++k) {
@@ -718,7 +706,7 @@ Pressed pressSections(const Weave& w, float pancake, float inflate, float tilt) 
                    static_cast<std::size_t>(g - block * span);
         };
         std::vector<Ring> tubes(sections * whole);
-        const double outX = (1.0 + 0.45 * pancake) * kx, outY = (1.0 + 0.25 * pancake) * ky;
+        const double outX = kx, outY = ky;
         for (int k = 0; k < n; ++k) {
             for (int i = 0; i < total; ++i) {
                 const std::array<float, 2> c = w.at(k, static_cast<float>(i) / static_cast<float>(per));
@@ -1043,7 +1031,7 @@ void openOutline(std::size_t count, const double* px, const double* py, const do
 // the strips grown, cut as its course tilts (cutOf), rounded, eased along the braid. Its thin
 // fast strips turn too sharply for tubes swept along them (pressSections): the hair of a strip's
 // inner side would fold. No rings: Braider::sectionAt lays the hair in that plane.
-Pressed pressAcross(const Weave& w, float pancake, float inflate, float tilt) {
+Pressed pressAcross(const Weave& w, float inflate, float tilt) {
     constexpr int kAround = Pressed::kAround, kPerStep = Pressed::kPerStep;
     constexpr double kGrow = 2.0;   // the growth at inflate 1
     constexpr double kRound = 0.6;  // the radius an outline's corners are rounded to, in the sections' own size (openOutline)
@@ -1069,8 +1057,7 @@ Pressed pressAcross(const Weave& w, float pancake, float inflate, float tilt) {
     }
     const std::size_t span = static_cast<std::size_t>(out.span), sections = static_cast<std::size_t>(n);
     out.scales.assign(sections * span * kAround, 1.0f);
-    const double loose = 1.0 + 0.6 * pancake;
-    const double a = w.halfWidth * loose, b = w.halfThick * loose;
+    const double a = w.halfWidth, b = w.halfThick;
     double turnCos[kAround], turnSin[kAround];
     for (int j = 0; j < kAround; ++j) {
         turnCos[j] = pm::cos(6.283185307179586 * j / kAround);
@@ -1098,7 +1085,7 @@ Pressed pressAcross(const Weave& w, float pancake, float inflate, float tilt) {
         // (square roots, not hypot: the same bits on every platform)
         auto far = [](double x, double y) { return std::sqrt(x * x + y * y); };
         for (int k = 0; k < n; ++k) {
-            const SectionCut cut = cutOf(w, k, static_cast<float>(i) / static_cast<float>(kPerStep), pancake, tilt);
+            const SectionCut cut = cutOf(w, k, static_cast<float>(i) / static_cast<float>(kPerStep), tilt);
             at[k] = {cut.center[0] / a, cut.center[1] / b, cut.across[0], cut.across[1] * a / b, cut.thick[0] * b / a, cut.thick[1]};
             sums[0] = std::max(sums[0], std::abs(static_cast<double>(cut.center[0])) + far(cut.acrossFlat[0] * a, cut.thickFlat[0] * b));
             sums[1] = std::max(sums[1], std::abs(static_cast<double>(cut.center[1])) + far(cut.acrossFlat[1] * a, cut.thickFlat[1] * b));
@@ -1122,7 +1109,7 @@ Pressed pressAcross(const Weave& w, float pancake, float inflate, float tilt) {
         const Weave& was = *w.plain;
         for (int k = 0; k < was.sections; ++k) {
             for (int i = 0; i < was.cycle * kPerStep; ++i) {
-                const SectionCut cut = cutOf(was, k, static_cast<float>(i) / static_cast<float>(kPerStep), pancake, tilt);
+                const SectionCut cut = cutOf(was, k, static_cast<float>(i) / static_cast<float>(kPerStep), tilt);
                 const double across = std::sqrt(cut.acrossFlat[0] * a * cut.acrossFlat[0] * a + cut.thickFlat[0] * b * cut.thickFlat[0] * b);
                 const double deep = std::sqrt(cut.acrossFlat[1] * a * cut.acrossFlat[1] * a + cut.thickFlat[1] * b * cut.thickFlat[1] * b);
                 reachPlain = {std::max(reachPlain[0], std::abs(static_cast<double>(cut.center[0])) + across),
@@ -1340,7 +1327,7 @@ Pressed pressAcross(const Weave& w, float pancake, float inflate, float tilt) {
 // it is asked again (an evaluation after another param's edit, the next frame, the next Braid node
 // of the same style), and `separate` only blends it in.
 // `across`: in the braid's cross-section (pressAcross).
-std::shared_ptr<const Pressed> pressedFor(const Weave& w, float pancake, float inflate, float tilt, bool across) {
+std::shared_ptr<const Pressed> pressedFor(const Weave& w, float inflate, float tilt, bool across) {
     struct Kept {
         std::mutex mutex;
         std::vector<std::pair<std::uint64_t, std::shared_ptr<const Pressed>>> solved;  // the last asked first
@@ -1368,7 +1355,7 @@ std::shared_ptr<const Pressed> pressedFor(const Weave& w, float pancake, float i
         return static_cast<std::uint64_t>(u);
     };
     std::uint64_t key = hashCombine(static_cast<std::uint64_t>(w.sections) * 4 + (w.round ? 1 : 0), static_cast<std::uint64_t>(w.cycle));
-    for (const float v : {w.halfWidth, w.halfThick, pancake, inflate, tilt}) key = hashCombine(key, bits(v));
+    for (const float v : {w.halfWidth, w.halfThick, inflate, tilt}) key = hashCombine(key, bits(v));
     key = hashCombine(key, (w.plain ? 1u : 0u) + (across ? 2u : 0u));
     for (const auto& t : w.tracks) {
         for (const auto& c : t) key = hashCombine(key, bits(c[0]) << 32 | bits(c[1]));
@@ -1382,7 +1369,7 @@ std::shared_ptr<const Pressed> pressedFor(const Weave& w, float pancake, float i
         }
     }
     const ProfileScope profile("braid.press");
-    Pressed made = across ? pressAcross(w, pancake, inflate, tilt) : pressSections(w, pancake, inflate, tilt);
+    Pressed made = across ? pressAcross(w, inflate, tilt) : pressSections(w, inflate, tilt);
     markContacts(made);
     auto solved = std::make_shared<const Pressed>(std::move(made));
     const std::lock_guard<std::mutex> lock(kept.mutex);
@@ -1648,7 +1635,6 @@ struct Braider {
     float clearLift = 0.0f;
     End end = End::Fan;
     float release = 1.5f;  // end free: braid widths the sections take to let go (releaseLength)
-    float pancake = 0.0f, loops = 0.0f, loopSize = 0.5f;
     // Version 2: the sections pressed against each other (press), null: plain ellipses. `separate`
     // blends the outlines in, `keep` is the cross-section's scale with them (Pressed::keep, blended),
     // `tilt` the weave's steps a braid width (cutOf).
@@ -1671,7 +1657,7 @@ struct Braider {
     void press(float inflate, float share) {
         if (weave.sections < 2) return;
         tilt = tightness / std::max(weave.stepLength, 1e-6f);
-        pressed = pressedFor(weave, pancake, inflate, tilt, style == Style::Fishtail);
+        pressed = pressedFor(weave, inflate, tilt, style == Style::Fishtail);
         separate = std::clamp(share, 0.0f, 1.0f);
         keep = {1.0f + (pressed->keep[0] - 1.0f) * separate, 1.0f + (pressed->keep[1] - 1.0f) * separate};
         if (style == Style::Cornrow) weave.lift += (-pressed->lowest - weave.lift) * separate;
@@ -2019,7 +2005,7 @@ struct Braider {
     SectionStation sectionAt(int section, const PathStation& st) const {
         if (pressed && pressed->rings.empty()) {
             // (pressAcross: the section where the braid's cross-section cuts it, the whole scaled to the braid's reach)
-            const SectionCut cut = cutOf(weave, section, st.steps, pancake, tilt);
+            const SectionCut cut = cutOf(weave, section, st.steps, tilt);
             SectionStation sec;
             sec.center = Vec3f{(cut.center[1] * keep[1] + st.lift) * st.wid, cut.center[0] * keep[0] * st.wid, 0.0f};
             sec.across = Vec3f{cut.across[1] * keep[1], cut.across[0] * keep[0], 0.0f};
@@ -2030,11 +2016,6 @@ struct Braider {
         }
         std::array<float, 2> slope{};
         std::array<float, 2> c = weave.at(section, st.steps, &slope);
-        if (pancake > 0.0f) {  // pulled apart: the sections out from the middle, looser and wider
-            const float out = 1.0f + 0.45f * pancake;
-            c = {c[0] * out, c[1] * (1.0f + 0.25f * pancake)};
-            slope = {slope[0] * out, slope[1] * (1.0f + 0.25f * pancake)};
-        }
         const float wid = st.wid, rate = st.rate;
         SectionStation sec;
         sec.center = Vec3f{(c[1] + st.lift) * wid, c[0] * wid, 0.0f};
@@ -2064,14 +2045,12 @@ struct Braider {
         }
         return sec;
     }
-    // A strand's spot in its section (from the unit disc: looser, wider sections with pancake) and
-    // its end's fan, by its draws.
+    // A strand's spot in its section (from the unit disc) and its end's fan, by its draws.
     StrandSpot spotOf(const StrandDraws& d) const {
-        const float loose = 1.0f + 0.6f * pancake;
         StrandSpot spot;
         spot.inBundle = true;
-        spot.across = d.inLobe.x * weave.halfWidth * loose;
-        spot.thick = d.inLobe.y * weave.halfThick * loose;
+        spot.across = d.inLobe.x * weave.halfWidth;
+        spot.thick = d.inLobe.y * weave.halfThick;
         spot.out = std::min(std::sqrt(d.inLobe.x * d.inLobe.x + d.inLobe.y * d.inLobe.y) / kLobeReach, 1.0f);
         if (end != End::Tuft) {
             spot.fanDepth = style == Style::Cornrow ? std::abs(pm::sin(d.fanAngle)) : pm::sin(d.fanAngle);
@@ -2102,53 +2081,6 @@ struct Braider {
         }
         return table;
     }
-    // The hair a section lets out of the braid at `steps` for a strand at `spot` within it: at a
-    // share `loops` of the sections' stretches between crossings along the braid's edge (each
-    // section's own), the hair on its outer side bows out off the braid's side and goes back in
-    // before the next crossing, most at the section's outer edge, less toward its inside (how far
-    // in it reaches, each loop its own): a section of the braid pulled loose, its hair together.
-    // `pressedTo`: the scale the section's outline puts the strand's spot at (1: a plain ellipse).
-    Vec3f loopAt(int section, float steps, const Vec3f& spot, float wid, float pressedTo) const {
-        if (!(loops > 0.0f) || !(loopSize > 0.0f) || weave.lobes.empty()) return {};
-        const auto& mine = weave.lobes[static_cast<std::size_t>(section)];
-        if (mine.empty()) return {};
-        const float cycle = static_cast<float>(weave.cycle);
-        const float turn = std::floor(steps / cycle), within = steps - turn * cycle;
-        for (std::size_t k = 0; k < mine.size(); ++k) {
-            for (int wrap = 0; wrap < 2; ++wrap) {  // (a stretch past the cycle's end, from the turn before)
-                const float at = within + static_cast<float>(wrap) * cycle;
-                if (at < mine[k][0] || at >= mine[k][1]) continue;
-                const float u = (at - mine[k][0]) / (mine[k][1] - mine[k][0]);
-                const std::int64_t visit = static_cast<std::int64_t>(turn) - wrap;
-                const std::uint64_t key = hash64(hashCombine(hashCombine(seed ^ 0x100F5ull, static_cast<std::uint64_t>(section * 64 + static_cast<int>(k))),
-                                                             static_cast<std::uint64_t>(visit + (1ll << 32))));
-                if (unitFloat(key) >= loops) return {};
-                // Its side: where the stretch's middle is.
-                const float mid = 0.5f * (mine[k][0] + mine[k][1]);
-                const float side = weave.at(section, mid)[0] >= 0.0f ? 1.0f : -1.0f;
-                // The bundle: the hair out from how far in this loop reaches (spot.x along the band's
-                // width, toward the side), out together, a gap left between it and the rest; a
-                // little more toward the outer edge, as a loose loop fans.
-                const float reachIn = -0.1f + 0.6f * unitFloat(hash64(key ^ 0xB0D1ull));
-                const float edge = side * spot.x;
-                // (in the loop or not: hair between would web the gap shut)
-                const float pulled = edge > reachIn ? 0.85f + 0.15f * std::clamp((edge - reachIn) / (1.0f - reachIn), 0.0f, 1.0f) : 0.0f;
-                if (!(pulled > 0.0f)) return {};
-                const float size = loopSize * (0.6f + 0.8f * unitFloat(hash64(key ^ 0x51Eull)));
-                const float swell = pm::sin(kPi * u);
-                const float bow = swell * size * wid * pulled;
-                // Clumped as it leaves: the bundle's hair drawn in toward its own middle (half way
-                // out its share of the section), a lock of its own with a gap between it and the braid.
-                const float clump = 0.85f * swell;
-                const float loose = 1.0f + 0.6f * pancake;
-                const float toX = (side * 0.5f * (reachIn + 1.0f) - spot.x) * clump * weave.halfWidth * loose * wid * pressedTo;
-                const float toY = -spot.y * clump * weave.halfThick * loose * wid * pressedTo;
-                return {0.35f * bow + toY, side * bow + toX, 0.0f};  // off the side, a little up
-            }
-        }
-        return {};
-    }
-
     // The braid's point `at` a distance along `path` for a strand in `section` (-1: the path
     // itself) with draws `d`: its section's offset in the path's frame, letting go and fanning out
     // over the tail.
@@ -2181,7 +2113,7 @@ struct Braider {
         const float side = std::clamp((qx * cs - qy * sn) / chord, -1.0f, 1.0f);
         const float within = 1.0f - (pm::acos(out) - out * chord) / kPi;  // the disc's share no farther out
         const float angle = sector + side * kPi / n;
-        const float radius = std::sqrt(n * weave.halfWidth * weave.halfThick) * (1.0f + 0.6f * pancake) * st.wid;
+        const float radius = std::sqrt(n * weave.halfWidth * weave.halfThick) * st.wid;
         return Vec3f{pm::sin(angle), pm::cos(angle), 0.0f} * (kLobeReach * std::sqrt(std::max(within, 0.0f)) * radius);
     }
     // The same from the station and its section's band (stationAt, sectionAt: as they are worked
@@ -2219,8 +2151,6 @@ struct Braider {
             if (spot.inBundle) loose = loose + bundleSpot(st, section, d) * (bundled * (1.0f - letGo));
         }
         Vec3f offset = local + loose;
-        // Loose bundles looping out of their section (loops) go before the ties: those hold them too.
-        offset = offset + loopAt(section, st.steps, d.inLobe, wid, pressedTo) * ((1.0f - letGo) * (1.0f - bundled));
         if (st.release < 1.0f) {  // held by a tie (stationAt)
             const float n = offset.x - st.tieAxis.x, b = offset.y - st.tieAxis.y, r = std::sqrt(n * n + b * b);
             if (r > st.most) {
@@ -2540,19 +2470,6 @@ public:
                 .soft(0, 1)
                 .addedIn(2)
                 .in("Sections"),
-            ParamSpec{"pancake", 0.0, "Pulls the sections apart and loosens them: the loose, chunky look of a braid "
-                                      "pulled out by hand (mappable, per braid)", "fraction"}
-                .range(0, 1)
-                .in("Loose"),
-            ParamSpec{"loops", 0.0, "Share of the sections' stretches between crossings where the hair on the "
-                                    "section's outer side bows out of the braid in a loop and goes back in before the "
-                                    "next crossing (mappable, per braid)", "fraction"}
-                .range(0, 1)
-                .in("Loose"),
-            ParamSpec{"loopSize", 0.5, "How far a loop reaches out, in braid widths (each a little more or less; mappable, per braid)"}
-                .atLeast(0)
-                .soft(0, 1.5)
-                .in("Loose"),
             ParamSpec{"roll", 0.0, "Turns the braid's face about its path, degrees (it faces out of the scalp, or away "
                                    "from the head; mappable, per braid)", "angle"}
                 .soft(-180, 180)
@@ -2564,7 +2481,8 @@ public:
             ParamSpec{"feed", false, "Pick up strands all along the path, where they grow (cornrows, French braids)"}
                 .in("Feed"),
             ParamSpec{"feedUntil", 1.0, "With feed: pick up strands along this share of the path only; past it the "
-                                        "braid hangs free (0: only the root region, a ponytail braid)", "fraction"}
+                                        "braid hangs free (0: only the root region, a ponytail braid: its hair gathered in as "
+                                        "without feed)", "fraction"}
                 .range(0, 1)
                 .in("Feed")
                 .when("feed", {"true"}),
@@ -2708,11 +2626,13 @@ private:
         br.taperTangents = br.taper.tangents();
         const float region = static_cast<float>(params().getDouble("region"));
         // (Paths of its own, about region apart, cover the scalp: every strand joins the nearest.)
-        br.region2 = own && !params().getBool("feed") ? std::numeric_limits<float>::infinity() : region * region;
+        // Feed picking up nothing along the path (feedUntil 0: only the root region) is a ponytail
+        // braid: the hair gathers into it at the root, as without feed.
+        const bool feed = params().getBool("feed") && params().getDouble("feedUntil") > 0.0;
+        br.region2 = own && !feed ? std::numeric_limits<float>::infinity() : region * region;
         br.end = endFrom(params().getString("end"));
         br.ties = static_cast<int>(params().getInt("ties"));
         br.seed = static_cast<std::uint64_t>(params().getInt("seed"));
-        const bool feed = params().getBool("feed");
         br.feeds = feed;
         if (feed) br.feedUntil = static_cast<float>(params().getDouble("feedUntil"));
         // The settings its numbers give (`number`: a param's number, or its value at a path).
@@ -2726,9 +2646,6 @@ private:
             b.gather = number("gather");
             b.tail = b.end == End::Bound ? 0.0f : number("tail");
             b.release = std::max(number("release"), 0.0f);
-            b.pancake = number("pancake");
-            b.loops = number("loops");
-            b.loopSize = number("loopSize");
             b.tieLength = number("tieLength");
             b.tieSpacing = number("tieSpacing");
             b.cinch = number("cinch");
@@ -2743,9 +2660,9 @@ private:
         };
         // Mapped params read per path, at its root (its guide's; a path of its own: its strand's):
         // each path braided with its own settings (Braider::perPath).
-        static constexpr const char* kPerPath[] = {"width", "tightness", "flatness", "separate", "inflate", "pancake",
-                                                   "loops", "loopSize", "roll", "gather", "gatherSmoothness", "tail",
-                                                   "tailSmoothness", "release", "tieLength", "tieSpacing", "cinch"};
+        static constexpr const char* kPerPath[] = {"width", "tightness", "flatness", "separate", "inflate", "roll",
+                                                   "gather", "gatherSmoothness", "tail", "tailSmoothness", "release",
+                                                   "tieLength", "tieSpacing", "cinch"};
         bool perPath = false;
         for (const char* name : kPerPath) perPath = perPath || paramMapped(params(), name);
         const Braider base = br;  // (before its numbers: what each path's settings start from)
@@ -2924,8 +2841,6 @@ private:
         if (ties) *ties = tieStrands(br, channels);
         if (sections) *sections = sectionGuides(br, channels);
         if (tubes) {
-            br.loops = 0.0f;  // (hair let out of its section: not the section's)
-            for (const std::shared_ptr<Braider>& o : ownSettings) o->loops = 0.0f;
             phase.next("braid.tubes");
             sectionTubesOf(br, channels, feed, tubePoints, *tubes);
             return true;
@@ -3271,8 +3186,7 @@ private:
             if (stretch.rings == 0) return;
             const BraidPath& path = br.paths[b];
             const Braider& own = br.of(b);  // (its settings)
-            const float loose = 1.0f + 0.6f * own.pancake;
-            const float halfWidth = own.weave.halfWidth * loose, halfThick = own.weave.halfThick * loose;
+            const float halfWidth = own.weave.halfWidth, halfThick = own.weave.halfThick;
             const std::size_t rings = stretch.rings;
             const float from = stretch.from, to = stretch.to;
             StrandDraws centered;  // no spot of its own, no fan, no wander
@@ -3493,7 +3407,6 @@ BraidSections braidSections(const BraidWeaveSettings& settings, int perStep, int
     br.style = styleFrom(settings.style);
     const bool pressing = settings.version >= 2;
     br.weave = weaveFor(br.style, settings.sections, settings.dutch, settings.flatness, pressing);
-    br.pancake = settings.pancake;
     br.tightness = std::max(settings.tightness, 0.05f);
     if (pressing) br.press(settings.inflate, settings.separate);
     BraidSections out;
@@ -3503,9 +3416,8 @@ BraidSections braidSections(const BraidWeaveSettings& settings, int perStep, int
     out.around = std::max(around, 3);
     out.round = br.weave.round;
     out.pressed = br.pressed != nullptr;
-    const float loose = 1.0f + 0.6f * br.pancake;
-    out.halfWidth = br.weave.halfWidth * loose;
-    out.halfThick = br.weave.halfThick * loose;
+    out.halfWidth = br.weave.halfWidth;
+    out.halfThick = br.weave.halfThick;
     if (br.pressed) {
         out.keep = br.keep;
         out.grown = br.pressed->grown;
