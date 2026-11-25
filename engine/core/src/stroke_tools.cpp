@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <cctype>
 #include <cmath>
 #include <stdexcept>
@@ -13,6 +14,7 @@
 
 #include "groomlab/curve.h"
 #include "groomlab/graph.h"
+#include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/guide_selection.h"
@@ -777,8 +779,92 @@ ParamMapRef paramMapOf(const std::string& graphJson, const ScalpMaps& maps, cons
     return {source.map, source.kind};
 }
 
+namespace {
+
+// wireParamMap with mapNode: the map's Map node wired into the param.
+std::string wireParamMapNode(const std::string& graphJson, const ScalpMaps& maps, const std::string& node, const std::string& param,
+                             const std::string& map, const std::string& kind) {
+    nlohmann::json g = graphOf(graphJson);
+    nlohmann::json& n = nodeNamed(g, node);
+    if (kind == "texture") {
+        const auto it = maps.maps.find(map);
+        if (it == maps.maps.end() || it->second.kind != "texture") throw std::runtime_error("the groom has no texture map named " + map);
+    }
+    bool names = false;  // a param naming a map (Interpolate's regionMap): it takes the map's name
+    try {
+        const nlohmann::json complete = nlohmann::json::parse(completeGraphJson(g.dump()), nullptr, false);
+        if (complete.is_object() && complete.contains("nodes")) {
+            for (const nlohmann::json& c : complete["nodes"]) {
+                if (!c.is_object() || c.value("name", std::string()) != node) continue;
+                const nlohmann::json params = c.value("params", nlohmann::json::object());
+                if (params.is_object() && params.contains(param) && params[param].is_string()) names = true;
+            }
+        }
+    } catch (const std::exception&) {
+        // An incomplete graph: a number param.
+    }
+    if (!n.contains("params") || !n["params"].is_object()) n["params"] = nlohmann::json::object();
+    if (!g.contains("connections") || !g["connections"].is_array()) g["connections"] = nlohmann::json::array();
+    auto& list = g["connections"];
+    auto unwire = [&] {
+        list.erase(std::remove_if(list.begin(), list.end(),
+                                  [&](const nlohmann::json& c) {
+                                      return c.is_object() && c.value("to", std::string()) == node &&
+                                             c.value("input", std::string()) == param;
+                                  }),
+                   list.end());
+    };
+    if (names) {
+        n["params"][param] = map;
+        unwire();
+        return g.dump();
+    }
+    // A number param: a Map node reading the map (one per map, made left of the node) wired into
+    // the param's input, in the graph to see. The param keeps its number, the slider: the map's
+    // 0-1 multiplies it (ScalarField), so white is the param as it was and the slider still scales
+    // it. A map read in the param itself before ({guide|colorSet|texture, min, max}) gives way: the
+    // param back to its number (its max).
+    nlohmann::json& own = n["params"];
+    if (own.contains(param) && own[param].is_object()) {
+        const nlohmann::json& old = own[param];
+        if (old.contains("max") && old["max"].is_number()) {
+            own[param] = old["max"];
+        } else {
+            own.erase(param);
+        }
+    }
+    unwire();
+    GraphEdit edit(g.dump());
+    std::string mapNode;
+    for (const nlohmann::json& other : g["nodes"]) {
+        if (!other.is_object() || other.value("type", std::string()) != "Map") continue;
+        const nlohmann::json params = other.value("params", nlohmann::json::object());
+        if (params.is_object() && params.value("name", std::string("mask")) == map) {
+            mapNode = other.value("name", std::string());
+            break;
+        }
+    }
+    if (mapNode.empty()) {
+        std::optional<double> x, y;
+        if (n.contains("ui") && n["ui"].is_object()) {
+            const nlohmann::json& ui = n["ui"];
+            if (ui.contains("x") && ui["x"].is_number() && ui.contains("y") && ui["y"].is_number()) {
+                x = ui["x"].get<double>() - 240.0;  // a column (graph_edit.cpp's) to its left, a little below
+                y = ui["y"].get<double>() + 140.0;
+            }
+        }
+        mapNode = edit.addNode("Map", edit.uniqueName(map), nlohmann::json{{"name", map}}.dump(), x, y);
+    }
+    exposeParam(edit, node, param);
+    edit.connect(mapNode, node, param);
+    return edit.toJson();
+}
+
+}  // namespace
+
 std::string wireParamMap(const std::string& graphJson, const ScalpMaps& maps, const std::string& node, const std::string& param,
-                         const std::string& map, const std::string& kind) {
+                         const std::string& map, const std::string& kind, bool mapNode) {
+    if (mapNode) return wireParamMapNode(graphJson, maps, node, param, map, kind);
     nlohmann::json g = graphOf(graphJson);
     nlohmann::json& n = nodeNamed(g, node);
     // White: 1 x the param's value, as it was (its default when the node leaves it out).

@@ -610,10 +610,14 @@ class GROOMLAB_OT_graph_map_source(_ParamOp):
     low: FloatProperty(name="Min", default=0.0, description="The value at the map's black (0)")
     high: FloatProperty(name="Max", default=1.0, description="The value at the map's white (1)")
     clear: BoolProperty(options={"SKIP_SAVE"}, description="Back to a plain value (the param's default)")
+    color: BoolProperty(options={"SKIP_SAVE", "HIDDEN"})  # a color (ColorLayers'): the map's r g b, no channel
 
     def invoke(self, context, event):
         node = _node(context, self.node)
         value = graph_tree.values(node).get(self.param) if node is not None else None
+        if node is not None:
+            spec = next((s for s in graph_tree.node_param_specs(node) if s["name"] == self.param), {})
+            self.color = bool(spec.get("colorField"))
         source, name = map_source(value)
         if source:
             self.source = source
@@ -630,7 +634,8 @@ class GROOMLAB_OT_graph_map_source(_ParamOp):
             layout.label(text="Edit the code in its text block (Edit Expression)", icon="TEXT")
         else:
             layout.prop(self, "name")
-            layout.prop(self, "component")
+            if not self.color:
+                layout.prop(self, "component")
         row = layout.row(align=True)
         row.prop(self, "low")
         row.prop(self, "high")
@@ -654,7 +659,7 @@ class GROOMLAB_OT_graph_map_source(_ParamOp):
                     self.report({"WARNING"}, "Name the %s to read" % dict((s[0], s[1].lower()) for s in MAP_SOURCES)[self.source])
                     return {"CANCELLED"}
                 value[self.source] = self.name
-                if self.component != "DEFAULT":
+                if self.component != "DEFAULT" and not self.color:
                     value["component"] = self.component
             set_map(scalp, node.gl_name, self.param, value)
         except HelperError as e:

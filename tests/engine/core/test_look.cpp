@@ -1295,7 +1295,10 @@ TEST(ClumpCenters, ClumpByReadsOnlyTheOneItPicks) {
         if (op["type"] != "Clump") continue;
         for (const nlohmann::json& p : op["params"]) {
             if (p["name"] == "count") EXPECT_EQ(p["showWhen"], (nlohmann::json{{"param", "clumpBy"}, {"in", {"count"}}}));
-            if (p["name"] == "clumpBy") EXPECT_EQ(p["showWhen"], (nlohmann::json{{"param", "centersFrom"}, {"in", {"pick"}}}));
+            // (Its own centers: pick, and upstreamClump's inside an upstream Clump's, issue #115.)
+            if (p["name"] == "clumpBy") {
+                EXPECT_EQ(p["showWhen"], (nlohmann::json{{"param", "centersFrom"}, {"in", {"pick", "upstreamClump"}}}));
+            }
         }
     }
 }
@@ -2259,6 +2262,114 @@ TEST(Braid, EveryStyleAndCornrowsStayAboveTheScalp) {
     EXPECT_GT(checked, 20u);
     BraidScene bad("zigzag");
     EXPECT_THROW(bad.lg.eval(bad.braid), GraphError);
+}
+
+TEST(Braid, ABraidHangingPastTheScalpsOpenEdgeFollowsItsPath) {
+    // A braid laid over the edge of an open scalp (the plane's, as a neck's cut) and hanging down
+    // past it, well below its level: there it is not sunk into the scalp (its closest point is on the
+    // scalp's open edge), so it is not lifted off its path but follows it.
+    std::vector<Vec3f> path;
+    auto add = [&](Vec3f a, Vec3f b, int n) {
+        for (int k = 0; k < n; ++k) path.push_back(a + (b - a) * (static_cast<float>(k) / static_cast<float>(n)));
+    };
+    add({0.5f, 0.0f, 0.5f}, {0.5f, 0.4f, 0.5f}, 8);
+    add({0.5f, 0.4f, 0.5f}, {1.2f, 0.4f, 0.5f}, 14);
+    add({1.2f, 0.4f, 0.5f}, {1.35f, -1.2f, 0.5f}, 30);  // (hanging down past the edge, well below its level)
+    path.push_back({1.35f, -1.2f, 0.5f});
+    BraidScene scene("three", path);
+    const StrandsPtr out = scene.lg.eval(scene.braid);
+    ASSERT_TRUE(out);
+    const std::vector<float>& braid = *out->strandChannel("braidId");
+    const std::vector<float>& woven = *out->pointChannel("braidWoven");
+    const std::vector<float>& tail = *out->pointChannel("braidTail");
+    const float width = static_cast<float>(scene.lg.g.node(scene.braid).params().getDouble("width"));
+    auto fromPath = [&](const Vec3f& q) {
+        float best = 1e30f;
+        for (std::size_t k = 0; k + 1 < path.size(); ++k) {
+            const Vec3f a = path[k], ab = path[k + 1] - a;
+            const float t = std::clamp((q - a).dot(ab) / std::max(ab.dot(ab), 1e-12f), 0.0f, 1.0f);
+            best = std::min(best, (q - (a + ab * t)).length());
+        }
+        return best;
+    };
+    // The braid's middle at each share along its strands (their woven points' mean there: the
+    // Braider places a point by its share along the path, whatever the strand's length).
+    constexpr std::size_t kBins = 40;
+    std::vector<Vec3f> sum(kBins);
+    std::vector<std::size_t> count(kBins, 0);
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const std::size_t n = out->strandPointCount(s);
+        if (braid[s] < 0.0f || n < 2) continue;
+        for (std::size_t i = 1; i < n; ++i) {
+            const std::size_t at = out->strandBegin(s) + i;
+            if (woven[at] < 0.99f || tail[at] > 0.01f) continue;
+            const auto bin = std::min<std::size_t>(kBins - 1, i * kBins / n);
+            sum[bin] = sum[bin] + out->strandPoints(s)[i];
+            ++count[bin];
+        }
+    }
+    float worst = 0.0f;
+    std::size_t below = 0;
+    for (std::size_t k = 0; k < kBins; ++k) {
+        if (count[k] < 20) continue;
+        const Vec3f middle = sum[k] / static_cast<float>(count[k]);
+        if (middle.x < 1.1f || middle.y > -0.1f) continue;  // (out past the edge and below the scalp)
+        ++below;
+        worst = std::max(worst, fromPath(middle));
+    }
+    ASSERT_GT(below, 3u);
+    EXPECT_LT(worst, 0.25f * width) << "the braid leaves its path below the scalp's open edge (braid width " << width << ")";
+}
+
+TEST(Braid, ABraidPassingOverTheScalpsOpenEdgeHasNoKinkThere) {
+    // A braid laid along the scalp, a little into it, and on out past its open edge (a neck's cut): the
+    // lift that keeps it out of the scalp eases off toward the edge, so the braid crosses it with no
+    // kink (its offset from its path changes smoothly, never jumps where the scalp ends).
+    std::vector<Vec3f> path;
+    auto add = [&](Vec3f a, Vec3f b, int n) {
+        for (int k = 0; k < n; ++k) path.push_back(a + (b - a) * (static_cast<float>(k) / static_cast<float>(n)));
+    };
+    add({0.5f, 0.0f, 0.5f}, {0.55f, -0.03f, 0.5f}, 4);
+    add({0.55f, -0.03f, 0.5f}, {1.8f, -0.03f, 0.5f}, 60);
+    path.push_back({1.8f, -0.03f, 0.5f});
+    BraidScene scene("three", path);
+    const StrandsPtr out = scene.lg.eval(scene.braid);
+    ASSERT_TRUE(out);
+    const std::vector<float>& braid = *out->strandChannel("braidId");
+    const std::vector<float>& woven = *out->pointChannel("braidWoven");
+    const std::vector<float>& tail = *out->pointChannel("braidTail");
+    const float width = static_cast<float>(scene.lg.g.node(scene.braid).params().getDouble("width"));
+    constexpr std::size_t kBins = 60;
+    std::vector<Vec3f> sum(kBins);
+    std::vector<std::size_t> count(kBins, 0);
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const std::size_t n = out->strandPointCount(s);
+        if (braid[s] < 0.0f || n < 2) continue;
+        for (std::size_t i = 1; i < n; ++i) {
+            const std::size_t at = out->strandBegin(s) + i;
+            if (woven[at] < 0.99f || tail[at] > 0.01f) continue;
+            const auto bin = std::min<std::size_t>(kBins - 1, i * kBins / n);
+            sum[bin] = sum[bin] + out->strandPoints(s)[i];
+            ++count[bin];
+        }
+    }
+    // The braid's middle's offset from the path (the straight run at y -0.03), bin to bin.
+    float jump = 0.0f, lastLift = 0.0f;
+    bool first = true;
+    std::size_t over = 0, past = 0;
+    for (std::size_t k = 0; k < kBins; ++k) {
+        if (count[k] < 20) continue;
+        const Vec3f middle = sum[k] / static_cast<float>(count[k]);
+        if (middle.x < 0.7f || middle.x > 1.6f) continue;
+        (middle.x < 1.0f ? over : past) += 1;
+        const float lift = std::sqrt((middle.y + 0.03f) * (middle.y + 0.03f) + (middle.z - 0.5f) * (middle.z - 0.5f));
+        if (!first) jump = std::max(jump, std::abs(lift - lastLift));
+        first = false;
+        lastLift = lift;
+    }
+    ASSERT_GT(over, 3u);
+    ASSERT_GT(past, 3u);
+    EXPECT_LT(jump, 0.08f * width) << "the braid jumps where the scalp's open edge ends it (braid width " << width << ")";
 }
 
 TEST(Braid, FlatnessTightnessRollAndSectionsShapeTheWeave) {
@@ -6238,6 +6349,243 @@ TEST(Clump, WithoutCentersPicksItsOwn) {
     EXPECT_EQ(maxDisplacement(*before, *none), 0.0f);
     ASSERT_NE(none->strandChannel("clumpId"), nullptr);
     for (const float id : *none->strandChannel("clumpId")) EXPECT_EQ(id, -1.0f);
+}
+
+TEST(Clump, UpstreamClumpMakesSmallerClumpsInsideTheBigOnes) {
+    // Issue #115: a big Clump, then a small one of centersFrom upstreamClump: the small clumps lie
+    // inside the big ones (never two big clumps' strands in one small clump), more of them, the big
+    // clumps' numbers kept, and each small clump draws its strands closer together still.
+    LookGraph lg;
+    const NodeId big = lg.add(op::kClump, lg.scatter);
+    lg.g.node(big).params().set("count", std::int64_t{6});
+    const NodeId small = lg.add(op::kClump, big);
+    lg.g.node(small).params().set("count", std::int64_t{40});
+    lg.g.node(small).params().set("clumpChannel", std::string("subClumpId"));
+    lg.g.node(small).params().set("centersFrom", std::string("upstreamClump"));
+    const StrandsPtr bigOut = lg.eval(big);
+    const StrandsPtr out = lg.eval(small);
+    const auto* bigIds = out->strandChannel("clumpId");
+    const auto* subIds = out->strandChannel("subClumpId");
+    ASSERT_NE(bigIds, nullptr);
+    ASSERT_NE(subIds, nullptr);
+    EXPECT_EQ(*bigIds, *bigOut->strandChannel("clumpId")) << "the big clumps' numbers kept";
+    auto crossing = [&](const std::vector<float>& sub) {
+        std::map<int, std::set<int>> bigsOf;
+        for (std::size_t s = 0; s < sub.size(); ++s) {
+            if (sub[s] >= 0.0f) bigsOf[static_cast<int>(sub[s])].insert(static_cast<int>((*bigIds)[s]));
+        }
+        std::size_t across = 0;
+        for (const auto& [id, bigs] : bigsOf) across += bigs.size() > 1;
+        return std::make_pair(across, bigsOf.size());
+    };
+    const auto [across, subs] = crossing(*subIds);
+    EXPECT_EQ(across, 0u) << "a small clump takes strands of two big clumps";
+    std::set<int> bigs(bigIds->begin(), bigIds->end());
+    EXPECT_GT(subs, bigs.size()) << "no more clumps than the big ones";
+    EXPECT_GT(maxDisplacement(*bigOut, *out), 0.001f);
+    // Plain pick (the same count) clumps across the big clumps: the mode is what keeps them inside.
+    lg.g.node(small).params().set("centersFrom", std::string("pick"));
+    EXPECT_GT(crossing(*lg.eval(small)->strandChannel("subClumpId")).first, 0u);
+    // Its clumpChannel the upstream's own: that one's numbers stay (a note says to name another).
+    lg.g.node(small).params().set("centersFrom", std::string("upstreamClump"));
+    lg.g.node(small).params().set("clumpChannel", std::string("clumpId"));
+    EXPECT_EQ(*lg.eval(small)->strandChannel("clumpId"), *bigOut->strandChannel("clumpId"));
+    const auto note = lg.g.lastNotes().find(small);
+    ASSERT_NE(note, lg.g.lastNotes().end());
+    EXPECT_NE(note->second.find("subClumpId"), std::string::npos) << note->second;
+}
+
+TEST(Clump, AfterABraidItClumpsAlongEachSectionOfEachBraid) {
+    // A Clump after a Braid (centersFrom upstreamClump, upstreamChannel braidSection): clumps
+    // along each section of each braid, never two braids' (nor two sections') strands in one clump,
+    // though sections are numbered within their braid (braidSection read with braidId).
+    std::vector<float> xs;
+    for (int i = 0; i < 72; ++i) xs.push_back((static_cast<float>(i) + 0.5f) / 72.0f);
+    auto in = uprights(xs);
+    std::vector<float>& braidIds = in->addStrandChannel("braidId", -1.0f);
+    std::vector<float>& sections = in->addStrandChannel("braidSection", -1.0f);
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+        braidIds[i] = static_cast<float>((i / 2) % 2);  // the two braids' strands side by side
+        sections[i] = static_cast<float>(i % 3);
+    }
+    auto op = OperatorRegistry::instance().create(op::kClump);
+    op->params().set("count", std::int64_t{8});
+    op->params().set("centersFrom", std::string("upstreamClump"));
+    op->params().set("upstreamChannel", std::string("braidSection"));
+    auto mixed = [&](const StrandsPtr& out) {
+        std::map<int, std::set<std::pair<int, int>>> groupsOf;
+        const std::vector<float>& ids = *out->strandChannel("clumpId");
+        for (std::size_t s = 0; s < ids.size(); ++s) {
+            if (ids[s] >= 0.0f) groupsOf[static_cast<int>(ids[s])].insert({static_cast<int>(braidIds[s]), static_cast<int>(sections[s])});
+        }
+        std::size_t across = 0;
+        for (const auto& [id, groups] : groupsOf) across += groups.size() > 1;
+        return std::make_pair(across, groupsOf.size());
+    };
+    const StrandsPtr out = valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value{}}));
+    ASSERT_TRUE(out);
+    const auto [across, clumps] = mixed(out);
+    EXPECT_EQ(across, 0u) << "a clump takes strands of two braids' sections";
+    EXPECT_GE(clumps, 6u) << "every section of each braid clumped";
+    // The section number alone would join the two braids' sections of the same number.
+    op->params().set("upstreamChannel", std::string("braidId"));
+    const StrandsPtr byBraid = valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value{}}));
+    EXPECT_GT(mixed(byBraid).first, 0u) << "braidId alone: across a braid's sections";
+    op->params().set("centersFrom", std::string("pick"));
+    const StrandsPtr picked = valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value{}}));
+    EXPECT_GT(mixed(picked).first, 0u) << "pick clumps across the braids";
+}
+
+TEST(Clump, AfterABraidItsClumpsGatherAcrossEachSectionAndKeepInsideItsTube) {
+    // A Clump after a Braid (upstreamClump by braidSection, pastTip fit): a braided strand's point
+    // gathers toward its center's point at the same spot along the braid (the same share of its
+    // points), so every woven point stays inside its section's tube there (no farther from the
+    // section's middle than its farthest strand was) and the clumps gather across it, the locks
+    // spreading out to keep the tube as thick as it came (keepTubeThickness).
+    BraidScene scene("three");
+    const NodeId clump = scene.lg.add(op::kClump, scene.braid);
+    ParamSet& p = scene.lg.g.node(clump).params();
+    p.set("centersFrom", std::string("upstreamClump"));
+    p.set("upstreamChannel", std::string("braidSection"));
+    p.set("count", std::int64_t{400});
+    p.set("strength", 1.0);
+    p.set("profile", Ramp::constant(0.9f));
+    const StrandsPtr before = scene.lg.eval(scene.braid);
+    auto inTube = [&](const std::string& pastTip, float* gathered, float* thick = nullptr) {
+        p.set("pastTip", pastTip);
+        const StrandsPtr after = scene.lg.eval(clump);
+        const std::vector<float>& braid = *before->strandChannel("braidId");
+        const std::vector<float>& section = *before->strandChannel("braidSection");
+        const std::vector<float>& woven = *before->pointChannel("braidWoven");
+        const std::vector<float>& tail = *before->pointChannel("braidTail");
+        const std::vector<float>& ids = *after->strandChannel("clumpId");
+        std::map<std::pair<int, int>, std::vector<std::size_t>> groups;
+        for (std::size_t s = 0; s < before->strandCount(); ++s) {
+            if (braid[s] >= 0.0f) groups[{static_cast<int>(braid[s]), static_cast<int>(section[s])}].push_back(s);
+        }
+        std::size_t points = 0, outside = 0;
+        double spreadBefore = 0.0, spreadAfter = 0.0;
+        double thickBefore = 0.0, thickAfter = 0.0;  // woven points' squared offsets from their section's middle
+        for (const auto& [key, members] : groups) {
+            const std::size_t n = before->strandPointCount(members.front());
+            for (std::size_t i = 1; i < n; ++i) {
+                Vec3f middle;
+                for (const std::size_t s : members) middle = middle + before->strandPoints(s)[i] / static_cast<float>(members.size());
+                float radius = 0.0f;
+                for (const std::size_t s : members) radius = std::max(radius, (before->strandPoints(s)[i] - middle).length());
+                std::map<float, std::pair<Vec3f, Vec3f>> clumpMiddles;  // per clump: its points' sums before and after
+                for (const std::size_t s : members) {
+                    if (before->strandPointCount(s) != n) continue;
+                    const std::size_t at = before->strandBegin(s) + i;
+                    if (woven[at] < 0.99f || tail[at] > 0.01f) continue;
+                    ++points;
+                    if ((after->strandPoints(s)[i] - middle).length() > 1.02f * radius + 1e-5f) ++outside;
+                    thickBefore += (before->strandPoints(s)[i] - middle).dot(before->strandPoints(s)[i] - middle);
+                    thickAfter += (after->strandPoints(s)[i] - middle).dot(after->strandPoints(s)[i] - middle);
+                    auto& m = clumpMiddles[ids[s]];
+                    m.first = m.first + before->strandPoints(s)[i];
+                    m.second = m.second + after->strandPoints(s)[i];
+                }
+                for (const std::size_t s : members) {
+                    const std::size_t at = before->strandBegin(s) + i;
+                    if (before->strandPointCount(s) != n || woven[at] < 0.99f || tail[at] > 0.01f) continue;
+                    std::size_t count = 0;
+                    for (const std::size_t o : members) count += ids[o] == ids[s];
+                    const auto& m = clumpMiddles[ids[s]];
+                    spreadBefore += (before->strandPoints(s)[i] - m.first / static_cast<float>(count)).length();
+                    spreadAfter += (after->strandPoints(s)[i] - m.second / static_cast<float>(count)).length();
+                }
+            }
+        }
+        EXPECT_GT(points, 1000u);
+        if (gathered) *gathered = static_cast<float>(spreadAfter / std::max(spreadBefore, 1e-12));
+        if (thick) *thick = static_cast<float>(std::sqrt(thickAfter / std::max(thickBefore, 1e-12)));
+        return static_cast<float>(outside) / static_cast<float>(std::max<std::size_t>(points, 1));
+    };
+    float gathered = 1.0f, thick = 0.0f;
+    EXPECT_LT(inTube("fit", &gathered, &thick), 0.002f) << "woven points out of their section's tube";
+    EXPECT_LT(gathered, 0.3f) << "the clumps gather across their section";
+    EXPECT_GT(thick, 0.9f) << "the tubes shrink onto their locks";
+    EXPECT_GT(inTube("extend", nullptr), 0.02f) << "by length from the root, strands leave their tube";
+}
+
+TEST(Clump, PastTipNearestKeepsAStrandWithTheStretchOfItsCenterItWindsWith) {
+    // A strand winding with its center (a braid's section, a rope's ply) but longer before it
+    // joins it (gathered from farther out): by its share of its length (fit) its points are pulled
+    // to stretches of the center turns away (across the braid); pastTip nearest walks along the
+    // center with the strand, each point pulled to the center's nearest point beside it.
+    constexpr float kTurns = 6.0f, kHeight = 2.0f;
+    auto helix = [&](float r, float y) {
+        const float a = 6.2831853f * kTurns * y / kHeight;
+        return Vec3f(r * std::cos(a), y, r * std::sin(a));
+    };
+    std::vector<Vec3f> center;
+    for (int k = 0; k <= 240; ++k) center.push_back(helix(0.05f, kHeight * static_cast<float>(k) / 240.0f));
+    auto centers = std::make_shared<GuideSet>();
+    centers->add(1, center);
+    std::vector<Vec3f> strand;
+    for (int k = 0; k < 30; ++k) strand.push_back(Vec3f(0.15f + 0.03f * static_cast<float>(k), 0.0f, 0.0f));  // out
+    for (int k = 30; k > 0; --k) strand.push_back(Vec3f(0.15f + 0.03f * static_cast<float>(k), 0.0f, 0.001f));  // and back
+    for (int k = 0; k <= 300; ++k) strand.push_back(helix(0.15f, kHeight * static_cast<float>(k) / 300.0f));
+    auto strands = std::make_shared<StrandSet>();
+    strands->addStrand(1, strand);
+    auto clump = OperatorRegistry::instance().create(op::kClump);
+    clump->params().set("strength", 1.0);
+    clump->params().set("profile", Ramp::constant(1.0f));
+    clump->params().set("centersFrom", std::string("inputCurves"));
+    auto worstSlide = [&](const std::string& pastTip) {
+        clump->params().set("pastTip", pastTip);
+        const StrandsPtr out = valueAs<StrandsPtr>(clump->evaluate(EvalContext{}, {Value(StrandsPtr(strands)), Value(GuidesPtr(centers))}));
+        float worst = 0.0f;
+        for (std::size_t i = 60; i < strand.size(); ++i) {  // (the winding part)
+            const Vec3f q = out->strandPoints(0)[i];
+            EXPECT_LT(std::hypot(q.x, q.z), 0.06f) << pastTip << ": onto the center";
+            worst = std::max(worst, std::abs(q.y - strand[i].y));
+        }
+        return worst;
+    };
+    EXPECT_LT(worstSlide("nearest"), 0.06f) << "nearest: beside where it was (a turn is 0.33 high)";
+    EXPECT_GT(worstSlide("fit"), 0.2f) << "fit: pulled turns along the center";
+}
+
+TEST(Clump, UpstreamClumpCurvesShapesClumpsInsideEachUpstreamClump) {
+    // centersFrom upstreamClumpCurves: the curves linked to centers shape the clumps, each strand
+    // gathering only toward a curve inside its own upstream clump (here a braid's section), never
+    // across; inputCurves alone pulls across them.
+    std::vector<float> xs;
+    for (int i = 0; i < 72; ++i) xs.push_back((static_cast<float>(i) + 0.5f) / 72.0f);
+    auto in = uprights(xs);
+    std::vector<float>& braidIds = in->addStrandChannel("braidId", -1.0f);
+    std::vector<float>& sections = in->addStrandChannel("braidSection", -1.0f);
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+        braidIds[i] = static_cast<float>((i / 2) % 2);
+        sections[i] = static_cast<float>(i % 3);
+    }
+    auto centers = std::make_shared<GuideSet>();
+    for (int c = 0; c < 18; ++c) {
+        const float x = (static_cast<float>(c) + 0.5f) / 18.0f;
+        centers->add(static_cast<GuideId>(c + 1), test::straightCurve({x, 0.0f, 0.5f}, {0, 1, 0}, 4));
+    }
+    auto op = OperatorRegistry::instance().create(op::kClump);
+    op->params().set("centersFrom", std::string("upstreamClumpCurves"));
+    op->params().set("upstreamChannel", std::string("braidSection"));
+    auto mixed = [&](const StrandsPtr& out) {
+        std::map<int, std::set<std::pair<int, int>>> groupsOf;
+        const std::vector<float>& ids = *out->strandChannel("clumpId");
+        for (std::size_t s = 0; s < ids.size(); ++s) {
+            if (ids[s] >= 0.0f) groupsOf[static_cast<int>(ids[s])].insert({static_cast<int>(braidIds[s]), static_cast<int>(sections[s])});
+        }
+        std::size_t across = 0;
+        for (const auto& [id, groups] : groupsOf) across += groups.size() > 1;
+        return std::make_pair(across, groupsOf.size());
+    };
+    const StrandsPtr out = valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value(GuidesPtr(centers))}));
+    ASSERT_TRUE(out);
+    const auto [across, clumps] = mixed(out);
+    EXPECT_EQ(across, 0u) << "a curve's clump takes strands of two braids' sections";
+    EXPECT_GE(clumps, 6u);
+    op->params().set("centersFrom", std::string("inputCurves"));
+    EXPECT_GT(mixed(valueAs<StrandsPtr>(op->evaluate(EvalContext{}, {StrandsPtr(in), Value(GuidesPtr(centers))}))).first, 0u);
 }
 
 TEST(ClumpCenters, StrandsWithoutPointsAreNeverCentersNorRead) {

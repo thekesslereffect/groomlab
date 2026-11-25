@@ -825,6 +825,12 @@ TEST(Stroke, PlaceDrawPartAndFlowTools) {
     const FlowSet flow = FlowSet::fromJson(g.session->data().flowJson);
     ASSERT_GT(flow.pins.size(), 2u);
     for (std::size_t i = 0; i < flow.pins.size(); ++i) EXPECT_EQ(flow.pins[i].seq, static_cast<int>(i));
+    // Issue #112: the graph had no Flow node: the stroke made one (after its Interpolate) in the
+    // same undo step, so the strands follow the arrows at once.
+    EXPECT_FALSE(firstNodeOfType(g.session->data().graphJson, "Flow").empty()) << "no Flow node made by the flow stroke";
+    g.host->undo();
+    EXPECT_TRUE(firstNodeOfType(g.session->data().graphJson, "Flow").empty());
+    EXPECT_TRUE(FlowSet::fromJson(g.session->data().flowJson).pins.empty());
     // Draw: a guide shaped like the stroke.
     tool.settings.setMode("draw");
     tool.settings.place.segments = 8;

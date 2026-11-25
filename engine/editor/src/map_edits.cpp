@@ -9,6 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
@@ -583,12 +584,37 @@ std::vector<std::string> reloadMapFiles(const ScalpMaps& maps, const GuideHierar
     return out;
 }
 
+// Whether node.param is a color a field colors (a ColorLayers layer's color, colorField): painted as
+// a color map whose Map node's rgb output feeds it.
+static bool colorFieldParam(const std::string& graphJson, const std::string& node, const std::string& param) {
+    const nlohmann::json g = nlohmann::json::parse(graphJson, nullptr, false);
+    const nlohmann::json* n = graphNode(g, node);
+    if (!n) return false;
+    const std::string type = n->value("type", std::string());
+    const OperatorRegistry& registry = OperatorRegistry::instance();
+    if (!registry.contains(type)) return false;
+    for (const ParamSpec& s : registry.create(type)->paramSpecs()) {
+        if (s.name == param) return s.colorField;
+    }
+    return false;
+}
+
 ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage,
                       const std::string& node, const std::string& param, const ParamPaintRequest& paint, const MapFiles& files) {
     const std::string full = graphOrDefault(graph);
     if (!GraphEdit(full).hasNode(node)) throw std::invalid_argument("no node '" + node + "'");
-    const std::string channel = paint.channel == "luminance" ? std::string() : paint.channel;
-    if (!channel.empty() && !rgbaChannel(channel)) throw std::invalid_argument("a map's channel is r, g, b or a, not '" + channel + "'");
+    // A color param (a ColorLayers layer's): painted as a color map.
+    const bool color = colorFieldParam(full, node, param);
+    if (color && paint.kind == "guides") {
+        throw std::invalid_argument("a color is painted on the scalp's vertices or a texture, not on the guides");
+    }
+    // (A color takes its map whole: a color map, listed in the param itself, or with mapNode
+    // through its Map node's rgb output.)
+    const std::string channel = color ? std::string(paint.mapNode ? "rgb" : "")
+                                      : paint.channel == "luminance" ? std::string() : paint.channel;
+    if (!color && !channel.empty() && !rgbaChannel(channel)) {
+        throw std::invalid_argument("a map's channel is r, g, b or a, not '" + channel + "'");
+    }
     ParamMapRef read;
     try {
         read = paramMapOf(full, maps, guides, node, param);
@@ -605,7 +631,7 @@ ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const Gui
     }
     out.map = paint.name.empty() ? paramMapName(node, param) : paint.name;
     out.kind = mapKindOf(maps, guides, out.map);
-    out.channel = channel;
+    out.channel = color ? std::string() : channel;  // a color map painted whole
     if (out.kind.empty()) {
         if (paint.kind != "vertices" && paint.kind != "texture" && paint.kind != "guides") {
             throw std::invalid_argument("a setting's map is on the guides, the scalp's vertices or a texture, not '" + paint.kind + "'");
@@ -618,7 +644,7 @@ ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const Gui
         }
         MapCreateRequest create;  // white: the param as it was, black 0
         create.kind = paint.kind;
-        create.color = !channel.empty();
+        create.color = color || !channel.empty();
         create.value = 1.0f;
         create.fill = PaintColor{1.0f, 1.0f, 1.0f, 1.0f};
         create.resolution = paint.resolution;
@@ -628,7 +654,7 @@ ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const Gui
         out.kind = paint.kind;
     }
     try {
-        out.graph = channel.empty() ? wireParamMap(full, out.created.maps, node, param, out.map, out.kind)
+        out.graph = channel.empty() ? wireParamMap(full, out.created.maps, node, param, out.map, out.kind, paint.mapNode)
                                     : wireMapChannel(full, node, param, out.map, channel);
     } catch (const std::invalid_argument&) {
         throw;

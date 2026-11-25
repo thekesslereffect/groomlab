@@ -34,7 +34,8 @@ float compositePaintValue(float current, float value, PaintMode mode) {
     switch (mode) {
         case PaintMode::Add: return std::clamp(current + value, 0.0f, 1.0f);
         case PaintMode::Subtract: return std::clamp(current - value, 0.0f, 1.0f);
-        case PaintMode::ClampMaximum: return std::min(current, std::clamp(value, 0.0f, 1.0f));
+        case PaintMode::Minimum: return std::max(current, std::clamp(value, 0.0f, 1.0f));
+        case PaintMode::Maximum: return std::min(current, std::clamp(value, 0.0f, 1.0f));
         case PaintMode::Replace: return std::clamp(value, 0.0f, 1.0f);
     }
     return std::clamp(value, 0.0f, 1.0f);

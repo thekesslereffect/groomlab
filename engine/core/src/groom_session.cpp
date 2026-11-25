@@ -1695,14 +1695,14 @@ std::shared_ptr<const std::vector<Vec3f>> GroomSession::clumpCenterDots(GraphDoc
     // read and its kept state names, preview_core.h).
     (void)clumped;
     const std::string from = op.params().getString("centersFrom");
-    if (from != "pick") {  // the centers input (guides or strands), when one is linked
+    if (from != "pick" && from != "upstreamClump") {  // the centers input (guides or strands), when one is linked
         if (!doc.graph.inputSource(node, 1, &source, &output)) return dots;
         doc.graph.evaluateOutput(source, output, ctx);
         const Value value = doc.graph.cachedValue(source, output);
         centers = valueAs<GuidesPtr>(value);
         centerStrands = valueAs<StrandsPtr>(value);
     } else {
-        // A Clump picking its own centers: the strands they are (their roots), else (centers on the
+        // A Clump picking its own centers (pick, upstreamClump): the strands they are (their roots), else (centers on the
         // scalp, its axes moved to their spots: ClumpState::offsets) the centers' curves as it kept them.
         ClumpState state;
         const StrandsPtr made = valueAs<StrandsPtr>(doc.graph.cachedValue(node));
@@ -2876,11 +2876,202 @@ std::shared_ptr<const TexturePreview> GroomSession::udimViewPreview(const ScalpM
     return udimViewPreview_;
 }
 
+ScalpMapView GroomSession::nodeMapView(ScalpMapView view) {
+    // A field node's result (a Layers node's maps combined, issue #124): evaluated with the
+    // session's inputs and shown as the maps it reads are. Vertex maps: read at each vertex of the
+    // cage (the roots a Scatter makes lie on it), shown as a vertex map (refined to a subdivided
+    // scalp). Textures: read at each texel of an image at the scalp's UVs, the node blending them
+    // texel by texel (its modes, as a paint program's layers), shown as a texture map; a texture
+    // being painted is read as the brush leaves it (setLiveTexture), so the view follows the
+    // stroke. Nothing when the node gives no field or fails (its error shows on the node).
+    const std::string node = view.name.substr(kNodeMapPrefix.size());
+    {
+        std::vector<std::string> errors;
+        bindScalp(errors);  // the scalp with the maps as they are now (vertex maps as its color sets)
+    }
+    if (!scalp_) return view;
+    const ScalpMesh& cage = cageScalp_ ? *cageScalp_ : *scalp_;
+    // A texture map being painted: what its file will hold, read live.
+    std::string live;
+    if (previewMapImage_ && previewMapImage_->width() > 0) {
+        const auto it = scalpMaps_.maps.find(previewMapName_);
+        if (it != scalpMaps_.maps.end() && it->second.kind == "texture") {
+            const ScopedPathResolver scope(paths());
+            live = resolvePath(it->second.texture);
+        }
+    }
+    if (live != liveTexturePath_ && !liveTexturePath_.empty()) setLiveTexture(liveTexturePath_, nullptr, 0);
+    liveTexturePath_ = live;
+    std::uint64_t key = hashCombine(hashText(hash64(0x5CA1DD), view.name), hashText(0, data_.graphJson));
+    key = hashCombine(hashCombine(key, scalpMapsHash_), hashCombine(cage.contentHash(), scalp_->contentHash()));
+    key = hashCombine(hashCombine(key, reinterpret_cast<std::uintptr_t>(activeHierarchy_.get())), hashFloat(0, static_cast<float>(time_)));
+    key = hashCombine(key, previewMapVersion_);
+    {
+        const ScopedPathResolver scope(paths());
+        for (const auto& [name, entry] : scalpMaps_.maps) {
+            if (entry.kind == "texture") key = hashCombine(key, fileStamp(resolvePath(entry.texture)));
+        }
+    }
+    key = hashCombine(key, hashText(hash64(0x5CA1AB), view.channel));
+    view.version = key;
+    if (key != nodeViewKey_) {
+        nodeViewKey_ = key;
+        nodeViewValues_.reset();
+        nodeViewPreview_.reset();
+        nodeViewChannels_ = 1;
+        if (!live.empty()) {
+            // The brush's image (RGBA, rows bottom-up) as the texture the map's file will be.
+            const TexturePreview& image = *previewMapImage_;
+            const int w = image.width(), h = image.height();
+            std::vector<std::uint8_t> rows(static_cast<std::size_t>(w) * h * 4);
+            for (int y = 0; y < h; ++y) {
+                std::memcpy(&rows[static_cast<std::size_t>(y) * w * 4], &image.rgba()[static_cast<std::size_t>(h - 1 - y) * w * 4],
+                            static_cast<std::size_t>(w) * 4);
+            }
+            try {
+                setLiveTexture(live, textureFromPixels(w, h, 4, rows), previewMapVersion_);
+            } catch (const std::exception&) {
+                setLiveTexture(live, nullptr, 0);
+            }
+        }
+        FieldPtr field;
+        try {
+            field = valueAs<FieldPtr>(evaluateNode(node, 1.0f, time_));
+        } catch (const std::exception&) {
+            field = nullptr;
+        }
+        if (field) {
+            const bool color = field->isColor();
+            const std::size_t per = color ? 4 : 1;
+            nodeViewChannels_ = static_cast<int>(per);
+            if (field->mapKind() == "texture" && cage.hasUVs()) {
+                const int size = std::clamp(field->textureSize() > 0 ? field->textureSize() : 1024, 256, 1024);
+                // Each texel's root (on the cage, at the texel's middle), kept while the UVs and size are.
+                const std::uint64_t rootsKey = hashCombine(cage.surfaceHash(), static_cast<std::uint64_t>(size));
+                if (rootsKey != nodeTexelRootsKey_) {
+                    nodeTexelRootsKey_ = rootsKey;
+                    nodeTexelRoots_.assign(static_cast<std::size_t>(size) * size, StrandRoot{});
+                    const auto& uvs = cage.cornerUVs();
+                    const float fs = static_cast<float>(size);
+                    for (std::size_t t = 0; t < cage.triangles().size(); ++t) {
+                        // Texel space: x = u * size, y = (1 - v) * size (rows top-down).
+                        std::array<std::array<float, 2>, 3> p{};
+                        for (int c = 0; c < 3; ++c) p[c] = {uvs[t * 3 + c][0] * fs, (1.0f - uvs[t * 3 + c][1]) * fs};
+                        const float area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+                        if (std::abs(area) < 1e-12f) continue;
+                        const int x0 = std::max(0, static_cast<int>(std::floor(std::min({p[0][0], p[1][0], p[2][0]}))));
+                        const int x1 = std::min(size - 1, static_cast<int>(std::ceil(std::max({p[0][0], p[1][0], p[2][0]}))));
+                        const int y0 = std::max(0, static_cast<int>(std::floor(std::min({p[0][1], p[1][1], p[2][1]}))));
+                        const int y1 = std::min(size - 1, static_cast<int>(std::ceil(std::max({p[0][1], p[1][1], p[2][1]}))));
+                        for (int y = y0; y <= y1; ++y) {
+                            for (int x = x0; x <= x1; ++x) {
+                                const float px = static_cast<float>(x) + 0.5f, py = static_cast<float>(y) + 0.5f;
+                                const float b1 = ((px - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (py - p[0][1])) / area;
+                                const float b2 = ((p[1][0] - p[0][0]) * (py - p[0][1]) - (px - p[0][0]) * (p[1][1] - p[0][1])) / area;
+                                if (b1 < -1e-5f || b2 < -1e-5f || b1 + b2 > 1.0f + 1e-5f) continue;
+                                StrandRoot& r = nodeTexelRoots_[static_cast<std::size_t>(y) * size + x];
+                                r.face = static_cast<std::int32_t>(t);
+                                r.u = std::clamp(b1, 0.0f, 1.0f);
+                                r.v = std::clamp(b2, 0.0f, 1.0f);
+                            }
+                        }
+                    }
+                }
+                TexturePaint paint = color ? TexturePaint(cage, size, size, PaintColor{0.0f, 0.0f, 0.0f, 1.0f})
+                                           : TexturePaint(cage, size, size, 0.0f);
+                std::vector<float>& values = paint.values();
+                std::vector<std::uint8_t> covered(nodeTexelRoots_.size(), 0);
+                parallelFor(0, nodeTexelRoots_.size(), [&](std::size_t i) {
+                    const StrandRoot& r = nodeTexelRoots_[i];
+                    if (r.face < 0) return;
+                    covered[i] = 1;
+                    if (color) {
+                        const std::array<float, 3> c = field->colorAtRoot(r);
+                        for (std::size_t k = 0; k < 3; ++k) values[i * 4 + k] = std::clamp(c[k], 0.0f, 1.0f);
+                        values[i * 4 + 3] = 1.0f;
+                    } else {
+                        values[i] = std::clamp(field->atRoot(r), 0.0f, 1.0f);
+                    }
+                }, 1024);
+                // A few texels past each UV island's edge take the edge's values: filtering
+                // there shows no dark seam.
+                const int offsets[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                for (int pass = 0; pass < 4; ++pass) {
+                    std::vector<std::uint8_t> next = covered;
+                    for (int y = 0; y < size; ++y) {
+                        for (int x = 0; x < size; ++x) {
+                            const std::size_t i = static_cast<std::size_t>(y) * size + x;
+                            if (covered[i]) continue;
+                            for (const auto& o : offsets) {
+                                const int nx = x + o[0], ny = y + o[1];
+                                if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+                                const std::size_t n = static_cast<std::size_t>(ny) * size + nx;
+                                if (!covered[n]) continue;
+                                for (std::size_t k = 0; k < per; ++k) values[i * per + k] = values[n * per + k];
+                                next[i] = 1;
+                                break;
+                            }
+                        }
+                    }
+                    covered.swap(next);
+                }
+                MapDisplay display;
+                display.mapChannels = color ? kColorMap : kGrayMap;
+                display.pick = !color || view.channel.size() != 1 ? -1
+                               : view.channel == "r" ? 0 : view.channel == "g" ? 1 : view.channel == "b" ? 2 : 3;
+                display.keepAlpha = false;
+                auto preview = std::make_shared<TexturePreview>();
+                preview->update(paint, display);
+                nodeViewPreview_ = std::move(preview);
+            } else {
+                // Each vertex as a root at a corner of a triangle using it (barycentric u, v:
+                // corner 0 at 0 0, corner 1 at 1 0, corner 2 at 0 1).
+                std::vector<StrandRoot> roots(cage.pointCount());
+                for (std::size_t t = 0; t < cage.triangles().size(); ++t) {
+                    const auto& tri = cage.triangles()[t];
+                    for (int c = 0; c < 3; ++c) {
+                        StrandRoot& r = roots[static_cast<std::size_t>(tri[c])];
+                        if (r.face >= 0) continue;
+                        r.face = static_cast<std::int32_t>(t);
+                        r.u = c == 1 ? 1.0f : 0.0f;
+                        r.v = c == 2 ? 1.0f : 0.0f;
+                    }
+                }
+                std::vector<float> values(cage.pointCount() * per, 0.0f);
+                parallelFor(0, roots.size(), [&](std::size_t i) {
+                    if (roots[i].face < 0) return;
+                    if (color) {
+                        const std::array<float, 3> c = field->colorAtRoot(roots[i]);
+                        for (std::size_t k = 0; k < 3; ++k) values[i * 4 + k] = c[k];
+                        values[i * 4 + 3] = 1.0f;
+                    } else {
+                        values[i] = field->atRoot(roots[i]);
+                    }
+                });
+                const int levels = scalp_->subdivisionLevel();
+                nodeViewValues_ = levels == 0 ? std::make_shared<const std::vector<float>>(std::move(values))
+                                              : std::make_shared<const std::vector<float>>(
+                                                    SubdivisionPlan::of(cage, levels)->refineVertexValues(values, static_cast<int>(per)));
+            }
+        }
+    }
+    view.channels = nodeViewChannels_;
+    if (nodeViewPreview_) {
+        view.kind = "texture";
+        view.preview = nodeViewPreview_;
+    } else if (nodeViewValues_) {
+        view.kind = "vertices";
+        view.values = nodeViewValues_;
+    }
+    return view;
+}
+
 ScalpMapView GroomSession::scalpMapView(const std::string& name, const std::string& channel) {
     ScalpMapView view;
     view.name = name;
     view.channel = channel;
     if (view.channel != "r" && view.channel != "g" && view.channel != "b" && view.channel != "a") view.channel = "rgb";
+    if (view.name.compare(0, kNodeMapPrefix.size(), kNodeMapPrefix) == 0) return nodeMapView(std::move(view));
     if (view.name.empty() || !scalp_) return view;
     const auto it = scalpMaps_.maps.find(view.name);
     const bool previewing = previewMapName_ == view.name;

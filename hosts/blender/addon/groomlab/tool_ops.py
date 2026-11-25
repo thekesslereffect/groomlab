@@ -1026,7 +1026,8 @@ class GROOMLAB_OT_map_new(GroomToolOperator):
                 # A setting's map: on the scalp (vertices or a texture), or on the guides (the regions'
                 # default: a value a group of guides).
                 kind = self.kind if self.kind in ("vertices", "texture", "guides") else "vertices"
-                r = tools.map_for_param(scalp, target[0], target[1], kind=kind, resolution=int(self.resolution), faces=faces)
+                r = tools.map_for_param(scalp, target[0], target[1], kind=kind, resolution=int(self.resolution), faces=faces,
+                                        map_node=True)
                 tools.pick(context, "paint")
                 on = " (white on the %d selected faces)" % len(faces) if faces and r.get("made") else ""
                 tools.status(context.scene, "%s %s, which %s.%s reads%s: Ctrl paints it toward 0%s, strokes back toward the "

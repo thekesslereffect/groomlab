@@ -186,13 +186,10 @@ TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId
 GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& source, const std::vector<SectionPoint>& polygon,
                   GuideId into = kNoGuide, const std::vector<Vec3f>& outline = {},
                   const std::function<Vec3f(float)>& deviation = {});
-// The guide of the slice whose middle is (u, v) of `source`'s root section, `extent` its larger
-// half-extent (scene units): rooted there on the scalp, then along the source's tube (sliceTube's).
-// `alongOnly`: the root's pull joined along the tube only (a cell of a cut: across it stays its
-// part of the tube where its neighbours meet it); else all of it (a slice of the hierarchy, as its
-// parent's tube and hair join their root: GuideHierarchy's resolveFollower).
-std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, float u, float v, float extent, float scale = 1.0f,
-                             bool alongOnly = true);
+// The guide of the slice whose middle is (u, v) of `source`'s root section (sliceTube's, a cell
+// of a cut): rooted there on the scalp (on the tube's root loop where it has one), then that part
+// of the source's tube as the tube is drawn, joined from the root over the tube's own root join.
+std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, float u, float v, float scale = 1.0f);
 // A tube spine of the source laid as its tube lies (its footprint fixed on the scalp).
 TubeSpine sourceSpine(const TubeSource& source, float scale = 1.0f);
 // `p` taken onto the scalp along `normal` (the nearer hit either way), else its nearest point
@@ -202,7 +199,8 @@ Vec3f alongNormal(const ScalpMesh& scalp, const Vec3f& p, const Vec3f& normal);
 // Where drawn roots' tubes (root tubes and their slices) pass into each other: each pair of
 // neighbours of one group (`guides`: those; none: every such tube), at each point past the root
 // (the same share of the way along each), how deep one's outline reaches into the other's section
-// (a share of that section's half-width). The deepest of each pair, deepest first; none when they
+// (a share of that section's half-width), both as they are drawn (their sections joined from their
+// root loops, display.cpp appendTubeSurface). The deepest of each pair, deepest first; none when they
 // tile. What the tests and the hosts' checks measure.
 struct TubeOverlap {
     GuideId into = kNoGuide, from = kNoGuide;

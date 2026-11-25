@@ -30,7 +30,8 @@ const char* paintModeName(PaintMode mode) {
         case PaintMode::Replace: return "replace";
         case PaintMode::Add: return "add";
         case PaintMode::Subtract: return "subtract";
-        case PaintMode::ClampMaximum: return "clampMaximum";
+        case PaintMode::Minimum: return "min";
+        case PaintMode::Maximum: return "max";
     }
     return "replace";
 }
@@ -39,8 +40,10 @@ PaintMode paintModeFromString(const std::string& name) {
     if (name.empty() || name == "replace") return PaintMode::Replace;
     if (name == "add") return PaintMode::Add;
     if (name == "subtract") return PaintMode::Subtract;
-    if (name == "clampMaximum" || name == "clamp") return PaintMode::ClampMaximum;
-    throw std::invalid_argument("paint mode takes replace, add, subtract or clampMaximum");
+    if (name == "min" || name == "minimum") return PaintMode::Minimum;
+    // (Max was Clamp Maximum: its old names still read.)
+    if (name == "max" || name == "maximum" || name == "clampMaximum" || name == "clamp") return PaintMode::Maximum;
+    throw std::invalid_argument("paint mode takes replace, add, subtract, min or max");
 }
 
 StrokeSymmetry StrokeSymmetry::of(const BrushSettings& s, const ScalpMesh* scalp) {
@@ -165,8 +168,9 @@ float brushWeight(const Vec3f& p, const Vec3f& center, float radius, const Brush
 namespace {
 
 constexpr float kPerStampRate = 0.05f;  // Length and the Shape brush's width change per stamp at strength 1
-constexpr float kFlattenRate = 0.1f;    // Shape on flatness: share of the way to flat (or round) per stamp at strength 1
+constexpr float kFlattenRate = 0.1f;    // Shape on flatness: share of the way to flat (either axis) per stamp at strength 1
 constexpr float kTwistRate = 0.1f;      // radians per stamp at strength 1
+constexpr float kBelowScalpCos = 0.5f;  // belowScalpAt: behind the surface within 60 degrees of straight in
 constexpr float kAttractRate = 0.1f;    // fraction of the way to the center per stamp, at the tip
 
 std::vector<float> segmentLengths(const std::vector<Vec3f>& pts) {
@@ -448,18 +452,42 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
                                                                        : g.tube.twistAt(t);
             }
             const float k = std::clamp(s.strength, -1.0f, 1.0f);
+            if (s.tubeChannel == TubeChannel::Flatness) {
+                // Two axes. Flatness (positive) flattens the section's height (v): its aspect toward
+                // kMinTubeAspect, its width kept. Ctrl (negative) flattens the other axis, across its
+                // width (u): the width over the height toward kMinTubeAspect, the height kept, so
+                // the width shrinks and the aspect grows past 1. Either one rounds a tube the other
+                // flattened on its way, then flattens it its own way.
+                std::vector<float> widths(n);
+                for (std::size_t i = 0; i < n; ++i) widths[i] = g.tube.widthAt(static_cast<float>(i) / static_cast<float>(n - 1));
+                bool widthChanged = false;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const float w = weights[i];
+                    if (w <= 0.0f) continue;
+                    const float r = std::min(1.0f, std::fabs(k) * w * kFlattenRate);
+                    const float a = perPoint[i];
+                    if (k > 0.0f) {
+                        perPoint[i] = std::clamp(a + (kMinTubeAspect - a) * r, kMinTubeAspect, kMaxTubeAspect);
+                    } else {
+                        const float b = 1.0f / a;  // width over height
+                        const float flat = std::clamp(1.0f / (b + (kMinTubeAspect - b) * r), kMinTubeAspect, kMaxTubeAspect);
+                        widths[i] *= a / flat;      // the height (width * aspect) kept
+                        perPoint[i] = flat;
+                        widthChanged = true;
+                    }
+                }
+                e.tube.aspect = std::move(perPoint);
+                if (widthChanged) e.tube.width = std::move(widths);
+                e.tubeEdited = e.tube.aspect != g.tube.aspect || e.tube.width != g.tube.width;
+                return e;
+            }
             for (std::size_t i = 0; i < n; ++i) {
                 const float w = weights[i];
                 if (w <= 0.0f) continue;
                 float& v = perPoint[i];
                 switch (s.tubeChannel) {
                     case TubeChannel::Width: v *= std::max(0.05f, 1.0f + k * w * kPerStampRate); break;
-                    case TubeChannel::Flatness: {
-                        // Toward kMinTubeAspect (flat), or back toward 1 (as drawn) from either side.
-                        const float target = k > 0.0f ? kMinTubeAspect : 1.0f;
-                        v += (target - v) * std::min(1.0f, std::fabs(k) * w * kFlattenRate);
-                        break;
-                    }
+                    case TubeChannel::Flatness: break;  // above
                     case TubeChannel::Twist: v += k * w * kTwistRate; break;
                 }
             }
@@ -1445,13 +1473,22 @@ TubeChannel tubeChannelFromString(const std::string& name) {
     throw std::invalid_argument("the Tube brush paints width, flatness or twist, not '" + name + "'");
 }
 
+bool belowScalpAt(const Vec3f& p, const SurfacePoint& closest, float offset) {
+    const Vec3f d = p - closest.position;
+    const float h = d.dot(closest.normal.normalized());
+    if (h >= offset - 1e-5f) return false;
+    // Behind the surface: across it, not off past an open border (a scalp cut at the neck or the
+    // face), where the closest point is on the border edge and p lies out to its side, along the
+    // surface more than into it (issue #111: hair hanging past the neck pulled up to the edge).
+    return h >= 0.0f || -h >= kBelowScalpCos * d.length();
+}
+
 std::vector<Vec3f> keepOffScalp(const std::vector<Vec3f>& points, const ScalpMesh& scalp, float offset) {
     if (points.size() < 2 || scalp.triangleCount() == 0) return points;
     // Height above the surface near p, and the surface normal there; false when the surface is far.
     auto below = [&](const Vec3f& p, float reach, SurfacePoint* sp) {
         *sp = scalp.closestPoint(p, reach);
-        if (sp->root.face < 0) return false;
-        return (p - sp->position).dot(sp->normal.normalized()) < offset - 1e-5f;
+        return sp->root.face >= 0 && belowScalpAt(p, *sp, offset);
     };
     std::vector<Vec3f> out(points.size());
     out[0] = points[0];

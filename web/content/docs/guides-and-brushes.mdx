@@ -171,8 +171,10 @@ The selected guides' tubes draw brighter.
 
 - **Width, Flatness, Twist** (in Maya at the top of the **Brush** block). Drag over guides to paint their tubes near the brush, each
   section by the brush's falloff (and the **Root to tip** curve) at its guide point. **Width**
-  grows the tubes (a negative strength shrinks them), **Flatness** flattens them toward a ribbon
-  (negative: rounds them back), **Twist** turns them about the guide (negative: the other way). The first
+  grows the tubes (a negative strength shrinks them), **Flatness** flattens them toward a ribbon,
+  keeping their width (**Ctrl**: flattens them the other way, keeping their height and narrowing
+  their width, so the ribbon stands on its edge), **Twist** turns them about the guide (negative:
+  the other way). The first
   stroke on a tube gives it one section per guide point, so you shape it point by point.
   Symmetry, frozen and soloed guides work as with every brush; each stroke is one
   undo step.
@@ -545,11 +547,25 @@ and each drag is one undo step. The brushes are the same, in the same order, in 
 **Painting a setting** (density, width, length, clumping...). In the Paint tab, click **+ New Map**
 and set **For** to the setting: **Density**, **Width**, **Length**, **Clump strength**, **Curl**,
 **Noise amplitude**, **Flyaways**, or **Other setting...** for any other mappable parameter. GroomLab
-creates a white map (so nothing changes yet), connects it to the setting, selects it and starts the
-Paint brush on it, all in one undo step. If the setting already reads a map, that map is selected
-instead. A stroke paints toward the **Value** (1 is the setting's full value); **Ctrl** paints
+creates a white map (so nothing changes yet), adds a **Map** node for it to the graph wired into the
+setting, selects the map and starts the Paint brush on it, all in one undo step. The setting keeps
+its slider, which scales what you paint (white is the setting's value). If the setting already reads
+a map, that map is selected instead. A param's own **Paint** button (and right-click > **Paint**) in
+the node panel makes the map the same way but lists it in the param itself, as **Map** does. A stroke paints toward the **Value** (1 is the setting's full value); **Ctrl** paints
 toward 0: thinner hair on the width map, no hair on the density map. For example, to thin the
 sideburns, create the map for Density and Ctrl+paint over them.
+
+**Paint modes.** Paint and Fill combine the value (or color) with the map by their **Mode**:
+**Replace** moves the map toward it, **Add** and **Subtract** add or take it away, **Min** raises
+values below it (nothing lower than the value is left) and **Max** lowers values above it (nothing
+higher is left). Max was called Clamp before.
+
+**Maps on the mesh.** Every vertex map is also kept on the scalp mesh itself, as a color set (Maya)
+or a color attribute (Blender) of the same name, so the color set lists, renderers and other tools
+read it there. GroomLab writes them again whenever a map changes and when you save; removing or
+renaming a map takes its own set along, and a color set of yours with the same name is left alone.
+In Maya a deformed scalp gets them on its original shape; a scalp with other construction history
+is skipped with a warning (delete its history to keep the maps on it).
 
 **What lights up under the brush.** Before you press, the guides the brush would edit are lit
 under its circle: those of its level or group, not hidden and not frozen. With guides selected
@@ -745,7 +761,8 @@ the parts where the hair splits, with no drawing needed.
 
 For vellus hair, brows and short fur, the **Flow** brush grooms a direction field: drag arrows on
 the scalp (drag over arrows to comb them, Ctrl to erase), or click to place whorls and other
-singular points that hair turns around. A **Flow** node lays the strands along the field. See
+singular points that hair turns around. A **Flow** node lays the strands along the field: your
+first stroke adds one to the graph when it has none (picking the tool alone changes nothing). See
 [Fur & feathers](/docs/fur-and-feathers).
 
 The arrows and sinks are kept on the groom itself, not in the Flow node, so they stay when you

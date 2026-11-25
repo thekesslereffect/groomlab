@@ -980,6 +980,14 @@ void bindGraph(py::module_& m) {
              },
              py::arg("params_json") = std::string(), py::arg("after") = std::string(), py::arg("groom_size") = py::none(),
              "(name, made): the graph's Part node, or one made after `after` (graph_inserts.h: every host's part tools).")
+        .def("insert_flow",
+             [](GraphEdit& e, const std::string& paramsJson, const std::string& after, std::optional<double> groomSize) {
+                 bool made = false;
+                 std::string name = insertFlow(e, paramsJson, after, groomSize, &made);
+                 return py::make_tuple(name, made);
+             },
+             py::arg("params_json") = std::string(), py::arg("after") = std::string(), py::arg("groom_size") = py::none(),
+             "(name, made): the graph's Flow node, or one made after `after` (graph_inserts.h: every host's Flow tool).")
         .def("remove_scalp_nodes", [](GraphEdit& e, const std::string& mesh) { return removeScalpNodes(e, mesh); }, py::arg("mesh_name"),
              "Remove > Scalp's graph (graph_inserts.h): its Scalp nodes and what they alone feed; a Merge left alone passes through.")
         .def("remove_collider_nodes", [](GraphEdit& e, const std::string& mesh) { return removeColliderNodes(e, mesh); },
@@ -1264,6 +1272,8 @@ void bindGraph(py::module_& m) {
         .def("clump_colored", &GraphEdit::clumpColored, py::arg("node"), py::arg("source"),
              "Whether a clump color source shows this Clump's clumps (its own source, or the bare channel when "
              "it is the last Clump writing it).")
+        .def("scalp_view_offered", &GraphEdit::scalpViewOffered, py::arg("node"),
+             "Show on Scalp: whether the node has the eye (a Layers or ColorLayers node).")
         .def("braid_tubes_offered", &GraphEdit::braidTubesOffered, py::arg("node"),
              "Show Tubes: whether the node has the button (a Braid node).")
         .def("braid_tubes_shown", &GraphEdit::braidTubesShown, py::arg("node"), py::arg("shown"),

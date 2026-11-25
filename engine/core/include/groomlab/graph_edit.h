@@ -78,6 +78,16 @@ public:
     // scripts, loading) never changes a param. True when a param changed.
     bool connectByHand(const std::string& src, const std::string& dst, const std::string& input,
                        const std::string& output = {});
+    // A Clump the user just wired into a chain after another Clump (issue #115): its strands
+    // coming through that Clump (along each node's first input), it is set to clump inside that
+    // one's clumps (centersFrom upstreamClump, upstreamChannel that Clump's clumpChannel, its own
+    // clumpChannel subClumpId where it would take the same, the nodes after it that read its clumps,
+    // a Curl's coherence clump, following that name); after a Braid (the nearer of the
+    // two), along each braid's sections (upstreamChannel braidSection). Once: only while its
+    // centersFrom is still pick and nothing feeds its centers (a choice the user made stays). connectByHand on a
+    // Clump's strands and the inserts (graph_inserts.h, Add Node After) call it; connect alone
+    // never does. True when it changed the node.
+    bool adoptUpstreamClump(const std::string& node);
     // Removes what feeds dst's input; false when nothing did.
     bool disconnect(const std::string& dst, const std::string& input);
     // Detach (every host's node menu, Ctrl+Shift+X): takes a node out of the flow as if it were
@@ -204,6 +214,10 @@ public:
     // nodes that have no button now (a node deleted, or made another type: what a host stores after
     // an edit). Both keep the other names' order. A rename: renamedBraidTubes.
     bool braidTubesOffered(const std::string& node) const;
+    // Show on Scalp (every host's eye on a Layers or ColorLayers node, issue #124): whether the node
+    // has it. Lit, the scalp shows the node's maps combined (GroomSession::scalpMapView with
+    // kNodeMapPrefix + its name), and stays on it while other maps are picked and painted.
+    bool scalpViewOffered(const std::string& node) const;
     bool braidTubesShown(const std::string& node, const std::string& shown) const;
     std::string braidTubesToggled(const std::string& node, const std::string& shown) const;
     std::string braidTubesKept(const std::string& shown) const;

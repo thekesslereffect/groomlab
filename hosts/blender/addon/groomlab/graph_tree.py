@@ -440,8 +440,14 @@ class GroomLabNodeBase(object):
         linkable = [p["name"] for p in node_param_specs(self) if p.get("port")]
         clump = self.gl_type == "Clump"
         braid = shows_tubes(self)
-        if linkable or clump or braid:
+        on_scalp = shows_on_scalp(self)
+        if linkable or clump or braid or on_scalp:
             row = layout.row(align=True)
+        if on_scalp:  # Show on Scalp: this Layers node's maps combined on the scalp, locked there
+            scalp = getattr(self.id_data, "gl_scalp", None)
+            op = row.operator("groomlab.graph_scalp_view", text="", icon="HIDE_OFF",
+                              depress=scalp_view_shown(scalp, self))
+            op.node = self.gl_name
         if braid:  # Show Tubes: this node's section tubes (a Braid's) or its guides' tubes drawn in the viewport
             scalp = getattr(self.id_data, "gl_scalp", None)
             op = row.operator("groomlab.graph_braid_tubes", text="", icon="MESH_CYLINDER",
@@ -1721,6 +1727,8 @@ def sync_from_tree(tree):
             if edit(op="rename_node", name=node.gl_name, newName=node.name) is not None:
                 follow_renamed(scalp, None, node.gl_name, node.name)
                 follow_braid_tubes(scalp, old=node.gl_name, new=node.name)
+                if scalp.groomlab_tools.scalp_view_node == node.gl_name:  # its eye lit: the view follows
+                    scalp.groomlab_tools.scalp_view_node = node.name
                 if scalp.groomlab.view_node == node.gl_name:
                     with props.quiet():
                         scalp.groomlab.view_node = node.name
@@ -2048,6 +2056,25 @@ def port_types_match(out_type, in_type):
         except HelperError:
             pass
     return in_type in _PORT_TYPES.get(out_type, ())
+
+
+def shows_on_scalp(node):
+    """Whether the node has Show on Scalp: a Layers or ColorLayers node (the core's
+    GraphEdit::scalpViewOffered, node_facts)."""
+    return _fact(node, "scalpView")
+
+
+def scalp_view_shown(scalp, node):
+    """Whether the scalp shows this node's result (its Show on Scalp lit)."""
+    return bool(scalp) and scalp.groomlab_tools.scalp_view_node == node.gl_name
+
+
+def toggle_scalp_view(scalp, name):
+    """A Layers node's Show on Scalp: the scalp shows its maps combined, locked there while other
+    maps are painted; on the lit one, off. Display only (saved with the groom's settings)."""
+    d = scalp.groomlab_tools
+    d.scalp_view_node = "" if d.scalp_view_node == name else name
+    return bool(d.scalp_view_node)
 
 
 def shows_tubes(node):

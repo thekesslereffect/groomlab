@@ -123,6 +123,12 @@ public:
         const float v = atRoot(root);
         return {v, v, v};
     }
+    // The kind of painted map it reads: "texture" (an image at the scalp's UVs), "vertices" (a
+    // value per scalp vertex or guide: a vertex map, a guide layer), "" none (a number, an
+    // expression). A Layers node's is its layers' one kind (issue #124: never both).
+    virtual std::string mapKind() const { return {}; }
+    // The largest side of the images it reads (0: none): what a view of it is drawn at.
+    virtual int textureSize() const { return 0; }
 };
 using FieldPtr = std::shared_ptr<const FieldValue>;
 using CurvePtr = std::shared_ptr<const Ramp>;
@@ -403,6 +409,9 @@ struct ParamSpec {
     // node's ports: a Value node's kind, an Input's type).
     enum class Port { Auto, Value, None };
     Port port = Port::Auto;
+    // An input port on every new node of the operator (GraphEdit::addNode exposes it): the param a
+    // groom most often feeds (Scatter's density, painted), seen on the node without expanding it.
+    bool shownAsInput = false;
     // A default the param changed from: its operator raised its version (Operator::version) to
     // `since` when the default became `defaultValue`, and a node saved before that version which
     // leaves the param out takes `before`, what it made then (loadGraphJson, and a host's saved
@@ -518,6 +527,12 @@ struct ParamSpec {
         s.channel = ChannelUse::Reads;
         s.channelOptional = optional;
         s.channelFor = std::move(usedBy);
+        return s;
+    }
+    // An input port on a new node (shownAsInput).
+    ParamSpec asInput() const {
+        ParamSpec s = *this;
+        s.shownAsInput = true;
         return s;
     }
     // A param that cannot be an input (port None).

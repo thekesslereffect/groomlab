@@ -115,6 +115,122 @@ struct ClumpCenter {
     float side = std::numeric_limits<float>::quiet_NaN();
 };
 
+// A Clump after a Braid (alongBraid): each section keeps its tube's thickness as its locks gather.
+// At each station along a section (a share of its strands' points), every clumped point's offset
+// from the section's middle there (its strands' mean as they came) becomes its lock center's
+// offset times k plus its own offset from that center as clumped (tightened: (1 - w)^4 of what it
+// came with, w the strength's share there): k (one a station, eased along
+// the section) gives the offsets the mean square they had, the tube as thick, and a point that
+// would lie farther out than the farthest did is drawn back to that (the tube's wall). The locks spread out to fill the tube as they
+// gather, gaps opening between them, instead of the tube shrinking onto its centers. `regions`:
+// each strand's section; `centerStrand(c)`: the strand that is center c (its points as they came).
+template <class CenterStrand>
+void keepTubeThickness(const StrandSet& in, StrandSet& out, const std::vector<float>& regions,
+                       const std::vector<std::uint32_t>& assigned, const CenterStrand& centerStrand) {
+    std::unordered_map<float, std::vector<std::uint32_t>> bySection;
+    for (std::size_t s = 0; s < assigned.size(); ++s) {
+        if (assigned[s] == kNoClumpCenter || in.strandPointCount(s) < 2 || !(regions[s] == regions[s])) continue;
+        bySection[regions[s]].push_back(static_cast<std::uint32_t>(s));
+    }
+    std::vector<const std::vector<std::uint32_t>*> sections;
+    for (const auto& entry : bySection) sections.push_back(&entry.second);
+    auto pointAt = [](const Vec3f* p, std::size_t n, float u) {
+        const float x = u * static_cast<float>(n - 1);
+        const std::size_t a = std::min(static_cast<std::size_t>(std::max(x, 0.0f)), n - 2);
+        const float f = std::clamp(x - static_cast<float>(a), 0.0f, 1.0f);
+        return p[a] * (1.0f - f) + p[a + 1] * f;
+    };
+    // What a section's tube measures (its middle, its spread, its farthest point) is read off its
+    // core strands only, the ones every preview holds: a preview spreads its strands exactly as
+    // the render does.
+    const PreviewCore core(in);
+    parallelFor(0, sections.size(), [&](std::size_t g) {
+        const std::vector<std::uint32_t>& list = *sections[g];
+        std::vector<std::uint32_t> measured;
+        for (const std::uint32_t s : list) {
+            if (core.core(s)) measured.push_back(s);
+        }
+        if (measured.empty()) return;  // (no strand to measure the tube by: the locks as clumped)
+        std::size_t stations = 2;
+        for (const std::uint32_t s : measured) stations = std::max<std::size_t>(stations, in.strandPointCount(s));
+        std::vector<Vec3f> middle(stations, Vec3f());
+        for (std::size_t j = 0; j < stations; ++j) {
+            const float u = static_cast<float>(j) / static_cast<float>(stations - 1);
+            for (const std::uint32_t s : measured) middle[j] = middle[j] + pointAt(in.strandPoints(s), in.strandPointCount(s), u);
+            middle[j] = middle[j] / static_cast<float>(measured.size());
+        }
+        // Each clumped point (not its root): its station, its lock center's offset A and its own
+        // offset from that center B (as clumped); the offsets D as they came, summed a station.
+        struct Sample {
+            std::uint32_t s, i, j;
+            Vec3f m, a, b;  // the section's middle there, A, B
+        };
+        std::vector<Sample> samples;
+        std::vector<double> aa(stations, 0.0), ab(stations, 0.0), bb(stations, 0.0), dd(stations, 0.0);
+        std::vector<float> farthest(stations, 0.0f);
+        for (const std::uint32_t s : list) {
+            const std::size_t n = in.strandPointCount(s);
+            const std::size_t cs = centerStrand(assigned[s]);
+            if (cs >= in.strandCount() || in.strandPointCount(cs) < 2) continue;
+            const Vec3f* before = in.strandPoints(s);
+            const Vec3f* after = out.strandPoints(s);
+            for (std::size_t i = 1; i < n; ++i) {
+                const float u = static_cast<float>(i) / static_cast<float>(n - 1);
+                const float x = u * static_cast<float>(stations - 1);
+                const auto j = static_cast<std::uint32_t>(std::min<std::size_t>(static_cast<std::size_t>(x + 0.5f), stations - 1));
+                const Vec3f m = pointAt(middle.data(), stations, u);
+                const Vec3f c = pointAt(in.strandPoints(cs), in.strandPointCount(cs), u);
+                const Vec3f a = c - m, d = before[i] - m;
+                // Its offset from its lock's center as clumped (1 - w of what it came with), that
+                // share taken three times more: a lock (1 - w)^4 as wide, not 1 - w. Small locks side
+                // by side fill a tube whatever their width until they are thin: narrowed evenly
+                // they only thin the tube out, so they narrow fast from the slider's start (0.66 as
+                // wide at 0.1, 0.41 at 0.2, 0.06 at 0.5) and the gaps between them open at once.
+                const Vec3f came = before[i] - c;
+                Vec3f b = after[i] - c;
+                const float c2 = came.dot(came);
+                if (c2 > 1e-20f) {
+                    const float kept = std::clamp(b.dot(came) / c2, 0.0f, 1.0f);
+                    b = b * (kept * kept * kept);
+                }
+                if (core.core(s)) {
+                    aa[j] += a.dot(a);
+                    ab[j] += a.dot(b);
+                    bb[j] += b.dot(b);
+                    dd[j] += d.dot(d);
+                    farthest[j] = std::max(farthest[j], d.length());
+                }
+                samples.push_back({s, static_cast<std::uint32_t>(i), j, m, a, b});
+            }
+        }
+        // k at each station: the mean of |kA + B|^2 that of |D|^2 (k at least 1, at most 4).
+        std::vector<float> k(stations, 1.0f);
+        for (std::size_t j = 0; j < stations; ++j) {
+            if (!(aa[j] > 1e-20)) continue;
+            const double disc = ab[j] * ab[j] - aa[j] * (bb[j] - dd[j]);
+            const double root = (-ab[j] + std::sqrt(std::max(disc, 0.0))) / aa[j];
+            k[j] = static_cast<float>(std::clamp(root, 1.0, 4.0));
+        }
+        // Eased along the section (its neighbours' mean).
+        std::vector<float> eased(stations);
+        for (std::size_t j = 0; j < stations; ++j) {
+            float sum = 0.0f;
+            int count = 0;
+            for (std::size_t o = j >= 2 ? j - 2 : 0; o <= std::min(j + 2, stations - 1); ++o, ++count) sum += k[o];
+            eased[j] = sum / static_cast<float>(count);
+        }
+        // Each point spread with its lock, and drawn back onto the tube's wall where that would take
+        // it out past the farthest point there (a lock at the edge lies against the wall).
+        for (const Sample& q : samples) {
+            Vec3f* after = out.strandPoints(q.s);
+            Vec3f offset = q.a * eased[q.j] + q.b;
+            const float r = offset.length(), most = farthest[q.j];
+            if (r > most && r > 0.0f) offset = offset * (most / r);
+            after[q.i] = q.m + offset;
+        }
+    }, 1);
+}
+
 // The points each of a run's `count` centers' curves takes (clumpCenterSamples): the most any of
 // them does. `curveOf(c)`: center c's points and their count (none: no curve of its own).
 template <class CurveOf>
@@ -925,15 +1041,33 @@ public:
                       "strands: a Scatter, guides, single points) only says where the clumps are (their roots), each "
                       "axis the strand it gathers nearest its center's root (the hair as grown there); inputCurves: each "
                       "axis is the center curve itself (groomed clump curves, a Noise on the centers waving each clump "
-                      "as one). Connecting centers in the Graph Editor sets inputPoints (a Guides node: inputCurves)",
-                      "", {"pick", "inputPoints", "inputCurves"}},
+                      "as one); upstreamClump: smaller clumps inside an earlier Clump's: it picks its own "
+                      "centers as pick does, and each strand gathers only toward the centers inside its own upstream "
+                      "clump (upstreamChannel, the clump number that Clump writes), so the big clumps keep their shape "
+                      "and split into smaller ones, a big clump with no center of its own left as it is; after a "
+                      "Braid, its sections (upstreamChannel braidSection): clumps along each section of each braid, "
+                      "never across braids; upstreamClumpCurves: the centers input's curves as inputCurves takes them, "
+                      "each strand gathering only toward the curves inside its own upstream clump (a curve belongs to "
+                      "the upstream clump of the strand rooted nearest it), so groomed curves shape the clumps within "
+                      "each big clump or braid section and never pull across them. Connecting centers in the Graph "
+                      "Editor sets inputPoints (a Guides node: inputCurves; a Clump: upstreamClump; to an "
+                      "upstreamClump one: upstreamClumpCurves); wiring it after a Clump or a Braid sets upstreamClump",
+                      "", {"pick", "inputPoints", "inputCurves", "upstreamClump", "upstreamClumpCurves"}},
+            ParamSpec{"upstreamChannel", std::string("clumpId"),
+                      "centersFrom upstreamClump: the per-strand channel numbering the upstream Clump's clumps (its "
+                      "clumpChannel; any Clump before this one in the chain, or the one linked to centers), or a "
+                      "Braid's braidSection (each section of each braid: read with its braidId, as sections are "
+                      "numbered within their braid; braidId alone: clumps across a whole braid). Give this Clump's own "
+                      "clumpChannel another name (subClumpId) to keep both"}
+                .readsChannel(true)
+                .when("centersFrom", {"upstreamClump", "upstreamClumpCurves"}),
             ParamSpec{"clumpBy", std::string("count"),
                       "The clumps it picks among the strands: count: about `count` of them, whatever the scalp's size "
                       "(re-fitted to the scalp's area: an edit that changes it by more than 1% moves every clump); size: "
                       "clumps about `size` apart, as many as the scalp holds (a whole body gets more than a head, of the "
                       "same size; an edit of the scalp changes the clumps only near it)",
                       "", {"count", "size"}}
-                .when("centersFrom", {"pick"}),
+                .when("centersFrom", {"pick", "upstreamClump"}),
             notAnimatable({"count", std::int64_t{300}, "About how many clumps (clumpBy count); 0: none (the strands as they "
                                                        "came)"})
                 .atLeast(0)
@@ -951,18 +1085,22 @@ public:
                            "past 1 on beyond it, up to 2. As Scatter's", "fraction"})
                 .range(0, kMaxCenterRandomness)
                 .soft(0, 1)
-                .when("centersFrom", {"pick"}),
+                .when("centersFrom", {"pick", "upstreamClump"}),
             ParamSpec{"centerWeight", 1.0, "Chance each strand can be a center it picks, 0-1 (mappable: e.g. an Expression "
                                            "favoring long strands, or guideInfluence)", "fraction"}
                 .soft(0, 1)
-                .when("centersFrom", {"pick"})
+                .when("centersFrom", {"pick", "upstreamClump"})
                 .adv(),
             ParamSpec{"pastTip", std::string("fit"),
                       "How a strand lies along its clump's axis. fit: tip to tip, each point at the same share of the "
                       "axis's length as of its own, so the strand takes the axis's length as much as it clumps; "
                       "extend: each point as far along the axis as along the strand, and past a shorter axis's tip on "
-                      "along its last direction, so the strand keeps its own length",
-                      "", {"fit", "extend"}},
+                      "along its last direction, so the strand keeps its own length; nearest: each point toward the "
+                      "axis's nearest point, walking along the axis with the strand, so strands winding with their axis "
+                      "(a rope's plies, coils) stay with the same stretch of it however long each is. After a Braid "
+                      "(centersFrom upstreamClump by braidSection) fit takes each point toward its center's point at the "
+                      "same spot along the braid, so the clumps gather across each section and keep inside its tube",
+                      "", {"fit", "extend", "nearest"}},
             ParamSpec{"clumpChannel", std::string("clumpId"),
                       "Per-strand channel receiving the clump's number, from its center's ID (the same while that center "
                       "is; empty: none). Chained Clumps each want their own (lockId, then clumpId), for a Twist, Cards or "
@@ -999,7 +1137,7 @@ public:
                       "rooted in and a strand gathers toward its own tube's; strands in no tube clump as ever. Off: by "
                       "root across tubes. "
                       "Strands without those channels clump as ever either way"}
-                .when("centersFrom", {"pick"}),
+                .when("centersFrom", {"pick", "upstreamClump"}),
             ParamSpec{"repelRadius", 0.5, "With a negative strength: how far from its center a strand is pushed out to at "
                                           "least (the part's half width): those within twice it move out, the nearest "
                                           "to it, keeping their order; those farther away stay as they are (mappable: "
@@ -1201,9 +1339,27 @@ private:
         const StrandsPtr in = requireStrands(inputs, 0, op::kClump);
         ProfilePhases phase("clump.centers");
         const std::string from = params().getString("centersFrom");
-        const bool own = from == "pick";
-        if (!own && from != "inputPoints" && from != "inputCurves") {
-            throw GraphError("Clump: unknown centersFrom '" + from + "' (pick, inputPoints or inputCurves)");
+        // upstreamClump: centers of its own, as pick, each strand clumping only within its upstream
+        // clump (below, by regions).
+        // upstreamClumpCurves: the centers input's curves (as inputCurves), each strand clumping
+        // only toward those inside its upstream clump (the same regions).
+        const bool upstreamCurves = from == "upstreamClumpCurves";
+        const bool upstream = from == "upstreamClump" || upstreamCurves;
+        const bool own = from == "pick" || from == "upstreamClump";
+        // Clumps along a Braid's sections (upstreamClump by braidSection, its centers its own
+        // strands, pastTip fit): a braided strand's points lie where its index share says along the
+        // braid (Braider::braidAlong: the same station for the same share, whatever its length), so
+        // each point gathers toward its center's point at the same share of its points (look.slang
+        // ClumpCS byPoint), the centers' curves resampled evenly over their points and never moved
+        // off them: a strand moves only across its section there, never along the braid or out of
+        // the section's tube.
+        const bool alongBraid = from == "upstreamClump" && params().getString("upstreamChannel") == "braidSection" &&
+                                params().getString("pastTip") == "fit" && in->strandChannel("braidSection") &&
+                                in->strandChannel("braidId");
+        if (alongBraid && incremental) return false;  // (keepTubeThickness: a section at a time, in full)
+        if (!own && from != "inputPoints" && from != "inputCurves" && !upstreamCurves) {
+            throw GraphError("Clump: unknown centersFrom '" + from +
+                             "' (pick, inputPoints, inputCurves, upstreamClump or upstreamClumpCurves)");
         }
         const bool linked = inputs.at(1).index() != 0;
         const std::string regionName = params().getString("regionChannel");
@@ -1255,7 +1411,7 @@ private:
                 if (side) c.side = (*side)[s];
             }, 1024);
         };
-        if (own && linked) {
+        if (own && linked && !upstream) {
             ctx.note("centers are connected but centersFrom is pick (it picks its own): set centersFrom to inputPoints "
                      "or inputCurves to clump by them");
         } else if (!own) {
@@ -1325,7 +1481,7 @@ private:
                 strandCenters(in, now, &nowIds);
                 // Each axis its strand moved from the strand's root to the center's spot (its curve
                 // resampled, then moved: as look.slang CentersCS makes it).
-                if (pick->onSpots) axisOffsets = clumpAxisOffsets(*in, scalpOf(ctx), now, pickedAt, planned);
+                if (pick->onSpots && !alongBraid) axisOffsets = clumpAxisOffsets(*in, scalpOf(ctx), now, pickedAt, planned);
                 for (ClumpCenter& c : given) c.region = c.feather = c.side = std::numeric_limits<float>::quiet_NaN();  // (a pick's carry none)
                 if (pick->byRoots && !tubeIds) chosen = now;
                 picked = now;
@@ -1343,7 +1499,9 @@ private:
 
         const ScalarField strength(params(), "strength", scalpOf(ctx));
         strength.validate(*in);
-        const std::string channel = params().getString("clumpChannel");
+        // (upstreamClump writing the upstream Clump's own channel: left as that Clump numbered it.)
+        const bool keepsUpstream = upstream && params().getString("clumpChannel") == params().getString("upstreamChannel");
+        const std::string channel = keepsUpstream ? std::string() : params().getString("clumpChannel");
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         // Each clump's axis: the core strand it gathers nearest its center's root (centersFrom
         // inputPoints), else the center's own curve (a center of its own is a strand).
@@ -1378,6 +1536,10 @@ private:
                 const ClumpCenter& g = given[centerGuides[c]];
                 return std::make_pair(g.points, g.count);
             });
+        }
+        if (alongBraid) {  // (a sample a point at least: the centers' points themselves)
+            for (const std::size_t k : centerGuides) samples = std::max(samples, given[k].count);
+            samples = std::min(samples, kClumpCenterSamplesMost);
         }
         // Incrementally, what the last run made (its result checked below), and the centers (strands)
         // the centers input left as they were: their search roots and curves as it made them (when
@@ -1423,6 +1585,13 @@ private:
                 resampled.resize(samples);
                 if (!centerStrands) {
                     clumpGuideCurve(g.points, g.count, resampled.data(), samples);  // (a guide: its smooth curve)
+                } else if (alongBraid) {  // evenly over its points (ClumpCS byPoint)
+                    for (std::size_t j = 0; j < samples; ++j) {
+                        const double x = static_cast<double>(j) * static_cast<double>(g.count - 1) / static_cast<double>(samples - 1);
+                        const std::size_t a = std::min(static_cast<std::size_t>(x), g.count - 2);
+                        const float f = static_cast<float>(x - static_cast<double>(a));
+                        resampled[j] = g.points[a] * (1.0f - f) + g.points[a + 1] * f;
+                    }
                 } else {
                     resampleByArcLengthInto(g.points, g.count, resampled.data(), samples);
                 }
@@ -1482,6 +1651,51 @@ private:
                 tubeRegions[s] = t >= 0.0f ? kTubeRegionBase + t : channelRegions ? (*channelRegions)[s] : 0.0f;
             }, 4096);
             strandRegions = &tubeRegions;
+        }
+        // upstreamClump: each upstream clump (its number in upstreamChannel, on these strands, else on
+        // the strands linked as centers when they are these strands as that Clump left them) a region
+        // of its own within the regions above, so a strand clumps only toward the centers inside its
+        // own big clump, the big clump's shape kept (its axes are its own strands).
+        std::vector<float> upstreamRegions;
+        if (upstream && !vanes.active()) {
+            const std::string upName = params().getString("upstreamChannel");
+            const std::vector<float>* up = upName.empty() ? nullptr : in->strandChannel(upName);
+            if (!up && !upName.empty()) {
+                if (const StrandsPtr linkedStrands = valueAs<StrandsPtr>(inputs.at(1))) {
+                    const std::vector<float>* theirs = linkedStrands->strandChannel(upName);
+                    if (theirs && linkedStrands->strandCount() == in->strandCount() && linkedStrands->ids() == in->ids()) up = theirs;
+                }
+            }
+            // (A Braid's sections are numbered within their braid: braidSection read with braidId.)
+            const std::vector<float>* braid = nullptr;
+            if (up && upName == "braidSection") {
+                braid = in->strandChannel("braidId");
+                if (!braid && in->strandChannel(upName) != up) {
+                    if (const StrandsPtr linkedStrands = valueAs<StrandsPtr>(inputs.at(1))) braid = linkedStrands->strandChannel("braidId");
+                }
+                if (braid && braid->size() != up->size()) braid = nullptr;
+            }
+            if (!up || up->size() != in->strandCount()) {
+                ctx.note("no upstream clumps: no Clump before this one writes " + (upName.empty() ? std::string("a channel") : upName) +
+                         " (its clumpChannel): it clumps as pick does");
+            } else {
+                if (keepsUpstream) {
+                    ctx.note("its clumpChannel is the upstream Clump's own (" + upName + "): it is kept as that Clump numbered "
+                             "it; name this one's another (subClumpId) to have both");
+                }
+                // (Numbered in order of first appearance: the same strands, the same regions.)
+                std::unordered_map<std::uint64_t, float> numberOf;
+                upstreamRegions.resize(in->strandCount());
+                for (std::size_t s = 0; s < upstreamRegions.size(); ++s) {
+                    const float base = strandRegions ? (*strandRegions)[s] : 0.0f;
+                    const float clump = (*up)[s];
+                    std::uint64_t key = hashFloat(hashFloat(hash64(0x5CB1u), base), clump >= 0.0f ? clump : -1.0f);
+                    if (braid) key = hashFloat(key, (*braid)[s] >= 0.0f ? (*braid)[s] : -1.0f);
+                    const auto it = numberOf.emplace(key, static_cast<float>(numberOf.size())).first;
+                    upstreamRegions[s] = it->second;
+                }
+                strandRegions = &upstreamRegions;
+            }
         }
         const PreviewCore core(*in);  // what a center's region and axis come from (preview_core.h)
         const std::uint64_t regionHash = strandRegions ? hashChannel(*strandRegions) : 0;
@@ -1905,19 +2119,29 @@ private:
         std::vector<StrandId> ids(used.size());
         for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
         gpu::StageInputs taken;
+        ParamSet paired;  // (along a braid: ClumpCS's byPoint)
+        if (alongBraid) {
+            paired = params();
+            paired.set("pastTip", std::string("byPoint"));
+        }
+        const ParamSet& stageParams = alongBraid ? paired : params();
         if (!last) {
             auto inputs = gpu::clumpInputs(assigned, curvesMade, normalsMade, ids, seed);
             inputs->spots = !axisOffsets.empty();  // centers on the scalp (ClumpInputs::spots)
             inputs->samples = samples;
             taken.clump = std::move(inputs);
             phase.next("clump.run");
-            gpu::runStageInto(gpu::StageKind::Clump, params(), in, scalp, *out, std::move(taken));
+            gpu::runStageInto(gpu::StageKind::Clump, stageParams, in, scalp, *out, std::move(taken));
             phase.next("clump.channel");
             if (clumpIds) {
                 parallelFor(0, assigned->size(), [&](std::size_t s) {
                     const std::uint32_t c = (*assigned)[s];
                     if (c != kNoCenter) (*clumpIds)[s] = (*numbers)[c];
                 }, 4096);
+            }
+            if (alongBraid && strandRegions && !picked.empty()) {  // (each section as thick as it came)
+                phase.next("clump.tubes");
+                keepTubeThickness(*in, *out, *strandRegions, *assigned, [&](std::uint32_t c) { return picked[centerGuides[c]]; });
             }
         } else {
             auto theirs = std::make_shared<std::vector<std::uint32_t>>(dirty.size());
@@ -1926,7 +2150,7 @@ private:
             inputs->spots = !axisOffsets.empty();  // centers on the scalp (ClumpInputs::spots)
             inputs->samples = samples;
             taken.clump = std::move(inputs);
-            gpu::runStageOnStrands(gpu::StageKind::Clump, params(), in, dirty, scalp, *out, std::move(taken));
+            gpu::runStageOnStrands(gpu::StageKind::Clump, stageParams, in, dirty, scalp, *out, std::move(taken));
             if (clumpIds) {
                 for (const std::uint32_t s : dirty) (*clumpIds)[s] = (*assigned)[s] != kNoCenter ? (*numbers)[(*assigned)[s]] : -1.0f;
             }
@@ -1952,7 +2176,8 @@ private:
             // right (a dab moving a guide makes all its strands again). Otherwise across the scalp's U
             // there (its UV layout; none, any way along the scalp): the surface's, so a brush moving
             // an axis strand never turns it.
-            const bool alongGuides = params().getString("centersFrom") == "inputCurves";
+            const bool alongGuides = params().getString("centersFrom") == "inputCurves" ||
+                                     params().getString("centersFrom") == "upstreamClumpCurves";
             const std::vector<Vec3f>& centerCurves = *curvesMade;
             acrossOf.assign(roots.size(), Vec3f());
             for (std::size_t c = 0; c < roots.size(); ++c) {

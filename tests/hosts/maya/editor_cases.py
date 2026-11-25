@@ -2956,6 +2956,13 @@ class GraphEditorTest(unittest.TestCase):
                 out[holder.property("glParam")] = (chip.text(), holder.field, note)
             return out
 
+        # Put in after clumpLarge, clumpSmall clumps inside its clumps under a name of its own
+        # (issue #115): nothing overwritten. Its own clumps under clumpLarge's name: the warning.
+        self.assertEqual(model.param("clumpSmall", "centersFrom"), "upstreamClump")
+        self.assertEqual(model.param("clumpSmall", "clumpChannel"), "subClumpId")
+        self.assertEqual(rows("clumpSmall")["clumpChannel"][2], "")
+        self.editor.set_param("clumpSmall", "centersFrom", "pick")
+        self.editor.set_param("clumpSmall", "clumpChannel", "clumpId")
         clump = rows("clumpSmall")
         self.assertEqual(clump["clumpChannel"][0], "Writes")
         self.assertIsInstance(clump["clumpChannel"][1], QtWidgets.QLineEdit)  # a name of its own: no dropdown
@@ -2996,9 +3003,10 @@ class GraphEditorTest(unittest.TestCase):
         self.assertGreaterEqual(view.transform().m11(), view.READABLE * theme.scale() - 1e-6)
         output = view.mapFromScene(self.editor.items["output"].sceneBoundingRect()).boundingRect()
         self.assertTrue(view.viewport().rect().contains(output))
-        view.frame_all()  # A: every node in view however big the graph, centered on it
-        middle = view.mapFromScene(self.editor.scene.itemsBoundingRect().center())
-        self.assertTrue(view.viewport().rect().contains(middle))
+        view.frame_all()  # A: every node in view, however far it zooms out (never past 1:1)
+        self.assertLessEqual(view.transform().m11(), theme.scale() + 1e-6)
+        whole = view.mapFromScene(self.editor.scene.itemsBoundingRect()).boundingRect()
+        self.assertTrue(view.viewport().rect().contains(whole), (whole, view.viewport().rect()))
         framed = view.mapFromScene(self.editor.scene.itemsBoundingRect()).boundingRect()
         self.assertTrue(view.viewport().rect().contains(framed))
         # Panning isn't held to the nodes: the view goes well past them.
@@ -3563,10 +3571,10 @@ class PaletteTickBudgetTest(unittest.TestCase):
 
 
 class ToolScrollTest(unittest.TestCase):
-    """Issue 114: picking a tool leaves the Groom Tools panel where it is scrolled; only a card too
-    short to reach there scrolls up to its end."""
+    """Issue 114: each tool's card in the Groom Tools panel comes back where it was left scrolled
+    (palette.ToolPalette.keep_scroll); a tool not shown before starts at the top."""
 
-    def test_picking_a_tool_keeps_the_scroll(self):
+    def test_each_tool_keeps_its_own_scroll(self):
         from groomlab.ui import palette
         cmds.file(new=True, force=True)
         groom = groomlab.create_groom(cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20)[0])
@@ -3595,32 +3603,30 @@ class ToolScrollTest(unittest.TestCase):
             pick("shape", settle=600)
             tall = bar.maximum()
             self.assertGreater(tall, comb_max, "the Tube tool's card is the longer")
+            self.assertEqual(bar.value(), 0, "a card not shown before: at the top")
             at = comb_max // 2
             self.assertGreater(at, 0, "Comb's card scrolls too")
+            low = tall - 20
+            self.assertGreater(low, comb_max, "below where Comb's card reaches")
+            user_scroll(low)
+            wait(50)  # (noted once the bar's action is done)
+            pick("comb", settle=600)
+            self.assertEqual(bar.value(), 0, "Comb's card not scrolled yet: at the top")
             user_scroll(at)
-            for tool in ("comb", "shape", "comb", "shape"):  # a tile clicked: the panel stays
-                pick(tool)
-                self.assertEqual(bar.value(), at, tool)
+            wait(50)
+            for tool, where in (("shape", low), ("comb", at), ("shape", low), ("comb", at)):  # a tile clicked
+                pick(tool, settle=600)
+                self.assertEqual(bar.value(), where, tool)
             wait(1600)  # (after the card's layouts settle: still there)
             self.assertEqual(bar.value(), at)
-            # Moved by something else while the card lays out (the focus passed on down the panel): back.
-            pick("comb", settle=0)
-            bar.setValue(0)
-            self.assertEqual(bar.value(), at)
-            # Below where Comb's card reaches: Comb at its end; the Tube tool picked straight back
-            # (Comb still holding), where it was.
-            wait(1600)
-            pick("shape", settle=600)
-            user_scroll(tall - 20)
-            pick("comb")
-            self.assertEqual(bar.value(), bar.maximum())
-            self.assertLess(bar.value(), tall - 20)
-            pick("shape")
-            self.assertEqual(bar.value(), tall - 20)
-            # The user's own scrolling while it holds: theirs.
-            pick("comb", settle=0)
+            # The user's own scrolling while a card settles: theirs, and where that card comes back.
+            pick("shape", settle=0)
             user_scroll(0)
-            wait(300)
+            wait(600)
+            self.assertEqual(bar.value(), 0)
+            pick("comb", settle=600)
+            self.assertEqual(bar.value(), at)
+            pick("shape", settle=600)
             self.assertEqual(bar.value(), 0)
         finally:
             cmds.setToolTo("selectSuperContext")

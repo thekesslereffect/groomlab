@@ -754,6 +754,22 @@ TEST(GraphInserts, PartsOpenTheHairAndTheStarterCountsTheGroomsOwnLook) {
     EXPECT_TRUE(starterLookGiven(curled.toJson(), looks));
 }
 
+TEST(GraphInserts, DrawingFlowMakesTheFlowNodeOnce) {
+    // Issue #112, insertFlow: every host's Flow tool gives a graph without one a Flow node after
+    // its Interpolate, one only, as insertPart does for parts.
+    GraphEdit edit(defaultGraphJson());
+    for (const std::string& n : edit.nodeNames()) {
+        if (edit.nodeType(n) == "Flow") edit.removeNode(n);
+    }
+    bool made = false;
+    const std::string flow = insertFlow(edit, {}, {}, std::nullopt, &made);
+    EXPECT_TRUE(made);
+    EXPECT_EQ(edit.nodeType(flow), "Flow");
+    EXPECT_EQ(insertFlow(edit, {}, {}, std::nullopt, &made), flow);
+    EXPECT_FALSE(made) << "one there: kept";
+    EXPECT_NO_THROW(loadGraphJson(edit.toJson()));
+}
+
 TEST(GuideHierarchy, EveryHostsGuideEditsAlike) {
     // childGroupFor: Generate Children adds to the group's own child group, else a new one.
     GuideHierarchy h;
@@ -793,6 +809,39 @@ TEST(ScalpMaps, VertexMapsFollowTheScalpsJoiningOrLeaving) {
     EXPECT_EQ(mapKindOf(maps, nullptr, "dens"), "vertices");
     EXPECT_EQ(mapChannelsOf(maps, nullptr, "tint"), kColorMap);
     EXPECT_EQ(mapChannelsOf(maps, nullptr, "nope"), 0);
+}
+
+TEST(ScalpMaps, VertexMapsGoOnTheScalpMeshesAsColorSets) {
+    // Issue #113, vertexMapColorSets: each vertex map split over the scalps it spans, r g b a per
+    // vertex; a gray one r = g = b, alpha 1; one painted before a scalp joined leaves it 0.
+    ScalpMaps maps;
+    ScalpMapEntry gray;
+    gray.kind = "vertices";
+    gray.values = {0.1f, 0.2f, 0.3f};  // the groom's own 3 vertices only
+    maps.maps["dens"] = gray;
+    ScalpMapEntry color;
+    color.kind = "vertices";
+    color.channels = kColorMap;
+    for (int v = 0; v < 5; ++v) color.values.insert(color.values.end(), {0.5f, 0.25f, 0.0f, 0.75f});
+    maps.maps["tint"] = color;
+    ScalpMapEntry odd;
+    odd.kind = "vertices";
+    odd.values = {1, 2};  // fits no layout
+    maps.maps["odd"] = odd;
+    const ScalpCounts scalps{{"scalp", 3}, {"patch", 2}};
+    const std::vector<MeshColorSet> sets = vertexMapColorSets(maps, scalps);
+    ASSERT_EQ(sets.size(), 4u);
+    auto find = [&](const std::string& scalp, const std::string& name) {
+        for (const MeshColorSet& s : sets) {
+            if (s.scalp == scalp && s.name == name) return s.rgba;
+        }
+        return std::vector<float>{};
+    };
+    EXPECT_EQ(find("scalp", "dens"), (std::vector<float>{0.1f, 0.1f, 0.1f, 1, 0.2f, 0.2f, 0.2f, 1, 0.3f, 0.3f, 0.3f, 1}));
+    EXPECT_EQ(find("patch", "dens"), (std::vector<float>{0, 0, 0, 1, 0, 0, 0, 1}));
+    EXPECT_EQ(find("patch", "tint"), (std::vector<float>{0.5f, 0.25f, 0.0f, 0.75f, 0.5f, 0.25f, 0.0f, 0.75f}));
+    EXPECT_TRUE(find("scalp", "odd").empty()) << "a map fitting no layout is left out";
+    EXPECT_EQ(vertexMapColorSets(maps, scalps, {"tint"}).size(), 2u) << "only the maps asked for";
 }
 
 TEST(GraphInserts, AGuideGroupsReadersFollowItsRename) {
@@ -1630,6 +1679,130 @@ TEST(GraphEdit, MovedGuidesLinkedByHandMakeAClumpFollowThem) {
             const nlohmann::json now = nlohmann::json::parse(edit.toJson());
             EXPECT_EQ(now["nodes"][1]["params"].value("centersFrom", std::string()), "inputCurves") << kind << " " << source;
         }
+    }
+}
+
+TEST(GraphEdit, AClumpLinkedToAClumpsCentersClumpsInsideItsClumps) {
+    // Issue #115: a Clump linked by hand into a picking Clump's centers: the smaller clumps inside
+    // its clumps (upstreamClump), reading the numbers it writes (its clumpChannel); this one's own
+    // written under another name so both are kept.
+    const nlohmann::json g = {
+        {"version", 1},
+        {"nodes",
+         {{{"name", "s"}, {"type", "Scatter"}},
+          {{"name", "big"}, {"type", "Clump"}, {"params", {{"clumpChannel", "lockId"}}}},
+          {{"name", "small"}, {"type", "Clump"}, {"params", {{"clumpChannel", "lockId"}}}}}},
+        {"connections",
+         {{{"from", "s"}, {"to", "big"}, {"input", "strands"}}, {{"from", "big"}, {"to", "small"}, {"input", "strands"}}}}};
+    GraphEdit edit(g.dump());
+    EXPECT_TRUE(edit.connectByHand("big", "small", "centers"));
+    const nlohmann::json small = nlohmann::json::parse(edit.toJson())["nodes"][2]["params"];
+    EXPECT_EQ(small.value("centersFrom", std::string()), "upstreamClump");
+    EXPECT_EQ(small.value("upstreamChannel", std::string()), "lockId");
+    EXPECT_EQ(small.value("clumpChannel", std::string()), "subClumpId");
+}
+
+TEST(GraphEdit, AClumpWiredAfterAClumpClumpsInsideItsClumps) {
+    // Issue #115: a Clump wired into the strands after another Clump (inserted after it, dropped on
+    // its wire, linked by hand, through other nodes between) clumps inside that one's clumps once,
+    // reading the numbers it writes, its own written under another name; a choice already made, a
+    // Clump with its own centers linked, and links made by connect alone (pastes, presets) stay.
+    const nlohmann::json g = {
+        {"version", 1},
+        {"nodes",
+         {{{"name", "s"}, {"type", "Scatter"}},
+          {{"name", "big"}, {"type", "Clump"}},
+          {{"name", "n"}, {"type", "Noise"}},
+          {{"name", "w"}, {"type", "Width"}}}},
+        {"connections",
+         {{{"from", "s"}, {"to", "big"}, {"input", "strands"}},
+          {{"from", "big"}, {"to", "n"}, {"input", "strands"}},
+          {{"from", "n"}, {"to", "w"}, {"input", "strands"}}}},
+        {"output", "w"}};
+    auto params = [](const GraphEdit& e, const std::string& name) {
+        const nlohmann::json graph = nlohmann::json::parse(e.toJson());
+        for (const nlohmann::json& n : graph["nodes"]) {
+            if (n.value("name", std::string()) == name) return n.value("params", nlohmann::json::object());
+        }
+        return nlohmann::json::object();
+    };
+    auto expectInside = [&](const GraphEdit& e, const std::string& name, const std::string& upChannel, const std::string& own) {
+        const nlohmann::json p = params(e, name);
+        EXPECT_EQ(p.value("centersFrom", std::string()), "upstreamClump") << name;
+        EXPECT_EQ(p.value("upstreamChannel", std::string()), upChannel) << name;
+        EXPECT_EQ(p.value("clumpChannel", std::string("clumpId")), own) << name;
+    };
+    {  // Add Node after the big one (through it into the Noise).
+        GraphEdit edit(g.dump());
+        const std::string small = edit.addNode("Clump", "small");
+        insertAfter(edit, "big", small);
+        expectInside(edit, small, "clumpId", "subClumpId");
+    }
+    {  // After the Noise: through it, the big Clump still the one before.
+        GraphEdit edit(g.dump());
+        const std::string small = edit.addNode("Clump", "small");
+        insertOnLink(edit, "n", "w", "strands", small);
+        expectInside(edit, small, "clumpId", "subClumpId");
+    }
+    {  // Linked by hand into its strands; the big one writing under its own name.
+        nlohmann::json named = g;
+        named["nodes"][1]["params"] = {{"clumpChannel", "lockId"}};
+        GraphEdit edit(named.dump());
+        const std::string small = edit.addNode("Clump", "small");
+        EXPECT_TRUE(edit.connectByHand("n", small, "strands"));
+        expectInside(edit, small, "lockId", "clumpId");
+    }
+    {  // A big Clump put in before a picking one: the one after it clumps inside it.
+        nlohmann::json one = g;
+        one["nodes"][1]["type"] = "Curl";
+        GraphEdit edit(one.dump());
+        const std::string small = edit.addNode("Clump", "small");
+        insertOnLink(edit, "n", "w", "strands", small);
+        EXPECT_EQ(params(edit, small).value("centersFrom", std::string("pick")), "pick") << "no Clump before it";
+        const std::string bigger = edit.addNode("Clump", "bigger");
+        insertOnLink(edit, "s", "big", "strands", bigger);
+        expectInside(edit, small, "clumpId", "subClumpId");
+        EXPECT_EQ(params(edit, bigger).value("centersFrom", std::string("pick")), "pick");
+    }
+    {  // A Curl coherent by the clumps of the Clump a bigger one is put in before: it keeps reading
+       // that Clump's (now subClumpId), so the bigger one's later name or removal leaves it fed.
+        nlohmann::json curled = g;
+        curled["nodes"][1] = {{"name", "big"}, {"type", "Curl"}, {"params", {{"coherence", "clump"}}}};
+        curled["nodes"][3] = {{"name", "w"}, {"type", "Curl"}, {"params", {{"coherence", "clump"}}}};
+        GraphEdit edit(curled.dump());
+        const std::string small = edit.addNode("Clump", "small");
+        insertOnLink(edit, "big", "n", "strands", small);
+        EXPECT_EQ(params(edit, "w").value("clumpChannel", std::string("clumpId")), "clumpId");
+        const std::string bigger = edit.addNode("Clump", "bigger");
+        insertOnLink(edit, "s", "big", "strands", bigger);
+        expectInside(edit, small, "clumpId", "subClumpId");
+        EXPECT_EQ(params(edit, "w").value("clumpChannel", std::string()), "subClumpId") << "reads the small clumps still";
+        EXPECT_EQ(params(edit, "big").value("clumpChannel", std::string("clumpId")), "clumpId") << "not after it";
+    }
+    {  // Left alone: a choice made, a Clump given centers, connect alone.
+        GraphEdit edit(g.dump());
+        const std::string chose = edit.addNode("Clump", "chose", R"({"centersFrom": "inputCurves"})");
+        insertAfter(edit, "big", chose);
+        EXPECT_EQ(params(edit, chose).value("centersFrom", std::string()), "inputCurves");
+        const std::string pasted = edit.addNode("Clump", "pasted");
+        edit.connect("w", pasted, "strands");
+        EXPECT_EQ(params(edit, pasted).value("centersFrom", std::string("pick")), "pick");
+        EXPECT_FALSE(edit.adoptUpstreamClump("s")) << "not a Clump";
+    }
+    {  // After a Braid (nearer than the Clump): along each braid's sections.
+        nlohmann::json braided = g;
+        braided["nodes"][2]["type"] = "Braid";
+        GraphEdit edit(braided.dump());
+        const std::string after = edit.addNode("Clump", "after");
+        insertAfter(edit, "n", after);
+        const nlohmann::json p = params(edit, after);
+        EXPECT_EQ(p.value("centersFrom", std::string()), "upstreamClump");
+        EXPECT_EQ(p.value("upstreamChannel", std::string()), "braidSection");
+        EXPECT_EQ(p.value("pastTip", std::string("fit")), "fit") << "after a Braid, fit gathers across each section";
+        // Curves then linked to its centers by hand: they shape the clumps inside the sections.
+        const std::string curves = edit.addNode("Guides", "curves");
+        EXPECT_TRUE(edit.connectByHand(curves, after, "centers"));
+        EXPECT_EQ(params(edit, after).value("centersFrom", std::string()), "upstreamClumpCurves");
     }
 }
 

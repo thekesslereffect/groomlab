@@ -690,8 +690,9 @@ class GraphTest(SceneMixin, unittest.TestCase):
         self.assertEqual(params["Curl"]["coherence"]["default"], "strand")
         self.assertEqual(params["Clump"]["clumpBy"]["default"], "count")
         self.assertEqual(params["Clump"]["count"]["showWhen"], {"param": "clumpBy", "in": ["count"]})
-        self.assertEqual(params["Clump"]["clumpBy"]["showWhen"], {"param": "centersFrom", "in": ["pick"]})
-        self.assertEqual(params["Clump"]["centersFrom"]["choices"], ["pick", "inputPoints", "inputCurves"])
+        self.assertEqual(params["Clump"]["clumpBy"]["showWhen"], {"param": "centersFrom", "in": ["pick", "upstreamClump"]})
+        self.assertEqual(params["Clump"]["centersFrom"]["choices"],
+                         ["pick", "inputPoints", "inputCurves", "upstreamClump", "upstreamClumpCurves"])
         # A link drawn by hand into a picking Clump's centers sets it to take them; plain connect does not.
         edit = gl.GraphEdit(json.dumps({"version": 1, "nodes": [
             {"name": "s", "type": "Scatter"}, {"name": "c", "type": "Clump"}, {"name": "g", "type": "ToGuides"}],

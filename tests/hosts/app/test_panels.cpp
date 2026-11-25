@@ -320,9 +320,16 @@ TEST(AppPanels, ParamEditorsRoundTripEveryKindWithoutLosingMaps) {
               json::parse("[[0, 1], [0.5, 1, 0, -2, 0.75, 0.25], [1, 0]]"));
 
     // A mappable param holding a map: shown as its source, never replaced by the number editor.
+    // (Scatter's density is a port on the node from the start, ParamSpec::shownAsInput: Port, until
+    // a source of its own is picked, which takes the port off.)
     const std::string scatter = nodeOfType(*doc, "Scatter");
     panel.showNode(scatter);
     EXPECT_EQ(panel.editorKind("density"), "map");
+    ASSERT_TRUE(panel.mapEditor("density"));
+    EXPECT_TRUE(doc->paramExposed(scatter, "density"));
+    EXPECT_EQ(panel.mapEditor("density")->source(), MapSourceEditor::Source::Port);
+    panel.mapEditor("density")->chooseSource(MapSourceEditor::Source::Constant);
+    EXPECT_FALSE(doc->paramExposed(scatter, "density"));
     const json constant = doc->paramOrDefault(scatter, "density");
     ASSERT_TRUE(constant.is_number());
     const json expression = {{"expression", "0.5 + 0.5 * u"}};
@@ -471,8 +478,9 @@ TEST(AppPanels, LookCardAppliesEverySetting) {
 
 TEST(AppPanels, NewMapForASettingMakesLinksPaintsThenCtrlLowers) {
     // The maps panel's New map, For: Density (the Width and Density brushes are gone): a white
-    // vertex map made and linked to Scatter's density, picked, the Paint brush on it toward 1, all
-    // one undo step; Ctrl paints it toward 0 (hair away); asked again, the same map is picked.
+    // vertex map made, its Map node wired into Scatter's density (the param keeps its number, which
+    // the map multiplies), picked, the Paint brush on it toward 1, all one undo step; Ctrl paints it
+    // toward 0 (hair away); asked again, the same map is picked.
     const std::string path = sampleCopy("groomlab_app_setting_map");
     MainWindow window;
     window.resize(1280, 720);
@@ -501,10 +509,15 @@ TEST(AppPanels, NewMapForASettingMakesLinksPaintsThenCtrlLowers) {
     ASSERT_TRUE(doc->map(map));
     EXPECT_EQ(doc->map(map)->kind, "vertices");
     EXPECT_EQ(doc->maps().size(), mapsBefore + 1);
-    const json linked = doc->paramOrDefault(scatter, "density");
-    ASSERT_TRUE(linked.is_object());
-    EXPECT_EQ(linked["colorSet"], map);
-    EXPECT_DOUBLE_EQ(linked["max"].get<double>(), before.get<double>()) << "white: the density as it was";
+    EXPECT_EQ(doc->paramOrDefault(scatter, "density"), before) << "its number kept: white is the density as it was";
+    std::string mapNode;
+    for (const json& n : doc->graph()["nodes"]) {
+        if (n.value("type", std::string()) == "Map" && n.value("params", json::object()).value("name", std::string()) == map) {
+            mapNode = n.value("name", std::string());
+        }
+    }
+    ASSERT_FALSE(mapNode.empty()) << "a Map node of the map";
+    EXPECT_EQ(doc->paramInputSource(scatter, "density"), mapNode);
     EXPECT_EQ(panel->selectedMap(), map);
     BrushSession& session = window.brush();
     EXPECT_EQ(session.settings().modeName(), "paint");
@@ -515,7 +528,9 @@ TEST(AppPanels, NewMapForASettingMakesLinksPaintsThenCtrlLowers) {
     EXPECT_EQ(doc->undo(), "");
     EXPECT_EQ(doc->map(map), nullptr);
     EXPECT_EQ(doc->paramOrDefault(scatter, "density"), before);
+    EXPECT_EQ(doc->paramInputSource(scatter, "density"), "");
     EXPECT_EQ(doc->redo(), "");
+    EXPECT_EQ(doc->paramInputSource(scatter, "density"), mapNode);
     ASSERT_TRUE(doc->map(map));
     // Ctrl over the scalp's middle: toward 0, the rest white.
     ViewRequest request;
@@ -2422,6 +2437,15 @@ TEST(AppPanels, AttributeParamsSayWritesOrReads) {
     ASSERT_EQ(doc->connectNodes(small, "", curl, "strands"), "");
     ASSERT_EQ(doc->setParam(curl, "coherence", "clump", true), "");
     ASSERT_EQ(doc->setParam(curl, "clumpChannel", "lockId", true), "");
+    // Wired after clumpLarge, clumpSmall clumps inside its clumps under a name of its own (issue
+    // #115): nothing overwritten.
+    EXPECT_EQ(doc->paramOrDefault(small, "centersFrom"), "upstreamClump");
+    EXPECT_EQ(doc->paramOrDefault(small, "clumpChannel"), "subClumpId");
+    panel.showNode(small);
+    EXPECT_EQ(panel.attributeNote("clumpChannel"), QString()) << panel.attributeNote("clumpChannel").toStdString();
+    // Its own clumps under clumpLarge's name: a warning.
+    ASSERT_EQ(doc->setParam(small, "centersFrom", "pick", true), "");
+    ASSERT_EQ(doc->setParam(small, "clumpChannel", "clumpId", true), "");
 
     panel.showNode(small);
     EXPECT_EQ(panel.editorKind("clumpChannel"), "attributeWrites");

@@ -436,7 +436,42 @@ bool isGrayImage(const Texture& image) {
     return im && gray(*im);
 }
 
-std::uint64_t fileStamp(const std::string& path) { return fileStampOf(path, nullptr); }
+namespace {
+struct LiveTexture {
+    TexturePtr texture;
+    std::uint64_t version = 0;
+};
+std::mutex& liveLock() {
+    static std::mutex lock;
+    return lock;
+}
+std::map<std::string, LiveTexture>& liveTextures() {
+    static std::map<std::string, LiveTexture> live;
+    return live;
+}
+bool liveTexture(const std::string& path, LiveTexture* out) {
+    const std::lock_guard<std::mutex> hold(liveLock());
+    const auto it = liveTextures().find(path);
+    if (it == liveTextures().end()) return false;
+    if (out) *out = it->second;
+    return true;
+}
+}  // namespace
+
+void setLiveTexture(const std::string& path, TexturePtr texture, std::uint64_t version) {
+    const std::lock_guard<std::mutex> hold(liveLock());
+    if (texture) {
+        liveTextures()[path] = LiveTexture{std::move(texture), version};
+    } else {
+        liveTextures().erase(path);
+    }
+}
+
+std::uint64_t fileStamp(const std::string& path) {
+    LiveTexture live;
+    if (liveTexture(path, &live)) return (live.version * 0x9E3779B97F4A7C15ull) ^ 0x11FE5EEDull | 1ull;
+    return fileStampOf(path, nullptr);
+}
 
 ScopedFileStamps::ScopedFileStamps() {
     if (tStamps) return;  // nested: the outer scope's answers
@@ -583,6 +618,8 @@ TexturePtr cachedTexture(const std::string& path) {
 }
 
 TexturePtr loadTexture(const std::string& path) {
+    LiveTexture live;
+    if (liveTexture(path, &live)) return live.texture;
     const std::string pattern = udimPattern(path);
     const std::string key = pattern.empty() ? path : pattern;
     const std::uint64_t stamp = fileStampOf(path, &pattern);

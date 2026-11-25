@@ -236,7 +236,7 @@ def fill_map(groom, name, value=None, selected_only=False, color=None, channels=
     map takes `color` (r, g, b[, a]) in the channels of `channels` (a subset of "rgba"), or
     `value` in its r g b (its alpha kept). With `faces` (polygon indices of the scalp:
     selected_scalp_faces) only those faces are filled (a guide layer: the guides rooted on them).
-    `mode`: replace, add, subtract or clamp (the most a value may be). One undo step. Every host's
+    `mode`: replace, add, subtract, min (the least a value may be) or max (the most). One undo step. Every host's
     Fill (the editor's fillMap, in groomLabScalpMaps)."""
     if value is None and color is None:
         raise ValueError("fill a map with a value or a color")
@@ -263,6 +263,8 @@ def remove_map(groom, name, delete_file=False):
         raise RuntimeError("no map named %r" % name)
     with undo_chunk("remove map"):
         flat = cmds.groomLabScalpMaps(groom, remove=name, **({"deleteFile": True} if delete_file else {})) or []
+        from groomlab.mesh_maps import remove_mesh_map
+        remove_mesh_map(groom, name)  # (its color set on the scalp meshes, issue #113)
         changed = [(flat[i], flat[i + 1]) for i in range(0, len(flat) - 1, 2)]
         if cmds.getAttr(groom + ".strandColorSource") == name and cmds.getAttr(groom + ".strandColorMode") == 2:
             cmds.setAttr(groom + ".strandColorMode", 0)
@@ -281,6 +283,8 @@ def rename_map(groom, old, new):
     same step)."""
     with undo_chunk("rename map"):
         cmds.groomLabScalpMaps(groom, rename=(old, new))
+        from groomlab.mesh_maps import rename_mesh_map
+        rename_mesh_map(groom, old, new)  # (its color set on the scalp meshes, issue #113)
         if cmds.getAttr(groom + ".strandColorSource") == old:
             cmds.setAttr(groom + ".strandColorSource", new, type="string")
         if cmds.getAttr(groom + ".scalpMapDisplay") == old:
@@ -327,7 +331,8 @@ def paint_map(groom, name, value=1.0, strength=0.5, color=None, channels="rgba",
     if not kind:
         raise ValueError("no map named %r" % name)
     _remember_view(groom)
-    view_map(groom, name)
+    if not scalp_view_node(groom):  # a node's eye lit: the view stays on it, the map still painted
+        view_map(groom, name)
     show_map_on_scalp(groom, name if kind != "guides" else None)
     texture = next((m["texture"] for m in maps(groom) if m["name"] == name), "") if kind == "texture" else ""
     if map_channels(groom, name) == 4 and color is None:
@@ -379,10 +384,20 @@ def end_paint_view(from_job=False):
         cmds.evalDeferred(lambda: _kill_job(job))
     else:
         _kill_job(job)
-    if not view or not groom or not cmds.objExists(groom):
+    if not groom or not cmds.objExists(groom):
         return
+    try:  # what was painted kept on the scalp meshes too, as color sets (issue #113)
+        from groomlab.mesh_maps import maps_to_mesh
+        maps_to_mesh(groom)
+    except Exception as e:
+        cmds.warning("GroomLab: painted maps not kept on the scalp: %s" % e)
+    if not view:
+        return
+    locked = scalp_view_node(groom)  # a node's eye lit since: it stays
     with no_undo():  # a display, not an edit: no undo step of its own
         for attr, kind, value in view:
+            if locked and attr == "scalpMapDisplay":
+                continue
             if kind == "string":
                 cmds.setAttr(groom + "." + attr, value or "", type="string")
             else:
@@ -401,17 +416,38 @@ def view_map(groom, name=None):
 
 
 MAP_DISPLAY_CHANNELS = ("rgb", "r", "g", "b", "a")
+NODE_MAP_PREFIX = getattr(groomlab_core, "NODE_MAP_PREFIX", "node:")
+
+
+def scalp_view_node(groom):
+    """The node whose result the scalp shows (a Layers node's eye lit, issue #124), or None."""
+    try:
+        shown = cmds.getAttr(groom + ".scalpMapDisplay") or ""
+    except (RuntimeError, ValueError):
+        return None
+    return shown[len(NODE_MAP_PREFIX):] if shown.startswith(NODE_MAP_PREFIX) else None
+
+
+def show_node_on_scalp(groom, node=None):
+    """Show a Layers (or ColorLayers) node's maps combined on the scalp, its eye lit; None turns it
+    off (the scalp then shows no map). While it is lit the scalp stays on that node: picking or
+    painting another map leaves the view alone (show_map_on_scalp)."""
+    cmds.setAttr(groom + ".scalpMapDisplay", NODE_MAP_PREFIX + node if node else "", type="string")
 
 
 def show_map_on_scalp(groom, name=None, channel=None):
     """Show a map on the scalp in the viewport (a gray map black to white, a color map in color,
     any kind); None hides it. `channel` ("rgb", or "r", "g", "b", "a" as gray) picks what of a
-    color map shows; None leaves it as it is."""
+    color map shows; None leaves it as it is. While a node's eye is lit (show_node_on_scalp) the
+    scalp stays on that node: nothing changes. Returns whether the scalp shows `name` now."""
     if channel is not None:
         if channel not in MAP_DISPLAY_CHANNELS:
             raise ValueError("channel is one of %s, not %r" % (MAP_DISPLAY_CHANNELS, channel))
         cmds.setAttr(groom + ".scalpMapChannel", channel, type="string")
+    if scalp_view_node(groom):
+        return False
     cmds.setAttr(groom + ".scalpMapDisplay", name or "", type="string")
+    return True
 
 
 def export_map(groom, name, path, resolution=1024):
@@ -720,12 +756,14 @@ def param_map(groom, node, param):
 
 
 def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, paint=True, channel="luminance",
-                faces=None):
+                faces=None, map_node=False):
     """Paint a mappable param (+ New Map > for a setting in the Paint tab, and the Graph Editor's
     right-click a param > Paint): the map it reads already when it reads one, else the map `name`
     (default "<node>_<param>"; made white, so the look stays as it is) on the guides, the scalp's
     vertices or a texture (`kind`), read by the param as every host links it (the core's
-    wireParamMap: the param's value its white; a Map node wired to it goes). With `paint` the
+    wireParamMap: listed in the param, white its value; with `map_node`, as Groom Tools > Paint >
+    New Map for a setting links it, a Map node of the map wired into the param instead, whose own
+    value the map's 0-1 multiplies, so its slider still scales it). With `paint` the
     Paint brush starts on it toward 1 (the param's own value); Ctrl paints toward 0 (on a density
     map: no hair). With `channel` ("r", "g", "b" or "a") the param reads that output of the map's
     Map node (one Map node feeds several params), a channel of a color map `name` (made if
@@ -740,6 +778,8 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
         kwargs["mapName"] = name
     if channel and channel != "luminance":
         kwargs["channel"] = channel
+    if map_node:
+        kwargs["mapNode"] = True
     if faces:
         kwargs["faces"] = _faces_flag(faces)
     if kind == "texture":

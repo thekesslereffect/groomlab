@@ -173,7 +173,8 @@ void MainWindow::buildPanels() {
         if (!graph_->addNodeOfType("Map", QPointF(nan, nan), false, -1, nlohmann::json{{"name", map}}, map).empty()) graphEdited();
     });
     connect(maps_, &MapsPanel::paintParamRequested, this, [this](const std::string& node, const std::string& param, const std::string& kind) {
-        paintParam(QString::fromStdString(node), QString::fromStdString(param), QString::fromStdString(kind));
+        // (New map for a setting: its Map node wired into the param, seen in the graph.)
+        paintParam(QString::fromStdString(node), QString::fromStdString(param), QString::fromStdString(kind), true);
     });
 
     look_ = new LookPanel();
@@ -490,6 +491,7 @@ void MainWindow::wireOverlay() {
     });
     connect(graph_, &NodeGraphView::clumpColorsToggled, this, [this](const std::string& node) { toggleClumpColors(node); });
     connect(graph_, &NodeGraphView::braidTubesToggled, this, [this](const std::string& node) { toggleBraidTubes(node); });
+    connect(graph_, &NodeGraphView::scalpViewToggled, this, [this](const std::string& node) { toggleScalpView(node); });
     connect(graph_, &NodeGraphView::nodeRenamed, this, [this](const std::string& from, const std::string& to) { followRenamedNode(from, to); });
     connect(graph_, &NodeGraphView::edited, this, [this] { graphEdited(); });
     connect(graph_, &NodeGraphView::message, this, [this](const QString& text) { report(text); });

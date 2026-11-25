@@ -167,14 +167,20 @@ TEST(AppGraphEditor, TheNodeMenuFollowsTheNodesKind) {
     for (const char* item : {"Brush This Node's Guides", "Clear Sculpt Edits", "Edit Node...", "Show Inner Param", "Save as Node..."}) {
         EXPECT_FALSE(has(items, item)) << item << ": not this node's kind";
     }
-    // Expose Param as Input: the param an input port (checked after).
+    // Expose Param as Input: the param an input port (checked after). Scatter's density is one from
+    // the start (ParamSpec::shownAsInput), checked.
     QMenu* expose = submenu(&menu, QStringLiteral("Expose Param as Input"));
     ASSERT_NE(expose, nullptr);
     emit expose->aboutToShow();
     ASSERT_FALSE(expose->actions().isEmpty());
-    QAction* first = expose->actions().front();
+    QAction* first = nullptr;
+    for (QAction* a : expose->actions()) {
+        EXPECT_EQ(a->isChecked(), w.doc()->paramExposed(scatter, a->text().toStdString())) << a->text().toStdString();
+        if (a->text() == QStringLiteral("density")) EXPECT_TRUE(a->isChecked());
+        if (!first && !a->isChecked() && !a->isSeparator()) first = a;
+    }
+    ASSERT_NE(first, nullptr);
     const std::string param = first->text().toStdString();
-    EXPECT_FALSE(first->isChecked());
     first->trigger();
     EXPECT_TRUE(w.doc()->paramExposed(scatter, param)) << param;
     // A Sculpt node: Brush This Node's Guides (what brushes shape) and Clear Sculpt Edits.

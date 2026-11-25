@@ -232,9 +232,8 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
         for (const ui::json& choice : defs().choices("paintMode")) {
             const std::string value = choice.value("value", std::string());
             auto* button = new QToolButton(paintBox);
-            // Clamp Maximum reads Max in the track (four in one row; its tip says it whole).
-            button->setText(value == "clampMaximum" ? tr("Max") : qs(choice.value("label", std::string())));
-            button->setToolTip(value == "clampMaximum" ? tr("Clamp Maximum: ") + qs(choice.value("tip", std::string())) : qs(choice.value("tip", std::string())));
+            button->setText(qs(choice.value("label", std::string())));
+            button->setToolTip(qs(choice.value("tip", std::string())));
             button->setCheckable(true);
             button->setProperty("role", "chip");
             button->setProperty("paintMode", qs(value));
@@ -247,6 +246,8 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
             });
             if (value == "replace") button->setChecked(true);
         }
+        // Every mode on one row while each still fits (Replace, Add, Subtract, Min, Max).
+        row->setMaxColumns(static_cast<int>(paintModes_.size()));
     }
     {
         // Whole Faces: each dab fills the scalp's faces under it, no falloff (BrushToolSettings::paintWholeFaces),
@@ -1080,7 +1081,9 @@ bool MapsPanel::paintSelected() {
     emit paintRequested();
     // A scalp map shows on the scalp while it is painted (Maya's paint_map): a texture map as its
     // image, a vertex map per vertex.
-    if ((map->kind == "texture" || map->kind == "vertices") && document_->scalpMapDisplay() != name) {
+    // (Not while a Layers node's eye holds the scalp: the map is painted, the view stays.)
+    if ((map->kind == "texture" || map->kind == "vertices") && document_->scalpViewNode().empty() &&
+        document_->scalpMapDisplay() != name) {
         showSelected(true);
         paintShown_ = name;
     }
@@ -1108,7 +1111,7 @@ void MapsPanel::showSelected(bool show) {
     document_->setScalpMapDisplay(show ? name : std::string(), channel.isEmpty() ? std::string("rgb") : channel.toStdString());
     {
         const QSignalBlocker block(show_);
-        show_->setChecked(show && !name.empty());
+        show_->setChecked(show && !name.empty() && document_->scalpMapDisplay() == name);  // (a node's eye may hold it)
     }
     emit displayChanged();
 }

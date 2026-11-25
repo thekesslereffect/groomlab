@@ -202,6 +202,15 @@ Clump pulls strands toward clump centers. Main parameters:
 | `clumpChannel` | Per-strand attribute that receives the clump index (`clumpId`). Chained Clumps should each use their own; Twist, Cards and HairColor's `clumpShare` read the one named by their own `clumpChannel`. | `clumpId` |
 | `followTubes` | With `pick`, for strands filling [tube guides](/docs/guides-and-brushes#tube-guides) (Interpolate's `fillTubes`): each tube picks its own centers among its strands, as far apart as `clumpBy` says, and a strand clumps only toward its own tube's, so clumps stay inside the tube and flatten, twist and taper with it. With centers given (`inputCurves`, `inputPoints`, such as a Guides node handing a tube hierarchy's level 2 guides), each center belongs to the tube it is rooted in, and a strand clumps only toward its own tube's center, never a neighbour tube's; a strand whose tube has none, or that is rooted in no tube (a seam between roots), clumps toward the centers of its level-0 tube (Interpolate's `tubeBase`: the root outline holding it, else the nearest), so none is left unclumped and none crosses into a neighbour's clump. This follows the drawn root outlines, not the painted region map, so a coarse scalp does not matter. Where neighbouring roots overlap slightly at a shared edge, a strand there belongs to the root whose outline it lies furthest inside. Centers given as guides follow the smooth curve through each guide's points, as Interpolate does, not the straight chords between them. Strands in no tube clump as usual. No effect on strands without tubes. | on |
 
+**Clumps inside clumps.** `centersFrom` `upstreamClump` makes smaller clumps inside an earlier
+Clump's: it picks its own centers, and each strand gathers only toward the centers inside its own
+big clump (`upstreamChannel`, the channel that Clump numbers its clumps in), so the big clumps keep
+their shape and split into smaller ones. Give the second Clump's `clumpChannel` its own name
+(`subClumpId`) to keep both numbers. Linking a Clump to another Clump's `centers`, or adding a Clump
+after one, sets it up. After a **Braid**, `upstreamChannel` `braidSection` gathers small locks along
+each section of each braid, inside its tube: the braid keeps its shape and thickness, and the locks
+show from low strengths on. `upstreamClumpCurves` does the same with the `centers` input's curves.
+
 **Custom clump centers.** Connect strands or guides to Clump's `centers` input: a low-density
 Scatter, a guide group or a ToGuides node. Connecting `centers` sets `centersFrom` to
 `inputPoints`.
@@ -243,7 +252,7 @@ To keep strand lengths after clumping, add a **RestoreLength** after the Clump w
 | **Noise** | Random displacement. Applied to a `fraction` of the strands at high frequency, it gives frizz (`mode` `kinky` for sharp kinks). | `amplitude`, `frequency`, `fraction` |
 | **Wet** | Wet hair in one node: small clumps near the root merge into larger clumps toward the tip, each small clump nested inside one large clump. `wetness` sets the amount (animate it to dry the hair); `clumpSize` is the spacing of the largest clumps, `levels` the number of nested clump sizes. It also writes a `wetness` attribute that darkens the shading and raises the gloss in the viewport, the app and Arnold. | `wetness`, `clumpSize`, `levels` |
 | **Smooth** | Removes bends from strands, keeping roots and lengths. `scale` is the wavelength it removes, as a fraction of strand length: small values remove kinks, 1 straightens the whole strand. The result does not depend on point count. | `strength`, `scale` |
-| **Scatter** | Generates roots on the scalp. `density` is in strands per unit area (shown per cm²). `layout` `uvGrid` places one root per cell of a UV grid (rows of fur, scale tracts). `previewAll` keeps every root in the viewport regardless of preview density, for a small number of large elements. `length` is the length of the straight strands it grows; an **Interpolate** after it gives them the guides' shapes and lengths, so with guides it only shows where no guide reaches (trim with the **Length** node). Past 2M strands the node notes it is heavy (a human head has about 100-150k hairs); past 50M it stops with an error. | `density`, `randomness`, `layout` |
+| **Scatter** | Generates roots on the scalp. `density` is in strands per unit area (shown per cm²), and an input on the node from the start: a map or field linked there scales it (white: the slider's density). `layout` `uvGrid` places one root per cell of a UV grid (rows of fur, scale tracts). `previewAll` keeps every root in the viewport regardless of preview density, for a small number of large elements. `length` is the length of the straight strands it grows; an **Interpolate** after it gives them the guides' shapes and lengths, so with guides it only shows where no guide reaches (trim with the **Length** node). Past 2M strands the node notes it is heavy (a human head has about 100-150k hairs); past 50M it stops with an error. | `density`, `randomness`, `layout` |
 
 Curl is defined on the strand's curve, not on its points: 40 or 256 segments give the same curl,
 and Curl inserts points where a turn would otherwise be undersampled.
@@ -372,6 +381,18 @@ rest are white, so a mask on layer 2's opacity gives the mask itself.
 Link the stack's output to any mappable param, or ColorLayers' `rgb` to a color param such as
 HairColor's `color`. Example: a brown base with a red layer on multiply, masked by a painted map,
 gives red streaks where you paint.
+
+A ColorLayers layer's color takes a map the way a number does: its **Map** button picks a painted
+map, a texture, a color set, a strand attribute or an expression (a color map's r g b color the
+layer; a gray one colors it gray), and its **Paint** button makes a color map for it.
+
+**See the stack on the scalp.** The eye on a Layers or ColorLayers node's header (a color swatch on
+a node whose header has View's eye) shows the stack's result on the scalp: vertex maps per vertex,
+textures as an image composited texel by texel with each layer's mode and opacity. While it is on,
+the scalp stays on that node: picking or painting one of its maps paints it as usual, and the view
+updates as you paint (a texture as you stroke), without switching to the map. Click it again to turn
+it off. A stack reads one kind of map: textures, or vertex maps and guide layers, never both (the
+node says so if you mix them).
 **Split** routes
 strands to outputs `a` to `d`, by fraction or by a painted map.
 

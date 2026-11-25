@@ -1193,8 +1193,7 @@ class PaintTab(_GroomTab):
         self.mode_group.setExclusive(True)
         self.mode_buttons = {}
         for choice in definitions.choices("paintMode"):
-            label = choice["label"].replace(" Maximum", "")  # "Clamp Maximum": Clamp (its tooltip says the rest)
-            button = widgets.chip(label, choice.get("tip", ""), choice["value"] == "replace", "paintMode_" + choice["value"])
+            button = widgets.chip(choice["label"], choice.get("tip", ""), choice["value"] == "replace", "paintMode_" + choice["value"])
             button.clicked.connect(lambda _checked=False, value=choice["value"]: self.paint_mode_changed(value))
             self.mode_group.addButton(button)
             self.mode_buttons[choice["value"]] = button
@@ -1565,7 +1564,8 @@ class PaintTab(_GroomTab):
         painted = self.__dict__.setdefault("_painted_views", {})
         if self.groom not in painted:
             painted[self.groom] = [self._views(self.groom), None]
-        groomlab.view_map(self.groom, name)
+        if not groomlab.scalp_view_node(self.groom):  # a node's eye lit: the view stays on it (issue #124)
+            groomlab.view_map(self.groom, name)
         if self.current_kind() in ("vertices", "texture"):
             groomlab.show_map_on_scalp(self.groom, name)
         painted[self.groom][1] = self._views(self.groom)  # what painting shows now
@@ -1672,8 +1672,9 @@ class PaintTab(_GroomTab):
         from groomlab.base import undo_chunk
         with undo_chunk("map for %s.%s" % (node, param)):
             before = groomlab.param_map(self.groom, node, param)
+            # (New Map for a setting: the map's Map node wired into the param, seen in the graph.)
             name = self.run(groomlab.paint_param, self.groom, node, param, kind=kind, resolution=resolution, paint=False,
-                            faces=faces)
+                            faces=faces, map_node=True)
             if not name:
                 return None
             self.refresh(force=True)

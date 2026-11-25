@@ -232,8 +232,9 @@ public:
     // Paint this param (the param panels' Paint action, the maps panel's New map for a setting):
     // the map it reads, or one made (`kind`: vertices or texture) and linked as one undo step
     // (GroomDocument::paintParam), picked, then the Paint brush on it toward 1 (Ctrl: toward 0)
-    // in brush mode. False (and a message) when refused.
-    bool paintParam(const QString& node, const QString& param, const QString& kind = QStringLiteral("vertices"));
+    // in brush mode. `mapNode` (New map for a setting): the map's Map node wired into the param
+    // (seen in the graph), not the map listed in the param. False (and a message) when refused.
+    bool paintParam(const QString& node, const QString& param, const QString& kind = QStringLiteral("vertices"), bool mapNode = false);
     // The open groom's graph saved as a user preset (the Presets menu's Save as Preset); false
     // (and a message) when refused (a bad name, a file in the way unless `overwrite`).
     bool savePreset(const QString& name, bool overwrite = false);
@@ -756,6 +757,9 @@ private:
     // A Braid header's Show Tubes button: that node's section tubes drawn in the viewport, or (lit)
     // no more. The nodes shown are the document's (saved with the groom).
     void toggleBraidTubes(const std::string& node);
+    // A Layers header's Show on Scalp: that node's maps combined on the scalp, locked there while
+    // other maps are painted (GroomDocument::showNodeOnScalp), or (lit) no more.
+    void toggleScalpView(const std::string& node);
     // The display's Show Tubes nodes from the document's, and which Braids' buttons are lit. True
     // when the display's changed (draw again).
     bool refreshBraidTubes();
