@@ -44,7 +44,8 @@ PaintMode paintModeFromString(const std::string& name);
 // section by the brush's weight at its guide point (the painted list first resampled to one value
 // per point, so edits are per CV):
 //   Width     the section grows (negative strength: shrinks);
-//   Flatness  its aspect goes toward 0, a flat ribbon (negative: back toward 1, as drawn);
+//   Flatness  its aspect goes toward 0, a flat ribbon, its width kept (negative: the other axis
+//             flattens, its width shrinking toward a ribbon on edge, its height kept);
 //   Twist     it turns about the guide (negative: the other way).
 enum class TubeChannel { Width, Flatness, Twist };
 // width, flatness, twist; tubeChannelFromString throws std::invalid_argument.
@@ -221,8 +222,13 @@ std::vector<GuideId> withMirrorGuides(const GuideHierarchy& hierarchy, const std
 std::vector<GuideId> brushTargets(const GuideHierarchy& hierarchy, const BrushSettings& s);
 
 // Pushes guide points (root first) out of the scalp to at least `offset`
-// above it, keeping segment lengths. The root stays where it is.
+// above it, keeping segment lengths. The root stays where it is. A point past an open border of
+// the scalp (belowScalpAt) is not in it.
 std::vector<Vec3f> keepOffScalp(const std::vector<Vec3f>& points, const ScalpMesh& scalp, float offset = 0.0f);
+// Whether p, whose closest scalp point is `closest`, is less than `offset` above the scalp: in
+// front of it but closer, or behind it, across the surface (within 60 degrees of its normal), not
+// off past an open border's edge, where it lies out to the side of the surface.
+bool belowScalpAt(const Vec3f& p, const SurfacePoint& closest, float offset = 0.0f);
 
 // Optional per-point weight in [0, 1] replacing the world-space sphere, e.g.
 // a screen-space falloff around the cursor for interactive tools.

@@ -564,12 +564,20 @@ class TubePanel(QtWidgets.QWidget):
         (busy()); `force` (after the panel's own edit): only not mid-drag."""
         if self.editor.busy() if force else self.busy():
             return
+        # (Polled: read again only when the guides or their selection changed, or for another
+        # groom or mode; each read parses the guides, a hitch every tick on a big groom.)
+        from groomlab.ui import groom_watch
+        stamp = groom_watch.stamp(groom, ("guideData", "guideSelection"))
+        key = (groom, self.mode, stamp)
+        if not force and stamp is not None and key == getattr(self, "_read_key", None):
+            return
+        self._read_key = key
         info = {"source": "none", "guides": [], "tube": None, "shapes": [], "midShapes": [], "tipShapes": [], "inUse": []}
         if groom:
             try:
                 if self.mode == "edit":
                     info = groomlab.tube_targets(groom)
-                if full or groom != self._groom:
+                if full or force or groom != self._groom or stamp is not None:
                     self._library = [s for s in groomlab.tube_shapes(groom) if not s["builtin"]]
             except (RuntimeError, ValueError):
                 pass
@@ -914,7 +922,7 @@ class TubePanel(QtWidgets.QWidget):
             return
         self._choice = name
         self.refresh(groom, force=True)
-        self.owner.status.setText("%s: a copy of the built-in to edit (drag its points)." % name)
+        self.owner.status.setText("%s: an editable copy (drag its points)." % name)
 
     def new_library_shape(self):
         groom = self.owner.groom()
@@ -1087,10 +1095,6 @@ class ToolPalette(QtWidgets.QWidget):
         # tool whose settings the Brush block shows now (remember_brush, recall_brush).
         self.brushes = {}
         self._brush_shown = None
-        # The card (tab, tool) shown, and while a switch holds the scroll where it was (issue 114):
-        # scroll_when_laid_out's pending().
-        self._scroll_card = None
-        self._scroll_pending = None
         self.buttons = {}  # tool -> its tile (the first made; a tool with tiles on two tabs: tiles)
         self.tiles = {}    # tool -> every tile of it
 
@@ -1171,8 +1175,13 @@ class ToolPalette(QtWidgets.QWidget):
         self.level.setVisible(False)
         self.level.currentIndexChanged.connect(self.target_changed)
 
-        self.status = widgets.StatusLabel()  # made early: the tabs report into it
-        top_column.addWidget(self.status)
+        # (Made early: the tabs report into it.) One line, always there, above the scrolled column:
+        # in view however far the panel scrolls, and messages coming and going never move the tools
+        # under it (issue #114).
+        self.status = widgets.StatusLabel(single_line=True)
+        self.status.setContentsMargins(theme.px(12), theme.px(4), theme.px(12), 0)
+        self.status.fit_height()
+        frame.insertWidget(frame.indexOf(scroll), self.status)
 
         # No groom to work on: how to start one.
         self.empty = QtWidgets.QFrame()
@@ -2271,12 +2280,12 @@ class ToolPalette(QtWidgets.QWidget):
             from groomlab.ui import messages
             self.status.setText("The sample wasn't added: %s" % messages.error("Add Sample Mesh", e))
             return
-        self.status.setText("Added %s (selected): click Create Groom from Selection." % part)
+        self.status.setText("Added %s: now Create Groom from Selection." % part)
 
     def create_groom(self):
         from groomlab.ui import menu
         if not menu.selected_meshes():
-            self.status.setText("Select the scalp mesh, or faces of one (and any guide curves), first.")
+            self.status.setText("Select a scalp mesh (or its faces) first.")
             return
         try:
             menu.create_groom_from_selection()
@@ -2457,7 +2466,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.sync_brush()  # the tool's own radius, falloff and curves, before they go to it
         self.status.setText("")
         if not self.groom():
-            self.status.setText("Select a groom first; tools work on the selected groom.")
+            self.status.setText("Select a groom to use the tools.")
         if tool == "select":
             groomlab.select_tool(level=max(self.level.currentData() or 0, 0), group=self.current_group(),
                                  symmetry=self.symmetry_name())
@@ -2568,22 +2577,7 @@ class ToolPalette(QtWidgets.QWidget):
         tool's own, Applies to (Paint: its own block, then Brush, titled)."""
         self.sync_brush()
         tool = self.card_tool()
-        # Another card (a tool picked): the panel stays where it is scrolled (issue 114), not moved by
-        # the card's blocks hiding and showing or the focus passed on; only a card too short to reach
-        # there scrolls up to its end. (Taken before anything shown or hidden here moves it; a tool
-        # picked again while the last switch still holds: where that one holds.)
-        card = (self.current_tab(), tool)
-        if card != self._scroll_card:
-            bar = self.scroll.verticalScrollBar()
-            held = self._scroll_pending() if self._scroll_pending else None
-            at = held if held is not None else bar.value()
-            first = self._scroll_card is None
-            self._scroll_card = card
-            self._scroll_pending = None
-            if not first:
-                # Held a while: the card's lists and blocks fill in over a few events.
-                self._scroll_pending = widgets.scroll_when_laid_out(
-                    bar, at, still=lambda: self._scroll_card == card, follow_ms=1500)
+        self.keep_scroll(tool)
         uses = TOOL_SETTINGS.get(tool, set())
         photos = self.current_tab() == "photos"
         self.settings.setVisible(not photos and tool is not None)
@@ -2659,6 +2653,44 @@ class ToolPalette(QtWidgets.QWidget):
             self.strength.setRange(-span["soft_max"] if signed else span["soft_min"], span["soft_max"])
             self.strength.setValue(self.strengths[tool])
             self.strength.setLabel("Strength (±)" if signed else "Strength")
+
+    def keep_scroll(self, tool):
+        """Each tool's card scrolled where it was left (issue #114). Where each tool's card is
+        scrolled is noted as it is scrolled (a wheel, the bar, keys: never the panel's own moves
+        as cards change height), and a tool shown again goes back there, held there while its
+        card settles (its blocks showing, hiding and refilling over the next moment); a tool not
+        shown before starts at the top."""
+        bar = self.scroll.verticalScrollBar()
+        if not getattr(self, "_scroll_hooked", False):
+            self._scroll_hooked = True
+            self._scrolls = {}
+            self._scroll_hold = None
+            bar.actionTriggered.connect(lambda *_: QtCore.QTimer.singleShot(0, self._note_scroll))
+            bar.rangeChanged.connect(lambda *_: self._hold_scroll())
+        if tool == getattr(self, "_scroll_tool", False):
+            return
+        self._scroll_tool = tool
+        self._scroll_hold = (tool, self._scrolls.get(tool, 0), QtCore.QElapsedTimer())
+        self._scroll_hold[2].start()
+        self._hold_scroll()
+        for wait in (0, 60, 250):
+            QtCore.QTimer.singleShot(wait, self._hold_scroll)
+
+    def _note_scroll(self):
+        """Scrolled by hand: where the current tool's card is now (and no longer held)."""
+        self._scroll_hold = None
+        self._scrolls[getattr(self, "_scroll_tool", None)] = self.scroll.verticalScrollBar().value()
+
+    def _hold_scroll(self):
+        hold = getattr(self, "_scroll_hold", None)
+        if not hold:
+            return
+        tool, want, since = hold
+        if tool != getattr(self, "_scroll_tool", False) or since.elapsed() > 500:
+            self._scroll_hold = None
+            return
+        bar = self.scroll.verticalScrollBar()
+        bar.setValue(min(want, bar.maximum()))
 
     # -- Each brush's own settings ----------------------------------------------------
     # Radius, falloff and the two curves are kept per brush (strength too: self.strengths), so a
@@ -2804,7 +2836,7 @@ class ToolPalette(QtWidgets.QWidget):
         groom = self.groom()
         curves = groomlab.selected_curves(groom)  # (groups of curves too)
         if not groom or not curves:
-            self.status.setText("Select the part curves (and pin the groom, or select it too).")
+            self.status.setText("Select the part curves and the groom.")
             return
         try:
             names = groomlab.add_part(groom, groomlab.transforms(curves), delete_curves=True)

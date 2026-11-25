@@ -276,7 +276,8 @@ class RootTubeCard(QtCore.QObject):
     def refresh(self, groom, full=True):
         """The buttons as the tool stands, and the hierarchy's levels. `full` False (the palette's
         frequent tick): the levels and the density map read again only for another groom or after
-        an action here (each read parses the guides and lays the scalp: a hitch every tick)."""
+        an action here (each read parses the guides and lays the scalp: a hitch every tick); `full`:
+        also when the guides or maps changed since they were read."""
         self.tool.poll()  # (after an undo the tool reads the groom again: its outlines follow)
         mode = self._mode()
         editing = mode == "edit"
@@ -291,8 +292,16 @@ class RootTubeCard(QtCore.QObject):
         self.duplicate_root.setEnabled(picked)
         self.duplicate_root.setChecked(mode == "duplicate")
         self.subdivide_root.setEnabled(picked)
-        heavy = full or groom != getattr(self, "_read_groom", "?") or self._levels is None
+        # (The levels and the density map read only when the guides or maps changed, or for another
+        # groom or level picked: each read parses the guides and lays the scalp, a hitch per tick.)
+        from groomlab.ui import groom_watch
+        stamp = groom_watch.stamp(groom, ("guideData", "scalpMaps"))
+        key = (stamp, self.owner.current_group())
+        heavy = (groom != getattr(self, "_read_groom", "?") or self._levels is None
+                 or (full and (stamp is None or key != getattr(self, "_read_key", None))))
         self._read_groom = groom
+        if heavy:
+            self._read_key = key
         if heavy:
             self.fill_density_maps(groom)
         else:
@@ -423,7 +432,7 @@ class RootTubeCard(QtCore.QObject):
         if info.get("base") and len(levels) > 1 and self.owner.current_group() in levels[1:]:
             try:
                 self._after_levels(groom, info["base"], 1)
-                self.owner.status.setText("Level 1 shown: a new root tube is drawn at the base level.")
+                self.owner.status.setText("Level 1 shown: new roots go there.")
             except (RuntimeError, ValueError) as e:
                 self.owner.status.setText(str(e).strip())
 
@@ -458,7 +467,7 @@ class RootTubeCard(QtCore.QObject):
             return
         made, kept = len(info["cells"]), info["kept"]
         if not made and not info["removed"]:
-            self.owner.status.setText("The density did not change: no root cut again.")
+            self.owner.status.setText("Density unchanged: nothing cut again.")
             return
         self.owner.status.setText("%s: %d root%s made%s." % (verb, made, "" if made == 1 else "s",
                                                               ", %d kept" % kept if kept else ""))
@@ -484,7 +493,7 @@ class RootTubeCard(QtCore.QObject):
         groom = self.owner.groom()
         roots = self.tool.picked if self._mode() in ("select", "duplicate") else []
         if not groom or not roots:
-            self.owner.status.setText("Select a root first (Select root), then Subdivide.")
+            self.owner.status.setText("Select a root, then Subdivide.")
             return
         self.tool.leave()
         info = self._run(self._subdivide, groom, roots)
@@ -512,7 +521,7 @@ class RootTubeCard(QtCore.QObject):
         groom = self.owner.groom()
         name = self.density_map(groom) if groom else None
         if not name:
-            self.owner.status.setText("No density map yet: Subdivide a root first.")
+            self.owner.status.setText("No density map yet: Subdivide first.")
             return
         self.tool.leave()
         info = self._run(root_tubes.apply_density, groom, [], name, self.multiplier.value(), True)
@@ -540,7 +549,7 @@ class RootTubeCard(QtCore.QObject):
         # The one map (Subdivide makes it); Apply cuts by it after.
         name, roots = self.density_map(groom), []
         if not name:
-            self.owner.status.setText("No density map yet: Subdivide a root first (it makes the root's map).")
+            self.owner.status.setText("No density map yet: Subdivide first.")
             self.paint_density.setChecked(False)
             return
         paint = self.owner.paint_tab
@@ -561,8 +570,7 @@ class RootTubeCard(QtCore.QObject):
             self.owner.status.setText(messages.error("Paint subdivision density", e))
             self.refresh(groom)
             return
-        self.owner.status.setText("Painting %s (white: more, smaller roots; Ctrl: toward black). Finish painting "
-                                  "(or Q, another tool), then Apply to cut by it." % name)
+        self.owner.status.setText("Painting %s: white for more roots, then Apply." % name)
         self.refresh(groom)
 
     def _paint_ended(self):
@@ -617,8 +625,8 @@ class RootTubeCard(QtCore.QObject):
         except (RuntimeError, ValueError) as e:
             self.owner.status.setText(str(e).strip())
             return
-        self.owner.status.setText("Level %d's tubes kept in view; the level you pick shows its guides." % self._locked if self._locked
-                                  else "Lock view off: only the picked level shows.")
+        self.owner.status.setText("Level %d's tubes kept in view." % self._locked if self._locked
+                                  else "Lock view off.")
 
     def mixed_toggled(self, on):
         """Mixed view: the levels above shown where no level below continues them, on the level picked."""
@@ -630,8 +638,8 @@ class RootTubeCard(QtCore.QObject):
         except RuntimeError as e:
             self.owner.status.setText(str(e).strip())
             return
-        self.owner.status.setText("Mixed view: level %d with the levels above it doesn't continue." % self._current if on
-                                  else "Mixed view off: the picked level alone.")
+        self.owner.status.setText("Mixed view: level %d with the levels above." % self._current if on
+                                  else "Mixed view off.")
 
     def _unlock(self):
         self._locked = 0
@@ -655,9 +663,8 @@ class RootTubeCard(QtCore.QObject):
         if not info:
             return
         self._after_levels(groom, info["base"], len(info["levels"]))
-        self.owner.status.setText("Split %d tube%s: %s has %d levels; level %d shown." %
-                                  (info["split"], "" if info["split"] == 1 else "s", info["base"], len(info["levels"]),
-                                   len(info["levels"])))
+        self.owner.status.setText("Split %d tube%s: %s has %d levels." %
+                                  (info["split"], "" if info["split"] == 1 else "s", info["base"], len(info["levels"])))
 
     def remove_clicked(self):
         groom = self.owner.groom()
@@ -668,7 +675,7 @@ class RootTubeCard(QtCore.QObject):
         if info:
             self._after_levels(groom, info["base"], len(info["levels"]))
             if info.get("removed") is not None:
-                self.owner.status.setText("Removed %d split tube%s under the selection: %s has %d levels." %
+                self.owner.status.setText("Removed %d tube%s: %s has %d levels." %
                                           (info["removed"], "" if info["removed"] == 1 else "s", info["base"],
                                            len(info["levels"])))
 
@@ -682,4 +689,4 @@ class RootTubeCard(QtCore.QObject):
         except (RuntimeError, ValueError) as e:
             self.owner.status.setText(str(e).strip())
             return
-        self.owner.status.setText("Level %d: its tubes shown; the Tube tool and brushes edit them." % level)
+        self.owner.status.setText("Level %d shown." % level)

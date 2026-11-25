@@ -809,6 +809,7 @@ bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, co
         return changed;
     }
     impl_->connect(src, dst, input, output);
+    if (input == "strands" && nodeType(dst) == op::kClump) return adoptUpstreamClump(dst);
     // A Clump picking its own centers takes the centers linked to it (its centersFrom: inputPoints;
     // guides, through any curve nodes after them, inputCurves: each clump along its guide); a Cards
     // node following the strands, the guides linked to it (its cardsFrom: guides). Guides are a
@@ -833,6 +834,45 @@ bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, co
         }
         return false;
     };
+    // A Clump linked to a Clump's centers (issue #115): the smaller clumps inside its clumps
+    // (upstreamClump), reading the clump numbers it writes; this one's own written under another
+    // name when it would take that one's (subClumpId).
+    if (input == "centers" && nodeType(dst) == op::kClump && nodeType(src) == op::kClump) {
+        std::string upChannel = "clumpId";
+        for (const json& n : impl_->nodes()) {
+            if (n.is_object() && n.value("name", std::string()) == src && n.contains("params") && n["params"].is_object()) {
+                const auto it = n["params"].find("clumpChannel");
+                if (it != n["params"].end() && it->is_string()) upChannel = it->get<std::string>();
+            }
+        }
+        for (json& n : impl_->nodes()) {
+            if (!n.is_object() || n.value("name", std::string()) != dst) continue;
+            json& params = n["params"];
+            if (!params.is_object()) params = json::object();
+            const auto it = params.find("centersFrom");
+            if (it != params.end() && !(it->is_string() && it->get<std::string>() == "pick")) return false;
+            params["centersFrom"] = "upstreamClump";
+            params["upstreamChannel"] = upChannel;
+            const auto own = params.find("clumpChannel");
+            const std::string ownChannel = own != params.end() && own->is_string() ? own->get<std::string>() : std::string("clumpId");
+            if (!upChannel.empty() && ownChannel == upChannel) params["clumpChannel"] = "subClumpId";
+            return true;
+        }
+        return false;
+    }
+    // Curves (not a Clump) linked to the centers of a Clump clumping inside upstream clumps: those
+    // curves shape the clumps within each upstream clump (upstreamClumpCurves).
+    if (input == "centers" && nodeType(dst) == op::kClump) {
+        for (json& n : impl_->nodes()) {
+            if (!n.is_object() || n.value("name", std::string()) != dst || !n.contains("params") || !n["params"].is_object()) continue;
+            json& params = n["params"];
+            const auto it = params.find("centersFrom");
+            if (it != params.end() && it->is_string() && it->get<std::string>() == "upstreamClump") {
+                params["centersFrom"] = "upstreamClumpCurves";
+                return true;
+            }
+        }
+    }
     struct Switch {
         const char *type, *input, *param, *from, *to, *toForGuides;
     };
@@ -852,6 +892,48 @@ bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, co
         }
     }
     return false;
+}
+
+bool GraphEdit::adoptUpstreamClump(const std::string& node) {
+    if (nodeType(node) != op::kClump || !impl_->sourceOf(node, "centers").empty()) return false;
+    json* dst = nullptr;
+    for (json& n : impl_->nodes()) {
+        if (n.is_object() && n.value("name", std::string()) == node) dst = &n;
+    }
+    if (!dst) return false;
+    json& params = (*dst)["params"];
+    if (!params.is_object()) params = json::object();
+    const auto from = params.find("centersFrom");
+    if (from != params.end() && !(from->is_string() && from->get<std::string>() == "pick")) return false;
+    // Up the chain along each node's first input (the strands it passes on): the nearest Clump.
+    std::string at = impl_->sourceOf(node, "strands");
+    std::set<std::string> seen{node};
+    while (!at.empty() && seen.insert(at).second) {
+        if (nodeType(at) == op::kClump || nodeType(at) == op::kBraid) break;
+        const json spec = impl_->spec(at);
+        const json inputs = spec.is_object() ? spec.value("inputs", json::array()) : json::array();
+        at = inputs.empty() ? std::string() : impl_->sourceOf(at, inputs[0].value("name", std::string()));
+    }
+    if (at.empty() || (nodeType(at) != op::kClump && nodeType(at) != op::kBraid)) return false;
+    if (nodeType(at) == op::kBraid) {
+        // After a Braid: clumps along each section of each braid (its braidSection, with braidId).
+        params["centersFrom"] = "upstreamClump";
+        params["upstreamChannel"] = "braidSection";
+        return true;
+    }
+    std::string upChannel = "clumpId";
+    for (const json& n : impl_->nodes()) {
+        if (n.is_object() && n.value("name", std::string()) == at && n.contains("params") && n["params"].is_object()) {
+            const auto it = n["params"].find("clumpChannel");
+            if (it != n["params"].end() && it->is_string() && !it->get<std::string>().empty()) upChannel = it->get<std::string>();
+        }
+    }
+    params["centersFrom"] = "upstreamClump";
+    params["upstreamChannel"] = upChannel;
+    const auto own = params.find("clumpChannel");
+    const std::string ownChannel = own != params.end() && own->is_string() ? own->get<std::string>() : std::string("clumpId");
+    if (ownChannel == upChannel) params["clumpChannel"] = "subClumpId";
+    return true;
 }
 
 bool GraphEdit::disconnect(const std::string& dst, const std::string& input) {

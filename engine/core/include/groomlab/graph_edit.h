@@ -78,6 +78,15 @@ public:
     // scripts, loading) never changes a param. True when a param changed.
     bool connectByHand(const std::string& src, const std::string& dst, const std::string& input,
                        const std::string& output = {});
+    // A Clump the user just wired into a chain after another Clump (issue #115): its strands
+    // coming through that Clump (along each node's first input), it is set to clump inside that
+    // one's clumps (centersFrom upstreamClump, upstreamChannel that Clump's clumpChannel, its own
+    // clumpChannel subClumpId where it would take the same); after a Braid (the nearer of the
+    // two), along each braid's sections (upstreamChannel braidSection). Once: only while its
+    // centersFrom is still pick and nothing feeds its centers (a choice the user made stays). connectByHand on a
+    // Clump's strands and the inserts (graph_inserts.h, Add Node After) call it; connect alone
+    // never does. True when it changed the node.
+    bool adoptUpstreamClump(const std::string& node);
     // Removes what feeds dst's input; false when nothing did.
     bool disconnect(const std::string& dst, const std::string& input);
     // Detach (every host's node menu, Ctrl+Shift+X): takes a node out of the flow as if it were

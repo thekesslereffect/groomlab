@@ -633,6 +633,18 @@ void bindGroom(py::module_& m) {
         py::arg("maps_json"), py::arg("before"), py::arg("after"),
         "(maps_json, changed): the painted vertex maps refitted when scalps join or leave (scalp_maps.h); "
         "`before`/`after`: [(scalp name, vertex count)] in join order, the groom's own (\"scalp\") first.");
+    m.def(
+        "vertex_map_color_sets",
+        [](const std::string& mapsJson, const ScalpCounts& scalps, const std::vector<std::string>& only) {
+            py::list out;
+            for (const MeshColorSet& s : vertexMapColorSets(ScalpMaps::fromJson(mapsJson), scalps, only)) {
+                out.append(py::make_tuple(s.scalp, s.name, s.rgba));
+            }
+            return out;
+        },
+        py::arg("maps_json"), py::arg("scalps"), py::arg("only") = std::vector<std::string>{},
+        "[(scalp name, map name, [r, g, b, a per vertex])]: the painted vertex maps as color sets of the scalp "
+        "meshes (scalp_maps.h vertexMapColorSets); `scalps`: [(scalp name, vertex count)], the groom's own first.");
     m.def("retarget_map_readers",
           [](const std::string& graphJson, const std::string& from, const std::string& to) {
               bool changed = false;

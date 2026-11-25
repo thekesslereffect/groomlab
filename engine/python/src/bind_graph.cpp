@@ -980,6 +980,14 @@ void bindGraph(py::module_& m) {
              },
              py::arg("params_json") = std::string(), py::arg("after") = std::string(), py::arg("groom_size") = py::none(),
              "(name, made): the graph's Part node, or one made after `after` (graph_inserts.h: every host's part tools).")
+        .def("insert_flow",
+             [](GraphEdit& e, const std::string& paramsJson, const std::string& after, std::optional<double> groomSize) {
+                 bool made = false;
+                 std::string name = insertFlow(e, paramsJson, after, groomSize, &made);
+                 return py::make_tuple(name, made);
+             },
+             py::arg("params_json") = std::string(), py::arg("after") = std::string(), py::arg("groom_size") = py::none(),
+             "(name, made): the graph's Flow node, or one made after `after` (graph_inserts.h: every host's Flow tool).")
         .def("remove_scalp_nodes", [](GraphEdit& e, const std::string& mesh) { return removeScalpNodes(e, mesh); }, py::arg("mesh_name"),
              "Remove > Scalp's graph (graph_inserts.h): its Scalp nodes and what they alone feed; a Merge left alone passes through.")
         .def("remove_collider_nodes", [](GraphEdit& e, const std::string& mesh) { return removeColliderNodes(e, mesh); },

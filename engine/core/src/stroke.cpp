@@ -12,8 +12,12 @@
 
 #include "groomlab/brush_catalog.h"
 #include "groomlab/curve.h"
+#include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
+#include "groomlab/graph_io.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_selection.h"
+#include "groomlab/presets.h"
 #include "groomlab/random.h"
 #include "groomlab/subdivision.h"
 
@@ -1046,6 +1050,18 @@ void BrushTool::commitFlow(StrokeHost& host, const ToolView& view) {
         StrokeEdit edit;
         edit.mode = settings.modeName();
         edit.set(StrokeField::Flow, overlays_.stored(set).toJson());
+        // Flow drawn on a graph with no Flow node: one made after its Interpolate in the same undo
+        // step (graph_inserts.h insertFlow), so the strands follow the stroke at once (issue #112).
+        if (!inverted_) {
+            try {
+                GraphEdit graph(graphOrDefault(host.storedText(StrokeField::Graph)));  // (a blank one is the default graph)
+                bool made = false;
+                insertFlow(graph, {}, {}, presetScalpSize(*scalp_), &made);
+                if (made) edit.set(StrokeField::Graph, graph.toJson());
+            } catch (const std::exception&) {
+                // (No graph, or none with strands to lay: the arrows are kept all the same.)
+            }
+        }
         host.commit(std::move(edit));
     } catch (const std::exception& e) {
         host.warn(std::string("GroomLab flow: ") + e.what());

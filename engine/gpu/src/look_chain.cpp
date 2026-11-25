@@ -2078,6 +2078,11 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             // input ignored); else they are its centers input's, and with nothing linked it clumps
             // nothing (the CPU's).
             const std::string centersFrom = clumpParams.getString("centersFrom");
+            // (upstreamClump, smaller clumps inside an earlier Clump's by regions: the CPU's.)
+            if (centersFrom == "upstreamClump" || centersFrom == "upstreamClumpCurves") {
+                *why = name + " clumps inside an upstream Clump's clumps";
+                return false;
+            }
             const bool own = centersFrom == "pick";
             if (!own && !graph.inputSource(id, 1, &centersNode, &centersOutput)) {
                 *why = name + " has no centers connected";

@@ -92,6 +92,7 @@ bool wireAfterNode(GraphEdit& edit, const std::string& anchor, const std::string
         try {
             GraphEdit trial = edit;
             trial.connect(anchor, node, p.value("name", std::string()));
+            trial.adoptUpstreamClump(node);  // (a Clump after a Clump: inside its clumps, issue #115)
             edit = std::move(trial);
             return true;
         } catch (const std::exception&) {

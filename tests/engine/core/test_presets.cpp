@@ -15,6 +15,7 @@
 #include <fstream>
 #include <functional>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <set>
 #include <sstream>
@@ -280,6 +281,21 @@ TEST(Presets, NoShippedPresetHoldsANodeOlderThanItsOperator) {
         check(file.contains("graph") ? file["graph"] : file.value("nodes", json::array()));
     }
     EXPECT_GT(nodes, 200u) << "the presets' nodes were found";
+}
+
+TEST(Presets, BasicBraidsComesFirstInTheBraidsMenu) {
+    // Every host's Presets menu lists a category's presets by title (issue #120: Basic braids first).
+    std::vector<std::string> titles;
+    for (const PresetInfo& p : listPresets({kShipped})) {
+        if (p.category == "Braids") titles.push_back(p.title);
+    }
+    ASSERT_FALSE(titles.empty());
+    auto lower = [](std::string s) {
+        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    std::sort(titles.begin(), titles.end(), [&](const std::string& a, const std::string& b) { return lower(a) < lower(b); });
+    EXPECT_EQ(titles.front(), "Basic braids");
 }
 
 TEST(Presets, AnEarlierDirectoryHidesALaterOne) {

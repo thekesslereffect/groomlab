@@ -15,6 +15,7 @@
 
 #include "groomlab/graph.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/operators.h"
 #include "groomlab/presets.h"
 
 namespace groomlab {
@@ -180,6 +181,33 @@ std::map<std::string, std::pair<double, double>> layoutPositions(const GraphEdit
     return out;
 }
 
+// The Clumps just wired in (`nodes`) set to clump inside a Clump before them, and, one of them a
+// Clump, the first Clump after them down the chain from `dst` (along each node's first input)
+// inside theirs (GraphEdit::adoptUpstreamClump, issue #115).
+static void adoptUpstreamClumps(GraphEdit& edit, const std::vector<std::string>& nodes, const std::string& dst) {
+    bool clump = false;
+    for (const std::string& n : nodes) {
+        clump = clump || edit.nodeType(n) == op::kClump;
+        edit.adoptUpstreamClump(n);
+    }
+    std::string at = clump ? dst : std::string();
+    std::set<std::string> seen;
+    while (!at.empty() && seen.insert(at).second) {
+        if (edit.nodeType(at) == op::kClump) {
+            edit.adoptUpstreamClump(at);
+            return;
+        }
+        std::string next;
+        for (const Link& l : linksFrom(graphOf(edit), at)) {
+            if (l.input == firstInput(edit, l.to)) {
+                next = l.to;
+                break;
+            }
+        }
+        at = next;
+    }
+}
+
 void insertBetween(GraphEdit& edit, const std::string& src, const std::string& dst, const std::string& node,
                    const std::string& nodeInput) {
     const json g = graphOf(edit);
@@ -191,6 +219,7 @@ void insertBetween(GraphEdit& edit, const std::string& src, const std::string& d
     GraphEdit trial = edit;  // (the graph as it was when a link does not fit)
     trial.connect(src, node, nodeInput.empty() ? firstInput(trial, node) : nodeInput, links.front().output);
     for (const Link& l : links) trial.connect(node, dst, l.input);
+    adoptUpstreamClumps(trial, {node}, dst);
     edit = std::move(trial);
 }
 
@@ -208,6 +237,7 @@ void insertAfter(GraphEdit& edit, const std::string& anchor, const std::string& 
         insertBetween(edit, anchor, consumers.front().to, node, nodeInput);
     } else {
         edit.connect(anchor, node, nodeInput.empty() ? firstInput(edit, node) : nodeInput);
+        adoptUpstreamClumps(edit, {node}, {});
     }
     if (const auto at = placeBy(edit, anchor, kInsertColumn / 2.0, kInsertRow)) setNodePosition(edit, node, at->first, at->second);
 }
@@ -237,6 +267,7 @@ void insertOnLink(GraphEdit& edit, const std::string& src, const std::string& ds
             if (why.empty()) why = e.what();
             continue;
         }
+        adoptUpstreamClumps(trial, {node}, dst);
         edit = std::move(trial);
         return;
     }
@@ -258,6 +289,25 @@ std::string insertPart(GraphEdit& edit, const std::string& paramsJson, const std
     }
     if (anchor.empty()) throw GraphError("the graph has no strands to part (no Scatter)");
     const std::string node = edit.addNode("Part", {}, paramsJson, std::nullopt, std::nullopt, groomSize);
+    insertAfter(edit, anchor, node);
+    if (made) *made = true;
+    return node;
+}
+
+std::string insertFlow(GraphEdit& edit, const std::string& paramsJson, const std::string& after, std::optional<double> groomSize,
+                       bool* made) {
+    if (made) *made = false;
+    const json g = graphOf(edit);
+    const std::vector<std::string> flows = ofType(g, "Flow");
+    if (!flows.empty()) return flows.front();
+    std::string anchor = !after.empty() && edit.hasNode(after) ? after : std::string();
+    for (const char* kind : {"Interpolate", "Scatter"}) {
+        if (!anchor.empty()) break;
+        const std::vector<std::string> found = ofType(g, kind);
+        if (!found.empty()) anchor = found.front();
+    }
+    if (anchor.empty()) throw GraphError("the graph has no strands to lay along the flow (no Scatter)");
+    const std::string node = edit.addNode("Flow", {}, paramsJson, std::nullopt, std::nullopt, groomSize);
     insertAfter(edit, anchor, node);
     if (made) *made = true;
     return node;
@@ -1092,6 +1142,7 @@ void insertNodesOnLink(GraphEdit& edit, const std::string& src, const std::strin
             if (why.empty()) why = e.what();
             continue;
         }
+        adoptUpstreamClumps(trial, group, dst);
         edit = std::move(trial);
         return;
     }

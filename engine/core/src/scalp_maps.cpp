@@ -572,6 +572,42 @@ bool refitVertexMaps(ScalpMaps& maps, const ScalpCounts& before, const ScalpCoun
     return changed;
 }
 
+std::vector<MeshColorSet> vertexMapColorSets(const ScalpMaps& maps, const ScalpCounts& scalps,
+                                             const std::vector<std::string>& only) {
+    std::vector<MeshColorSet> out;
+    std::size_t total = 0;
+    for (const auto& [name, count] : scalps) total += count;
+    for (const auto& [name, entry] : maps.maps) {
+        if (entry.kind != "vertices") continue;
+        if (!only.empty() && std::find(only.begin(), only.end(), name) == only.end()) continue;
+        const std::size_t per = entry.channels == kColorMap ? 4 : 1;
+        if (entry.values.size() % per != 0) continue;
+        const std::size_t painted = entry.values.size() / per;
+        // (Painted on the first scalps only, before the others joined: those, the rest unpainted.)
+        bool fits = painted == total;
+        for (std::size_t k = 0, covered = 0; !fits && k < scalps.size(); ++k) fits = (covered += scalps[k].second) == painted;
+        if (!fits || painted == 0) continue;
+        std::size_t first = 0;
+        for (const auto& [scalp, count] : scalps) {
+            MeshColorSet set{scalp, name, std::vector<float>(count * 4, 0.0f)};
+            for (std::size_t v = 0; v < count; ++v) {
+                float* c = &set.rgba[v * 4];
+                c[3] = 1.0f;
+                const std::size_t at = first + v;
+                if (at >= painted) continue;
+                if (per == 4) {
+                    for (std::size_t k = 0; k < 4; ++k) c[k] = entry.values[at * 4 + k];
+                } else {
+                    c[0] = c[1] = c[2] = entry.values[at];
+                }
+            }
+            first += count;
+            out.push_back(std::move(set));
+        }
+    }
+    return out;
+}
+
 namespace {
 bool hasGuideLayer(const GuideHierarchy* guides, const std::string& name) {
     if (!guides) return false;

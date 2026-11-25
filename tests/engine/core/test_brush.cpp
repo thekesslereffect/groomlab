@@ -290,7 +290,7 @@ TEST(Brush, ShapePaintsFlatnessAndTwist) {
     s.mode = BrushMode::ShapeTube;
     s.radius = 0.4f;
     s.strength = 1.0f;
-    // Flatness: toward a flat ribbon near the tip; Ctrl rounds it back toward 1.
+    // Flatness: toward a flat ribbon near the tip, its width kept.
     s.tubeChannel = TubeChannel::Flatness;
     for (int i = 0; i < 10; ++i) applyBrushStroke(h, nullptr, s, {{0, 1.9f, 0}});
     const TubeProfile flat = h.guide(id)->tube;
@@ -299,10 +299,25 @@ TEST(Brush, ShapePaintsFlatnessAndTwist) {
     EXPECT_GE(flat.aspect.back(), kMinTubeAspect);
     EXPECT_FLOAT_EQ(flat.aspect.front(), 1.0f);
     EXPECT_EQ(flat.width, (std::vector<float>{0.1f, 0.1f}));  // width as it was
+    // Ctrl flattens the other axis: the width shrinks, the height (width * aspect) is kept, so a
+    // flattened tube rounds on its way (issue #109).
     s.strength = -1.0f;
     applyBrushStroke(h, nullptr, s, {{0, 1.9f, 0}});
-    EXPECT_GT(h.guide(id)->tube.aspect.back(), flat.aspect.back());
-    EXPECT_LE(h.guide(id)->tube.aspect.back(), 1.0f);
+    const TubeProfile back = h.guide(id)->tube;
+    ASSERT_EQ(back.width.size(), 17u);
+    EXPECT_GT(back.aspect.back(), flat.aspect.back());
+    EXPECT_LT(back.width.back(), 0.1f);
+    EXPECT_NEAR(back.width.back() * back.aspect.back(), 0.1f * flat.aspect.back(), 1e-5f);
+    EXPECT_FLOAT_EQ(back.width.front(), 0.1f);  // out of the brush: as it was
+    EXPECT_FLOAT_EQ(back.aspect.front(), 1.0f);
+    // Held on a round tube, Ctrl flattens it on edge: the aspect past 1, the height still kept.
+    h.setTube(id, TubeProfile{});
+    for (int i = 0; i < 10; ++i) applyBrushStroke(h, nullptr, s, {{0, 1.9f, 0}});
+    const TubeProfile edge = h.guide(id)->tube;
+    EXPECT_GT(edge.aspect.back(), 1.6f);
+    EXPECT_LE(edge.aspect.back(), kMaxTubeAspect);
+    EXPECT_NEAR(edge.width.back() * edge.aspect.back(), 0.1f, 1e-5f);
+    EXPECT_FLOAT_EQ(edge.aspect.front(), 1.0f);
     // Twist: the sections near the cursor turn one way, Ctrl the other; the root's stays.
     s.tubeChannel = TubeChannel::Twist;
     s.strength = 1.0f;
