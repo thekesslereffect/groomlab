@@ -784,7 +784,12 @@ TEST(AppGraphEditor, TheGraphOpensAtAReadableZoomOnItsLookEnd) {
     const QRectF output = view.nodeRect(nodeOf(*doc, "Output"));
     EXPECT_TRUE(QRectF(view.rect()).contains(output)) << "the output end in view";
     view.fitAll();
-    EXPECT_GE(view.viewScale(), NodeGraphView::kReadableScale) << "A: as readable";
+    EXPECT_LT(view.viewScale(), NodeGraphView::kReadableScale) << "A: zoomed out past readable to show it all";
+    for (const auto& node : nlohmann::json::parse(doc->graphJson())["nodes"]) {
+        const std::string name = node.value("name", "");
+        const QRectF card = view.nodeRect(name);
+        if (!card.isEmpty()) EXPECT_TRUE(QRectF(view.rect()).contains(card)) << "A: every node in view: " << name;
+    }
 }
 
 TEST(AppGraphEditor, BakeNodeToGuidesAsksTheGroupInTheViewport) {

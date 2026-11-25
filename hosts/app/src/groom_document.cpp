@@ -886,19 +886,6 @@ std::string GroomDocument::insertNodesOnLink(const std::vector<std::string>& nod
     });
 }
 
-std::string GroomDocument::detachGroup(const std::vector<std::string>& nodes, int* detached) {
-    if (detached) *detached = 0;
-    if (nodes.size() == 1) return detachNodes(nodes, detached);
-    bool changed = false;
-    const std::string error = editGraph("shake " + std::to_string(nodes.size()) + " nodes loose", [&](json& g) {
-        GraphEdit edit(g.dump());
-        changed = edit.detachGroup(nodes).changed;
-        g = json::parse(edit.toJson());
-    });
-    if (error.empty() && detached) *detached = changed ? static_cast<int>(nodes.size()) : 0;
-    return error;
-}
-
 // ---- Dots (graph_portals.h: a portal's dots, free ones from the add-node search) -------------------
 
 std::string GroomDocument::addDot(double x, double y, std::string* made, const std::string& from, const std::string& output) {

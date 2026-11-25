@@ -64,7 +64,6 @@ const std::vector<Shortcut>& shortcuts() {
         {"graph.alignChain", "Graph", "A+drag a node", "Line up its chain: left or up upstream, right or down downstream", kAll},
         {"graph.alignSelected", "Graph", "Shift+A+drag a node", "Line the selection up with it", kAll},
         {"graph.distribute", "Graph", "Alt+A+drag a node", "Spread the selection evenly, it staying", kAll},
-        {"graph.shake", "Graph", "Shake a node while dragging", "Take it out of its links", kAll},
         {"graph.bundle", "Graph", "Shift+drag an output", "Move all its links to another output", kAll},
         {"graph.pin", "Graph", "Alt+click / double-click a link, or . with it selected", "A pin on the link", kAll},
         {"graph.duplicateDrag", "Graph", "Alt+drag a node", "Duplicate it and drag the copy", kAll},

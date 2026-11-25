@@ -133,7 +133,9 @@ class OperatorCatalog(object):
 
 
 # Nodes whose output port is set by a param: a Value's kind, an Expression's output (a field or a value).
-VALUE_SETS = {"Value": ("kind",), "Expression": ("output",)}
+# A node type's params its ports depend on (node_spec asks the core with them): a Value's kind, an
+# Expression's output and its variables (a map variable made an input is a port).
+VALUE_SETS = {"Value": ("kind",), "Expression": ("output", "variables")}
 
 VALUE_KINDS = {"any": "Any", "number": "Number", "integer": "Integer", "bool": "Bool", "vec3": "Vec3",
                "choice": "Choice", "text": "Text"}
@@ -187,11 +189,53 @@ def node_fields(node):
     return fields
 
 
+LAYOUT_KEYS = ("backdrops", "pins", "portals")
+
+
+def _compound_graph(node):
+    """A Compound node's own graph (params.definition.graph), or None."""
+    params = node.get("params")
+    definition = params.get("definition") if isinstance(params, dict) else None
+    graph = definition.get("graph") if isinstance(definition, dict) else None
+    return graph if isinstance(graph, dict) else None
+
+
 def without_layout(data):
-    """A graph's dict without the editors' layout (every node's "ui", the backdrops, the pins, the portals)."""
-    out = {k: v for k, v in data.items() if k not in ("backdrops", "pins", "portals")}
-    out["nodes"] = [{k: v for k, v in n.items() if k != "ui"} for n in data.get("nodes", [])]
+    """A graph's dict without the editors' layout (every node's "ui", the backdrops, the pins, the
+    portals), the graphs inside its compounds' too."""
+    out = {k: v for k, v in data.items() if k not in LAYOUT_KEYS}
+    nodes = []
+    for n in data.get("nodes", []):
+        bare = {k: v for k, v in n.items() if k != "ui"}
+        inner = _compound_graph(n)
+        if inner is not None:
+            params = dict(bare["params"])
+            params["definition"] = dict(params["definition"], graph=without_layout(inner))
+            bare["params"] = params
+        nodes.append(bare)
+    out["nodes"] = nodes
     return out
+
+
+def copy_layout(stored, source):
+    """`source`'s layout into `stored` (graph dicts, `stored` changed in place): each node's "ui" by
+    name, and inside each compound the same (its nodes, backdrops, pins and portals), so a move
+    inside a compound is kept. The top level's own backdrops, pins and portals are the caller's."""
+    by_name = dict((n.get("name"), n) for n in source.get("nodes", []))
+    for n in stored.get("nodes", []):
+        src = by_name.get(n.get("name"))
+        if src is None:
+            continue
+        if "ui" in src:
+            n["ui"] = copy.deepcopy(src["ui"])
+        inner, src_inner = _compound_graph(n), _compound_graph(src)
+        if inner is not None and src_inner is not None:
+            copy_layout(inner, src_inner)
+            for key in LAYOUT_KEYS:
+                if src_inner.get(key):
+                    inner[key] = copy.deepcopy(src_inner[key])
+                else:
+                    inner.pop(key, None)
 
 
 MAP_SOURCES = ("texture", "colorSet", "attribute", "expression", "guide")
@@ -518,9 +562,8 @@ class GraphModel(object):
         if bare == without_layout(self.to_dict()):
             new = self.to_json()  # nothing else differs: the model's own text (what the editor compares)
         else:
-            for n in stored.get("nodes", []):
-                if n.get("name") in self.nodes and "ui" in self.nodes[n["name"]]:
-                    n["ui"] = copy.deepcopy(self.nodes[n["name"]]["ui"])
+            # Every node's place, the ones inside compounds too (their graphs' backdrops, pins, dots).
+            copy_layout(stored, self.to_dict())
             stored.pop("backdrops", None)
             if self.backdrops:
                 stored["backdrops"] = copy.deepcopy(self.backdrops)
@@ -999,7 +1042,7 @@ class GraphModel(object):
         return into, index
 
     def detach_group(self, names):
-        """Several nodes out of the flow together (a shake): the links among them kept (the core's)."""
+        """Several nodes out of the flow together: the links among them kept (the core's)."""
         edit = self._edit()
         with _core_errors():
             done = edit.detach_group(list(names))

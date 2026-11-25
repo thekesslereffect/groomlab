@@ -382,46 +382,6 @@ Positions alignGesture(const GraphEdit& edit, const std::vector<LayoutBox>& boxe
     throw GraphError("unknown align gesture '" + mode + "'");
 }
 
-void ShakeDetector::reset() {
-    started_ = false;
-    direction_ = 0;
-    turnTimes_.clear();
-}
-
-bool ShakeDetector::add(double seconds, double x, double /*y*/) {
-    if (!started_) {
-        started_ = true;
-        anchorX_ = extremeX_ = x;
-        direction_ = 0;
-        turnTimes_.clear();
-        return false;
-    }
-    if (direction_ == 0) {
-        if (std::abs(x - anchorX_) >= minTravel_) {
-            direction_ = x > anchorX_ ? 1 : -1;
-            extremeX_ = x;
-        }
-        return false;
-    }
-    if ((x - extremeX_) * direction_ > 0.0) {  // still going the same way
-        extremeX_ = x;
-        return false;
-    }
-    if ((extremeX_ - x) * direction_ < minTravel_) return false;  // not back far enough yet
-    // A turn: this stroke went at least minTravel one way and has come back as far.
-    if (std::abs(extremeX_ - anchorX_) >= minTravel_) turnTimes_.push_back(seconds);
-    anchorX_ = extremeX_;
-    extremeX_ = x;
-    direction_ = -direction_;
-    turnTimes_.erase(std::remove_if(turnTimes_.begin(), turnTimes_.end(), [&](double t) { return t < seconds - window_; }), turnTimes_.end());
-    if (static_cast<int>(turnTimes_.size()) >= turns_) {
-        turnTimes_.clear();
-        anchorX_ = extremeX_ = x;
-        direction_ = 0;
-        return true;
-    }
-    return false;
-}
 
 std::vector<std::string> wireStyles() { return {"smooth", "square", "rounded"}; }
 

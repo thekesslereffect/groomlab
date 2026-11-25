@@ -1233,8 +1233,7 @@ class GROOMLAB_OT_graph_canvas_press(bpy.types.Operator):
             elif node.select:
                 tree.nodes.active = node
             _press.update(kind="move", start=(x, y), last=(x, y), node=node, moved=False, shift=shift, ctrl=ctrl,
-                          alt=alt, nodes=None, dots=[], k=g.k, shake=graph_arrange.ShakeDetector(), shaken=False,
-                          left=set(), time=time.time())
+                          alt=alt, nodes=None, dots=[], k=g.k, left=set(), time=time.time())
         else:
             _press.update(kind="band", start=(x, y), shift=shift, before={n for n in tree.nodes if n.select})
             _band[0] = (x, y, x, y)
@@ -1305,9 +1304,6 @@ class GROOMLAB_OT_graph_canvas_press(bpy.types.Operator):
                 speed = math.hypot(x - lx, y - ly) / max(now - _press["time"], 1e-3)
                 _press.update(last=(x, y), moved=True, time=now)
                 _hold_on_backdrops(tree, _press, speed)
-                if not _press["shaken"] and _press["shake"].add(now, event.mouse_x, event.mouse_y):
-                    _press["shaken"] = True
-                    _shake_loose(context, tree)
             elif kind == "band":
                 sx, sy = _press["start"]
                 _band[0] = (sx, sy, x, y)
@@ -1672,32 +1668,13 @@ def _hold_on_backdrops(tree, press, speed):
             graph_tree.set_location(n, at)
 
 
-def _shake_loose(context, tree):
-    """A shake while dragging: the dragged nodes out of their links (several: their own links kept)."""
-    names = [n.gl_name for n in _press["nodes"] or [] if graph_tree.ours(n) and n.gl_name]
-    if not names:
-        return
-    at = {n.name: graph_tree.get_location(n) for n in _press["nodes"]}
-    try:
-        graph_tree.detach_group(tree.gl_scalp, names)
-    except HelperError as e:
-        print("GroomLab:", e)
-        return
-    for n in _press["nodes"]:  # (the tree made again from the graph: where the drag has them)
-        try:
-            if n.name in at:
-                graph_tree.set_location(n, at[n.name])
-        except ReferenceError:
-            pass
-
-
 def _end_move(context, tree, x, y):
     """A drag let go: nodes dropped on a wire go into it (a chain as one: the core's
     insertNodesOnLink); dots carried go into the graph with the nodes (one step)."""
     scalp = tree.gl_scalp
     group = [n for n in _press["nodes"] or [] if graph_tree.ours(n) and n.gl_name]
     names = {n.gl_name for n in group}
-    if group and not _press["shift"] and not _press["ctrl"] and not _press["shaken"]:
+    if group and not _press["shift"] and not _press["ctrl"]:
         g = Graph(context, context.region, tree)
         outside = [l for l in tree.links if (l.from_node in group) != (l.to_node in group)]
         link = g.wire_at(x, y) if not outside else None

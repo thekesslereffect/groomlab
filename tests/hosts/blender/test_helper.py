@@ -2733,7 +2733,7 @@ class AuthoringTest(HelperTestCase):
         self.assertFalse(self.call("edit_graph", op="move_pass_through", name="color", input="strands", by=1)["changed"])
         self.call("edit_graph", op="set_pass_through", name="color", input="strands", on=False)
         self.assertNotIn("passThrough", self.node("color"))
-        # A shake: two nodes out of the flow, their own link kept.
+        # Two nodes out of the flow together, their own link kept.
         self.assertTrue(self.call("edit_graph", op="detach_group", names=["noise", "color"])["detached"])
         self.assertIn(("noise", "color", "strands"), self.links())
         self.call("undo")
@@ -2743,10 +2743,8 @@ class AuthoringTest(HelperTestCase):
                       selected=[], mode="chain", dx=200, dy=0)
         self.assertEqual(g["axis"], "row")
         self.assertTrue(g["positions"])
-        # The core's wire and shake, which the add-on draws from its own ports (test_addon_graph checks them).
+        # The core's wire, which the add-on draws from its own port (test_addon_graph checks it).
         self.assertEqual(len(self.h.call("wire_route", style="smooth", ax=0, ay=0, bx=200, by=50)["steps"]), 1)
-        moves = [[i * 0.05, (30 if i % 2 else -30), 0] for i in range(12)]
-        self.assertTrue(self.h.call("shake_test", moves=moves)["shakes"])
 
     def test_controls_keyed_params_and_maps(self):
         strands, _ = self.evaluate_hash(self.s, 0.05)

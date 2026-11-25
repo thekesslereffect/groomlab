@@ -1287,7 +1287,7 @@ class GraphEditorTest(unittest.TestCase):
 
     def test_8g_canvas_arranged_by_hand(self):
         """PR #107's Graph Editor in Blender (graph_arrange.py, the helper's arrange.cpp): the wire
-        styles and the shake are the core's (their ports checked against the helper's), Align and
+        styles are the core's (their port checked against the helper's), Align and
         Tidy lay out the cards as drawn, a teleported link is drawn out of its portal's dots, Pass
         Through as Output gives the node a port, and a folded backdrop hides its nodes."""
         import types
@@ -1310,7 +1310,7 @@ class GraphEditorTest(unittest.TestCase):
                 self.assertAlmostEqual(x, gnode["ui"]["x"], 2)
                 self.assertAlmostEqual(-y, gnode["ui"]["y"], 2)
 
-        # The ports drawn every frame: the core's wireRoute and ShakeDetector, through the helper.
+        # The port drawn every frame: the core's wireRoute, through the helper.
         for style in arrange.WIRE_STYLES:
             for a, b, below, through in (((0, 0), (300, 80), None, False), ((300, 0), (0, 40), None, False),
                                          ((300, 0), (0, 40), 120.0, False), ((0, 0), (10, 90), None, True)):
@@ -1323,10 +1323,6 @@ class GraphEditorTest(unittest.TestCase):
                 for s, w in zip(got, want):
                     for u, v in zip(s, w):
                         self.assertAlmostEqual(u, v, 6)
-        moves = [[i * 0.04, 40.0 * ((i // 2) % 2) - 20.0 + i * 0.5, 0.0] for i in range(40)]
-        shaker = arrange.ShakeDetector()
-        self.assertEqual([i for i, m in enumerate(moves) if shaker.add(*m)],
-                         process.call("shake_test", moves=moves)["shakes"])
         # The cards the core lays out are the ones drawn.
         g = graph()
         for box in g.boxes:

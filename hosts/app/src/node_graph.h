@@ -37,7 +37,6 @@
 //                                  it (its graph shown to edit: GroomDocument::enterCompound; I too;
 //                                  U or the path bar at the top goes back out)
 //   Shift+drag a node              moves it with everything upstream; Shift+click adds it
-//   shake a node while dragging    pulls it out of its links (Detach)
 //   Shift+drag from an output      picks up all its links: dropped on another output, they read it
 //   Alt+click a wire               a pin there (as a double-click)
 //   a portal's dot                 drag moves it; an exit's nub drags another link of its signal
@@ -144,8 +143,8 @@ public:
     void setSelection(const std::vector<std::string>& names);
     // The rubber band over a view rectangle, as a drag on empty space makes it (`add`: Ctrl, Shift).
     void selectInRect(const QRectF& widgetRect, bool add);
-    // A (Frame All): the whole graph fitted, zoomed in no further than 1:1 and out no further than
-    // kReadableScale (a longer graph centered at that size: pan for its ends), as Maya's frame_all.
+    // A (Frame All): the whole graph fitted however big it is (zoomed in no further than 1:1), as
+    // Maya's frame_all.
     void fitAll();
     // The view a graph opens at (and keeps while the dock is resized, until panned or zoomed): the
     // whole graph when it fits at a readable size, else a readable zoom on its look end (from the
@@ -425,6 +424,9 @@ protected:
     void dropEvent(QDropEvent* event) override;
 
 private:
+    // The whole graph fitted, zoomed out no further than `least` (fitAll: the view's least zoom;
+    // frameReadable: kReadableScale).
+    void fitGraph(qreal least);
     struct Port {
         std::string name, type;
         bool optional = false;
@@ -588,7 +590,7 @@ private:
     std::string wireStyle_ = "smooth";
     // A move: the nodes it carries (the selection; Shift: with everything upstream), whether it
     // began with Shift on a node (a click without a move adds it to the selection instead), the
-    // backdrops it grows, and the shake that pulls the nodes out of their links.
+    // backdrops it grows.
     std::vector<int> moving_;
     bool shiftPress_ = false;
     bool ctrlPress_ = false;  // a Ctrl+press: a click without a move toggles the node in the selection
@@ -605,9 +607,7 @@ private:
     std::map<std::string, QPointF> gestureStart_;
     void gestureMove(const QPointF& scene);
     std::vector<Growing> growing_;
-    ShakeDetector shake_;
-    QElapsedTimer shakeClock_;
-    bool shaken_ = false;
+    QElapsedTimer moveClock_;  // the drag's speed (a fast one leaves backdrops)
     // Alt+click (no drag) on a wire puts a pin there.
     QPointF altPress_;
     bool altPressed_ = false;

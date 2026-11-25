@@ -239,32 +239,6 @@ TEST(GraphEditByHand, PassThroughOutputsCanBeReordered) {
     EXPECT_THROW(edit.movePassThrough("noise", "strands", 1), GraphError);
 }
 
-TEST(GraphArrange, AQuickLeftRightShakeIsCaught) {
-    ShakeDetector shake;
-    double t = 0.0;
-    bool caught = false;
-    int at = -1;
-    // Back and forth 40 px every 50 ms.
-    for (int i = 0; i < 12 && !caught; ++i) {
-        caught = shake.add(t, (i % 2) ? 40.0 : 0.0, 0.0);
-        if (caught) at = i;
-        t += 0.05;
-    }
-    EXPECT_TRUE(caught);
-    EXPECT_GE(at, 4);
-    // A slow drag back and forth is no shake.
-    ShakeDetector slow;
-    bool any = false;
-    for (int i = 0; i < 12; ++i) any = any || slow.add(i * 0.5, (i % 2) ? 40.0 : 0.0, 0.0);
-    EXPECT_FALSE(any);
-    // Nor a small jitter, nor a drag one way.
-    ShakeDetector jitter;
-    for (int i = 0; i < 20; ++i) any = any || jitter.add(i * 0.02, (i % 2) ? 5.0 : 0.0, 0.0);
-    ShakeDetector straight;
-    for (int i = 0; i < 20; ++i) any = any || straight.add(i * 0.02, i * 30.0, 0.0);
-    EXPECT_FALSE(any);
-}
-
 TEST(GraphArrange, WireStylesRouteForwardAndBackward) {
     EXPECT_EQ(wireStyles(), (std::vector<std::string>{"smooth", "square", "rounded"}));
     // Smooth: one curve, level at both ends.

@@ -462,7 +462,7 @@ class GraphApiTest(unittest.TestCase):
             self.assertEqual(again.pass_through("width"), [inputs[0], "strands"])
             self.assertEqual(again.node_spec("width")["outputs"][-1]["name"], "thru_strands")
 
-    def test_dots_groups_shaken_and_dropped_on_a_wire(self):
+    def test_dots_groups_detached_and_dropped_on_a_wire(self):
         model = gm.GraphModel.from_groom(self.groom, self.catalog)
         # A free dot, fed from length; another taking its signal; a link out of that exit.
         dot = model.add_dot(0, 0)
@@ -478,7 +478,7 @@ class GraphApiTest(unittest.TestCase):
         self.assertEqual(model.portal_of_link("resample", "strands"), (dot, 0))
         model.set_dot_input(dot, 0, None)  # the exit freed: a dot of its own, the link a wire again
         self.assertIsNone(model.portal_of_link("resample", "strands"))
-        # Shaken together: the link between them kept.
+        # Out of the flow together: the link between them kept.
         model = gm.GraphModel.from_groom(self.groom, self.catalog)
         self.assertTrue(model.detach_group(["length", "width"])["changed"])
         self.assertEqual(model.source_of("width", "strands"), "length")
@@ -511,6 +511,20 @@ class GraphApiTest(unittest.TestCase):
         stored = groomlab.get_graph(self.groom)
         definition = next(n for n in stored["nodes"] if n["name"] == compound)["params"]["definition"]
         self.assertNotIn("curl", [n["name"] for n in definition["graph"]["nodes"]])
+
+    def test_a_move_inside_a_compound_is_kept(self):
+        # Only the layout written (a node moved, no other edit): the move inside the compound is in
+        # the groom's graph, so a sync from the groom keeps it (it snapped back before).
+        model = gm.GraphModel.from_groom(self.groom, self.catalog)
+        compound = model.collapse(["length", "width"])
+        model.save(self.groom)
+        inner = gm.ScopedModel(model, compound)
+        inner.set_position("width", 333.0, 77.0)
+        inner.save_layout(self.groom)
+        again = gm.ScopedModel(gm.GraphModel.from_groom(self.groom, self.catalog), compound)
+        self.assertEqual(again.position("width"), (333.0, 77.0))
+        self.assertEqual(inner.top().to_json(), cmds.getAttr(self.groom + ".graph"))
+        self.assertEqual(gm.without_layout(model.to_dict()), gm.without_layout(again.top().to_dict()))
 
     def test_model_rejects_bad_edits(self):
         model = gm.GraphModel.from_groom(self.groom, self.catalog)
