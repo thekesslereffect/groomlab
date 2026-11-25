@@ -411,9 +411,7 @@ TEST(MapEdits, ImportAndRelinkReadAnImageInPlaceOrAsACopy) {
     image.path = (dir / "photos" / "none.png").generic_u8string();
     EXPECT_THROW(importMap(in.maps, &h, "x", image, std::nullopt, files), std::invalid_argument) << "no image";
     // Relink a texture map: a texture param reading its old image reads the new one.
-    // (A param reading the image itself, as grooms made before Map nodes were wired do.)
-    const std::string graph =
-        R"({"nodes": [{"name": "length", "type": "Length", "params": {"keep": {"texture": "photos/Tint Map.png", "component": "r", "min": 0, "max": 1}}}], "output": "length"})";
+    const std::string graph = wireParamMap("", in.maps, "length", "keep", "Tint_Map", "texture");
     ASSERT_NE(graph.find("Tint Map.png"), std::string::npos);
     image.path = gray;
     image.copy = std::nullopt;

@@ -363,14 +363,16 @@ struct ParamMapRef {
 ParamMapRef paramMapOf(const std::string& graphJson, const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& node,
                        const std::string& param);
 
-// The graph with node.param reading map `map` of kind `kind` (a guide layer, a vertex map or a
-// texture map of `maps`): a Map node of the map (the one there, else one made beside the node)
-// wired into the param, exposed as an input. The param keeps its number, which the map's 0-1
-// multiplies (white: the param as it was; its slider still scales it). A param naming a map
-// (Interpolate's regionMap) takes the map's name instead. Throws std::runtime_error for no such
-// node, or a texture map not in `maps`.
+// The graph with node.param reading map `map` of kind `kind` (a vertex map by its color set, a
+// texture map of `maps` by its file, "guides" a guide layer), white the param's value now (min
+// 0, max the value; 1 when it is no number): the map listed in the param itself (a param's Paint
+// and Map buttons, the brush). With `mapNode` (Groom Tools > Paint > New Map for a setting) a Map
+// node of the map (the one there, else one made beside the node) is wired into the param instead,
+// exposed as an input; the param keeps its number, which the map's 0-1 multiplies (its slider
+// still scales it). A param naming a map (Interpolate's regionMap) takes the map's name either
+// way. Throws std::runtime_error for no such node, or a texture map not in `maps`.
 std::string wireParamMap(const std::string& graphJson, const ScalpMaps& maps, const std::string& node, const std::string& param,
-                         const std::string& map, const std::string& kind);
+                         const std::string& map, const std::string& kind, bool mapNode = false);
 
 // The map node.param is painted on. When none drives the param yet: a vertex map named
 // <node>_<param> (made unique against the maps and the guides' layers), `vertexCount` values of

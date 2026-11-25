@@ -234,6 +234,7 @@ struct ParamPaintRequest {
     std::string channel;               // "r", "g", "b" or "a": that channel of a color map, read through its Map node; "": its value
     std::vector<std::int32_t> faces;   // a map made here: white on those polygons of the cage only, black elsewhere
     int resolution = 1024;             // a texture map made here, this square
+    bool mapNode = false;              // linked through a Map node in the graph (New Map for a setting), not in the param
 };
 
 // What Paint on a setting does.

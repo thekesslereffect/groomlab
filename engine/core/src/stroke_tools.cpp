@@ -779,8 +779,11 @@ ParamMapRef paramMapOf(const std::string& graphJson, const ScalpMaps& maps, cons
     return {source.map, source.kind};
 }
 
-std::string wireParamMap(const std::string& graphJson, const ScalpMaps& maps, const std::string& node, const std::string& param,
-                         const std::string& map, const std::string& kind) {
+namespace {
+
+// wireParamMap with mapNode: the map's Map node wired into the param.
+std::string wireParamMapNode(const std::string& graphJson, const ScalpMaps& maps, const std::string& node, const std::string& param,
+                             const std::string& map, const std::string& kind) {
     nlohmann::json g = graphOf(graphJson);
     nlohmann::json& n = nodeNamed(g, node);
     if (kind == "texture") {
@@ -855,6 +858,89 @@ std::string wireParamMap(const std::string& graphJson, const ScalpMaps& maps, co
     exposeParam(edit, node, param);
     edit.connect(mapNode, node, param);
     return edit.toJson();
+}
+
+}  // namespace
+
+std::string wireParamMap(const std::string& graphJson, const ScalpMaps& maps, const std::string& node, const std::string& param,
+                         const std::string& map, const std::string& kind, bool mapNode) {
+    if (mapNode) return wireParamMapNode(graphJson, maps, node, param, map, kind);
+    nlohmann::json g = graphOf(graphJson);
+    nlohmann::json& n = nodeNamed(g, node);
+    // White: 1 x the param's value, as it was (its default when the node leaves it out).
+    double top = 1.0;
+    bool names = false;  // a param naming a map (Interpolate's regionMap): it takes the map's name
+    try {
+        const nlohmann::json complete = nlohmann::json::parse(completeGraphJson(g.dump()), nullptr, false);
+        if (complete.is_object() && complete.contains("nodes")) {
+            for (const nlohmann::json& c : complete["nodes"]) {
+                if (!c.is_object() || c.value("name", std::string()) != node) continue;
+                const nlohmann::json params = c.value("params", nlohmann::json::object());
+                if (params.is_object() && params.contains(param) && params[param].is_number()) top = params[param].get<double>();
+                if (params.is_object() && params.contains(param) && params[param].is_string()) names = true;
+            }
+        }
+    } catch (const std::exception&) {
+        // An incomplete graph: the map's white is 1.
+    }
+    nlohmann::json value;
+    if (names) {
+        value = map;
+    } else if (kind == "guides") {
+        value = {{"guide", map}, {"min", 0.0}, {"max", top}};
+    } else if (kind == "texture") {
+        const auto it = maps.maps.find(map);
+        if (it == maps.maps.end() || it->second.kind != "texture") throw std::runtime_error("the groom has no texture map named " + map);
+        value = {{"texture", it->second.texture}, {"component", "r"}, {"min", 0.0}, {"max", top}};
+    } else {
+        value = {{"colorSet", map}, {"component", "r"}, {"min", 0.0}, {"max", top}};
+    }
+    if (!n.contains("params") || !n["params"].is_object()) n["params"] = nlohmann::json::object();
+    n["params"][param] = std::move(value);
+    // A Map node wired to the param would win over the map param: the wire goes.
+    if (!g.contains("connections") || !g["connections"].is_array()) g["connections"] = nlohmann::json::array();
+    auto& list = g["connections"];
+    list.erase(std::remove_if(list.begin(), list.end(),
+                              [&](const nlohmann::json& c) {
+                                  return c.is_object() && c.value("to", std::string()) == node && c.value("input", std::string()) == param;
+                              }),
+               list.end());
+    // A guide layer read before the strands exist (Scatter's density: no strand channel yet) blends
+    // the guides at each root: the node's guides input, when it is free, fed as the graph's guides
+    // are (what feeds another node's guides, else its first Guides node).
+    if (kind == "guides" && !names) {
+        const std::string type = n.value("type", std::string());
+        const OperatorRegistry& registry = OperatorRegistry::instance();
+        if (registry.contains(type)) {
+            const std::vector<PortSpec> ports = registry.create(type)->inputs();
+            const bool beforeStrands =
+                std::none_of(ports.begin(), ports.end(), [](const PortSpec& p) { return p.type == PortType::Strands; });
+            const auto port = std::find_if(ports.begin(), ports.end(),
+                                           [](const PortSpec& p) { return p.type == PortType::Guides; });
+            const bool fed = port != ports.end() && std::any_of(list.begin(), list.end(), [&](const nlohmann::json& c) {
+                return c.is_object() && c.value("to", std::string()) == node && c.value("input", std::string()) == port->name;
+            });
+            if (beforeStrands && port != ports.end() && !fed) {
+                std::string source;
+                for (const nlohmann::json& c : list) {
+                    if (c.is_object() && c.value("input", std::string()) == "guides" && c.value("from", std::string()) != node) {
+                        source = c.value("from", std::string());
+                        break;
+                    }
+                }
+                if (source.empty() && g.contains("nodes") && g["nodes"].is_array()) {
+                    for (const nlohmann::json& other : g["nodes"]) {
+                        if (other.is_object() && other.value("type", std::string()) == "Guides") {
+                            source = other.value("name", std::string());
+                            break;
+                        }
+                    }
+                }
+                if (!source.empty()) list.push_back({{"from", source}, {"to", node}, {"input", port->name}});
+            }
+        }
+    }
+    return g.dump();
 }
 
 ParamMapBinding bindParamMap(const std::string& graphJson, const ScalpMaps& maps, const GuideHierarchy* guides,

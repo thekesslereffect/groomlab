@@ -293,17 +293,6 @@ TEST(BrushPack, GrayCtrlPaintsTowardZeroOrBackUp) {
     EXPECT_EQ(grayCtrlTarget(0.0f), 1.0f) << "painting black, Ctrl paints back up";
 }
 
-// The map a Map node wired into node.input reads ("" none).
-std::string mapFeeding(const nlohmann::json& g, const std::string& node, const std::string& input) {
-    for (const nlohmann::json& c : g["connections"]) {
-        if (c["to"] != node || c["input"] != input) continue;
-        for (const nlohmann::json& n : g["nodes"]) {
-            if (n["name"] == c["from"] && n["type"] == "Map") return n["params"].value("name", std::string("mask"));
-        }
-    }
-    return {};
-}
-
 TEST(BrushPack, BindParamMapFindsOrWiresTheMap) {
     // The default graph: a Width node whose width is a number. A white vertex map wired to it.
     ScalpMaps none;
@@ -313,14 +302,13 @@ TEST(BrushPack, BindParamMapFindsOrWiresTheMap) {
     EXPECT_EQ(b.kind, "vertices");
     ASSERT_FALSE(b.graphJson.empty());
     const nlohmann::json g = nlohmann::json::parse(b.graphJson);
-    // A Map node of the map wired into the width, the param an input; the width keeps its number,
-    // which the map multiplies (white: the width as it was, the slider still scaling it).
-    EXPECT_EQ(mapFeeding(g, "width", "width"), "width_width");
+    nlohmann::json value;
     for (const nlohmann::json& n : g["nodes"]) {
-        if (n["name"] != "width") continue;
-        EXPECT_TRUE(!n["params"].contains("width") || n["params"]["width"].is_number()) << n.dump();
-        EXPECT_EQ(n["paramInputs"], nlohmann::json::array({"width"}));
+        if (n["name"] == "width") value = n["params"]["width"];
     }
+    EXPECT_EQ(value["colorSet"], "width_width");
+    EXPECT_EQ(value["min"], 0.0);
+    EXPECT_NEAR(value["max"].get<double>(), 0.007, 1e-9) << "white is the width as it was";
     ASSERT_TRUE(b.maps.maps.count("width_width"));
     EXPECT_EQ(b.maps.maps.at("width_width").values, std::vector<float>(7, 1.0f));
     // Wired: found again, nothing to rewire.
@@ -360,11 +348,15 @@ TEST(BrushPack, BindParamMapFindsOrWiresTheMap) {
     ScalpMaps tex;
     tex.maps["fine"] = ScalpMapEntry{"texture", {}, "masks/fine.png"};
     const nlohmann::json wired = nlohmann::json::parse(wireParamMap("", tex, "noise", "amplitude", "fine", "texture"));
-    EXPECT_EQ(mapFeeding(wired, "noise", "amplitude"), "fine");
+    for (const nlohmann::json& n : wired["nodes"]) {
+        if (n["name"] == "noise") EXPECT_EQ(n["params"]["amplitude"]["texture"], "masks/fine.png");
+    }
     EXPECT_EQ(paramMapOf(wired.dump(), tex, nullptr, "noise", "amplitude").map, "fine");
     EXPECT_THROW(wireParamMap("", none, "noise", "amplitude", "fine", "texture"), std::runtime_error);
     const nlohmann::json layer = nlohmann::json::parse(wireParamMap("", none, "noise", "amplitude", "wild", "guides"));
-    EXPECT_EQ(mapFeeding(layer, "noise", "amplitude"), "wild");
+    for (const nlohmann::json& n : layer["nodes"]) {
+        if (n["name"] == "noise") EXPECT_EQ(n["params"]["amplitude"]["guide"], "wild");
+    }
     auto feeds = [](const nlohmann::json& g, const std::string& to) {
         std::vector<std::string> from;
         for (const nlohmann::json& c : g["connections"]) {
@@ -372,20 +364,13 @@ TEST(BrushPack, BindParamMapFindsOrWiresTheMap) {
         }
         return from;
     };
-    EXPECT_TRUE(feeds(layer, "noise").empty()) << "the Map node reads the guides: none wired";
-    // Scatter's density: its Map node, wired once however often (the one Map node of the map).
+    EXPECT_TRUE(feeds(layer, "noise").empty()) << "after the strands: a strand channel, no guides wired";
+    // Before the strands (Scatter's density): the graph's guides fed to the node's guides input, once.
     const nlohmann::json dense = nlohmann::json::parse(wireParamMap("", none, "scatter", "density", "thick", "guides"));
-    EXPECT_EQ(mapFeeding(dense, "scatter", "density"), "thick");
-    const nlohmann::json again2 = nlohmann::json::parse(wireParamMap(dense.dump(), none, "scatter", "density", "thick", "guides"));
-    EXPECT_EQ(again2["nodes"].size(), dense["nodes"].size()) << "no second Map node";
-    // A map read in the param itself before ({min, max}): the param its number again, a Map node wired.
-    const nlohmann::json old = nlohmann::json::parse(wireParamMap(
-        R"({"nodes": [{"name": "s", "type": "Scatter", "params": {"density": {"colorSet": "d", "min": 0, "max": 40}}}]})", none, "s",
-        "density", "d", "vertices"));
-    EXPECT_EQ(mapFeeding(old, "s", "density"), "d");
-    for (const nlohmann::json& n : old["nodes"]) {
-        if (n["name"] == "s") EXPECT_EQ(n["params"]["density"], 40);
-    }
+    EXPECT_EQ(feeds(dense, "scatter"), std::vector<std::string>{"guides"});
+    EXPECT_EQ(feeds(nlohmann::json::parse(wireParamMap(dense.dump(), none, "scatter", "density", "thick", "guides")), "scatter"),
+              std::vector<std::string>{"guides"});
+    EXPECT_TRUE(feeds(nlohmann::json::parse(wireParamMap("", none, "scatter", "density", "thick", "vertices")), "scatter").empty());
 
     // A param naming its map (Interpolate's regionMap, New Map > For > Interpolation regions): the
     // map's name in it, whatever its kind; a name of no map refused.
