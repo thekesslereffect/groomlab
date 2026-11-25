@@ -628,7 +628,7 @@ ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const Gui
         out.kind = paint.kind;
     }
     try {
-        out.graph = channel.empty() ? wireParamMap(full, out.created.maps, node, param, out.map, out.kind)
+        out.graph = channel.empty() ? wireParamMap(full, out.created.maps, node, param, out.map, out.kind, paint.mapNode)
                                     : wireMapChannel(full, node, param, out.map, channel);
     } catch (const std::invalid_argument&) {
         throw;

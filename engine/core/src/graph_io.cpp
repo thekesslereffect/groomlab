@@ -510,6 +510,7 @@ std::string paramSpecJson(const ParamSpec& p) {
     if (p.defaultValue.index() == 1 || p.defaultValue.index() == 2 || p.defaultValue.index() == 4) {
         param["decimals"] = paramDecimals(p, kinds[p.defaultValue.index()]);
     }
+    if (p.shownAsInput) param["shownAsInput"] = true;
     // Limits and slider ranges only where set; the slider's falls back to the limits.
     if (p.min) param["min"] = *p.min;
     if (p.max) param["max"] = *p.max;
@@ -647,7 +648,7 @@ const std::string& defaultGraphJson() {
   "nodes": [
     {"name": "scalp", "type": "Scalp"},
     {"name": "guides", "type": "Guides"},
-    {"name": "scatter", "type": "Scatter"},
+    {"name": "scatter", "type": "Scatter", "paramInputs": ["density"]},
     {"name": "interpolate", "type": "Interpolate"},
     {"name": "length", "type": "Length", "params": {"fraction": 1.0, "randomness": 0.2}},
     {"name": "noise", "type": "Noise"},

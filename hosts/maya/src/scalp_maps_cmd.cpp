@@ -67,6 +67,9 @@ const char* kSelected[] = {"-sel", "-selected"};
 const char* kPaintParam[] = {"-pp", "-paintParam"};
 const char* kMapName[] = {"-mn", "-mapName"};
 const char* kChannel[] = {"-chn", "-channel"};
+// With -paintParam: linked through a Map node wired into the param (New Map for a setting), not
+// listed in the param itself.
+const char* kMapNode[] = {"-mnd", "-mapNode"};
 // The scalp's faces (polygon indices, space separated): -make makes the map 0 with -value (or
 // -fillColor) on those faces only; -fill fills those faces only. A guide layer: the guides
 // rooted on them.
@@ -111,6 +114,7 @@ MSyntax ScalpMapsCmd::newSyntax() {
     s.addFlag(kPaintParam[0], kPaintParam[1], MSyntax::kString, MSyntax::kString);
     s.addFlag(kMapName[0], kMapName[1], MSyntax::kString);
     s.addFlag(kChannel[0], kChannel[1], MSyntax::kString);
+    s.addFlag(kMapNode[0], kMapNode[1]);
     s.addFlag(kFaces[0], kFaces[1], MSyntax::kString);
     s.setObjectType(MSyntax::kSelectionList, 0, 1);
     s.useSelectionAsDefault(true);
@@ -435,6 +439,7 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 paint.kind = flagString(db, kKind[0], "guides").asChar();
                 paint.name = flagString(db, kMapName[0]).asChar();
                 paint.channel = flagString(db, kChannel[0]).asChar();
+                paint.mapNode = db.isFlagSet(kMapNode[0]);
                 if (onFaces) paint.faces = faces;
                 paint.resolution = resolution;
                 MapFiles files;

@@ -1549,8 +1549,9 @@ class PaintTab(_GroomTab):
         from groomlab.base import undo_chunk
         with undo_chunk("map for %s.%s" % (node, param)):
             before = groomlab.param_map(self.groom, node, param)
+            # (New Map for a setting: the map's Map node wired into the param, seen in the graph.)
             name = self.run(groomlab.paint_param, self.groom, node, param, kind=kind, resolution=resolution, paint=False,
-                            faces=faces)
+                            faces=faces, map_node=True)
             if not name:
                 return None
             self.refresh(force=True)

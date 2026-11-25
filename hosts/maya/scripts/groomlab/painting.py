@@ -731,12 +731,14 @@ def param_map(groom, node, param):
 
 
 def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, paint=True, channel="luminance",
-                faces=None):
+                faces=None, map_node=False):
     """Paint a mappable param (+ New Map > for a setting in the Paint tab, and the Graph Editor's
     right-click a param > Paint): the map it reads already when it reads one, else the map `name`
     (default "<node>_<param>"; made white, so the look stays as it is) on the guides, the scalp's
     vertices or a texture (`kind`), read by the param as every host links it (the core's
-    wireParamMap: the param's value its white; a Map node wired to it goes). With `paint` the
+    wireParamMap: listed in the param, white its value; with `map_node`, as Groom Tools > Paint >
+    New Map for a setting links it, a Map node of the map wired into the param instead, whose own
+    value the map's 0-1 multiplies, so its slider still scales it). With `paint` the
     Paint brush starts on it toward 1 (the param's own value); Ctrl paints toward 0 (on a density
     map: no hair). With `channel` ("r", "g", "b" or "a") the param reads that output of the map's
     Map node (one Map node feeds several params), a channel of a color map `name` (made if
@@ -751,6 +753,8 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
         kwargs["mapName"] = name
     if channel and channel != "luminance":
         kwargs["channel"] = channel
+    if map_node:
+        kwargs["mapNode"] = True
     if faces:
         kwargs["faces"] = _faces_flag(faces)
     if kind == "texture":
