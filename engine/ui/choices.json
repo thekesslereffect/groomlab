@@ -173,7 +173,8 @@
         {"value": "replace", "label": "Replace", "tip": "Move existing values toward the chosen value (the original behavior)"},
         {"value": "add", "label": "Add", "tip": "Add the chosen value to existing values, clamped to 1"},
         {"value": "subtract", "label": "Subtract", "tip": "Subtract the chosen value from existing values, clamped to 0"},
-        {"value": "clampMaximum", "label": "Clamp Maximum", "tip": "Lower values above the chosen maximum and leave lower values unchanged"}
+        {"value": "min", "label": "Min", "tip": "Raise values below the chosen minimum and leave higher values unchanged"},
+        {"value": "max", "label": "Max", "tip": "Lower values above the chosen maximum and leave lower values unchanged"}
       ]
     },
     "photoDepth": {

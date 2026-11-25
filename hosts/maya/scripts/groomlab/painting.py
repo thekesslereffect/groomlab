@@ -236,7 +236,7 @@ def fill_map(groom, name, value=None, selected_only=False, color=None, channels=
     map takes `color` (r, g, b[, a]) in the channels of `channels` (a subset of "rgba"), or
     `value` in its r g b (its alpha kept). With `faces` (polygon indices of the scalp:
     selected_scalp_faces) only those faces are filled (a guide layer: the guides rooted on them).
-    `mode`: replace, add, subtract or clamp (the most a value may be). One undo step. Every host's
+    `mode`: replace, add, subtract, min (the least a value may be) or max (the most). One undo step. Every host's
     Fill (the editor's fillMap, in groomLabScalpMaps)."""
     if value is None and color is None:
         raise ValueError("fill a map with a value or a color")

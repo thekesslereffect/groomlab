@@ -477,10 +477,15 @@ TEST(ScalpPaint, CompositeModesPreserveAndClampValues) {
     EXPECT_FLOAT_EQ(compositePaintValue(0.9f, 0.2f, PaintMode::Add), 1.0f);
     EXPECT_FLOAT_EQ(compositePaintValue(0.3f, 0.2f, PaintMode::Subtract), 0.1f);
     EXPECT_FLOAT_EQ(compositePaintValue(0.1f, 0.2f, PaintMode::Subtract), 0.0f);
-    EXPECT_FLOAT_EQ(compositePaintValue(0.8f, 0.6f, PaintMode::ClampMaximum), 0.6f);
-    EXPECT_FLOAT_EQ(compositePaintValue(0.4f, 0.6f, PaintMode::ClampMaximum), 0.4f);
+    EXPECT_FLOAT_EQ(compositePaintValue(0.8f, 0.6f, PaintMode::Maximum), 0.6f);
+    EXPECT_FLOAT_EQ(compositePaintValue(0.4f, 0.6f, PaintMode::Maximum), 0.4f);
+    EXPECT_FLOAT_EQ(compositePaintValue(0.4f, 0.6f, PaintMode::Minimum), 0.6f);
+    EXPECT_FLOAT_EQ(compositePaintValue(0.8f, 0.6f, PaintMode::Minimum), 0.8f);
     EXPECT_EQ(paintModeFromString("add"), PaintMode::Add);
-    EXPECT_EQ(std::string(paintModeName(PaintMode::ClampMaximum)), "clampMaximum");
+    EXPECT_EQ(std::string(paintModeName(PaintMode::Maximum)), "max");
+    EXPECT_EQ(std::string(paintModeName(PaintMode::Minimum)), "min");
+    EXPECT_EQ(paintModeFromString("min"), PaintMode::Minimum);
+    EXPECT_EQ(paintModeFromString("clampMaximum"), PaintMode::Maximum);  // the old name still reads
     EXPECT_THROW(paintModeFromString("multiply"), std::invalid_argument);
 }
 
@@ -488,9 +493,9 @@ TEST(ScalpPaint, CompositeModesFillAndStampRealMapsOncePerStroke) {
     const auto plane = uvPlane(8);
     const Vec3f center{0.5f, 0.0f, 0.5f};
     const std::vector<Vec3f> one{center}, overlaps{center, center, center};
-    const std::array<PaintMode, 4> modes{
-        PaintMode::Replace, PaintMode::Add, PaintMode::Subtract, PaintMode::ClampMaximum};
-    const std::array<float, 4> filled{0.2f, 0.6f, 0.2f, 0.2f};
+    const std::array<PaintMode, 5> modes{
+        PaintMode::Replace, PaintMode::Add, PaintMode::Subtract, PaintMode::Maximum, PaintMode::Minimum};
+    const std::array<float, 5> filled{0.2f, 0.6f, 0.2f, 0.2f, 0.4f};
     for (std::size_t m = 0; m < modes.size(); ++m) {
         std::vector<float> vertices(plane->pointCount(), 0.4f);
         fillMapValues(vertices, kGrayMap, kAllChannels, {0.2f, 0.2f, 0.2f, 0.2f}, modes[m]);

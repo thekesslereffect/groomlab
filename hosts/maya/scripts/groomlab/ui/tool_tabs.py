@@ -1144,8 +1144,7 @@ class PaintTab(_GroomTab):
         self.mode_group.setExclusive(True)
         self.mode_buttons = {}
         for choice in definitions.choices("paintMode"):
-            label = choice["label"].replace(" Maximum", "")  # "Clamp Maximum": Clamp (its tooltip says the rest)
-            button = widgets.chip(label, choice.get("tip", ""), choice["value"] == "replace", "paintMode_" + choice["value"])
+            button = widgets.chip(choice["label"], choice.get("tip", ""), choice["value"] == "replace", "paintMode_" + choice["value"])
             button.clicked.connect(lambda _checked=False, value=choice["value"]: self.paint_mode_changed(value))
             self.mode_group.addButton(button)
             self.mode_buttons[choice["value"]] = button
