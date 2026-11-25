@@ -1127,7 +1127,11 @@ private:
     ScalpMapView nodeMapView(ScalpMapView view);
     std::uint64_t nodeViewKey_ = 0;
     std::shared_ptr<const std::vector<float>> nodeViewValues_;
+    std::shared_ptr<const TexturePreview> nodeViewPreview_;  // a node reading textures: its image
     int nodeViewChannels_ = 1;
+    std::uint64_t nodeTexelRootsKey_ = 0;
+    std::vector<StrandRoot> nodeTexelRoots_;  // each texel's root on the cage (-1 face: none)
+    std::string liveTexturePath_;             // the texture set live (setLiveTexture) for the brush
     // A texture map's tile set shown (scalpMapView): its mosaic as the preview, kept per files,
     // scalp and display.
     std::shared_ptr<const TexturePreview> udimViewPreview(const ScalpMapView& view);

@@ -160,8 +160,9 @@ class ParamPanel(QtWidgets.QScrollArea):
                     unused = QtWidgets.QLabel('<span style="color:%s">guides set it</span>' % _ge.MUTED.name())
                     unused.setToolTip(SCATTER_LENGTH_TIP)
                     row.addWidget(unused)
-                elif spec.get("mappable") and self.editor.groom and gm.linkable(spec):
-                    # A mappable param: its field and the Paint chip (as in the app), right-click > Paint's choices.
+                elif (spec.get("mappable") or spec.get("colorField")) and self.editor.groom and gm.linkable(spec):
+                    # A mappable param (or a color a map colors: a ColorLayers layer's): its field and the
+                    # Paint chip (as in the app), right-click > Paint's choices.
                     widget = QtWidgets.QWidget()
                     row = QtWidgets.QHBoxLayout(widget)
                     row.setContentsMargins(0, 0, 0, 0)
@@ -1038,7 +1039,7 @@ class ParamPanel(QtWidgets.QScrollArea):
             state, values = self.key_state(name, param, state)
         if gm.linkable(spec):
             state.add("param.linkable")
-            if spec.get("mappable"):
+            if spec.get("mappable") or spec.get("colorField"):  # (a color: painted as a color map)
                 state.add("param.mappable")
         if self.editor.groom:
             state.add("groom")

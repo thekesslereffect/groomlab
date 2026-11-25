@@ -53,6 +53,24 @@ struct ScalarField::GuideSampler {
     }
 };
 
+std::string ScalarField::mapKind() const {
+    if (field_) return field_->mapKind();
+    if (!hasMap_) return {};
+    switch (map_.source) {
+        case MapRef::Source::Texture: return "texture";
+        case MapRef::Source::ColorSet:
+        case MapRef::Source::Attribute:
+        case MapRef::Source::Guide: return "vertices";
+        case MapRef::Source::Expression: return {};
+    }
+    return {};
+}
+
+int ScalarField::textureSize() const {
+    if (field_) return field_->textureSize();
+    return texture_ ? std::max(texture_->width(), texture_->height()) : 0;
+}
+
 ScalarField::ScalarField(const ParamSet& params, const std::string& name, const ScalpMesh* scalp,
                          const GuideSet* guides)
     : constant_(static_cast<float>(params.getDouble(name))), scalp_(scalp), param_(name) {

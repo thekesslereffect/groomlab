@@ -53,6 +53,8 @@ public:
     MapFieldValue(const ParamSet& params, MeshPtr scalp, GuidesPtr guides)
         : scalp_(std::move(scalp)), guides_(std::move(guides)),
           field_(params, "map", scalp_.get(), guides_.get()) {}
+    std::string mapKind() const override { return field_.mapKind(); }
+    int textureSize() const override { return field_.textureSize(); }
     float atRoot(const StrandRoot& root) const override { return field_.atRoot(root); }
     float at(const StrandSet& strands, std::size_t s) const override { return field_.at(strands, s); }
     float atPoint(const StrandSet& strands, std::size_t s, std::size_t point) const override {
@@ -88,6 +90,8 @@ public:
         }
     }
     float atRoot(const StrandRoot& root) const override { return fields_[3]->atRoot(root); }
+    std::string mapKind() const override { return fields_[3]->mapKind(); }
+    int textureSize() const override { return fields_[3]->textureSize(); }
     float at(const StrandSet& strands, std::size_t s) const override { return fields_[3]->at(strands, s); }
     float atPoint(const StrandSet& strands, std::size_t s, std::size_t point) const override {
         return fields_[3]->atPoint(strands, s, point);
@@ -874,9 +878,27 @@ public:
             if (color) layer.color = std::make_unique<ColorField>(params, layerParam(k, ""));
             else layer.value = std::make_unique<ScalarField>(params, layerParam(k, ""), scalp_.get());
             layer.opacity = std::make_unique<ScalarField>(params, layerParam(k, "Opacity"), scalp_.get());
+            // One kind of painted map in the stack (issue #124): textures blend texel by texel,
+            // vertex maps vertex by vertex, and a stack of both could show as neither.
+            auto note = [&](const std::string& kind, int size) {
+                textureSize_ = std::max(textureSize_, size);
+                if (kind.empty()) return;
+                if (!kind_.empty() && kind != kind_) {
+                    throw GraphError(std::string(op) + ": layer " + std::to_string(k) + " reads a " +
+                                     (kind == "texture" ? "texture map" : "vertex map or guide layer") + " and a layer below it a " +
+                                     (kind_ == "texture" ? "texture map" : "vertex map or guide layer") +
+                                     ": one kind of map per stack (all textures, or all vertex maps)");
+                }
+                kind_ = kind;
+            };
+            if (layer.value) note(layer.value->mapKind(), layer.value->textureSize());
+            if (layer.color) note(layer.color->mapKind(), layer.color->textureSize());
+            note(layer.opacity->mapKind(), layer.opacity->textureSize());
             layers_.push_back(std::move(layer));
         }
     }
+    std::string mapKind() const override { return kind_; }
+    int textureSize() const override { return textureSize_; }
 
     float atRoot(const StrandRoot& root) const override {
         if (color_) return luminanceOf(colorAtRoot(root));
@@ -982,6 +1004,8 @@ private:
     MeshPtr scalp_;  // kept alive: the fields read it
     bool color_;
     std::vector<Layer> layers_;
+    std::string kind_;      // the painted maps' one kind ("": none read)
+    int textureSize_ = 0;   // their images' largest side
 };
 
 class LayersOp : public Operator {

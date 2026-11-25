@@ -112,6 +112,9 @@ public:
     const Expression::Bound& boundExpression() const { return bound_; }
     const FieldPtr& plugged() const { return field_; }
     float scale() const { return scale_; }
+    // The kind of painted map it reads (FieldValue::mapKind) and its image's largest side (0: none).
+    std::string mapKind() const;
+    int textureSize() const;
 
 private:
     float remap(const ScalpMesh::Color& c) const;
@@ -190,6 +193,8 @@ public:
     std::array<float, 3> at(const StrandSet& strands, std::size_t s) const;
     std::array<float, 3> atPoint(const StrandSet& strands, std::size_t s, std::size_t point) const;
     std::array<float, 3> atRoot(const StrandRoot& root) const;
+    std::string mapKind() const { return field_ ? field_->mapKind() : std::string(); }
+    int textureSize() const { return field_ ? field_->textureSize() : 0; }
 
 private:
     std::array<float, 3> constant_{};
