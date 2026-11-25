@@ -603,13 +603,15 @@ ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const Gui
                       const std::string& node, const std::string& param, const ParamPaintRequest& paint, const MapFiles& files) {
     const std::string full = graphOrDefault(graph);
     if (!GraphEdit(full).hasNode(node)) throw std::invalid_argument("no node '" + node + "'");
-    // A color param (a ColorLayers layer's): a color map, its Map node's rgb output feeding it.
+    // A color param (a ColorLayers layer's): painted as a color map.
     const bool color = colorFieldParam(full, node, param);
     if (color && paint.kind == "guides") {
         throw std::invalid_argument("a color is painted on the scalp's vertices or a texture, not on the guides");
     }
-    // (A color takes its map whole: a color map, listed in the param itself.)
-    const std::string channel = color || paint.channel == "luminance" ? std::string() : paint.channel;
+    // (A color takes its map whole: a color map, listed in the param itself, or with mapNode
+    // through its Map node's rgb output.)
+    const std::string channel = color ? std::string(paint.mapNode ? "rgb" : "")
+                                      : paint.channel == "luminance" ? std::string() : paint.channel;
     if (!color && !channel.empty() && !rgbaChannel(channel)) {
         throw std::invalid_argument("a map's channel is r, g, b or a, not '" + channel + "'");
     }
