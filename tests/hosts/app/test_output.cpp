@@ -911,6 +911,7 @@ TEST(AppOutput, FindCommandIsARoundedCard) {
     QCoreApplication::processEvents();
     ASSERT_TRUE(find);
     EXPECT_TRUE(find->testAttribute(Qt::WA_TranslucentBackground));
+    EXPECT_TRUE(find->windowFlags() & Qt::NoDropShadowWindowHint);  // (the system's shadow is square)
     const QImage shot = find->grab().toImage();
     ASSERT_FALSE(shot.isNull());
     EXPECT_EQ(qAlpha(shot.pixel(0, 0)), 0);

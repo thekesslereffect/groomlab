@@ -94,7 +94,7 @@ class FindCommand(QtWidgets.QFrame):
     MAX = 12
 
     def __init__(self, parent=None):
-        super(FindCommand, self).__init__(parent, QtCore.Qt.Popup | QtCore.Qt.FramelessWindowHint)
+        super(FindCommand, self).__init__(parent, QtCore.Qt.Popup | QtCore.Qt.FramelessWindowHint | QtCore.Qt.NoDropShadowWindowHint)
         # A see-through window around a rounded card (a top-level window is square: its corners
         # show round only so).
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)

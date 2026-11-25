@@ -23,7 +23,7 @@ constexpr int kEntryRole = Qt::UserRole;
 }  // namespace
 
 FindCommand::FindCommand(std::vector<Entry> entries, QWidget* parent)
-    : QFrame(parent, Qt::Popup | Qt::FramelessWindowHint), entries_(std::move(entries)) {
+    : QFrame(parent, Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint), entries_(std::move(entries)) {
     setAttribute(Qt::WA_DeleteOnClose);
     // A see-through window around a rounded card (a top-level window is square: its corners show
     // round only so); the card is the one styled.
