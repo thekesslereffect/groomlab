@@ -810,6 +810,22 @@ class FlowLayout(QtWidgets.QLayout):
         m = self.contentsMargins()
         return size + QtCore.QSize(m.left() + m.right(), m.top() + m.bottom())
 
+    @staticmethod
+    def _least(shown, widest):
+        """The narrowest a segment may be: its widest label's text with a little room each side
+        (items without text: most of the widest one's width)."""
+        from groomlab.ui import theme
+        least = 0
+        for item in shown:
+            w = item.widget()
+            text = w.text() if w is not None and hasattr(w, "text") else ""
+            if not text:
+                return widest * 85 // 100
+            font = QtGui.QFont(w.font())
+            font.setBold(True)  # (the chosen segment's label is bold)
+            least = max(least, int(QtGui.QFontMetricsF(font).horizontalAdvance(text)) + 1 + theme.px(6))
+        return min(least, widest)
+
     def _arrange(self, rect, move):
         m = self.contentsMargins()
         area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
@@ -820,8 +836,9 @@ class FlowLayout(QtWidgets.QLayout):
         widest = max(item.sizeHint().width() for item in shown)
         n = len(shown)
         columns = max(1, min((area.width() + gap) // max(1, widest + gap), min(self.max_columns, n)))
-        # A track's few segments on one row when each still gets most of its width (their padding gives).
-        if not self.last_row_stretch and n <= self.max_columns and (area.width() - (n - 1) * gap) // n >= widest * 85 // 100:
+        # A track's segments on one row when each is still as wide as its widest word (their padding
+        # gives way first).
+        if not self.last_row_stretch and n <= self.max_columns and (area.width() - (n - 1) * gap) // n >= self._least(shown, widest):
             columns = n
         span = (area.width() - (columns - 1) * gap) // columns
         column = max(widest, span) if self.last_row_stretch else span
@@ -864,7 +881,9 @@ def seg_row(buttons, parent=None):
     row.setProperty("role", "segTrack")
     row.setAttribute(QtCore.Qt.WA_StyledBackground, True)
     pad = theme.component_px("segTrack", "padding", 2)
-    flow = FlowLayout(row, spacing=pad, max_columns=4, last_row_stretch=False)
+    # Every segment on one row while each still fits its word (FlowLayout._least); else a grid.
+    buttons = list(buttons)
+    flow = FlowLayout(row, spacing=pad, max_columns=max(4, len(buttons)), last_row_stretch=False)
     flow.setContentsMargins(pad, pad, pad, pad)
     for b in buttons:
         flow.addWidget(b)
