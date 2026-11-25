@@ -17,6 +17,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QImage>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -29,6 +30,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "find_command.h"
 #include "glass.h"
 #include "groom_tools.h"
 #include "icon_rail.h"
@@ -897,6 +899,24 @@ TEST(AppOutput, FoldedDocksOpenForShortcutsFloatingAndTheNextStart) {
     EXPECT_FALSE(next.shell()->folded(true));
     EXPECT_EQ(next.shell()->openWidth(false), open);
     QSettings().remove(QStringLiteral("ui"));  // (the other tests start from the default layout)
+}
+
+TEST(AppOutput, FindCommandIsARoundedCard) {
+    // Find Command (Ctrl+K) is its own window: see-through outside its rounded card, so its corners
+    // show round over whatever is under it, the card itself opaque.
+    MainWindow window;
+    window.show();
+    QCoreApplication::processEvents();
+    FindCommand* find = window.openFindCommand();
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(find);
+    EXPECT_TRUE(find->testAttribute(Qt::WA_TranslucentBackground));
+    const QImage shot = find->grab().toImage();
+    ASSERT_FALSE(shot.isNull());
+    EXPECT_EQ(qAlpha(shot.pixel(0, 0)), 0);
+    EXPECT_EQ(qAlpha(shot.pixel(shot.width() - 1, shot.height() - 1)), 0);
+    EXPECT_EQ(qAlpha(shot.pixel(shot.width() / 2, 2)), 255);  // (the card's edge, along the top)
+    find->close();
 }
 
 }  // namespace

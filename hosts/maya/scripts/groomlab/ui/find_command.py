@@ -95,11 +95,18 @@ class FindCommand(QtWidgets.QFrame):
 
     def __init__(self, parent=None):
         super(FindCommand, self).__init__(parent, QtCore.Qt.Popup | QtCore.Qt.FramelessWindowHint)
-        self.setObjectName("findCommand")
-        self.setProperty("role", "card")
-        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        # A see-through window around a rounded card (a top-level window is square: its corners
+        # show round only so).
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
         self.setFixedWidth(theme.px(460))
-        column = QtWidgets.QVBoxLayout(self)
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.body = QtWidgets.QFrame()
+        self.body.setObjectName("findCommand")
+        self.body.setProperty("role", "card")
+        self.body.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        outer.addWidget(self.body)
+        column = QtWidgets.QVBoxLayout(self.body)
         pad = theme.px(8)
         column.setContentsMargins(pad, pad, pad, pad)
         column.setSpacing(theme.px(6))
@@ -117,7 +124,7 @@ class FindCommand(QtWidgets.QFrame):
         self.foot = widgets.small_label("")
         column.addWidget(self.foot)
         self._entries = entries()
-        theme.style(self, surface="panel")
+        theme.style(self.body, surface="panel")  # (the card: the window itself paints nothing)
         self.filter("")
 
     def filter(self, text):

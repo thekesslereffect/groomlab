@@ -932,6 +932,7 @@ QScrollBar::handle:horizontal { background: %(scroll)s; border-radius: {{3}}px; 
 QScrollBar::handle:hover { background: %(scrollHover)s; }
 QScrollBar::handle:pressed { background: %(accent)s; }
 QMenu { background: %(raised)s; border: {{1}}px solid %(popupEdge)s; border-radius: %(panel_r)dpx; padding: {{4}}px; }
+QFrame#findCommand { border: {{1}}px solid %(popupEdge)s; }
 QMenu::item { padding: {{5}}px {{28}}px {{5}}px {{12}}px; border-radius: %(r)dpx; }
 QMenu::item:selected { background: %(selection)s; color: %(selectionText)s; }
 QMenu::item:disabled { color: %(disabled)s; }

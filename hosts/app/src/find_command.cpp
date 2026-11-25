@@ -24,25 +24,32 @@ constexpr int kEntryRole = Qt::UserRole;
 
 FindCommand::FindCommand(std::vector<Entry> entries, QWidget* parent)
     : QFrame(parent, Qt::Popup | Qt::FramelessWindowHint), entries_(std::move(entries)) {
-    setObjectName(QStringLiteral("findCommand"));
     setAttribute(Qt::WA_DeleteOnClose);
-    setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet(QStringLiteral("#findCommand { background: %1; border: 1px solid %2; border-radius: %3px; }")
+    // A see-through window around a rounded card (a top-level window is square: its corners show
+    // round only so); the card is the one styled.
+    setAttribute(Qt::WA_TranslucentBackground, true);
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    auto* body = new QFrame(this);
+    body->setObjectName(QStringLiteral("findCommand"));
+    body->setAttribute(Qt::WA_StyledBackground, true);
+    outer->addWidget(body);
+    body->setStyleSheet(QStringLiteral("#findCommand { background: %1; border: 1px solid %2; border-radius: %3px; }")
                       .arg((theme::uiColor("field").isValid() ? theme::uiColor("field") : theme::card()).name(),
                            (theme::uiColor("popupEdge").isValid() ? theme::uiColor("popupEdge") : theme::divider()).name())
                       .arg(theme::cardRadius()));
     setFixedWidth(460);
-    auto* column = new QVBoxLayout(this);
+    auto* column = new QVBoxLayout(body);
     column->setContentsMargins(8, 8, 8, 8);
     column->setSpacing(6);
-    box_ = new QLineEdit(this);
+    box_ = new QLineEdit(body);
     box_->setObjectName(QStringLiteral("findCommandBox"));
     box_->setPlaceholderText(tr("Find a command: alembic, comb, bake, preset..."));
     box_->setClearButtonEnabled(true);
     box_->installEventFilter(this);
     connect(box_, &QLineEdit::textChanged, this, &FindCommand::filter);
     column->addWidget(box_);
-    list_ = new QListWidget(this);
+    list_ = new QListWidget(body);
     list_->setObjectName(QStringLiteral("findCommandList"));
     list_->setFrameShape(QFrame::NoFrame);
     list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -50,7 +57,7 @@ FindCommand::FindCommand(std::vector<Entry> entries, QWidget* parent)
     connect(list_, &QListWidget::itemActivated, this, [this](QListWidgetItem* item) { run(item); });
     connect(list_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) { run(item); });
     column->addWidget(list_);
-    foot_ = new QLabel(this);
+    foot_ = new QLabel(body);
     foot_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px;").arg(theme::textMuted().name()));
     column->addWidget(foot_);
     filter({});
