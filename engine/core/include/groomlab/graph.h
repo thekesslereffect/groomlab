@@ -403,6 +403,9 @@ struct ParamSpec {
     // node's ports: a Value node's kind, an Input's type).
     enum class Port { Auto, Value, None };
     Port port = Port::Auto;
+    // An input port on every new node of the operator (GraphEdit::addNode exposes it): the param a
+    // groom most often feeds (Scatter's density, painted), seen on the node without expanding it.
+    bool shownAsInput = false;
     // A default the param changed from: its operator raised its version (Operator::version) to
     // `since` when the default became `defaultValue`, and a node saved before that version which
     // leaves the param out takes `before`, what it made then (loadGraphJson, and a host's saved
@@ -518,6 +521,12 @@ struct ParamSpec {
         s.channel = ChannelUse::Reads;
         s.channelOptional = optional;
         s.channelFor = std::move(usedBy);
+        return s;
+    }
+    // An input port on a new node (shownAsInput).
+    ParamSpec asInput() const {
+        ParamSpec s = *this;
+        s.shownAsInput = true;
         return s;
     }
     // A param that cannot be an input (port None).

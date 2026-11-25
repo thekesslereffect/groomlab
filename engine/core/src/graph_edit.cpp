@@ -628,6 +628,12 @@ std::string GraphEdit::addNode(const std::string& type, const std::string& name,
     nlohmann::json node = {{"name", chosen}, {"type", type}, {"version", spec.value("version", 1)}, {"params", params},
                            {"ui", {{"x", *x}, {"y", y.value_or(0.0)}}}};
     completeNode(node);  // every param written: a later default change never alters it
+    // Its params shown as inputs from the start (ParamSpec::shownAsInput), in the spec's order.
+    nlohmann::json shown = nlohmann::json::array();
+    for (const nlohmann::json& p : spec.value("params", nlohmann::json::array())) {
+        if (p.value("shownAsInput", false)) shown.push_back(p.value("name", std::string()));
+    }
+    if (!shown.empty()) node["paramInputs"] = std::move(shown);
     impl_->nodes().push_back(std::move(node));
     return chosen;
 }

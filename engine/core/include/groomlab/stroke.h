@@ -363,10 +363,12 @@ struct ParamMapRef {
 ParamMapRef paramMapOf(const std::string& graphJson, const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& node,
                        const std::string& param);
 
-// The graph with node.param reading map `map` of kind `kind` (a vertex map by its color set, a
-// texture map of `maps` by its file, "guides" a guide layer), white the param's value now (min
-// 0, max the value; 1 when it is no number). Throws std::runtime_error for no such node, or a
-// texture map not in `maps`.
+// The graph with node.param reading map `map` of kind `kind` (a guide layer, a vertex map or a
+// texture map of `maps`): a Map node of the map (the one there, else one made beside the node)
+// wired into the param, exposed as an input. The param keeps its number, which the map's 0-1
+// multiplies (white: the param as it was; its slider still scales it). A param naming a map
+// (Interpolate's regionMap) takes the map's name instead. Throws std::runtime_error for no such
+// node, or a texture map not in `maps`.
 std::string wireParamMap(const std::string& graphJson, const ScalpMaps& maps, const std::string& node, const std::string& param,
                          const std::string& map, const std::string& kind);
 

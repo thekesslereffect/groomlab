@@ -249,9 +249,10 @@ struct ParamPaint {
 // reads already (paramMapOf; an expression, a channel or an image no map holds is refused), else the
 // map `name` (default its own, paramMapName: one there already, its link since gone, is read again,
 // its painting back), made white when missing (createMap: the look stays as it is) and read by the
-// param as every host links it (wireParamMap: its white the param's value; a param naming a map
-// takes the name), or with a channel through the map's Map node (one per map, made beside the node;
-// the param exposed as an input and fed by that output: masks packed in one color map, made color).
+// param as every host links it (wireParamMap: the map's Map node wired into the param, its 0-1
+// multiplying the param's own value, so white is the param as it was; a param naming a map takes
+// the name), with a channel through that output of the Map node (masks packed in one color map,
+// made color).
 // Throws std::invalid_argument for no such node, a kind or channel it cannot be, no guides for a
 // guide layer, a gray guide layer for a channel, and what createMap refuses.
 ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage,
