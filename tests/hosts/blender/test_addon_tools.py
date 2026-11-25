@@ -844,6 +844,11 @@ class ToolsTest(unittest.TestCase):
             self.assertGreater(max(json.loads(mine["scalpMaps"])["mask"]["values"]), 0.1)
         finally:
             ref.close()
+        # The vertex map on the mesh too (issue #113): a per-vertex color attribute of its name.
+        attribute = head.data.color_attributes.get("mask")
+        self.assertIsNotNone(attribute)
+        self.assertEqual((attribute.domain, attribute.data_type), ("POINT", "FLOAT_COLOR"))
+        self.assertGreater(max(c.color[0] for c in attribute.data), 0.1)
         # The map on the scalp while painting, and the strands colored by it (Maya's view_map).
         display.refresh(head)
         self.assertIn("scalpMap", [e[0] for e in display.draw_list(head)])
@@ -897,21 +902,26 @@ class ToolsTest(unittest.TestCase):
         bpy.ops.groomlab.map_remove()
         self.assertNotIn("layer", [mm.name for mm in t.maps])
         # A map for a setting (New Map > For: Density; the Width and Density brushes are gone): made
-        # white, linked to Scatter's density, picked, the Paint tool on it toward 1, one undo step.
+        # white, its Map node wired into Scatter's density (the param keeps its number, which the
+        # map multiplies), picked, the Paint tool on it toward 1, one undo step.
         self.assertFalse({"width", "density"} & set(x["id"] for x in tools.catalog()["tools"]))
         found, others = tools.setting_targets(head)
         density = next(s for s in found if s["id"] == "density")
         self.assertTrue(density["node"])
         self.assertIn((density["node"], "density"), [(o["node"], o["param"]) for o in others])
         name = density["node"] + "_density"
+        value = next(n for n in hcall(head, "get_graph")["graph"]["nodes"] if n["name"] == density["node"])["params"]["density"]
         self.assertEqual(bpy.ops.groomlab.map_new(target="%s.density" % density["node"], kind="vertices"), {"FINISHED"})
         self.assertEqual(t.paint_map, name)
         self.assertEqual(t.tool, "paint")
         got = hcall(head, "tool_get")["settings"]
         self.assertEqual(got["attribute"], name)
         self.assertEqual(got["value"], 1.0)
-        scatter = next(n for n in hcall(head, "get_graph")["graph"]["nodes"] if n["name"] == density["node"])
-        self.assertEqual(scatter["params"]["density"]["colorSet"], name)
+        graph = hcall(head, "get_graph")["graph"]
+        scatter = next(n for n in graph["nodes"] if n["name"] == density["node"])
+        self.assertEqual(scatter["params"]["density"], value)
+        map_node = next(n["name"] for n in graph["nodes"] if n["type"] == "Map" and n.get("params", {}).get("name") == name)
+        self.assertTrue(any((c["from"], c["to"], c["input"]) == (map_node, density["node"], "density") for c in graph["connections"]))
         self.assertEqual(bpy.ops.groomlab.tool_undo(), {"FINISHED"})
         self.assertNotIn(name, [mm.name for mm in t.maps])
         bpy.ops.groomlab.tool_undo(redo=True)

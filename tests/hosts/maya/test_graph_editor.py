@@ -178,7 +178,8 @@ class GraphApiTest(unittest.TestCase):
         self.assertFalse(ge.shown_when(count, {"clumpBy": "size", "centersFrom": "pick"}.get, spec_of))
         self.assertFalse(ge.shown_when(count, {"clumpBy": "count", "centersFrom": "inputPoints"}.get, spec_of))
         self.assertTrue(ge.shown_when(count, {"clumpBy": "count", "centersFrom": "inputPoints"}.get))  # unchained
-        self.assertEqual(self.catalog.param_spec("Clump", "centersFrom")["choices"], ["pick", "inputPoints", "inputCurves"])
+        self.assertEqual(self.catalog.param_spec("Clump", "centersFrom")["choices"],
+                         ["pick", "inputPoints", "inputCurves", "upstreamClump", "upstreamClumpCurves"])  # (issue #115)
         self.assertIsNone(self.catalog.param_spec("Clump", "shapeFrom"))
         self.assertTrue(ge.shown_when(self.catalog.param_spec("Merge", "blend"), {}.get))
         # A unit by another param (unitWhen): Noise's frequency per scene unit in world space only.
@@ -1965,7 +1966,7 @@ class KeyableVariableTest(unittest.TestCase):
         graph["nodes"].append({"name": "cut", "type": "Expression", "params": {
             "expression": "$keep", "variables": json.dumps({"keep": {"value": 1.0, "control": "cut_keep"}})}})
         scatter = next(n for n in graph["nodes"] if n["type"] == "Scatter")
-        scatter.setdefault("paramInputs", []).append("density")
+        self.assertIn("density", scatter.get("paramInputs", []))  # an input port in the default graph
         graph["connections"].append({"from": "cut", "to": scatter["name"], "input": "density"})
         groomlab.set_graph(groom, graph)
         self.assertTrue(cmds.attributeQuery("ctl_cut_keep", node=groom, exists=True))  # made for it
