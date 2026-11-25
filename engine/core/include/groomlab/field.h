@@ -178,27 +178,36 @@ private:
 // another field's value as gray). Evaluation is thread-safe; validate() before parallel loops.
 class ColorField {
 public:
-    ColorField(const ParamSet& params, const std::string& name);
-    bool isConstant() const { return !field_; }
+    // The param's color; a field plugged in times it; or a map the param holds itself (a texture,
+    // color set, guide layer, strand attribute or expression, as a number param's: its r, g and b
+    // read, each min..max; a gray one's value in all three). A texture or color set needs `scalp`,
+    // a guide layer before the strands exist `guides`.
+    ColorField(const ParamSet& params, const std::string& name, const ScalpMesh* scalp = nullptr,
+               const GuideSet* guides = nullptr);
+    bool isConstant() const { return !field_ && !own_[0]; }
     const std::array<float, 3>& constant() const { return constant_; }
-    bool perPoint() const { return field_ && field_->perPoint(); }
-    bool strandLocal() const { return !field_ || field_->strandLocal(); }
-    bool readsPositions() const { return field_ && field_->readsPositions(); }
-    float longestRead() const { return field_ ? field_->longestRead() : -1.0f; }
+    bool perPoint() const { return (field_ && field_->perPoint()) || (own_[0] && own_[0]->perPoint()); }
+    bool strandLocal() const { return own_[0] ? own_[0]->strandLocal() : !field_ || field_->strandLocal(); }
+    bool readsPositions() const { return (field_ && field_->readsPositions()) || (own_[0] && own_[0]->readsPositions()); }
+    float longestRead() const { return own_[0] ? own_[0]->longestRead() : field_ ? field_->longestRead() : -1.0f; }
     // Its largest component: the constant's, times the plugged field's maximum.
     float maximum() const;
     void validate(const StrandSet& strands) const {
         if (field_) field_->validate(strands);
+        for (const auto& f : own_) {
+            if (f) f->validate(strands);
+        }
     }
     std::array<float, 3> at(const StrandSet& strands, std::size_t s) const;
     std::array<float, 3> atPoint(const StrandSet& strands, std::size_t s, std::size_t point) const;
     std::array<float, 3> atRoot(const StrandRoot& root) const;
-    std::string mapKind() const { return field_ ? field_->mapKind() : std::string(); }
-    int textureSize() const { return field_ ? field_->textureSize() : 0; }
+    std::string mapKind() const { return own_[0] ? own_[0]->mapKind() : field_ ? field_->mapKind() : std::string(); }
+    int textureSize() const { return own_[0] ? own_[0]->textureSize() : field_ ? field_->textureSize() : 0; }
 
 private:
     std::array<float, 3> constant_{};
     FieldPtr field_;
+    std::array<std::shared_ptr<const ScalarField>, 3> own_;  // a map the param holds: its r, g, b
 };
 
 // The environment expressions compile in while the graph evaluates in `ctx` (expression.h): its

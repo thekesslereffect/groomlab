@@ -168,8 +168,6 @@ class ParamPanel(QtWidgets.QScrollArea):
                     row.setContentsMargins(0, 0, 0, 0)
                     row.setSpacing(theme.px(4))
                     row.addWidget(self.editor_for(name, spec), 1)
-                    if spec.get("colorField"):  # a color: Map picks a painted map to color it (its Map node's rgb)
-                        row.addWidget(self.color_map_button(name, spec["name"]), 0, QtCore.Qt.AlignTop)
                     row.addWidget(self.paint_chip(name, spec["name"]), 0, QtCore.Qt.AlignTop)
                 else:
                     widget = self.editor_for(name, spec)
@@ -1065,67 +1063,6 @@ class ParamPanel(QtWidgets.QScrollArea):
         widgets.fill_menu(paint, container["items"], definitions.binder(self.param_actions(name, param)))
         return paint
 
-    def color_map_button(self, name, param):
-        """A color param's Map (as a number's, MappableEditor): a menu of the groom's scalp maps; the
-        one picked colors the param through its Map node's rgb output (the core's paintParam, as
-        every host links a color), None unplugs it."""
-        button = QtWidgets.QToolButton()
-        button.setProperty("role", "glyph")
-        button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        button.setToolTip("Color this param with a painted map (a color map's r g b; a gray map as gray): its Map "
-                          "node's rgb output feeds it, times this color")
-        driver = self.editor.model.driver_of(name, param)
-        shown = None
-        if driver and self.editor.model.node_type(driver) == "Map":
-            shown = self.editor.model.param(driver, "name")
-        button.setText("◉ " + shown if shown else "Map")
-        menu = QtWidgets.QMenu(button)
-
-        def fill():
-            menu.clear()
-            none = menu.addAction("None")
-            none.setCheckable(True)
-            none.setChecked(not driver)
-            none.triggered.connect(lambda _=False: self.set_color_map(name, param, None))
-            import groomlab
-            try:
-                entries = [m for m in groomlab.maps(self.editor.groom) if m.get("kind") != "guides"]
-            except Exception:  # noqa: BLE001 - no groom
-                entries = []
-            if entries:
-                menu.addSeparator()
-            for m in entries:
-                action = menu.addAction(m["name"])
-                action.setCheckable(True)
-                action.setChecked(m["name"] == shown)
-                action.triggered.connect(lambda _=False, n=m["name"], k=m.get("kind"): self.set_color_map(name, param, n, k))
-            if not entries:
-                menu.addAction("No scalp maps yet: Paint makes one").setEnabled(False)
-        menu.aboutToShow.connect(fill)
-        button.setMenu(menu)
-        return button
-
-    def set_color_map(self, node, param, map_name, kind=None):
-        """Color node.param with map `map_name` (its Map node's rgb output), or None: unplugged."""
-        import groomlab
-        editor = self.editor
-        if not editor.apply():
-            return
-        try:
-            if map_name is None:
-                editor.model.disconnect(node, param)
-                editor.changed()
-                editor.rebuild()
-                editor.report("%s.%s is its own color again" % (node, param))
-                return
-            groomlab.paint_param(editor.groom, node, param, kind=kind or groomlab.map_kind(editor.groom, map_name),
-                                 name=map_name, paint=False)
-        except (RuntimeError, ValueError, gm.GraphError) as e:
-            editor.report(str(e))
-            return
-        editor.reload()
-        editor.report("%s.%s colored by map %s" % (node, param, map_name))
-
     def paint_chip(self, name, param):
         """The yellow Paint chip beside a mappable param, a paintbrush (the app's Paint button): a click
         offers where to paint its map, as right-click > Paint does."""
@@ -1313,7 +1250,7 @@ class ParamPanel(QtWidgets.QScrollArea):
                 value = groomlab.param_value(self.editor.groom, name, spec["name"], self.editor.model)
             except (RuntimeError, ValueError):
                 pass
-        if spec["mappable"]:
+        if spec["mappable"] or (spec.get("colorField") and self.editor.model.node_type(name) == "ColorLayers"):
             return MappableEditor(self, name, spec, value)
         return self.plain_editor(name, spec, value)
 
@@ -1730,6 +1667,9 @@ class MappableEditor(QtWidgets.QWidget):
     def __init__(self, panel, node, spec, value):
         super(MappableEditor, self).__init__()
         self.panel, self.node, self.spec = panel, node, spec
+        # A color (a ColorLayers layer's): a map's r g b color it (a gray one as gray), so no
+        # component to pick; min and max still remap each channel.
+        self.color = bool(spec.get("colorField"))
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(theme.px(4))
@@ -1758,7 +1698,7 @@ class MappableEditor(QtWidgets.QWidget):
         # The number to come back to when switching off a map: the value now, else the map's
         # white value (what a map at 1 gave), else the default.
         if isinstance(value, dict):
-            self.last_plain = value.get("max", self.spec["default"])
+            self.last_plain = self.spec["default"] if self.color else value.get("max", self.spec["default"])
         else:
             self.last_plain = value
         current = "value"
@@ -1771,6 +1711,8 @@ class MappableEditor(QtWidgets.QWidget):
             self.value = self.last_plain
         else:
             plain = self.value if not isinstance(self.value, dict) else self.last_plain
+            if isinstance(plain, (list, tuple)) and plain:  # a color: white is the map at full
+                plain = 1.0
             top = float(plain) if isinstance(plain, (int, float)) and not isinstance(plain, bool) else 1.0
             self.value = {source: "", "component": "r", "min": 0.0, "max": top or 1.0}
         self.build(source)
@@ -1820,11 +1762,12 @@ class MappableEditor(QtWidgets.QWidget):
             box = suggest_box(self.value.get(source, ""), self.panel.editor.color_sets(),
                               lambda v: self.set_field(source, v), "color set on the scalp")
             form.addRow("name", box)
-            component = QtWidgets.QComboBox()
-            component.addItems(["r", "g", "b", "a", "luminance"])
-            component.setCurrentText(self.value.get("component", "r"))
-            component.currentTextChanged.connect(lambda c: self.set_field("component", c))
-            form.addRow("component", component)
+            if not self.color:
+                component = QtWidgets.QComboBox()
+                component.addItems(["r", "g", "b", "a", "luminance"])
+                component.setCurrentText(self.value.get("component", "r"))
+                component.currentTextChanged.connect(lambda c: self.set_field("component", c))
+                form.addRow("component", component)
             self.add_range(form, source)
             return
         if source == "expression":
@@ -1853,7 +1796,7 @@ class MappableEditor(QtWidgets.QWidget):
             form.addRow("file", holder)
         else:
             form.addRow({"expression": "expression", "guide": "map"}.get(source, "name"), name)
-        if source in ("texture", "colorSet"):
+        if source in ("texture", "colorSet") and not self.color:
             component = QtWidgets.QComboBox()
             component.addItems(["r", "g", "b", "a", "luminance"])
             component.setCurrentText(self.value.get("component", "r"))

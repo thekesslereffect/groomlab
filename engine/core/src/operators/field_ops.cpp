@@ -875,7 +875,7 @@ public:
             if (!params.getBool(layerParam(k, "On"))) continue;
             Layer layer;
             layer.mode = layerModeOf(params.getString(layerParam(k, "Mode")), op);
-            if (color) layer.color = std::make_unique<ColorField>(params, layerParam(k, ""));
+            if (color) layer.color = std::make_unique<ColorField>(params, layerParam(k, ""), scalp_.get());
             else layer.value = std::make_unique<ScalarField>(params, layerParam(k, ""), scalp_.get());
             layer.opacity = std::make_unique<ScalarField>(params, layerParam(k, "Opacity"), scalp_.get());
             // One kind of painted map in the stack (issue #124): textures blend texel by texel,

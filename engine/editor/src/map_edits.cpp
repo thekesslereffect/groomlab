@@ -608,7 +608,8 @@ ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const Gui
     if (color && paint.kind == "guides") {
         throw std::invalid_argument("a color is painted on the scalp's vertices or a texture, not on the guides");
     }
-    const std::string channel = color ? std::string("rgb") : paint.channel == "luminance" ? std::string() : paint.channel;
+    // (A color takes its map whole: a color map, listed in the param itself.)
+    const std::string channel = color || paint.channel == "luminance" ? std::string() : paint.channel;
     if (!color && !channel.empty() && !rgbaChannel(channel)) {
         throw std::invalid_argument("a map's channel is r, g, b or a, not '" + channel + "'");
     }
@@ -641,7 +642,7 @@ ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const Gui
         }
         MapCreateRequest create;  // white: the param as it was, black 0
         create.kind = paint.kind;
-        create.color = !channel.empty();
+        create.color = color || !channel.empty();
         create.value = 1.0f;
         create.fill = PaintColor{1.0f, 1.0f, 1.0f, 1.0f};
         create.resolution = paint.resolution;

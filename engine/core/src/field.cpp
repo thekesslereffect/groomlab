@@ -346,30 +346,51 @@ float ScalarField::atPoint(const StrandSet& strands, std::size_t s, std::size_t 
 // ---------------------------------------------------------------------------
 // Vector params
 
-ColorField::ColorField(const ParamSet& params, const std::string& name) : field_(params.field(name)) {
+ColorField::ColorField(const ParamSet& params, const std::string& name, const ScalpMesh* scalp, const GuideSet* guides)
+    : field_(params.field(name)) {
+    const MapRef* map = !field_ && params.has(name) ? std::get_if<MapRef>(&params.get(name)) : nullptr;
+    if (map) {
+        // A map in the param itself: a color one (a texture, a color set) by its r g b, any other
+        // (a guide layer, a strand attribute, an expression) its value as gray.
+        constant_ = {1.0f, 1.0f, 1.0f};
+        const bool rgb = map->source == MapRef::Source::Texture || map->source == MapRef::Source::ColorSet ||
+                         map->source == MapRef::Source::Guide;
+        for (int k = 0; k < 3; ++k) {
+            MapRef channel = *map;
+            if (rgb) channel.component = k == 0 ? MapRef::Component::R : k == 1 ? MapRef::Component::G : MapRef::Component::B;
+            ParamSet values;
+            values.set(name, channel);
+            own_[k] = std::make_shared<const ScalarField>(values, name, scalp, guides);
+        }
+        return;
+    }
     const Vec3f c = params.getVec3(name);
     constant_ = {c.x, c.y, c.z};
 }
 
 std::array<float, 3> ColorField::at(const StrandSet& strands, std::size_t s) const {
+    if (own_[0]) return {own_[0]->at(strands, s), own_[1]->at(strands, s), own_[2]->at(strands, s)};
     if (!field_) return constant_;
     const std::array<float, 3> f = field_->colorAt(strands, s);
     return {constant_[0] * f[0], constant_[1] * f[1], constant_[2] * f[2]};
 }
 
 std::array<float, 3> ColorField::atPoint(const StrandSet& strands, std::size_t s, std::size_t point) const {
+    if (own_[0]) return {own_[0]->atPoint(strands, s, point), own_[1]->atPoint(strands, s, point), own_[2]->atPoint(strands, s, point)};
     if (!field_) return constant_;
     const std::array<float, 3> f = field_->colorAtPoint(strands, s, point);
     return {constant_[0] * f[0], constant_[1] * f[1], constant_[2] * f[2]};
 }
 
 std::array<float, 3> ColorField::atRoot(const StrandRoot& root) const {
+    if (own_[0]) return {own_[0]->atRoot(root), own_[1]->atRoot(root), own_[2]->atRoot(root)};
     if (!field_) return constant_;
     const std::array<float, 3> f = field_->colorAtRoot(root);
     return {constant_[0] * f[0], constant_[1] * f[1], constant_[2] * f[2]};
 }
 
 float ColorField::maximum() const {
+    if (own_[0]) return std::max({own_[0]->maximum(), own_[1]->maximum(), own_[2]->maximum()});
     const float c = std::max({constant_[0], constant_[1], constant_[2]});
     return field_ ? c * field_->maximum() : c;
 }
