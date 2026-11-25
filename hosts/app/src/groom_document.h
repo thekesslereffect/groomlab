@@ -277,9 +277,10 @@ public:
     // Paint): the map the param reads already, else a map named <node>_<name> (made free) of
     // `kind` ("vertices" or "texture"), filled 1.0, and the param reading it (0 to its value
     // now, so the look stays as it is until painted) as one undo step (*made: true). The map's
-    // name is written to *mapName. "" or the error.
+    // name is written to *mapName. With `mapNode` (New Map for a setting) the map's Map node is
+    // wired into the param instead (seen in the graph). "" or the error.
     std::string paintParam(const std::string& node, const std::string& name, std::string* mapName = nullptr,
-                           const std::string& kind = "vertices", bool* made = nullptr);
+                           const std::string& kind = "vertices", bool* made = nullptr, bool mapNode = false);
     // The same as every host asks it (the editor's ParamPaintRequest: a map by name, one channel
     // of a color map through its Map node, a new map white on some scalp faces only); *channel
     // the channel the brush paints ("": the map's value).
@@ -746,8 +747,14 @@ public:
     // draws the map per vertex.
     ScalpMapView scalpMapView(const std::string& name, const std::string& channel);
     // The map updateDisplay shows on the scalp ("" none; as the Maya plugin's scalpMapDisplay).
+    // The map shown on the scalp ("" none). While a node's result is shown (showNodeOnScalp: a
+    // Layers node's eye, issue #124) the scalp stays on it: another map asked for is not shown.
     void setScalpMapDisplay(const std::string& name, const std::string& channel = "rgb");
     const std::string& scalpMapDisplay() const { return scalpMapName_; }
+    // A Layers or ColorLayers node's result on the scalp (its eye; "" off): its maps combined,
+    // locked there while other maps are picked and painted. scalpViewNode: the node shown, or "".
+    void showNodeOnScalp(const std::string& node);
+    std::string scalpViewNode() const;
     // The texture map the last updateDisplay showed as its image (its file, or the brush's live
     // image): the renderer's texture (GroomRenderer::setScalpMap). Kind "" when none: a vertex
     // map or guide layer shows per vertex in the frame itself.

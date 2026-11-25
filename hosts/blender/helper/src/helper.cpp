@@ -45,6 +45,7 @@
 #include "groomlab/groom_package.h"
 #include "groomlab/retriangulate.h"
 #include "groomlab/groom_session.h"
+#include "groomlab/scalp_maps.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/instances.h"
@@ -2087,10 +2088,29 @@ json Helper::run(const std::string& cmd, const json& args) {
         }
         return {{"shown", shown}, {"lit", lit}, {"offered", offered}};
     }
+    if (cmd == "map_color_sets") {
+        // The groom's vertex maps as color attributes of its scalp mesh (the core's
+        // vertexMapColorSets, issue #113): {hash, vertices, sets: [{name, rgba}]} (r g b a per
+        // vertex of the cage), the sets left out when `have` is the maps' hash already.
+        Session& s = session(args);
+        const std::string hash = std::to_string(s.groom->scalpMaps().hash());
+        json out = {{"hash", hash}};
+        if (optString(args, "have", "") == hash) return out;
+        const MeshPtr cage = s.groom->cageScalp();
+        json sets = json::array();
+        if (cage && cage->pointCount() > 0) {
+            for (const MeshColorSet& set : vertexMapColorSets(s.groom->scalpMaps(), {{"scalp", cage->pointCount()}})) {
+                sets.push_back({{"name", set.name}, {"rgba", set.rgba}});
+            }
+        }
+        out["vertices"] = cage ? cage->pointCount() : 0;
+        out["sets"] = std::move(sets);
+        return out;
+    }
     if (cmd == "graph_nodes") {
         // What each node of the groom's graph is to the editors (the core's rules, graph_edit.h): its
         // outputs' types as connected (outputTypes), View Up to Here (viewable), Bake Node to Guides
-        // (bakeable), Show Tubes (braidTubesOffered).
+        // (bakeable), Show Tubes (braidTubesOffered), Show on Scalp (scalpViewOffered).
         Session& s = session(args);
         const GraphEdit edit(viewGraphText(s));
         json nodes = json::object();
@@ -2102,7 +2122,7 @@ json Helper::run(const std::string& cmd, const json& args) {
                 // (a node no operator makes: no outputs said)
             }
             nodes[name] = {{"outputs", outputs}, {"viewable", edit.viewable(name)}, {"bakeable", edit.bakeable(name)},
-                           {"tubes", edit.braidTubesOffered(name)}};
+                           {"tubes", edit.braidTubesOffered(name)}, {"scalpView", edit.scalpViewOffered(name)}};
         }
         return {{"nodes", nodes}};
     }

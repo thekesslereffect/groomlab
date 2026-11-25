@@ -306,6 +306,7 @@ void NodeGraphView::rebuild() {
         node.name = info.name;
         node.type = info.type;
         node.tubes = edit.braidTubesOffered(info.name);
+        node.scalpView = edit.scalpViewOffered(info.name);
         node.viewable = edit.viewable(info.name);
         node.bypass = info.bypass;
         node.evaluation = info.evaluation;
@@ -938,6 +939,22 @@ bool NodeGraphView::braidTubesButtonAt(const QPointF& scene, int* node) const {
     return false;
 }
 
+bool NodeGraphView::scalpViewButtonAt(const QPointF& scene, int* node) const {
+    for (std::size_t i = 0; i < nodes_.size(); ++i) {
+        if (showsOnScalp(nodes_[i]) && clumpColorsButtonRect(nodes_[i]).adjusted(-2, -2, 2, 2).contains(scene)) {
+            *node = static_cast<int>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+void NodeGraphView::setScalpViewNode(const std::string& node) {
+    if (node == scalpView_) return;
+    scalpView_ = node;
+    update();
+}
+
 void NodeGraphView::setBraidTubeNodes(std::vector<std::string> nodes) {
     if (nodes == braidTubes_) return;
     braidTubes_ = std::move(nodes);
@@ -1246,6 +1263,49 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.drawLine(QPointF(far.center().x(), far.bottom()), QPointF(near.center().x(), near.bottom()));
         if (on) painter.setBrush(ink);
         painter.drawEllipse(near);
+    }
+    // Show on Scalp (an eye; a color swatch on a node whose View has the eye): a Layers node's maps
+    // combined on the scalp, locked there while other maps are painted; dim until shown, then lit.
+    if (showsOnScalp(node)) {
+        const QRectF button = clumpColorsButtonRect(node);
+        const bool on = scalpViewShown(node.name);
+        QColor ink = filled ? headerText(color) : (on ? theme::uiColor("accent") : theme::textDim());
+        if (on) {
+            QColor tile = ink;
+            tile.setAlpha(60);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(tile);
+            painter.drawRoundedRect(button, 4.0, 4.0);
+        } else {
+            ink.setAlpha(filled ? 140 : 170);
+        }
+        const QPointF c = button.center();
+        if (viewable(node)) {
+            const QColor hues[4] = {QColor(240, 110, 90), QColor(90, 200, 120), QColor(100, 150, 245), QColor(235, 205, 90)};
+            const QPointF cells[4] = {QPointF(-5.0, -5.0), QPointF(0.5, -5.0), QPointF(-5.0, 0.5), QPointF(0.5, 0.5)};
+            for (int k = 0; k < 4; ++k) {
+                const QRectF cell(c + cells[k], QSizeF(4.5, 4.5));
+                if (on) {
+                    painter.setPen(Qt::NoPen);
+                    painter.setBrush(hues[k]);
+                } else {
+                    painter.setPen(QPen(ink, 1.2));
+                    painter.setBrush(Qt::NoBrush);
+                }
+                painter.drawRect(cell);
+            }
+        } else {
+            QPainterPath eye(c + QPointF(-6.5, 0.0));
+            eye.quadTo(c + QPointF(0.0, -6.0), c + QPointF(6.5, 0.0));
+            eye.quadTo(c + QPointF(0.0, 6.0), c + QPointF(-6.5, 0.0));
+            QPen pen(ink, on ? 1.8 : 1.6);
+            painter.setPen(pen);
+            painter.setBrush(Qt::NoBrush);
+            painter.drawPath(eye);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(ink);
+            painter.drawEllipse(c, 2.2, 2.2);
+        }
     }
     if (!node.linkableParams.empty()) {
         const QRectF inputs = inputsButtonRect(node);
@@ -1809,6 +1869,10 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
     }
     if (braidTubesButtonAt(pressScene_, &node)) {
         emit braidTubesToggled(nodes_[node].name);
+        return;
+    }
+    if (scalpViewButtonAt(pressScene_, &node)) {
+        emit scalpViewToggled(nodes_[node].name);
         return;
     }
     if (viewButtonAt(pressScene_, &node)) {
@@ -2797,6 +2861,9 @@ bool NodeGraphView::event(QEvent* event) {
             tip = tr("Clump Colors: color the strands by this node's clumps (its clumpChannel); again: as they were");
         } else if (braidTubesButtonAt(scene, &node)) {
             tip = tr("Show Tubes: draws the braid's section tubes in the viewport");
+        } else if (scalpViewButtonAt(scene, &node)) {
+            tip = tr("Show on Scalp: the scalp shows this node's maps combined, and stays on it while you pick and "
+                     "paint other maps; again: off");
         } else if (viewButtonAt(scene, &node)) {
             tip = tr("View: show the groom up to this node in the viewport (V); again: the output");
         } else if (bypassButtonAt(scene, &node)) {

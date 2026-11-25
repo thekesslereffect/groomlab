@@ -653,12 +653,16 @@ def setting_targets(scalp):
     return targets["settings"], targets["others"]
 
 
-def map_for_param(scalp, node, param, kind="vertices", resolution=1024, faces=None):
+def map_for_param(scalp, node, param, kind="vertices", resolution=1024, faces=None, map_node=False):
     """New Map > For a setting: the map node.param reads, or a white one (`kind`: vertices, texture
     or guides) made and linked to it, one undo step (helper map_for_param); picked in the Paint tab,
     painted toward 1 (Ctrl: toward 0; on Density, no hair). A map made with `faces` (the scalp's
-    polygon indices) is white on those faces only. The caller picks the Paint tool."""
+    polygon indices) is white on those faces only. Linked in the param itself, or with `map_node`
+    (New Map for a setting) through a Map node wired into it, seen in the graph. The caller picks
+    the Paint tool."""
     args = {"node": node, "param": param, "kind": kind, "resolution": int(resolution)}
+    if map_node:
+        args["mapNode"] = True
     if faces:
         args["faces"] = [int(f) for f in faces]
     r = call(scalp, "map_for_param", **args)
@@ -1983,6 +1987,8 @@ def keep_state(scalp):
         return None
     keep = {"groom": state["groom"], "textures": state.get("textures") or [], "tools": state.get("tools") or {}}
     _states[rt.uid] = keep
+    from . import mesh_maps
+    mesh_maps.write(scalp, rt)  # the vertex maps as the mesh's color attributes too (issue #113)
     gt = _groom_tools.get(rt.uid)
     if gt is not None:
         gt.state_dirty = False

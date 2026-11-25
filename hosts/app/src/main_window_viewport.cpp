@@ -150,6 +150,11 @@ void MainWindow::refreshClumpColored() {
 }
 
 void MainWindow::followRenamedNode(const std::string& from, const std::string& to) {
+    // The node shown on the scalp (its Show on Scalp lit) follows it.
+    if (document_ && document_->scalpViewNode() == from) {
+        document_->showNodeOnScalp(to);
+        if (graph_) graph_->setScalpViewNode(to);
+    }
     // A color source naming the node (Clump Colors, "<channel>@<node>") follows it.
     const std::string renamed = renamedColorSource(settings_.colorSource, from, to);
     if (renamed == settings_.colorSource || !colorSource_) return;
@@ -158,6 +163,18 @@ void MainWindow::followRenamedNode(const std::string& from, const std::string& t
         colorSource_->setEditText(QString::fromStdString(renamed));
     }
     applyDisplayOptions();
+}
+
+void MainWindow::toggleScalpView(const std::string& node) {
+    if (!document_) return;
+    const bool on = document_->scalpViewNode() != node;
+    document_->showNodeOnScalp(on ? node : std::string());
+    if (graph_) graph_->setScalpViewNode(on ? node : std::string());
+    if (maps_) maps_->invalidate();
+    redisplay();
+    report(on ? tr("The scalp shows %1's maps combined").arg(QString::fromStdString(node))
+              : tr("%1 no longer shown on the scalp").arg(QString::fromStdString(node)),
+           false);
 }
 
 void MainWindow::toggleBraidTubes(const std::string& node) {

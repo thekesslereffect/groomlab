@@ -1834,6 +1834,8 @@ json mapForParam(ToolState& t, const json& args) {
     paint.channel = optString(args, "channel", "");
     paint.faces = facesArg(args);
     paint.resolution = static_cast<int>(optNumber(args, "resolution", 1024.0));
+    // New Map for a setting: through a Map node wired into the param; else listed in the param.
+    paint.mapNode = optBool(args, "mapNode", false);
     MapFiles files;
     files.mapsFolder = mapsFolder(s);
     files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };

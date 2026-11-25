@@ -1116,6 +1116,22 @@ def poll():
 
 # ---- Files ------------------------------------------------------------------------------------
 
+_ignored_meshes = set()
+
+
+def ignore_mesh_update(mesh):
+    """The next depsgraph update of `mesh` is GroomLab's own (its maps written as color attributes,
+    mesh_maps): not the scalp changing, so nothing is sent again."""
+    _ignored_meshes.add(mesh.name)
+
+
+def take_ignored_meshes():
+    """The meshes whose updates are GroomLab's own (ignore_mesh_update), cleared."""
+    names = set(_ignored_meshes)
+    _ignored_meshes.clear()
+    return names
+
+
 def snapshot_all(blend_path=None):
     """Before the .blend is saved (to `blend_path`): each groom's texture maps in the file's own
     maps folder (send_maps_dir: the first save of an untitled file, Save As), then each groom kept
