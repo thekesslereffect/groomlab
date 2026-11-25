@@ -2320,6 +2320,57 @@ TEST(Braid, ABraidHangingPastTheScalpsOpenEdgeFollowsItsPath) {
     EXPECT_LT(worst, 0.25f * width) << "the braid leaves its path below the scalp's open edge (braid width " << width << ")";
 }
 
+TEST(Braid, ABraidPassingOverTheScalpsOpenEdgeHasNoKinkThere) {
+    // A braid laid along the scalp, a little into it, and on out past its open edge (a neck's cut): the
+    // lift that keeps it out of the scalp eases off toward the edge, so the braid crosses it with no
+    // kink (its offset from its path changes smoothly, never jumps where the scalp ends).
+    std::vector<Vec3f> path;
+    auto add = [&](Vec3f a, Vec3f b, int n) {
+        for (int k = 0; k < n; ++k) path.push_back(a + (b - a) * (static_cast<float>(k) / static_cast<float>(n)));
+    };
+    add({0.5f, 0.0f, 0.5f}, {0.55f, -0.03f, 0.5f}, 4);
+    add({0.55f, -0.03f, 0.5f}, {1.8f, -0.03f, 0.5f}, 60);
+    path.push_back({1.8f, -0.03f, 0.5f});
+    BraidScene scene("three", path);
+    const StrandsPtr out = scene.lg.eval(scene.braid);
+    ASSERT_TRUE(out);
+    const std::vector<float>& braid = *out->strandChannel("braidId");
+    const std::vector<float>& woven = *out->pointChannel("braidWoven");
+    const std::vector<float>& tail = *out->pointChannel("braidTail");
+    const float width = static_cast<float>(scene.lg.g.node(scene.braid).params().getDouble("width"));
+    constexpr std::size_t kBins = 60;
+    std::vector<Vec3f> sum(kBins);
+    std::vector<std::size_t> count(kBins, 0);
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const std::size_t n = out->strandPointCount(s);
+        if (braid[s] < 0.0f || n < 2) continue;
+        for (std::size_t i = 1; i < n; ++i) {
+            const std::size_t at = out->strandBegin(s) + i;
+            if (woven[at] < 0.99f || tail[at] > 0.01f) continue;
+            const auto bin = std::min<std::size_t>(kBins - 1, i * kBins / n);
+            sum[bin] = sum[bin] + out->strandPoints(s)[i];
+            ++count[bin];
+        }
+    }
+    // The braid's middle's offset from the path (the straight run at y -0.03), bin to bin.
+    float jump = 0.0f, lastLift = 0.0f;
+    bool first = true;
+    std::size_t over = 0, past = 0;
+    for (std::size_t k = 0; k < kBins; ++k) {
+        if (count[k] < 20) continue;
+        const Vec3f middle = sum[k] / static_cast<float>(count[k]);
+        if (middle.x < 0.7f || middle.x > 1.6f) continue;
+        (middle.x < 1.0f ? over : past) += 1;
+        const float lift = std::sqrt((middle.y + 0.03f) * (middle.y + 0.03f) + (middle.z - 0.5f) * (middle.z - 0.5f));
+        if (!first) jump = std::max(jump, std::abs(lift - lastLift));
+        first = false;
+        lastLift = lift;
+    }
+    ASSERT_GT(over, 3u);
+    ASSERT_GT(past, 3u);
+    EXPECT_LT(jump, 0.08f * width) << "the braid jumps where the scalp's open edge ends it (braid width " << width << ")";
+}
+
 TEST(Braid, FlatnessTightnessRollAndSectionsShapeTheWeave) {
     // The braid's cross-section half way up: its extent across x and z (one is depth, one side to side).
     auto spread = [](BraidScene& scene) {

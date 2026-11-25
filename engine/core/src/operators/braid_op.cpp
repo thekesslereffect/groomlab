@@ -1415,6 +1415,10 @@ struct BraidPath {
     // braid width; empty: no scalp), so the braid is lifted only as far as keeps it out of the scalp
     // (Braider::liftAt).
     std::vector<float> overScalp;
+    // With it, how much the scalp is under the braid there (1: the surface goes on a braid width or
+    // more past its closest point; easing to 0 at an open edge of it, and 0 past one): the lift
+    // fades out toward a neck's cut instead of stopping at it.
+    std::vector<float> scalpUnder;
     std::vector<float> ties;   // where each tie's middle is along the path, the last first
     float tieHalf = 0.0f;      // half a tie's length
     std::vector<Vec3f> tieFrom, tieDirection;  // each tie's straight axis (Braider::layTieAxes)
@@ -1884,11 +1888,12 @@ struct Braider {
             // in over a quarter of that depth (no kink where the braid comes to touch the scalp).
             const float wid = std::max(braidWidthAt(path, at), 1e-6f);
             const float above = path.sample(path.overScalp, at) / wid, band = 0.25f * clearLift;
+            const float under = path.scalpUnder.empty() ? 1.0f : std::clamp(path.sample(path.scalpUnder, at), 0.0f, 1.0f);
             if (above < clearLift - band) {
-                lift += clearLift - above;
+                lift += (clearLift - above) * under;
             } else if (above < clearLift + band) {
                 const float d = clearLift + band - above;
-                lift += d * d / (4.0f * band);
+                lift += d * d / (4.0f * band) * under;
             }
         }
         return lift;
@@ -2770,6 +2775,7 @@ private:
         // first measured against the scalp: a path point whose closest scalp point lies on one is out
         // past the scalp's edge (a braid hanging below the neck), never sunk into it.
         std::optional<std::unordered_set<std::uint64_t>> openEdges;
+        std::vector<std::pair<Vec3f, Vec3f>> openSegments;  // (their ends, to measure how far one is)
         auto edgeKey = [](std::int32_t a, std::int32_t b) {
             return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(std::min(a, b))) << 32) |
                    static_cast<std::uint32_t>(std::max(a, b));
@@ -2782,7 +2788,10 @@ private:
                     for (int e = 0; e < 3; ++e) ++uses[edgeKey(t[static_cast<std::size_t>(e)], t[static_cast<std::size_t>((e + 1) % 3)])];
                 }
                 for (const auto& [key, count] : uses) {
-                    if (count == 1) openEdges->insert(key);
+                    if (count != 1) continue;
+                    openEdges->insert(key);
+                    openSegments.emplace_back(scalp->points()[static_cast<std::size_t>(key >> 32)],
+                                              scalp->points()[static_cast<std::size_t>(key & 0xffffffffu)]);
                 }
             }
             if (openEdges->empty() || sp.root.face < 0 || static_cast<std::size_t>(sp.root.face) >= scalp->triangleCount()) return false;
@@ -2792,6 +2801,16 @@ private:
             const float wa = 1.0f - sp.root.u - sp.root.v;
             return (wa < kOn && openEdges->count(edgeKey(t[1], t[2]))) || (sp.root.u < kOn && openEdges->count(edgeKey(t[2], t[0]))) ||
                    (sp.root.v < kOn && openEdges->count(edgeKey(t[0], t[1])));
+        };
+        // How far a scalp point is from the nearest open edge (infinite: none).
+        auto toOpenEdge = [&](const Vec3f& q) {
+            float best = std::numeric_limits<float>::infinity();
+            for (const auto& [a, b] : openSegments) {
+                const Vec3f ab = b - a;
+                const float t = std::clamp((q - a).dot(ab) / std::max(ab.dot(ab), 1e-20f), 0.0f, 1.0f);
+                best = std::min(best, (q - (a + ab * t)).length());
+            }
+            return best;
         };
         // Braid paths, evenly resampled, with frames facing out.
         phase.next("braid.paths");
@@ -2818,6 +2837,7 @@ private:
             p.frames = rotationMinimizingFrames(p.points.data(), p.points.size(), facing(scalp, headMiddle, g, p, pb.roll));
             if (pb.clearLift > 0.0f && scalp && scalp->triangleCount() > 0) {
                 p.overScalp.resize(p.points.size());
+                p.scalpUnder.assign(p.points.size(), 1.0f);
                 for (std::size_t k = 0; k < p.points.size(); ++k) {
                     const SurfacePoint sp = scalp->closestPoint(p.points[k]);
                     // Below the scalp counts (a guide a simulation let sink in: the braid comes out
@@ -2829,6 +2849,15 @@ private:
                     const float height = (p.points[k] - sp.position).dot(sp.normal);
                     const bool pastEdge = height < 0.0f && onOpenEdge(sp);
                     p.overScalp[k] = sp.root.face < 0 || pastEdge ? 1e30f : std::max(height, -pb.width);
+                    // Near an open edge the scalp under the braid runs out: the lift eases off over
+                    // the braid's width toward the edge, so the edge leaves no kink.
+                    if (pastEdge) {
+                        p.scalpUnder[k] = 0.0f;
+                    } else if (sp.root.face >= 0 && !openSegments.empty()) {
+                        const float u = static_cast<float>(k) / static_cast<float>(p.points.size() - 1);
+                        const float reach = pb.width * std::max(pb.taper(u), 0.05f);
+                        p.scalpUnder[k] = smoothstep(0.0f, reach, toOpenEdge(sp.position));
+                    }
                 }
             }
             // The weave travelled along the path: the steps a unit of length integrated.
