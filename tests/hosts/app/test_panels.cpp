@@ -320,14 +320,17 @@ TEST(AppPanels, ParamEditorsRoundTripEveryKindWithoutLosingMaps) {
               json::parse("[[0, 1], [0.5, 1, 0, -2, 0.75, 0.25], [1, 0]]"));
 
     // A mappable param holding a map: shown as its source, never replaced by the number editor.
-    // (Scatter's density is a port on the node from the start, ParamSpec::shownAsInput: Port, until
-    // a source of its own is picked, which takes the port off.)
+    // (Scatter's density is a port on the node from the start, ParamSpec::shownAsInput: with nothing
+    // wired into it, its value is what the node uses, so the value shows, editable, as in Maya; the
+    // Port source, then a source of its own, takes the port off.)
     const std::string scatter = nodeOfType(*doc, "Scatter");
     panel.showNode(scatter);
     EXPECT_EQ(panel.editorKind("density"), "map");
     ASSERT_TRUE(panel.mapEditor("density"));
     EXPECT_TRUE(doc->paramExposed(scatter, "density"));
-    EXPECT_EQ(panel.mapEditor("density")->source(), MapSourceEditor::Source::Port);
+    EXPECT_EQ(panel.mapEditor("density")->source(), MapSourceEditor::Source::Constant);
+    panel.mapEditor("density")->chooseSource(MapSourceEditor::Source::Port);
+    EXPECT_TRUE(doc->paramExposed(scatter, "density"));
     panel.mapEditor("density")->chooseSource(MapSourceEditor::Source::Constant);
     EXPECT_FALSE(doc->paramExposed(scatter, "density"));
     const json constant = doc->paramOrDefault(scatter, "density");

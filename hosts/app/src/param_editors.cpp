@@ -803,7 +803,10 @@ void MapSourceEditor::setValue(const json& value, bool exposed, const std::strin
         source_ = Source::Constant;
         if (value.is_number()) lastConstant_ = value;
     }
-    if (exposed) source_ = Source::Port;
+    // Exposed and fed: the port's page says by what; exposed with nothing wired in yet, the value
+    // (or map) is what the node uses, so it shows and stays editable (as in Maya; the row's ◆ says
+    // it is exposed).
+    if (exposed && !fedBy.empty()) source_ = Source::Port;
     port_->setText(fedBy.empty() ? tr("a Field port on the node: wire it in the graph")
                                  : tr("fed by %1").arg(QString::fromStdString(fedBy)));
     updating_ = false;

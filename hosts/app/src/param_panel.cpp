@@ -626,12 +626,14 @@ void ParamPanel::build() {
         row.section = section;
         row.showWhen = p.value("showWhen", json());
         row.rowOf = p.value("row", std::string());
-        // What it is called: the spec's label ("Object(s)"), else its name as words.
-        const QString shownName = p.contains("label") ? QString::fromStdString(p.value("label", std::string())) : prettyName(row.name);
+        const bool exposed = document_->paramExposed(node_, row.name);
+        // What it is called: the spec's label ("Object(s)"), else its name as words; a ◆ when it is
+        // exposed as an input (as Maya's Attribute Editor marks it).
+        const QString shownName = (p.contains("label") ? QString::fromStdString(p.value("label", std::string())) : prettyName(row.name)) +
+                                  (exposed ? QStringLiteral(" ◆") : QString());
         const json value = document_->paramOrDefault(node_, row.name);
         const QString description = QString::fromStdString(p.value("description", std::string()));
         const bool mappable = p.value("mappable", false);
-        const bool exposed = document_->paramExposed(node_, row.name);
         const std::string fedBy = document_->paramInputSource(node_, row.name);
         QWidget* field = nullptr;
         const std::string name = row.name;
