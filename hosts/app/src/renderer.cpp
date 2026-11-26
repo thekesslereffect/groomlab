@@ -1579,22 +1579,27 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     prepareMapTexture(rhi, batch);
     // The view's matrix pulled toward the camera by the hair's depth at the camera's target (its
     // depth in clip space less by that much), as Blender pulls its overlays: depth tested, they
-    // show over the hair round them and hide behind the head (the root mode's items; the overlays
-    // when not on top).
-    QMatrix4x4 pulled = mvp;
+    // show over the hair round them and hide behind the head (the root mode's items).
+    // The overlays not on top: pulled a hair's breadth alone (Maya's On top off: none), so a line on
+    // the scalp does not flicker in it and the guides behind the head and the hair stay hidden.
+    QMatrix4x4 pulled = mvp, nudged = mvp;
     {
         const QVector3D target = camera.target(), along = (target - eye).normalized();
-        const float pull = overlayPull_ > 0.0f ? overlayPull_ : 0.002f * std::max((target - eye).length(), 1e-3f);
-        const QVector3D closer = target - along * pull;
-        const float eps = std::clamp(mvp.map(target).z() - mvp.map(closer).z(), 1e-6f, 0.02f);
-        pulled.setRow(2, pulled.row(2) - eps * pulled.row(3));
+        const float distance = std::max((target - eye).length(), 1e-3f);
+        auto pull = [&](QMatrix4x4& m, float by) {
+            const QVector3D closer = target - along * by;
+            const float eps = std::clamp(mvp.map(target).z() - mvp.map(closer).z(), 1e-6f, 0.02f);
+            m.setRow(2, m.row(2) - eps * m.row(3));
+        };
+        pull(pulled, overlayPull_ > 0.0f ? overlayPull_ : 0.002f * distance);
+        pull(nudged, 0.002f * distance);
     }
     auto prepare = [&](GpuItem& item, bool skip) {
         item.fresh = false;
         if (!item.shown || skip) return;
         upload(rhi, batch, item);
         const bool tested = !overlaysOnTop_ && (isOverlay(item.kind) || &item == dots_.get());
-        writeUniforms(batch, item, tested ? pulled : mvp, eye, size, false, pixelScale);
+        writeUniforms(batch, item, tested ? nudged : mvp, eye, size, false, pixelScale);
         if (lookdev) writeUniforms(batch, item, hdrMvp, eye, size, true, pixelScale);
     };
     // The scalp and the props are the lookdev path's own surfaces: the line path alone draws
