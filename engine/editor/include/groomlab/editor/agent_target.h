@@ -112,12 +112,14 @@ public:
     // undo step named `label`.
     void commitPhotos(const std::string& label, const std::string& after);
     // An edit applied and recorded as one undo step (the oldest past kMaxUndo dropped). Throws
-    // ToolError (nothing changed) when the host cannot apply it.
-    void commit(GroomEdit edit);
-    EditHistory& history() { return history_; }
+    // ToolError (nothing changed) when the host cannot apply it. A host whose own history keeps
+    // its steps (the app's document, a Blender session's stack) records it there instead: history,
+    // undo and redo its too.
+    virtual void commit(GroomEdit edit);
+    virtual EditHistory& history() { return history_; }
     // Undo / redo one step: "" or the host's error.
-    std::string undo();
-    std::string redo();
+    virtual std::string undo();
+    virtual std::string redo();
     // The host strokes run on (default: an AgentStrokeHost on session()).
     virtual AgentStrokeHost& strokeHost();
     // What a host does its own way (defaults: the session's): Simulate Range to `frame`, a

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "main_window.h"
 
+#include "agent_link.h"
+
 #include <algorithm>
 #include <cmath>
 #include <thread>
@@ -648,6 +650,40 @@ void MainWindow::undo() {
     graphEdited();
     refreshGroups();
     rootsFollowHistory();
+}
+
+AppAgentLink* MainWindow::agentLink() {
+    if (!agentLink_) {
+        agentLink_ = new AppAgentLink(*this);
+        // The Groom Tools' badge while an agent is connected; its Stop turns the link off.
+        connect(agentLink_, &AppAgentLink::changed, this, [this] {
+            if (groomTools_) groomTools_->setAgentConnected(agentLink_->running() && agentLink_->clients() > 0);
+        });
+        if (groomTools_) connect(groomTools_, &GroomTools::agentStopRequested, this, [this] { setAgentLink(false); });
+    }
+    return agentLink_;
+}
+
+bool MainWindow::setAgentLink(bool on) {
+    if (!on) {
+        if (agentLink_) agentLink_->stop();
+        report(tr("Agent link off."));
+        return true;
+    }
+    QString error;
+    if (!agentLink()->start(&error)) {
+        report(tr("The agent link didn't start: %1").arg(error));
+        return false;
+    }
+    report(tr("Agent link on: an agent's groomlab-cli mcp --live finds this app (%1).").arg(agentLink_->file()));
+    return true;
+}
+
+void MainWindow::agentEdited() {
+    graphEdited();
+    refreshGroups();
+    rootsFollowHistory();
+    refreshUndoActions();
 }
 
 void MainWindow::rootsFollowHistory() {

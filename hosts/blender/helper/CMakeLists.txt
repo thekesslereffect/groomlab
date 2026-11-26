@@ -4,7 +4,7 @@
 # Apache-2.0 like the rest of GroomLab (the add-on is GPL-3.0-or-later): it is never loaded into
 # Blender's process.
 
-add_library(groomlab_helper_objs OBJECT src/helper.cpp src/tools.cpp src/authoring.cpp src/arrange.cpp src/pipeline.cpp src/reference.cpp src/shared_memory.cpp)
+add_library(groomlab_helper_objs OBJECT src/agent.cpp src/helper.cpp src/tools.cpp src/authoring.cpp src/arrange.cpp src/pipeline.cpp src/reference.cpp src/shared_memory.cpp)
 target_link_libraries(groomlab_helper_objs PUBLIC groomlab::core groomlab::editor groomlab::warnings nlohmann_json::nlohmann_json)
 if(TARGET groomlab_alembic)
     target_link_libraries(groomlab_helper_objs PUBLIC groomlab::alembic)

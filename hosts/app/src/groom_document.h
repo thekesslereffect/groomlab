@@ -563,6 +563,12 @@ public:
     std::string redoText() const;
     std::string undo();  // "" or the error
     std::string redo();
+    // The history itself (the agent link's tools read it: engine/editor agent_tools.h).
+    EditHistory& history() { return history_; }
+    // An AI agent's edit (agent_target.h AgentGroom::commit): its stored texts applied and recorded
+    // as one step of this history (the graph's text taken into the document's graph, the reference
+    // photos' too), so Edit > Undo and the agent's undo are one. "" or the error (nothing changed).
+    std::string commitAgentEdit(GroomEdit edit);
 
     // ---- Guides: strokes and edits (each one undo step) --------------------------------------
     // A stroke's edit from the core's tools (the stored texts after it): applied to the session

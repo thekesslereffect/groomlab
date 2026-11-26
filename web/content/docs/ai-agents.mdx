@@ -98,32 +98,44 @@ palette), then use it from Copilot's agent mode:
 Any other app that supports MCP servers over stdio works the same way: the command is
 `groomlab-cli`, and the arguments are `mcp --root <folder>`.
 
-## Live: the groom open in Maya
+## Live: the groom open in Maya, the app or Blender
 
-With **Agent Link** on, the agent works on the grooms of the scene open in Maya, as you watch:
-every change it makes is one step of Maya's undo, named `Agent: <tool>`, and you can take it back
-with Ctrl+Z like your own.
+With **Agent Link** on, the agent works on the grooms you have open, as you watch: in Maya the
+scene's grooms, in the app the open groom, in Blender the scene's grooms. Every change it makes is
+one step of that program's undo, and you can take it back with Ctrl+Z like your own.
 
-1. In Maya, open the Groom Tools and turn on **... > Agent Link** (it is off by default and stays
-   off until you turn it on in each session).
+1. Turn on **... > Agent Link** in the Groom Tools (in Blender, in the GroomLab window or the
+   sidebar's GroomLab tab). It is off by default and stays off until you turn it on in each
+   session.
 2. Start the MCP server with `--live`, for example in Claude Code:
 
    ```bash
    claude mcp add --scope user groomlab-live -- "C:\Users\you\Documents\GroomLab\GroomLab\bin\groomlab-cli.exe" mcp --live
    ```
 
-   or `"args": ["mcp", "--live"]` in Claude Desktop's config. `--live maya` picks Maya when other
-   GroomLab hosts run their link too; without a name the server takes the newest.
+   or `"args": ["mcp", "--live"]` in Claude Desktop's config. `--live maya`, `--live app` or
+   `--live blender` picks one when several GroomLab programs run their link; without a name the
+   server takes the newest.
 
 While an agent is connected, the Groom Tools' header shows an **Agent** badge with a stop button;
-stopping disconnects it. The tools work on the current groom unless the agent names another; files
-are read and written in the Maya project's folder. In Maya the agent's `undo`, `redo` and `history`
-are Maya's undo queue, `render_preview` with `viewport: true` shows the viewport as you see it, and
-a few tools leave their work to Maya's own menus (making a groom, exporting curves).
+stopping disconnects it. The tools work on the current groom unless the agent names another, and a
+few leave their work to the program's own menus (making a groom, exporting curves). In each program:
 
-With no host running its link, `--live` works on grooms of its own and says so. The link listens on
-127.0.0.1 only, and every request carries a token from a file in `Documents\GroomLab\agent_link`
-that only your user can read; the file goes away when the link stops or Maya quits.
+- **Maya**: each tool call is one undo step named `Agent: <tool>`; the agent's `undo`, `redo` and
+  `history` are Maya's undo queue. Files are read and written in the Maya project's folder, and
+  `render_preview` with `viewport: true` shows the viewport as you see it.
+- **The app**: each change is one step of Edit > Undo, the same history as yours, so the agent's
+  `undo` takes back your last step too. Files are read and written in the open groom's folder
+  (`Documents\GroomLab` for an unsaved one); `render_preview` with `viewport: true` shows the
+  viewport.
+- **Blender**: each change is one step of the groom's GroomLab history (Ctrl+Z in the Groom Tools)
+  and one Blender undo step named `Agent: <tool>`, so Edit > Undo takes it back as it takes back a
+  stroke. Files are read and written in the `.blend`'s folder (`Documents\GroomLab` while it is
+  unsaved). Photos the agent adds become cameras of the scene.
+
+With no program running its link, `--live` works on grooms of its own and says so. The link listens
+on 127.0.0.1 only, and every request carries a token from a file in `Documents\GroomLab\agent_link`
+that only your user can read; the file goes away when the link stops or the program quits.
 
 ## The tools
 
@@ -241,7 +253,6 @@ JSON Schemas for GroomLab's file formats, for agents and tools that write them d
 
 ## Not yet
 
-- **A live link to the app and Blender.** `--live` reaches Maya today; the app and Blender follow.
 - **Painting maps.** A preset that reads painted maps (density, length) says which maps are missing.
   These maps can only be painted in GroomLab itself.
 - **Flow arrows, parts and sculpts.** These come from the brushes in Maya, the app and Blender.

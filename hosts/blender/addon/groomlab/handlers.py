@@ -124,6 +124,8 @@ def on_undo(*args):
 
 @persistent
 def on_exit(*args):
+    from . import agent_link
+    agent_link.stop()  # (its discovery file removed)
     process.shutdown()
 
 

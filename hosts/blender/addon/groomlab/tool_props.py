@@ -25,6 +25,11 @@ def _push(*keys):
     return update
 
 
+def _agent_link():
+    from . import agent_link
+    return agent_link
+
+
 def _tube_lock_get(self):
     """Lock view: a level's tubes kept in view (the one setting, tube_view_group)."""
     return bool(self.tube_view_group)
@@ -692,6 +697,10 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                 description=defs.get("choices/scalpChannel")["tip"])
     map_delete_files: BoolProperty(name=defs.label("map.deleteFiles"), default=True, description=defs.tip("map.deleteFiles"))
     map_read_by: StringProperty()  # who reads the picked map ("node.param, ...")
+    # Groom Tools > More > Agent Link (agent_link.py): whether the link is on, not stored (the link's own state)
+    agent_link: BoolProperty(name=defs.label("agent.link"),
+                             description=defs.action("agent.link").get("tips", {}).get("blender", defs.tip("agent.link")),
+                             get=lambda self: _agent_link().get_on(self), set=lambda self, on: _agent_link().set_on(self, on))
     # Review > Strand Count HUD (pipeline_ops.draw_hud)
     show_hud: BoolProperty(name=defs.label("review.hud"), default=False, description=defs.tip("review.hud"),
                            update=_redraw_views)

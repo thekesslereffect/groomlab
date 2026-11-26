@@ -224,6 +224,8 @@ groomlab_precompile(groomlab_app_lib <nlohmann/json.hpp> <QByteArray> <QColor> <
 # viewport widget) as a library of their own, so the tests drive the panels headless (the
 # offscreen platform) without the executable's main.
 qt_add_library(groomlab_app_ui STATIC
+    src/agent_link.cpp
+    src/agent_link.h
     src/app_actions.cpp
     src/app_actions.h
     src/app_graph_actions.cpp

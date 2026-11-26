@@ -31,7 +31,7 @@ import os
 import bpy
 from bpy.props import EnumProperty, IntProperty, StringProperty
 
-from . import groom, icons, menu, photos, process, tool_props, tools, updates
+from . import agent_link, groom, icons, menu, photos, process, tool_props, tools, updates
 from . import definitions as defs
 from .ops import active_groom
 from .ui import _wrap
@@ -385,6 +385,7 @@ def header_buttons(row, context):
             op = guides.operator("groomlab.eye", text="", icon="OUTLINER_DATA_CURVES", depress=bool(d.show_guides))
         op.what, op.mode = "GUIDES", "TOGGLE"
         guides.popover(GROOMLAB_PT_guide_display.__name__, text="", icon="DISCLOSURE_TRI_DOWN")
+    agent_link.draw_badge(row)  # (while an AI agent is connected: the badge and its Stop)
     row.operator("groomlab.graph_open", text="", icon_value=icons.icon("ui_network" if window else "graph"))
     row.operator("groomlab.find_command", text="", icon="VIEWZOOM")
     row.menu("GROOMLAB_MT_tools_more", text="", icon="DOWNARROW_HLT")

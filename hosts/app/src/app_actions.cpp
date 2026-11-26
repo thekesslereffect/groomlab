@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "app_actions.h"
 
+#include "agent_link.h"
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -85,6 +87,9 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
     b["file.import"] = {run([m] { m->chooseOpen(); })};
     b["file.new"] = {run([m] { m->chooseMesh(); })};
     b["groom.create"] = {run([m] { m->chooseMesh(); })};
+    // The agent link (agent_link.h): an AI agent's MCP server reaches the open groom while it is on.
+    b["agent.link"] = {[m](const json&, bool on) { m->setAgentLink(on); },
+                       [m](const json&) { return m->agentLink_ && m->agentLink_->running(); }, {}, {}, {}, QStringLiteral("agentLink")};
     b["file.save"] = {run([m] { m->save(); }), {}, groomOpen, {}, {QKeySequence::Save}};
     // (Spelled out: QKeySequence::SaveAs has no binding on Windows.)
     b["file.saveAs"] = {run([m] { m->saveAs(); }), {}, groomOpen, {}, {QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S)}, QStringLiteral("saveAs")};

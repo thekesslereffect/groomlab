@@ -2960,6 +2960,37 @@ void dropSideFiles(Session& s) {
 
 json undoStateJson(Session& s) { return undoJson(toolsOf(s)); }
 
+void commitStroke(Session& s, StrokeEdit edit, std::function<void(bool after)> apply) {
+    ToolState& t = toolsOf(s);
+    const std::string map = edit.textureMap;
+    if (!map.empty() && !edit.texture.empty() && !t.host.paintOf(map)) {
+        t.host.texturePaint(map, edit.texture.channels, edit.texture.width);  // (the file opened for its tiles)
+    }
+    if (apply) t.pending.actions.push_back(std::move(apply));
+    try {
+        commitEdit(t, std::move(edit));
+    } catch (...) {
+        t.pending = SideEdit{};
+        throw;
+    }
+    pruneTargets(t);
+}
+
+const std::vector<StrokeEdit>& doneSteps(Session& s) { return toolsOf(s).host.edits(); }
+const std::vector<std::string>& redoLabels(Session& s) { return toolsOf(s).redoLabels; }
+
+bool undoSession(Session& s) {
+    ToolState& t = toolsOf(s);
+    if (t.tool.stroking()) t.tool.cancel(&t.host);
+    return undo(t);
+}
+
+bool redoSession(Session& s) {
+    ToolState& t = toolsOf(s);
+    if (t.tool.stroking()) t.tool.cancel(&t.host);
+    return redo(t);
+}
+
 void setShotLayer(Session& s, const std::string& layer) {
     ToolState& t = toolsOf(s);
     if (t.tool.stroking()) t.tool.cancel(&t.host);

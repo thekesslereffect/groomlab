@@ -22,7 +22,7 @@ platforms = ["@GROOMLAB_BLENDER_PLATFORM@"]
 
 [permissions]
 files = "Open and save grooms, export, run the bundled GroomLab helper"
-network = "Check for and download GroomLab updates"
+network = "Check for GroomLab updates; the opt-in agent link on localhost"
 
 [build]
 paths_exclude_pattern = ["__pycache__/", "*.pyc", "/.git/", "/*.zip"]
