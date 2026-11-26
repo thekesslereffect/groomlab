@@ -160,6 +160,10 @@ struct GroomRenderer::GpuItem {
     std::vector<float> ownPositions, ownNormals, ownOffsets, ownColors;
     std::vector<std::uint32_t> ownIndices;
     bool ownPending = false;
+    // Overlay lines wider than a pixel (Kind::WideLines): the lines as built and the width their
+    // quads were made for (made again when only the width changes: the core keeps the lines).
+    std::shared_ptr<const DisplayGeometry> wideSource;
+    float wideWidth = 0.0f;
 
     void release() {
         positions.reset();
@@ -240,6 +244,46 @@ GroomRenderer::GroomRenderer() : lod_(std::make_unique<LodDraw>()) {
 
 GroomRenderer::~GroomRenderer() = default;
 
+// Overlay lines `g` (pairs of `indices`, else of points) as quads `width` pixels wide into `item`'s
+// own streams (Kind::WideLines, wide_lines.vert): each end with the other end, its side and the
+// half width; uncolored lines white (the item's color multiplies them).
+void GroomRenderer::expandWideLines(GpuItem& item, const DisplayGeometry& g, float width) {
+    const std::size_t points = g.positions.size() / 3;
+    const bool colored = points > 0 && g.colors.size() >= points * 4;
+    const std::size_t segments = g.indices.empty() ? points / 2 : g.indices.size() / 2;
+    item.ownPositions.assign(segments * 12, 0.0f);
+    item.ownNormals.assign(segments * 12, 0.0f);
+    item.ownOffsets.assign(segments * 8, 0.0f);
+    item.ownColors.assign(segments * 16, 1.0f);
+    item.ownIndices.resize(segments * 6);
+    const float half = 0.5f * width;
+    // Vertices: the first end +1 and -1, the second -1 and +1 (its across turned round: the same edges).
+    const int at[4] = {0, 0, 1, 1};
+    const float sides[4] = {1.0f, -1.0f, -1.0f, 1.0f};
+    for (std::size_t k = 0; k < segments; ++k) {
+        const std::size_t ends[2] = {g.indices.empty() ? 2 * k : g.indices[2 * k], g.indices.empty() ? 2 * k + 1 : g.indices[2 * k + 1]};
+        for (int v = 0; v < 4; ++v) {
+            const std::size_t self = ends[at[v]], other = ends[1 - at[v]];
+            const std::size_t o = k * 4 + static_cast<std::size_t>(v);
+            if (self >= points || other >= points) continue;
+            for (int c = 0; c < 3; ++c) {
+                item.ownPositions[o * 3 + c] = g.positions[self * 3 + c];
+                item.ownNormals[o * 3 + c] = g.positions[other * 3 + c];
+            }
+            item.ownOffsets[o * 2] = sides[v];
+            item.ownOffsets[o * 2 + 1] = half;
+            if (colored) {
+                for (int c = 0; c < 4; ++c) item.ownColors[o * 4 + c] = g.colors[self * 4 + c];
+            }
+        }
+        const auto first = static_cast<std::uint32_t>(k * 4);
+        const std::uint32_t tris[6] = {first, first + 1, first + 2, first + 2, first + 1, first + 3};
+        std::memcpy(item.ownIndices.data() + k * 6, tris, sizeof tris);
+    }
+    item.ownPending = !item.ownIndices.empty();
+    item.wideWidth = width;
+}
+
 GroomRenderer::Kind GroomRenderer::kindOf(const DisplayGeometry& g, bool overlay) const {
     if (g.lines) {
         // Strand lines not written yet (StrandLines): what they will hold.
@@ -291,13 +335,36 @@ void GroomRenderer::setFrame(const DisplayFrame& frame) {
                     gpu.bindings.reset();
                     gpu.bindingsHdr.reset();
                 }
+                gpu.wideSource.reset();
+                if ((kind == Kind::Overlay || kind == Kind::OverlayColored) && item.lineWidth > 1.01f) {
+                    // Wider than a pixel (the guides' Width, the selected guides, the part lines):
+                    // quads, as a line's own width is a pixel on Direct3D and Metal.
+                    gpu.wideSource = item.geometry;
+                    expandWideLines(gpu, *gpu.wideSource, item.lineWidth);
+                    gpu.pending.reset();
+                    kind = Kind::WideLines;
+                }
                 gpu.kind = kind;
             }
         } else if (item.recolor && item.recolored) {
             gpu.pendingColors = item.recolored;
         }
+        // The width alone changed (the core keeps the lines as they are): the quads again.
+        if (gpu.wideSource && gpu.kind == Kind::WideLines && std::abs(item.lineWidth - gpu.wideWidth) > 1e-3f) {
+            if (item.lineWidth > 1.01f) {
+                expandWideLines(gpu, *gpu.wideSource, item.lineWidth);
+            } else {
+                gpu.pending = gpu.wideSource;  // (back to plain lines)
+                gpu.kind = kindOf(*gpu.pending, gpu.overlay);
+                gpu.wideSource.reset();
+            }
+        }
     }
-    if (frame.rebuilt[static_cast<std::size_t>(DisplayPart::Guides)]) setDots(frame.dots, frame.pointSize);
+    // (Again when only their size changed: the guides' Width, which leaves the guides as built.)
+    if (frame.rebuilt[static_cast<std::size_t>(DisplayPart::Guides)] || frame.pointSize != dotsSize_) {
+        setDots(frame.dots, frame.pointSize);
+        dotsSize_ = frame.pointSize;
+    }
     lookdev_.invalidate();
 }
 
@@ -828,6 +895,7 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
     const QShader surfaceVert = loadShader("surface.vert"), surfaceFrag = loadShader("surface.frag");
     const QShader surfaceColoredVert = loadShader("surface_colored.vert"), surfaceColoredFrag = loadShader("surface_colored.frag");
     const QShader dotsVert = loadShader("dots.vert");
+    const QShader wideLinesVert = loadShader("wide_lines.vert");
     const QShader mapVert = loadShader("map.vert"), mapFrag = loadShader("map.frag");
 
     // A kind's pipeline (`depthWrite` false: the strand lines' blended pass, depth tested alone).
@@ -922,6 +990,16 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
                 // The guide dots over the guides, as the guides are over the hair; the root mode's
                 // depth tested (hidden behind the head).
                 depthTest = kind == Kind::DotsTested;
+                break;
+            case Kind::WideLines:
+                ps->setShaderStages({{QRhiShaderStage::Vertex, wideLinesVert}, {QRhiShaderStage::Fragment, flatFrag}});
+                layout.setBindings({{kStrideXYZ}, {kStrideXYZ}, {kStrideUV}, {kStrideRGBA}});
+                layout.setAttributes({{0, 0, QRhiVertexInputAttribute::Float3, 0},
+                                      {1, 1, QRhiVertexInputAttribute::Float3, 0},
+                                      {2, 2, QRhiVertexInputAttribute::Float2, 0},
+                                      {3, 3, QRhiVertexInputAttribute::Float4, 0}});
+                triangles = true;
+                depthTest = false;  // (over the hair, as the overlay lines)
                 break;
             case Kind::MapTextured:
                 ps->setShaderStages({{QRhiShaderStage::Vertex, mapVert}, {QRhiShaderStage::Fragment, mapFrag}});
@@ -1286,6 +1364,12 @@ bool GroomRenderer::setInputs(QRhiCommandBuffer* cb, const GpuItem& item, QRhiBu
         case Kind::MapTextured:
             if (!item.uvs) return false;
             inputs.append({item.uvs.get(), 0});
+            break;
+        case Kind::WideLines:
+            if (!item.normals || !item.offsets || !item.colors) return false;
+            inputs.append({item.normals.get(), 0});
+            inputs.append({item.offsets.get(), 0});
+            inputs.append({item.colors.get(), 0});
             break;
         default:
             break;

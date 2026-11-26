@@ -209,9 +209,13 @@ private:
     // LinesColored: other lines.
     enum class Kind {
         LinesLit, Lines, LinesColored, StrandLines, StrandLinesColored, Overlay, OverlayColored, Triangles, TrianglesColored,
-        Surface, SurfaceColored, Dots, DotsTested, MapTextured, Count
+        Surface, SurfaceColored, Dots, DotsTested, MapTextured,
+        WideLines,  // overlay lines wider than a pixel: a quad a segment (wide_lines.vert)
+        Count
     };
     struct GpuItem;
+    // Overlay lines wider than a pixel as quads into the item's own streams (Kind::WideLines).
+    static void expandWideLines(GpuItem& item, const DisplayGeometry& g, float width);
     struct Pipeline;
     // The pipelines for one render pass (the host's target, or the lookdev HDR pass).
     struct PipelineSet {
@@ -255,6 +259,7 @@ private:
     std::vector<std::unique_ptr<GpuItem>> items_;  // one per DisplayItemId, then the scalp
     std::unique_ptr<GpuItem> scalp_;
     std::unique_ptr<GpuItem> dots_;  // the guide points, camera-facing diamonds (dots.vert)
+    float dotsSize_ = -1.0f;         // the size they were made at (the guides' Width changes it alone)
     std::unique_ptr<GpuItem> tool_;  // the tools' overlay
     std::uint64_t toolVersion_ = 0;
     std::unique_ptr<GpuItem> rootFills_, rootLines_, rootDots_;  // the root mode's (setRootOverlay)

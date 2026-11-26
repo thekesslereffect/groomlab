@@ -2333,6 +2333,7 @@ TEST(AppRender, IridescenceTurnsTheHairToItsStructuralColor) {
     const ViewResult& view = doc->evaluate(request);
     ASSERT_TRUE(view.strands);
     DisplaySettings settings;
+    settings.guides = false;  // (the hair's color alone: no guides, drawn their width wide, over it)
     auto iridescent = std::make_shared<StrandSet>(*view.strands);
     iridescent->addPointChannel(kIridescenceChannel, 1.0f);
     OrbitCamera camera;

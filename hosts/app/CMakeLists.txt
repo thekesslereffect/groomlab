@@ -34,6 +34,7 @@ set(GROOMLAB_APP_SHADERS
     shaders/strands.vert
     shaders/strands_colored.vert
     shaders/dots.vert
+    shaders/wide_lines.vert
     shaders/surface.vert
     shaders/surface.frag
     shaders/surface_colored.vert
