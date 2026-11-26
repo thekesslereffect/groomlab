@@ -563,10 +563,25 @@ class GuidesTab(_GroomTab):
             return
         items = self._rows
         hidden = set(groomlab.hidden_guide_groups(self.groom))
+        # Tube hierarchies' levels (a row's tube: that level's tubes kept in view) and the one kept.
+        self._tube_levels, self._viewed = {}, ""
+        hierarchy = getattr(self.owner, "tube_hierarchy", None)
         colors = groomlab.guide_group_colors(self.groom)
         muted = theme.current().qcolor("ui.textMuted" if theme.current().get("ui.textMuted") else "ui.textDim")
         self.tree.blockSignals(True)
         groups = groomlab.list_guide_groups(self.groom)
+        if hierarchy is not None:
+            parents = set(g["parent"] for g in groups if g["parent"])
+            for g in groups:
+                if g["parent"] or g["name"] not in parents:
+                    continue  # (a hierarchy starts at a top group with child groups)
+                info = hierarchy(self.groom, g["name"])
+                for n, name in enumerate((info or {}).get("levels") or []):
+                    self._tube_levels[name] = n + 1
+            self._viewed = self.owner.tube_view(self.groom)
+        # The icons' column: room for a level's tube when the groom has tube levels (every row then
+        # keeps its place, so the eyes line up).
+        self.tree.header().resizeSection(2, theme.px(112 if self._tube_levels else 86))
         named = _group_users(self.groom)
         pending = list(groups)
         while pending:  # parents before children
@@ -654,7 +669,30 @@ class GuidesTab(_GroomTab):
         more = widgets.menu_button("Rename, select, children, mirror, move, color, delete",
                                    lambda m: self.fill_row_menu(m, name), before=lambda: self.pick_row(name))
         more.setObjectName("groupMenu_" + name)
-        return widgets.RowStrip((segments, self._eye(name, shown), more))
+        icons = [segments, self._eye(name, shown), more]
+        levels = getattr(self, "_tube_levels", {})
+        if levels:
+            gap = QtWidgets.QWidget()  # (apart from the segments' count beside it)
+            gap.setFixedWidth(theme.px(4))
+            if name in levels:
+                icons[1:1] = [gap, self._tube(name, levels[name])]
+            else:  # (no tube: its place kept, the eyes in a column)
+                gap.setFixedWidth(theme.px(26))
+                icons.insert(1, gap)
+        return widgets.RowStrip(tuple(icons))
+
+    def _tube(self, name, level):
+        """A tube hierarchy level's tube: its tubes kept in view whichever level's guides are picked
+        (view level 2's tubes, comb level 1's guides); again: the tubes follow their guides."""
+        kept = getattr(self, "_viewed", "") == name
+        tube = widgets.row_glyph("tube" if kept else "tubeOff",
+                                 "Level %d's tubes %s" % (level, "kept in view: click to let the tubes follow their "
+                                                          "guides again" if kept else
+                                                          "kept in view whichever level's guides you pick and comb"),
+                                 lambda: QtCore.QTimer.singleShot(0, lambda: self.owner.set_tube_view("" if kept else name)),
+                                 on=kept)
+        tube.setObjectName("groupTube_" + name)
+        return tube
 
     def pick_row(self, name):
         """The row's popup or menu opened: its group picked first (what they act on)."""

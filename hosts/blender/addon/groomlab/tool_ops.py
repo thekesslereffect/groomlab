@@ -1982,6 +1982,33 @@ class GROOMLAB_OT_tube_level(GroomToolOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_tube_view(GroomToolOperator):
+    """Keep this level's tubes in view whichever level's guides you pick and comb; again: the tubes
+    follow their guides"""
+    bl_idname = "groomlab.tube_view"
+    bl_label = "Tubes Kept in View"
+    bl_options = {"REGISTER"}
+
+    group: StringProperty(name="Group", options={"SKIP_SAVE"})  # "": the tubes follow their guides
+
+    @classmethod
+    def description(cls, context, properties):
+        if not properties.group:
+            return "The tubes kept in view: click to let the tubes follow their guides again"
+        return "Keep %s's tubes in view whichever level's guides you pick and comb" % properties.group
+
+    def execute(self, context):
+        from . import tool_props
+        t = context.scene.groomlab_tools
+        t.tube_view_group = self.group  # (its update: Show tubes with no tube tool up, the display)
+        levels = tool_props.tube_hierarchy(t, self.group) if self.group else []
+        level = levels.index(self.group) + 1 if self.group in levels else 0
+        tools.status(context.scene, "Tubes of level %d kept in view." % level if level else
+                     "Tubes of %s kept in view." % self.group if self.group else "Tubes follow the guides.")
+        display.redraw()
+        return {"FINISHED"}
+
+
 # ---- Tubes (the Tubes section) --------------------------------------------------------------------
 
 class TubeOperator(GroomToolOperator):
@@ -2580,7 +2607,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_group_color, GROOMLAB_OT_group_promote_demote, GROOMLAB_OT_guides_mirror_group,
            GROOMLAB_OT_guides_reparent, GROOMLAB_OT_guides_regroup, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_overlay_mirror, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
            GROOMLAB_OT_curves_to_guides, GROOMLAB_OT_strands_to_curves, GROOMLAB_OT_flow_clear, GROOMLAB_OT_clone_pick_source, GROOMLAB_OT_clone_reset,
-           GROOMLAB_OT_length_edit, GROOMLAB_OT_root_tube, GROOMLAB_OT_tube_level,
+           GROOMLAB_OT_length_edit, GROOMLAB_OT_root_tube, GROOMLAB_OT_tube_level, GROOMLAB_OT_tube_view,
            GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,
            GROOMLAB_OT_tube_shape_rename, GROOMLAB_OT_tube_shape_remove, GROOMLAB_OT_corrective_new,
            GROOMLAB_OT_corrective_move, GROOMLAB_OT_corrective_solo, GROOMLAB_OT_corrective_enable,

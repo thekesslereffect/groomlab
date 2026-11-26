@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -38,6 +39,7 @@
 #include "reference_window.h"
 #include "theme.h"
 #include "transfer_window.h"
+#include "tube_panel.h"
 #include "viewport.h"
 
 namespace groomlab::app {
@@ -346,6 +348,9 @@ void MainWindow::buildProperties() {
     keep("guides", guides_);
     flow_ = check(settings_.flow);
     keep("flow", flow_);
+    parts_ = check(settings_.parts);
+    keep("parts", parts_);
+    settings_.tubes = true;  // (the tubes shown with every tool at first, as Maya's and Blender's)
     tubes_ = check(settings_.tubes);
     keep("tubes", tubes_);
     instances_ = check(settings_.instances);
@@ -523,6 +528,7 @@ void MainWindow::buildProperties() {
     toggle(guides_, &DisplaySettings::guides);
     connect(guides_, &QCheckBox::toggled, groomTools_, &GroomTools::setGuidesVisible);  // the guides' eye follows
     toggle(flow_, &DisplaySettings::flow);
+    toggle(parts_, &DisplaySettings::parts);
     toggle(tubes_, &DisplaySettings::tubes);
     toggle(instances_, &DisplaySettings::instances);
     toggle(lighting_, &DisplaySettings::lighting);
@@ -698,14 +704,14 @@ void MainWindow::refreshProperties() {
 }
 
 void MainWindow::fillGuideDisplay() {
-    // The Groom Tools' guides arrow (the Simple layout): how the guides draw, as pills and fields
-    // over the display's own controls (they carry the settings; hidden off the Attributes page).
+    // The Groom Tools' guides arrow (the Simple layout, Maya's guides display): one row of what
+    // shows (Guides, Parts, Flow, Tubes, Instances), then how the guides draw (Width, Points and
+    // Colors as segments, Smoothed); the tubes' look follows (the Groom Tools' Tubes block). The
+    // pills and segments mirror the display's own controls (they carry the settings; hidden off the
+    // Attributes page).
     QVBoxLayout* rows = groomTools_->guideDisplayRows();
     QWidget* host = rows->parentWidget();
-    FlowLayout* flow = nullptr;
-    QWidget* chips = pillRow(host, &flow);
-    chips->setObjectName(QStringLiteral("guideDisplayChips"));
-    auto mirror = [&](const QString& label, const char* name, QCheckBox* box, const QString& tip) {
+    auto mirror = [&](FlowLayout* flow, const QString& label, const char* name, QCheckBox* box, const QString& tip) {
         QToolButton* c = makePill(label, tip, host);
         c->setObjectName(QLatin1String(name));
         c->setChecked(box->isChecked());
@@ -719,11 +725,75 @@ void MainWindow::fillGuideDisplay() {
         flow->addWidget(c);
         return c;
     };
-    mirror(tr("Flow"), "display_flow", flow_, tr("The flow arrows and the field they make (a pale preview)"));
-    mirror(tr("Tubes"), "display_tubes", tubes_, tr("Each guide's tube, the volume its children and Interpolate's Fill Tubes fill"));
-    mirror(tr("Instances"), "display_instances", instances_, tr("Each Instance node's copies of its prototype mesh (else small markers)"));
+    FlowLayout* shown = nullptr;
+    QWidget* chips = pillRow(host, &shown);
+    chips->setObjectName(QStringLiteral("guideDisplayChips"));
+    mirror(shown, tr("Guides"), "display_guides", guides_, tr("The guides (with their part lines and flow; the eye beside the arrow)"));
+    mirror(shown, tr("Parts"), "display_parts", parts_, tr("The part lines the Part tool draws"));
+    mirror(shown, tr("Flow"), "display_flow", flow_, tr("The flow arrows and the field they make (a pale preview)"));
+    mirror(shown, tr("Tubes"), "display_tubes", tubes_,
+           tr("Each guide's tube, drawn with every tool as set below (the Tube and Roots tools show them either way)"));
+    mirror(shown, tr("Instances"), "display_instances", instances_, tr("Each Instance node's copies of its prototype mesh (else small markers)"));
+    rows->addWidget(chips);
+
+    // ---- Guides: how they draw.
+    auto* title = new QLabel(tr("Guides"), host);
+    title->setProperty("role", "listTitle");
+    rows->addWidget(title);
+    guideWidth_->setCaption(tr("Width"));
+    guideWidth_->setParent(host);
+    guideWidth_->setToolTip(tr("The guides' width in pixels (selected guides one more)"));
+    rows->addWidget(guideWidth_);
+    auto field = [&](const QString& label, QWidget* control, const QString& tip) {
+        auto* name = new QLabel(label, host);
+        name->setProperty("role", "propLabel");
+        name->setToolTip(tip);
+        control->setToolTip(tip);
+        QFrame* row = fieldRow(host, name, control);
+        rows->addWidget(row);
+        return row;
+    };
+    // Points and Colors: a few choices each, as a track of segments (each mirrors its combo's index).
+    auto segments = [&](const QString& label, const char* name, QComboBox* box, const std::vector<std::pair<QString, QString>>& items,
+                        const QString& tip) {
+        FlowLayout* track = nullptr;
+        QWidget* row = segmentRow(host, &track);
+        auto* group = new QButtonGroup(row);
+        group->setExclusive(true);
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            QToolButton* c = makeChip(items[i].first, items[i].second, row);
+            c->setObjectName(QStringLiteral("%1_%2").arg(QLatin1String(name)).arg(i));
+            c->setChecked(box->currentIndex() == static_cast<int>(i));
+            group->addButton(c, static_cast<int>(i));
+            track->addWidget(c);
+        }
+        connect(group, &QButtonGroup::idClicked, box, [box](int id) {
+            if (box->currentIndex() != id) box->setCurrentIndex(id);
+        });
+        connect(box, &QComboBox::currentIndexChanged, group, [group](int index) {
+            if (QAbstractButton* b = group->button(index)) {
+                const QSignalBlocker block(group);
+                b->setChecked(true);
+            }
+        });
+        return field(label, row, tip);
+    };
+    segments(tr("Points"), "display_guidePoints", guidePoints_,
+             {{tr("Off"), tr("No dots")}, {tr("Ends"), tr("A dot at each guide's root and tip")}, {tr("All"), tr("A dot at every point")}},
+             tr("The guides' points as dots: off, roots and tips, or all"));
+    segments(tr("Colors"), "display_guideColorMode", guideColorMode_,
+             {{tr("Group"), tr("Each guide group's own color")}, {tr("Layer"), tr("A painted guide layer's values, black to white")}},
+             tr("Each guide group's own color, or a painted guide layer from black to white"));
+    QWidget* layer = field(tr("Layer"), guideColorLayer_, tr("The painted guide layer Colors shows (Layer), black 0 to white 1"));
+    layer->setObjectName(QStringLiteral("guideColorLayerRow"));
+    guideColorLayer_->setVisible(settings_.guideColorMode == 1);
+    connect(guideColorMode_, &QComboBox::currentIndexChanged, layer, [layer](int mode) { layer->setVisible(mode == 1); });
+    layer->setVisible(settings_.guideColorMode == 1);
     // Smoothed: the guides drawn as a smooth curve through their points (Guide Smoothing's pieces
-    // per segment), else straight segments.
+    // per segment, 4 when turned on), else straight segments (1).
+    FlowLayout* look = nullptr;
+    QWidget* lookRow = pillRow(host, &look);
+    lookRow->setObjectName(QStringLiteral("guideLookChips"));
     QToolButton* smoothed = makePill(tr("Smoothed"), tr("Guides draw as a smooth curve through their points (off: straight segments)"), host);
     smoothed->setObjectName(QStringLiteral("display_guideSmoothing"));
     smoothed->setChecked(guideSmoothing_->value() > 1);
@@ -735,29 +805,8 @@ void MainWindow::fillGuideDisplay() {
         const QSignalBlocker block(smoothed);
         smoothed->setChecked(v > 1);
     });
-    flow->addWidget(smoothed);
-    rows->addWidget(chips);
-    // Width (a number field: its name inside), Points and Colors (field rows).
-    guideWidth_->setCaption(tr("Width"));
-    guideWidth_->setParent(host);
-    guideWidth_->setToolTip(tr("The guides' width in pixels (selected guides one more)"));
-    rows->addWidget(guideWidth_);
-    auto field = [&](const QString& label, QWidget* control, const QString& tip) {
-        auto* name = new QLabel(label, host);
-        name->setProperty("role", "propLabel");
-        name->setToolTip(tip);
-        control->setToolTip(tip);
-        QWidget* row = fieldRow(host, name, control);
-        rows->addWidget(row);
-        return row;
-    };
-    field(tr("Points"), guidePoints_, tr("The guides' points as dots: off, roots and tips, or all"));
-    field(tr("Colors"), guideColorMode_, tr("Each guide group's own color, or a painted guide layer from black to white"));
-    QWidget* layer = field(tr("Layer"), guideColorLayer_, tr("The painted guide layer Colors shows (Painted Layer), black 0 to white 1"));
-    layer->setObjectName(QStringLiteral("guideColorLayerRow"));
-    guideColorLayer_->setVisible(settings_.guideColorMode == 1);
-    connect(guideColorMode_, &QComboBox::currentIndexChanged, layer, [layer](int mode) { layer->setVisible(mode == 1); });
-    layer->setVisible(settings_.guideColorMode == 1);
+    look->addWidget(smoothed);
+    rows->addWidget(lookRow);
 }
 
 bool MainWindow::autoColorRange() {

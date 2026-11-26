@@ -15,7 +15,10 @@ The app's look where UILayout has no word for it: a panel sets a sub-layout's gr
 (palette.look(); the sidebar's layouts have no such attribute and draw as they always did): "card"
 a section on its card, "title" / "tray" / "hint" / "tool" / "status" / "count" its labels' roles, "empty" an empty state (its first label's icon on a disc, its labels centered),
 "primary" its operators in the accent, "pills" its switches as pills (each as wide as its name, wrapping),
-"dot" its color as a small dot (a card header's group)."""
+"dot" its color as a small dot (a card header's group), "gap" a little room in a row of icons, "blank" an icon's
+room with nothing in it (a list row's place kept)."""
+
+import os
 
 import bpy
 
@@ -43,6 +46,10 @@ ICONS = {
     "UNLOCKED": "ui_lock_open", "OPTIONS": "ui_sliders", "CURVE_PATH": "ui_segments", "MOD_VERTEX_WEIGHT": "ui_weight",
     "TRIA_UP_BAR": "ui_front", "TRIA_DOWN_BAR": "ui_behind", "CAMERA_DATA": "ui_photo_camera",
 }
+# A tube hierarchy level row's tube (the app's ui_tube.svg); ui_layers until icons/ui_tube.png is
+# rendered (tools/make_blender_icons.py).
+ICONS["MESH_CYLINDER"] = ("ui_tube" if os.path.isfile(os.path.join(os.path.dirname(__file__), "icons", "ui_tube.png"))
+                          else "ui_layers")
 
 
 def icon_name(icon="NONE", icon_value=0):
@@ -520,6 +527,10 @@ class Placer(object):
         if isinstance(node, DrawnLayout):
             if node.groomlab_role == "dot":  # (a group's color as a dot)
                 return 12 * self.s
+            if node.groomlab_role == "gap":  # (a little room in a row of icons)
+                return 4 * self.s
+            if node.groomlab_role == "blank":  # (an icon's room, nothing in it: a list row's place kept)
+                return self.row_h
             widths = [self.natural_width(c, st) for c in node.children]
             if not widths or any(w is None for w in widths):
                 return None
@@ -667,7 +678,7 @@ class Placer(object):
         """Whether a row's child keeps the width it wants: icon buttons and short toggles do, rows of
         them do; labels, fields and text buttons share the row."""
         if isinstance(child, DrawnLayout):  # a row or column of icon buttons (a list's menu beside it)
-            if child.groomlab_role == "dot":
+            if child.groomlab_role in ("dot", "gap", "blank"):
                 return True
             return child.kind in ("row", "column") and child.alignment == "EXPAND" and all(
                 isinstance(c, Item) and self.icon_only(c) for c in child.children) and bool(child.children)

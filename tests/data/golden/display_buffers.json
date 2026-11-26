@@ -1084,9 +1084,9 @@
    "87fcff8517c0e7ff"
   ],
   "selectedTubeWires": [
-   0,
-   0,
-   "0dd2f5d6ccceefff"
+   1088,
+   1088,
+   "98ed6f3d79f8a902"
   ],
   "softSelectedGuides": [
    25,
@@ -1109,14 +1109,14 @@
    "8d2c14c0859a1102"
   ],
   "tubeWires": [
-   0,
-   0,
-   "0dd2f5d6ccceefff"
+   16320,
+   16320,
+   "9cef28b9955ae55e"
   ],
   "tubes": [
-   12800,
-   73728,
-   "bebb1d227969140b"
+   0,
+   0,
+   "8d2c14c0859a1102"
   ]
  },
  "images": {
@@ -2754,9 +2754,9 @@
    "87fcff8517c0e7ff"
   ],
   "selectedTubeWires": [
-   0,
-   0,
-   "0dd2f5d6ccceefff"
+   1088,
+   1088,
+   "98ed6f3d79f8a902"
   ],
   "softSelectedGuides": [
    25,
@@ -2779,14 +2779,14 @@
    "8d2c14c0859a1102"
   ],
   "tubeWires": [
-   0,
-   0,
-   "0dd2f5d6ccceefff"
+   16320,
+   16320,
+   "9cef28b9955ae55e"
   ],
   "tubes": [
-   12800,
-   73728,
-   "bebb1d227969140b"
+   0,
+   0,
+   "8d2c14c0859a1102"
   ]
  }
 }

@@ -237,9 +237,9 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                     &TubePanel::deleteShape);
     delete_->setText(tr("Delete"));
     {
-        // The tubes in the viewport (Maya's Tube card's Visibility): shaded surfaces, wires, colors.
-        // Not on the card: how things draw lives with the other display settings, under the Groom
-        // Tools' guides arrow (displayBlock; the Simple layout).
+        // The tubes' look in the viewport (Maya's guides display's Tubes block): shaded surfaces,
+        // wires, colors. Not on the card: how things draw lives with the other display settings,
+        // under the Groom Tools' guides arrow (displayBlock; the Simple layout).
         display_ = new QWidget(this);
         display_->setObjectName(QStringLiteral("tubeDisplay"));
         auto* displayRows = new QVBoxLayout(display_);
@@ -257,19 +257,16 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         colors_->setToolTip(tr("Color each tube as the root tube it comes from (its split tubes and children in its color), a "
                                "color of its own without one"));
         colors_->setChecked(true);
-        levelColors_ = new QCheckBox(tr("Colors (Tube levels)"), profileBlock_);
+        levelColors_ = new QCheckBox(tr("Level colors"), profileBlock_);
         levelColors_->setObjectName(QStringLiteral("tubeLevelColors"));
         levelColors_->setToolTip(tr("Each tube of a tube hierarchy's levels (a split tube) in a shade of its own on top of its root "
                                     "tube's color, so the tubes of a level tell apart"));
-        always_ = new QCheckBox(tr("Always visible"), profileBlock_);
-        always_->setObjectName(QStringLiteral("tubesAlwaysVisible"));
-        always_->setToolTip(tr("Keep the tubes drawn whichever tool is up (Comb, Select, ...), not only the Tube tool"));
         // As pills (the Simple layout's Chip, as the popup's other display toggles), each mirroring
         // its box (the boxes carry the settings, hidden).
         FlowLayout* pills = nullptr;
         QWidget* pillsRow = pillRow(display_, &pills);
         pillsRow->setObjectName(QStringLiteral("tubeDisplayPills"));
-        for (QCheckBox* box : {shaded_, wireframe_, colors_, levelColors_, always_}) {
+        for (QCheckBox* box : {shaded_, wireframe_, colors_, levelColors_}) {
             connect(box, &QCheckBox::toggled, this, [this] { emit displayChanged(); });
             box->hide();
             QToolButton* pill = makePill(box->text(), box->toolTip(), pillsRow);
@@ -658,15 +655,17 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         lockView_->setToolTip(tr("Keep the tubes of the level shown now in view while you pick other levels to work on, whose "
                                  "guides show. Only the tubes' view: the other visibility controls work as they do"));
         connect(lockView_, &QCheckBox::toggled, this, [this](bool on) {
-            lockedLevel_ = on ? shownLevel_ : 0;
-            applyTubeViews();
+            // (The document's tubeViewGroup: the guides display's Level and the list's tubes too.)
+            const bool shown = shownLevel_ > 0 && shownLevel_ <= static_cast<int>(levels_.size());
+            setTubeView(on && shown ? levels_[static_cast<std::size_t>(shownLevel_ - 1)] : std::string());
         });
         mixedView_ = new QCheckBox(tr("Mixed view"), levelsBlock_);
         mixedView_->setObjectName(QStringLiteral("tubeMixedView"));
         mixedView_->setToolTip(tr("Working on a level, also show the tubes (not the guides) of the levels above where no level below "
                                   "continues them, and their roots in Select root and Edit roots"));
         mixedView_->setChecked(true);
-        connect(mixedView_, &QCheckBox::toggled, this, [this] { applyTubeViews(); });
+        // (A level picked: its view again, with or without the levels above' tubes.)
+        connect(mixedView_, &QCheckBox::toggled, this, [this] { applyLevelView(session_ ? session_->settings().brush.group : std::string()); });
         lockView_->hide();
         mixedView_->hide();
     }
@@ -771,7 +770,6 @@ bool TubePanel::shaded() const { return shaded_ && shaded_->isChecked(); }
 bool TubePanel::wireframe() const { return wireframe_ && wireframe_->isChecked(); }
 bool TubePanel::colors() const { return colors_ && colors_->isChecked(); }
 bool TubePanel::levelColors() const { return levelColors_ && levelColors_->isChecked(); }
-bool TubePanel::alwaysVisible() const { return always_ && always_->isChecked(); }
 
 // ---- Tube roots ------------------------------------------------------------------------------------
 
@@ -962,16 +960,68 @@ void TubePanel::applyDensity() {
     emit message(tr("Applied: %1 root(s) made%2.").arg(done.cells.size()).arg(done.kept ? tr(", %1 kept").arg(done.kept) : QString()));
 }
 
-void TubePanel::applyTubeViews() {
+void TubePanel::applyLevelView(const std::string& group) {
     GroomDocument* doc = document();
     if (!doc) return;
-    std::string locked;
-    if (lockedLevel_ > 0 && lockedLevel_ <= static_cast<int>(levels_.size())) locked = levels_[static_cast<std::size_t>(lockedLevel_ - 1)];
-    const std::string mixed = mixedView_->isChecked() && !levelBase_.empty() ? levelBase_ + ":" + std::to_string(shownLevel_) : std::string();
-    if (locked == doc->tubeViewGroup() && mixed == doc->mixedView()) return;
-    doc->setTubeViews(locked, mixed);
+    std::string mixed;
+    const HierarchyPtr h = group.empty() ? nullptr : doc->session().authoredHierarchy();
+    if (h && h->findGroup(group) != kNoGroup) {
+        TubeLevels info;
+        try {
+            info = tubeLevels(*h, {}, group);
+        } catch (const std::exception&) {
+        }
+        const auto at = std::find(info.levels.begin(), info.levels.end(), group);
+        if (info.levels.size() > 1 && at != info.levels.end()) {
+            mixed = info.base + ":" + std::to_string(at - info.levels.begin() + 1) + (mixedView_->isChecked() ? "" : ":solo");
+        }
+    }
+    if (mixed == doc->mixedView()) return;
+    doc->setTubeViews(doc->tubeViewGroup(), mixed);  // (the level kept in view stays: setTubeView's)
     if (session_ && session_->rootMode()) session_->refreshRoots();
     emit displayChanged();
+}
+
+void TubePanel::setTubeView(const std::string& group) {
+    GroomDocument* doc = document();
+    if (!doc) {
+        syncLock();
+        return;
+    }
+    const bool changed = group != doc->tubeViewGroup();
+    if (changed) {
+        doc->setTubeViews(group, doc->mixedView());
+        if (session_ && session_->rootMode()) session_->refreshRoots();
+    }
+    syncLock();
+    if (!changed) return;
+    const int level = group.empty() ? 0 : tubeLevelOf(group);
+    emit message(group.empty() ? tr("Tubes follow the guides.")
+                 : level      ? tr("Tubes of level %1 kept in view.").arg(level)
+                              : tr("Tubes of %1 kept in view.").arg(QString::fromStdString(group)));
+    emit tubeViewChanged(QString::fromStdString(group));
+    emit displayChanged();
+}
+
+void TubePanel::syncLock() {
+    const GroomDocument* doc = document();
+    const QSignalBlocker block(lockView_);
+    lockView_->setChecked(doc && !doc->tubeViewGroup().empty());
+}
+
+int TubePanel::tubeLevelOf(const std::string& group) const {
+    GroomDocument* doc = document();
+    const HierarchyPtr h = doc && !group.empty() ? doc->session().authoredHierarchy() : nullptr;
+    if (!h || h->findGroup(group) == kNoGroup) return 0;
+    TubeLevels info;
+    try {
+        info = tubeLevels(*h, {}, group);
+    } catch (const std::exception&) {
+        return 0;
+    }
+    if (info.levels.size() < 2) return 0;
+    const auto at = std::find(info.levels.begin(), info.levels.end(), group);
+    return at == info.levels.end() ? 0 : static_cast<int>(at - info.levels.begin()) + 1;
 }
 
 void TubePanel::setRootSnap(bool on) {
@@ -1081,16 +1131,17 @@ void TubePanel::fillLevels() {
         QSignalBlocker block(levelButtons_[k]);
         levelButtons_[k]->setChecked(static_cast<int>(k + 1) == shownLevel_);
     }
+    syncLock();  // (Lock view: the document's tubeViewGroup, set anywhere)
 }
 
 void TubePanel::showLevel(int level) {
     GroomDocument* doc = document();
     const HierarchyPtr h = doc ? doc->session().authoredHierarchy() : nullptr;
     if (!h || levelBase_.empty()) return;
+    // Its guides alone through the level view (the groups' eyes left as the artist set them).
     std::string picked;
     try {
         for (const auto& [group, visible] : tubeLevelVisibility(*h, levelBase_, level)) {
-            doc->setGroupHidden(group, !visible);
             if (visible) picked = group;
         }
     } catch (const std::exception& e) {
@@ -1104,9 +1155,9 @@ void TubePanel::showLevel(int level) {
         if (id != kNoGroup) b.level = h->groupDepth(id);
     }
     fillLevels();
-    applyTubeViews();
+    applyLevelView(picked);
     emit message(tr("Level %1: its tubes shown; the Tube tool and brushes edit them.").arg(level));
-    emit guidesEdited();  // (the groups' eyes and the brush's group: the host shows them)
+    emit guidesEdited();  // (the brush's group: the host shows it)
     emit settingsChanged();
 }
 

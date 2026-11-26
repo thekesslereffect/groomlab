@@ -598,19 +598,21 @@ void MainWindow::refreshTool() {
     // The Groom Tools' tile and card follow the tool the viewport has (and the settings it uses).
     const Viewport::ToolMode mode = viewport_->toolMode();
     shell_->setTool(mode == Viewport::ToolMode::Brush ? brush_.toolId() : std::string(), mode == Viewport::ToolMode::Select);
-    // The Tube brush's tubes (the core's display, every host's): wires and/or shaded, as its card says.
-    // (The Roots brush's too; Always visible: any tool.)
+    // The tubes (the core's display, every host's): shown with the Tube or Roots brush up
+    // (toolTubes) or with every tool (the Tubes switch, settings_.tubes); drawn with their look
+    // (the guides display's Shaded, Wireframe, Colors, Level colors) whichever tool is up.
     const TubePanel* tubes = groomTools_ ? groomTools_->tubePanel() : nullptr;
-    const bool tubeBrush = (mode == Viewport::ToolMode::Brush && (brush_.toolId() == "shape" || brush_.toolId() == "roots")) ||
-                           (tubes && tubes->alwaysVisible() && mode != Viewport::ToolMode::Camera);
-    const bool wires = tubeBrush && tubes && tubes->wireframe(), shaded = tubeBrush && tubes && tubes->shaded();
-    const bool colors = tubeBrush && tubes && tubes->colors();
-    const bool levelColors = tubeBrush && tubes && tubes->levelColors();
+    const bool toolTubes = toolTubesUp();
+    const bool wires = tubes && tubes->wireframe(), shaded = tubes && tubes->shaded();
+    const bool colors = tubes && tubes->colors();
+    const bool levelColors = tubes && tubes->levelColors();
     const std::string tubeView = document_ ? document_->tubeViewGroup() : std::string();
     const std::string mixedView = document_ ? document_->mixedView() : std::string();
     const bool hidden = brush_.rootMode() && brush_.roots().hidesGuides();
-    if (settings_.tubeWires != wires || settings_.tubeShaded != shaded || settings_.tubeColors != colors || hidden != rootsHide_ ||
-        settings_.tubeLevelColors != levelColors || settings_.tubeViewGroup != tubeView || settings_.mixedView != mixedView) {
+    if (settings_.toolTubes != toolTubes || settings_.tubeWires != wires || settings_.tubeShaded != shaded ||
+        settings_.tubeColors != colors || hidden != rootsHide_ || settings_.tubeLevelColors != levelColors ||
+        settings_.tubeViewGroup != tubeView || settings_.mixedView != mixedView) {
+        settings_.toolTubes = toolTubes;
         settings_.tubeWires = wires;
         settings_.tubeShaded = shaded;
         settings_.tubeColors = colors;
@@ -620,6 +622,10 @@ void MainWindow::refreshTool() {
         rootsHide_ = hidden;
         redisplay();
     }
+}
+
+bool MainWindow::toolTubesUp() const {
+    return viewport_->toolMode() == Viewport::ToolMode::Brush && (brush_.toolId() == "shape" || brush_.toolId() == "roots");
 }
 
 void MainWindow::setHairVisible(bool on) {
@@ -873,7 +879,7 @@ void MainWindow::redisplay() {
     DisplaySettings shown = settings_;
     if (brush_.rootMode() && brush_.roots().hidesGuides()) {
         // Edit roots: the guides and their tubes hidden, only the roots' outlines (Maya's too).
-        shown.guides = shown.tubes = shown.tubeWires = shown.tubeShaded = false;
+        shown.guides = shown.tubes = shown.toolTubes = shown.tubeWires = shown.tubeShaded = false;
     }
     const DisplayFrame& frame = document_->updateDisplay(shown);
     viewport_->renderer().setHairLook(document_->session().hairLook());

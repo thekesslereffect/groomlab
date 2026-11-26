@@ -63,6 +63,7 @@ namespace groomlab::app {
 class BrushPanel;
 class BrushSession;
 class CorrectivesPanel;
+class GroomDocument;
 class GuidesPanel;
 class MapsPanel;
 class PopupPanel;
@@ -229,6 +230,9 @@ signals:
     void groomPicked(int index);   // the picker's menu: another groom of the document
     void tabChanged(const QString& id);
     void toolStopRequested();  // a corrective picked greys the tool's tile: no tool (the camera)
+    // A tube hierarchy level's tubes kept in view, or let go (""): the guides display's Level, a
+    // Guide groups row's tube, the Roots card's Lock view (TubePanel::setTubeView).
+    void tubeViewChanged(const QString& group);
 
 private:
     QToolButton* makeTile(const std::string& id, const QString& label, const QString& tip);
@@ -242,6 +246,9 @@ private:
 
     BrushSession* session_ = nullptr;
     bool updating_ = false;
+    // The group whose level view was last applied (refresh: a level of a tube hierarchy picked).
+    const GroomDocument* levelViewDocument_ = nullptr;
+    std::string levelViewGroup_;
     QString name_;
     std::string tool_;
     bool tileLabels_ = true;  // the names under the icons (View > Tool Labels off: icons alone)

@@ -188,6 +188,7 @@ public:
     // with a preview of the field when displayFlow is on.
     static MObject aFlowData;
     static MObject aDisplayFlow;
+    static MObject aDisplayParts;  // the part lines (with the guides)
     static MObject aCorrectiveData;
     // Sculpt nodes (sculpt.h): their brushed edits by node name (sculptData, JSON), and the Sculpt
     // node brushes shape ("" none: the guides or a corrective), whose output the viewport shows as
@@ -635,11 +636,14 @@ public:
     // in its region's color on the tube root region map (kTubeRegionMap), or with no such map a
     // color of its own (from its guide's ID): its surface's color when shaded (its wires then
     // gray), else its wires'.
-    // Off keeps the last Shaded, Wireframe and Colors. `always` (the Tube card's Always visible):
-    // the tubes drawn as last set whichever tool is up (Comb, Select, ...), not only the Tube brush.
+    // Off keeps the last Shaded, Wireframe and Colors. The tubes draw so whichever tool is up
+    // (Comb, Select, ...) while the groom's Tubes switch is on (displayTubes, the guides display);
+    // `always` (scripts' -tubesAlwaysVisible) the same for this session.
     void setTubeWires(bool on, bool shaded = false, bool wireframe = true, bool colors = true, bool levelColors = false);
     void setTubesAlwaysVisible(bool always);
-    bool tubeWires() const { return tubeWires_ || tubesAlways_; }
+    bool toolTubes() const { return tubeWires_; }  // the Tube or Roots tool up
+    bool tubeWires() const { return tubeWires_ || tubesAlways_ || displayTubes(); }
+    bool displayTubes() const;  // the groom's Tubes switch (displayTubes), with the guides shown (their eye)
     bool tubeShaded() const { return tubeWires() && tubeShaded_; }
     bool tubeWireframe() const { return tubeWires() && tubeWireframe_; }
     bool tubeColors() const { return tubeWires() && tubeColors_; }

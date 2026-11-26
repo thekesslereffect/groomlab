@@ -444,13 +444,14 @@ class RootTubes(unittest.TestCase):
         info = root_tubes.add_tube_level(self.groom, guides=[one])
         self.assertEqual(info["split"], 4)  # its four leaves
         self.assertEqual(len(groomlab.guide_ids(self.groom, root_tubes.ROOT_GROUP + "_L4")), 8)
-        # One level shown at a time.
+        # One level shown at a time: the level view (the groom's mixedView), the groups' eyes left
+        # as they were; solo (Mixed view off) no tubes of the levels above.
         group = root_tubes.show_tube_level(self.groom, root_tubes.ROOT_GROUP, 2)
         self.assertEqual(group, root_tubes.ROOT_GROUP + "_L2")
-        hidden = groomlab.hidden_guide_groups(self.groom)
-        self.assertNotIn(group, hidden)
-        self.assertIn(root_tubes.ROOT_GROUP, hidden)
-        self.assertIn(root_tubes.ROOT_GROUP + "_L3", hidden)
+        self.assertEqual(cmds.getAttr(self.groom + ".mixedView"), root_tubes.ROOT_GROUP + ":2")
+        self.assertEqual(groomlab.hidden_guide_groups(self.groom), [])
+        root_tubes.show_tube_level(self.groom, root_tubes.ROOT_GROUP, 3, solo=True)
+        self.assertEqual(cmds.getAttr(self.groom + ".mixedView"), root_tubes.ROOT_GROUP + ":3:solo")
         info = root_tubes.remove_tube_level(self.groom, root_tubes.ROOT_GROUP)
         self.assertEqual(len(info["levels"]), 3)
 

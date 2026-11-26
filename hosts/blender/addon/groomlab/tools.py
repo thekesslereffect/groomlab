@@ -1297,22 +1297,16 @@ def _take_levels(scene, r):
 
 
 def tube_level_show(scalp, level):
-    """Level `level` (1: the base) shown, the hierarchy's other levels hidden, its group picked."""
+    """Level `level` (1: the base) picked: its guides alone through the level view (the display's
+    mixedView from the group picked; the groups' eyes untouched)."""
     scene = groom.scene_of(scalp)
     t = scene.groomlab_tools
     if not t.tube_base:
         tube_levels(scalp)
     r = call(scalp, "tube_level_show", base=t.tube_base, level=int(level))
-    shown = r.get("shown") or {}
-    hidden = set(g.name for g in t.groups if g.hidden)
-    picked = None
-    for name, visible in shown.items():
-        if visible:
-            hidden.discard(name)
-            picked = name
-        else:
-            hidden.add(name)
-    set_hidden_groups(scalp, sorted(hidden))
+    picked = next((name for name, visible in (r.get("shown") or {}).items() if visible), None)
+    from . import display
+    display.mark(scalp)
     if picked:
         with props.quiet():
             t.group = picked
@@ -1401,6 +1395,7 @@ def _fill_groups(scene, info, gt):
             item.hidden = bool(g.get("hidden"))
             item.segment_length = float(g.get("segmentLength") or 0.0)
             item.segments = int(g.get("segments") or 0)
+            item.tube_level = int(g.get("tubeLevel") or 0)
             item.depth = depth
             color = g.get("color")
             item.has_color = bool(color)

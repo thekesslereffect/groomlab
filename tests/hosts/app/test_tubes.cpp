@@ -821,7 +821,14 @@ TEST(AppTubes, TubeRootsAndTheHierarchyFromTheCard) {
     EXPECT_FALSE(panel.rootsBlock()->isHidden());
     EXPECT_FALSE(panel.levelsBlock()->isHidden());
     EXPECT_TRUE(panel.colors()) << "Colors on, as Maya's";
-    EXPECT_FALSE(panel.alwaysVisible());
+    // The tubes' display (the guides display's Tubes block): the look alone; whether they show with
+    // every tool is the popup's Tubes pill (no Always visible, no Show tubes, no Level here).
+    EXPECT_EQ(panel.displayBlock()->findChild<QCheckBox*>(QStringLiteral("tubesAlwaysVisible")), nullptr);
+    EXPECT_EQ(panel.displayBlock()->findChild<QCheckBox*>(QStringLiteral("displayTubes")), nullptr);
+    EXPECT_EQ(panel.displayBlock()->findChild<QComboBox*>(QStringLiteral("tubeViewLevel")), nullptr);
+    for (const char* look : {"tubeShadedPill", "tubeWireframePill", "tubeColorsPill", "tubeLevelColorsPill"}) {
+        EXPECT_TRUE(panel.displayBlock()->findChild<QToolButton*>(QLatin1String(look))) << look;
+    }
     int changes = 0;
     QObject::connect(&panel, &TubePanel::rootModeChanged, [&changes] { ++changes; });
     // Draw root: the root mode, placing; the card's id the Roots brush's; again: Draw root again
@@ -879,10 +886,19 @@ TEST(AppTubes, TubeRootsAndTheHierarchyFromTheCard) {
     EXPECT_EQ(panel.shownLevel(), 2);
     EXPECT_EQ(session.settings().brush.group, panel.levels()[1]);
     EXPECT_GT(doc->session().authoredHierarchy()->guides().size(), guides);
-    EXPECT_TRUE(doc->hiddenGroups().count(panel.levels()[0])) << "the other level hidden";
+    // Its guides alone through the level view (mixedView), the groups' eyes left alone.
+    EXPECT_EQ(doc->mixedView(), panel.levelBase() + ":2");
+    EXPECT_TRUE(doc->hiddenGroups().empty()) << "no eye flipped";
     panel.showLevel(1);
     EXPECT_EQ(panel.shownLevel(), 1);
-    EXPECT_FALSE(doc->hiddenGroups().count(panel.levels()[0]));
+    EXPECT_EQ(doc->mixedView(), panel.levelBase() + ":1");
+    // Mixed view off: the level alone, no tubes of the levels above (":solo"); on again.
+    QCheckBox* mixed = panel.findChild<QCheckBox*>(QStringLiteral("tubeMixedView"));
+    ASSERT_TRUE(mixed);
+    mixed->setChecked(false);
+    EXPECT_EQ(doc->mixedView(), panel.levelBase() + ":1:solo");
+    mixed->setChecked(true);
+    EXPECT_EQ(doc->mixedView(), panel.levelBase() + ":1");
     panel.removeLevel();
     EXPECT_EQ(panel.levels().size(), 1u);
     EXPECT_EQ(doc->session().authoredHierarchy()->guides().size(), guides);

@@ -212,6 +212,7 @@ MObject GroomShape::aScalpMaps;
 MObject GroomShape::aScalpMapDisplay;
 MObject GroomShape::aScalpMapChannel;
 MObject GroomShape::aDisplayFlow;
+MObject GroomShape::aDisplayParts;
 MObject GroomShape::aShotSculpt;
 MObject GroomShape::aCorrectiveWeight;
 MObject GroomShape::aShotLayer;
@@ -364,6 +365,11 @@ void GroomShape::setRootOverlay(std::vector<RootTubeTool::Item> items, float pix
     M3dView::scheduleRefreshAllViews();
 }
 
+bool GroomShape::displayTubes() const {
+    const MObject self = thisMObject();
+    return MPlug(self, aDisplayTubes).asBool() && MPlug(self, aDisplayGuides).asBool();
+}
+
 void GroomShape::setTubesAlwaysVisible(bool always) {
     if (always == tubesAlways_) return;
     tubesAlways_ = always;
@@ -372,12 +378,12 @@ void GroomShape::setTubesAlwaysVisible(bool always) {
 
 void GroomShape::setTubeWires(bool on, bool shaded, bool wireframe, bool colors, bool levelColors) {
     // The look (Shaded, Wireframe, Colors, level colors) is kept whether the tubes show or not: the
-    // guides display sets it with any tool up, and Always visible draws it once Tube or Roots is put
-    // down; a change made while the tubes show is drawn at once.
+    // guides display sets it with any tool up, and the groom's Tubes switch draws it once Tube or
+    // Roots is put down; a change made while the tubes show (the switch's too) is drawn at once.
     const bool look = shaded != tubeShaded_ || wireframe != tubeWireframe_ || colors != tubeColors_ ||
                       levelColors != tubeLevelColors_;
     if (on == tubeWires_ && !look) return;
-    const bool drawn = tubeWires_ || on || tubesAlways_;
+    const bool drawn = tubeWires() || on;
     tubeWires_ = on;
     tubeShaded_ = shaded;
     tubeWireframe_ = wireframe;
@@ -805,6 +811,9 @@ MStatus GroomShape::initialize() {
     aDisplayFlow = nAttr.create("displayFlow", "gldfl", MFnNumericData::kBoolean, true, &status);
     CHECK_MSTATUS_AND_RETURN_IT(status);
     nAttr.setStorable(true);
+    aDisplayParts = nAttr.create("displayParts", "gldpl", MFnNumericData::kBoolean, true, &status);  // the part lines
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+    nAttr.setStorable(true);
     aCorrectiveData = tAttr.create("correctiveData", "glcrd", MFnData::kString, stringData.create(""), &status);
     CHECK_MSTATUS_AND_RETURN_IT(status);
     tAttr.setStorable(true);
@@ -1081,7 +1090,7 @@ MStatus GroomShape::initialize() {
     nAttr.setKeyable(false);
     nAttr.setChannelBox(true);
 
-    aDisplayTubes = nAttr.create("displayTubes", "gldt", MFnNumericData::kBoolean, false, &status);
+    aDisplayTubes = nAttr.create("displayTubes", "gldt", MFnNumericData::kBoolean, true, &status);  // (the tubes on at first)
     CHECK_MSTATUS_AND_RETURN_IT(status);
     nAttr.setKeyable(false);
     nAttr.setChannelBox(true);
@@ -1185,7 +1194,7 @@ MStatus GroomShape::initialize() {
     tAttr.setStorable(false);
     tAttr.setHidden(true);
 
-    for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScalpSplit, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
+    for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScalpSplit, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aDisplayParts, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
                           &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aTubeViewGroup, &aMixedView, &aGuideGroupColors, &aBraidTubes, &aCardBlock, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
                           &aDisplayTubes, &aBrushTick, &aCardDensity, &aOutCards, &aOutRachis, &aOutMesh, &aDisplayCards, &aDisplayMesh, &aDisplayCardTextures, &aDisplayOverlaysOnTop, &aCardMaps, &aScalpMaps, &aScalpMapDisplay, &aScalpMapChannel, &aOutStrandCount, &aLastError, &aOutVrayPluginData, &aOutFrame}) {
         CHECK_MSTATUS_AND_RETURN_IT(addAttribute(*attr));
@@ -2203,7 +2212,7 @@ MStatus GroomShape::setDependentsDirty(const MPlug& plug, MPlugArray& affected) 
         plug == aRibbonWidthScale || plug == aDisplayWidthCoverage || plug == aDisplayCoverageDensity || plug == aDisplayClumpLod || plug == aClumpLodError || plug == aSculptDisplay || plug == aIsolateGroup || plug == aGuideColorMode ||
         plug == aGuideColorLayer || plug == aDisplayInstances || plug == aDisplayLighting || plug == aDisplayShadows || plug == aDisplayHairShading || plug == aDisplaySelfShadowing || plug == aDisplayStrandVariation ||
         plug == aGuideWidth || plug == aGuidePoints || plug == aGuideSmoothing || plug == aHiddenGuideGroups || plug == aTubeViewGroup || plug == aMixedView || plug == aGuideGroupColors || plug == aBraidTubes ||
-        plug == aDisplayFlow || plug == aDisplayColor ||
+        plug == aDisplayFlow || plug == aDisplayParts || plug == aDisplayColor ||
         plug == aUseMaterialColor || plug == aDisplayGuides || plug == aDisplayHair || plug == aDisplayTubes || plug == aDisplayCards || plug == aDisplayMesh ||
         plug == aDisplayCardTextures || plug == aDisplayOverlaysOnTop || plug == aCardMaps || plug == aScalpMapDisplay || plug == aScalpMapChannel;
     // Inputs: the groom re-evaluates, then redraws.

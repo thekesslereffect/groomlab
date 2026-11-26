@@ -5,12 +5,18 @@
 // deleted on the way undone too). The offscreen platform; the prompts answered by their labels.
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <vector>
 
 #include <QAction>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QCoreApplication>
+#include <QEvent>
 #include <QImage>
 #include <QLabel>
 #include <QListWidget>
@@ -18,6 +24,8 @@
 #include <QPushButton>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
+#include <QVBoxLayout>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -33,6 +41,10 @@
 #include "main_window.h"
 #include "maps_panel.h"
 #include "overlay.h"
+#include "brush_panel.h"
+#include "card_parts.h"
+#include "groomlab/display.h"
+#include "tube_panel.h"
 #include "viewport.h"
 
 namespace groomlab::app {
@@ -234,6 +246,196 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     doc->setGroupHidden("bangs", true);
     panel->refresh();
     EXPECT_EQ(panel->rebuilds(), rebuilds + 1);
+}
+
+TEST(AppLists, ATubeLevelKeptInViewWhileAnotherLevelIsCombed) {
+    // Maya's gui_roots tube_level_pin: a tube hierarchy's level kept in view while another level's
+    // guides are combed. The tubes' Level (the guides display), a level row's tube in Guide groups
+    // and the Roots card's Lock view are one setting, the document's tubeViewGroup; picking a level
+    // shows its guides alone, the pin stays; the Tubes switch is the one way the tubes show with
+    // every tool, drawn with their look.
+    MainWindow window;
+    window.resize(1280, 800);
+    window.show();
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(sampleCopy("groomlab_app_lists_tube_pin"))));
+    GroomDocument* doc = window.document();
+    auto* tools = window.findChild<GroomTools*>();
+    auto* panel = window.findChild<GuidesPanel*>();
+    ASSERT_TRUE(tools && panel);
+    TubePanel* tubes = tools->tubePanel();
+    tubes->refreshRoots();
+    tubes->addLevel();
+    ASSERT_EQ(tubes->levels().size(), 2u);
+    const std::string base = tubes->levels()[0], deeper = tubes->levels()[1];
+    auto tubeOf = [&](const std::string& group) {
+        return panel->findChild<QToolButton*>(QStringLiteral("groupTube_") + QString::fromStdString(group));
+    };
+    tools->tile("comb")->click();
+    EXPECT_FALSE(window.displaySettings().toolTubes) << "Comb: no tube tool up";
+    EXPECT_TRUE(window.displaySettings().tubes) << "the tubes shown at first";
+    {
+        auto* pill = tools->findChild<QToolButton*>(QStringLiteral("display_tubes"));
+        ASSERT_TRUE(pill);
+        pill->setChecked(false);  // (off, so the pin is seen to turn them on)
+        QCoreApplication::processEvents();
+    }
+    EXPECT_FALSE(window.displaySettings().tubes);
+    panel->refresh();
+    ASSERT_TRUE(tubeOf(deeper)) << "a level row has its tube";
+    EXPECT_TRUE(tubeOf(base));
+    EXPECT_FALSE(tubeOf(deeper)->property("kept").toBool());
+    tubeOf(deeper)->click();
+    QCoreApplication::processEvents();
+    EXPECT_EQ(doc->tubeViewGroup(), deeper) << "level 2's tubes kept in view";
+    EXPECT_EQ(window.displaySettings().tubeViewGroup, deeper);
+    EXPECT_TRUE(window.displaySettings().tubes) << "pinned with Comb up: the Tubes switch on";
+    auto* tubesPill = tools->findChild<QToolButton*>(QStringLiteral("display_tubes"));
+    ASSERT_TRUE(tubesPill) << "the guides display's Tubes pill";
+    EXPECT_TRUE(tubesPill->isChecked());
+    auto* lock = tubes->findChild<QCheckBox*>(QStringLiteral("tubeLockView"));
+    ASSERT_TRUE(lock);
+    EXPECT_TRUE(lock->isChecked()) << "so does the Roots card's Lock view";
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);  // (the rows made again)
+    ASSERT_TRUE(tubeOf(deeper));
+    EXPECT_TRUE(tubeOf(deeper)->property("kept").toBool()) << "its row's tube in the accent";
+    // Every row keeps room for a level's tube (the eyes in a column): the same strip width.
+    {
+        QTreeWidget* tree = panel->tree();
+        std::set<int> widths;
+        for (QTreeWidgetItemIterator it(tree); *it; ++it) {
+            if (QWidget* strip = tree->itemWidget(*it, 2)) widths.insert(strip->sizeHint().width());
+        }
+        EXPECT_EQ(widths.size(), 1u) << "rows with and without a tube line up";
+    }
+    // Picking level 1 in the list: its guides alone through the level view, the eyes untouched,
+    // the pin stays.
+    emit panel->groupClicked(base);
+    EXPECT_EQ(doc->mixedView(), base + ":1");
+    EXPECT_EQ(window.displaySettings().mixedView, base + ":1") << "and drawn so";
+    EXPECT_TRUE(doc->hiddenGroups().empty()) << "no eye flipped";
+    EXPECT_EQ(doc->tubeViewGroup(), deeper) << "the pin stays while level 1 is combed";
+    // A level row's eye hides that group, the level view or not (the eye always wins).
+    auto guidePoints = [&] {
+        const DisplayFrame& frame = doc->updateDisplay(window.displaySettings());
+        const auto& lines = frame.item(DisplayItemId::Guides).geometry;
+        return lines ? lines->positions.size() : std::size_t(0);
+    };
+    const std::size_t shownPoints = guidePoints();
+    EXPECT_GT(shownPoints, 0u);
+    QToolButton* eye = panel->findChild<QToolButton*>(QStringLiteral("groupEye_") + QString::fromStdString(base));
+    ASSERT_TRUE(eye);
+    eye->click();
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(doc->hiddenGroups().count(base)) << "the eye hides level 1";
+    EXPECT_NE(window.displaySettings().hiddenGuideGroups.find(base), std::string::npos);
+    EXPECT_LT(guidePoints(), shownPoints) << "its guides gone from the viewport under the level view";
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    eye = panel->findChild<QToolButton*>(QStringLiteral("groupEye_") + QString::fromStdString(base));
+    ASSERT_TRUE(eye);
+    eye->click();
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(doc->hiddenGroups().count(base));
+    EXPECT_EQ(guidePoints(), shownPoints);
+    EXPECT_TRUE(tools->card()->editing().contains(QStringLiteral("tubes: Level 2"))) << tools->card()->editing().toStdString();
+    // The Tube tool shows them either way; the look passed whichever tool is up.
+    tools->tile("shape")->click();
+    EXPECT_TRUE(window.displaySettings().toolTubes);
+    tools->tile("comb")->click();
+    EXPECT_FALSE(window.displaySettings().toolTubes);
+    EXPECT_TRUE(window.displaySettings().tubeWires) << "Wireframe: the look, whatever tool";
+    // The Tubes pill off: the Tubes switch (Properties > Display > Tubes).
+    tubesPill->click();
+    EXPECT_FALSE(window.displaySettings().tubes);
+    // The kept level's row tube again: no pin, no Lock view.
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    ASSERT_TRUE(tubeOf(deeper));
+    tubeOf(deeper)->click();
+    QCoreApplication::processEvents();
+    EXPECT_EQ(doc->tubeViewGroup(), "");
+    EXPECT_EQ(window.displaySettings().tubeViewGroup, "");
+    EXPECT_FALSE(lock->isChecked());
+    EXPECT_FALSE(tools->card()->editing().contains(QStringLiteral("tubes:")));
+    // Lock view (the Roots card's ⋯): the same setting.
+    lock->setChecked(true);
+    ASSERT_GT(tubes->shownLevel(), 0);
+    EXPECT_EQ(doc->tubeViewGroup(), tubes->levels()[static_cast<std::size_t>(tubes->shownLevel() - 1)]);
+    lock->setChecked(false);
+    EXPECT_EQ(doc->tubeViewGroup(), "");
+    // A group of no tube hierarchy picked: no level view, every group as its eye says.
+    ASSERT_TRUE(panel->addGroup({}, "loose"));
+    emit panel->groupClicked("loose");
+    EXPECT_EQ(doc->mixedView(), "");
+}
+
+TEST(AppLists, TheGuidesDisplayIsOneRowOfWhatShowsThenTheLook) {
+    // Maya's guides display: one pill row of what shows (Guides, Parts, Flow, Tubes, Instances),
+    // then the guides' look (Width, Points and Colors as segments, Smoothed), then the tubes' look
+    // (Shaded, Wireframe, Colors, Level colors); no Level menu, no Show tubes row.
+    MainWindow window;
+    window.resize(1280, 800);
+    window.show();
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(sampleCopy("groomlab_app_lists_guide_display"))));
+    auto* tools = window.findChild<GroomTools*>();
+    ASSERT_TRUE(tools);
+    PopupPanel* popup = tools->guideDisplayPopup();
+    ASSERT_TRUE(popup);
+    QWidget* shown = popup->findChild<QWidget*>(QStringLiteral("guideDisplayChips"));
+    ASSERT_TRUE(shown);
+    std::vector<std::string> pills;
+    for (QToolButton* b : shown->findChildren<QToolButton*>()) pills.push_back(b->text().toStdString());
+    EXPECT_EQ(pills, (std::vector<std::string>{"Guides", "Parts", "Flow", "Tubes", "Instances"}));
+    EXPECT_EQ(popup->findChild<QComboBox*>(QStringLiteral("tubeViewLevel")), nullptr);
+    EXPECT_EQ(popup->findChild<QCheckBox*>(QStringLiteral("displayTubes")), nullptr);
+    // Guides: the header's guides eye's setting.
+    auto* guides = popup->findChild<QToolButton*>(QStringLiteral("display_guides"));
+    ASSERT_TRUE(guides);
+    guides->click();
+    EXPECT_FALSE(window.displaySettings().guides);
+    EXPECT_FALSE(tools->guidesVisible()) << "the header's eye follows";
+    guides->click();
+    EXPECT_TRUE(window.displaySettings().guides);
+    // Parts: the part lines (DisplaySettings::parts).
+    auto* parts = popup->findChild<QToolButton*>(QStringLiteral("display_parts"));
+    ASSERT_TRUE(parts);
+    EXPECT_TRUE(parts->isChecked());
+    parts->click();
+    EXPECT_FALSE(window.displaySettings().parts);
+    parts->click();
+    EXPECT_TRUE(window.displaySettings().parts);
+    // Points and Colors: segments.
+    auto* ends = popup->findChild<QToolButton*>(QStringLiteral("display_guidePoints_1"));
+    ASSERT_TRUE(ends);
+    EXPECT_EQ(ends->text(), QStringLiteral("Ends"));
+    ends->click();
+    EXPECT_EQ(window.displaySettings().guidePoints, 1);
+    auto* layer = popup->findChild<QToolButton*>(QStringLiteral("display_guideColorMode_1"));
+    ASSERT_TRUE(layer);
+    EXPECT_EQ(layer->text(), QStringLiteral("Layer"));
+    auto* group = popup->findChild<QToolButton*>(QStringLiteral("display_guideColorMode_0"));
+    ASSERT_TRUE(group);
+    EXPECT_TRUE(group->isChecked());
+    // Smoothed: on draws smooth curves (4 pieces a segment), off straight (1).
+    auto* smoothed = popup->findChild<QToolButton*>(QStringLiteral("display_guideSmoothing"));
+    ASSERT_TRUE(smoothed);
+    const bool wasSmooth = smoothed->isChecked();
+    smoothed->click();
+    smoothed->click();
+    EXPECT_EQ(smoothed->isChecked(), wasSmooth);
+    if (smoothed->isChecked()) smoothed->click();
+    EXPECT_EQ(window.displaySettings().guideSmoothing, 1) << "off: straight";
+    smoothed->click();
+    EXPECT_GE(window.displaySettings().guideSmoothing, 4) << "on: smooth";
+    // The tubes' look under it.
+    for (const char* look : {"tubeShadedPill", "tubeWireframePill", "tubeColorsPill", "tubeLevelColorsPill"}) {
+        EXPECT_TRUE(popup->findChild<QToolButton*>(QLatin1String(look))) << look;
+    }
+    // Sized to its rows at its width (the wrapped pill rows leave no gaps).
+    popup->showUnder(tools);
+    QVBoxLayout* rows = popup->rows();
+    ASSERT_TRUE(rows->hasHeightForWidth());
+    EXPECT_EQ(popup->height(), rows->totalHeightForWidth(popup->width()));
+    if (const char* grab = std::getenv("GROOMLAB_APP_GRAB")) popup->grab().save(QString::fromUtf8(grab) + QStringLiteral("/guide_display.png"));
+    popup->hide();
 }
 
 TEST(AppLists, MapsBarMenuAndOperations) {
