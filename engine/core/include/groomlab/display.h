@@ -500,12 +500,15 @@ struct DisplaySettings {
     // renders and exports never read it.
     bool hair = true;
     // Guides (off: their part lines and flow arrows hidden with them).
-    bool guides = true, tubes = false;
-    // The Tube brush's tubes (every host's, as Maya's draw override shows them): every guide the
-    // brush can shape (activeTubeGuides) as a wire (tubeWires; the selected ones apart, warm) and/or
-    // a shaded surface a little inside it (tubeShaded), each in its root tube's color with
-    // tubeColors (buildTubeDisplay).
-    bool tubeWires = false, tubeShaded = false, tubeColors = false;
+    bool guides = true;
+    // The tubes (buildTubeDisplay, every host's, as Maya's draw override shows them), one way of
+    // drawing them: shown with every tool (`tubes`: the groom's Tubes switch, the guides display) or
+    // while the Tube or Roots tool is up (`toolTubes`), each guide's tube as a wire (tubeWires; the
+    // selected ones apart, warm) and/or a shaded surface a little inside it (tubeShaded), in its
+    // root tube's color with tubeColors: tubeWires, tubeShaded, tubeColors and tubeLevelColors are
+    // the look, whether they show or not.
+    bool tubes = false, toolTubes = false;
+    bool tubeWires = true, tubeShaded = false, tubeColors = false;
     bool tubeLevelColors = false;  // Colors (Tube levels): each split tube a shade of its own (TubeDisplayOptions::levelColors)
     bool movingGuides = true;  // the moving guides (DisplayInputs::movingGuides) over the groomed ones
     float guideWidth = 2.0f;

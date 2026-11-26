@@ -233,20 +233,20 @@ def toggle_guides():
 
 
 def tubes_always():
-    window = _palette()
-    if window is not None and hasattr(window, "tube_always"):
-        return window.tube_always.isChecked()
-    ctx = groomlab.BRUSH_CONTEXT
-    return bool(_ctx_exists(ctx) and cmds.groomLabBrushCtx(ctx, query=True, tubesAlwaysVisible=True))
+    """The current groom's Tubes switch (displayTubes): its tubes drawn with every tool."""
+    try:
+        return bool(cmds.getAttr(_groom() + ".displayTubes"))
+    except (RuntimeError, ValueError):
+        return False
 
 
 def toggle_tubes_always():
     on = not tubes_always()
     window = _palette()
-    if window is not None and hasattr(window, "tube_always"):
-        window.tube_always.setChecked(on)  # (it tells the tool)
-    elif _ctx_exists(groomlab.BRUSH_CONTEXT):
-        cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, edit=True, tubesAlwaysVisible=on)
+    if window is not None and hasattr(window, "tube_show"):
+        window.tube_show.setChecked(on)  # (it sets the groom's)
+    else:
+        cmds.setAttr(_groom() + ".displayTubes", on)
 
 
 def _root_card():

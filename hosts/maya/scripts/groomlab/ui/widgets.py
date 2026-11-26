@@ -562,6 +562,12 @@ GLYPHS = {
     "eyeOff": '<path d="M2.5 12 C5 6.8 8.3 5 12 5 C15.7 5 19 6.8 21.5 12 C19 17.2 15.7 19 12 19 C8.3 19 5 17.2 2.5 12 Z" '
               'fill="none" stroke="{c}" stroke-width="1.8" stroke-linejoin="round" opacity="0.5"/>'
               '<path d="M4 20 L20 4" stroke="{c}" stroke-width="1.8" stroke-linecap="round"/>',
+    # A tube (a cylinder): a tube hierarchy level's row, its tubes kept in view (tubeOff: not).
+    "tube": '<g fill="none" stroke="{c}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+            '<ellipse cx="12" cy="6.5" rx="6" ry="2.6"/><path d="M6 6.5 V17.5 A6 2.6 0 0 0 18 17.5 V6.5"/></g>',
+    "tubeOff": '<g opacity="0.45" fill="none" stroke="{c}" stroke-width="1.8" stroke-linecap="round" '
+               'stroke-linejoin="round"><ellipse cx="12" cy="6.5" rx="6" ry="2.6"/>'
+               '<path d="M6 6.5 V17.5 A6 2.6 0 0 0 18 17.5 V6.5"/></g>',
     # Guides: three strands from their roots (the guides' eye), and struck through when hidden.
     # The guides (the mock's: a curve between two points; lucide "spline", ISC).
     "guides": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'

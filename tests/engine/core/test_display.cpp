@@ -437,9 +437,10 @@ TEST(Display, MovingGuidesDrawOverTheGroomedOnesDimmed) {
 }
 
 TEST(Display, TheTubeBrushsTubesShowAsWiresAndShadedSurfaces) {
-    // DisplaySettings::tubeWires and tubeShaded (every host's Tube brush, as Maya's draw override
-    // shows them): the guides the brush can shape as wires (the selected ones apart) and/or shaded
-    // surfaces; neither while off.
+    // The tubes (every host's, as Maya's draw override shows them): shown while the Tube or Roots
+    // tool is up (toolTubes) or with every tool (tubes, the Tubes switch), drawn as the look says:
+    // wires (tubeWires; the selected ones apart) and/or shaded surfaces (tubeShaded); neither while
+    // not shown, whatever the look.
     const Scenario s = scenarios()[0];
     const DisplayInputs in = inputsFor(s);
     DisplayBuilder off;
@@ -447,6 +448,7 @@ TEST(Display, TheTubeBrushsTubesShowAsWiresAndShadedSurfaces) {
     EXPECT_EQ(none.item(DisplayItemId::TubeWires).geometry->vertexCount(), 0u);
     EXPECT_EQ(none.item(DisplayItemId::TubeSurfaces).geometry->vertexCount(), 0u);
     DisplaySettings wires = s.settings;
+    wires.toolTubes = true;
     wires.tubeWires = true;
     DisplayBuilder a;
     const DisplayFrame& w = a.update(in, wires);
@@ -455,12 +457,23 @@ TEST(Display, TheTubeBrushsTubesShowAsWiresAndShadedSurfaces) {
     if (!fixture().selection.empty()) EXPECT_GT(w.item(DisplayItemId::SelectedTubeWires).geometry->vertexCount(), 0u);
     EXPECT_EQ(w.item(DisplayItemId::TubeSurfaces).geometry->vertexCount(), 0u);
     DisplaySettings shaded = s.settings;
+    shaded.tubes = true;  // (the Tubes switch: the same tubes, with any tool)
+    shaded.tubeWires = false;
     shaded.tubeShaded = true;
     DisplayBuilder b;
     const DisplayFrame& sh = b.update(in, shaded);
     EXPECT_GT(sh.item(DisplayItemId::TubeSurfaces).geometry->vertexCount(), 0u);
     EXPECT_TRUE(sh.item(DisplayItemId::TubeSurfaces).geometry->triangles);
     EXPECT_EQ(sh.item(DisplayItemId::TubeWires).geometry->vertexCount(), 0u);
+    // The look alone shows nothing (the tubes not shown), and the guides' pass draws no tubes of
+    // its own (one way of drawing them).
+    DisplaySettings look = s.settings;
+    look.tubeWires = look.tubeShaded = true;
+    DisplayBuilder c;
+    const DisplayFrame& l = c.update(in, look);
+    EXPECT_EQ(l.item(DisplayItemId::TubeWires).geometry->vertexCount(), 0u);
+    EXPECT_EQ(l.item(DisplayItemId::TubeSurfaces).geometry->vertexCount(), 0u);
+    EXPECT_EQ(sh.item(DisplayItemId::Tubes).geometry->vertexCount(), 0u);
 }
 
 TEST(Display, TubeSurfacesAreOpenAtTheTip) {

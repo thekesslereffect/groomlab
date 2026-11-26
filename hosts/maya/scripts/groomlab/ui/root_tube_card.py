@@ -342,6 +342,7 @@ class RootTubeCard(QtCore.QObject):
         key = (stamp, self.owner.current_group())
         heavy = (groom != getattr(self, "_read_groom", "?") or self._levels is None
                  or (full and (stamp is None or key != getattr(self, "_read_key", None))))
+        self.sync_lock(groom)  # (Lock view: the groom's tubeViewGroup, set anywhere)
         self._read_groom = groom
         if heavy:
             self._read_key = key
@@ -648,7 +649,7 @@ class RootTubeCard(QtCore.QObject):
     def _after_levels(self, groom, base, level):
         """The level `level` shown and picked (the brushes and new guides work there)."""
         self.owner.fill_levels(groom)
-        group = root_tubes.show_tube_level(groom, base, level, self._locked)
+        group = root_tubes.show_tube_level(groom, base, level, self._locked if self._locked_base == base else 0)
         root_tubes.set_mixed_view(groom, base, level if self.mixed_view.isChecked() else 0)
         self.owner.pick_group(group)
         self._levels = None
@@ -659,20 +660,30 @@ class RootTubeCard(QtCore.QObject):
             pass
 
     def lock_toggled(self, on):
-        """Lock view: the level picked now stays in view (whatever level is picked after); off, only
-        the picked level shows again."""
-        groom = self.owner.groom()
-        self._locked = self._current if on and self._base else 0
-        self._locked_base = self._base
-        if not groom or not self._base:
+        """Lock view: the level picked now stays in view (whatever level is picked after); off, the
+        tubes follow their guides again. The tubes' Level (the guides display, the Guide groups
+        rows' tubes): one setting, the groom's tubeViewGroup."""
+        if not self._base or not self._levels:
             return
-        try:
-            root_tubes.show_tube_level(groom, self._base, self._current, self._locked)
-        except (RuntimeError, ValueError) as e:
-            self.owner.status.setText(str(e).strip())
-            return
-        self.owner.status.setText("Level %d's tubes kept in view." % self._locked if self._locked
-                                  else "Lock view off.")
+        levels = list(self._levels[1])
+        group = levels[self._current - 1] if on and 0 < self._current <= len(levels) else ""
+        self.owner.set_tube_view(group)
+
+    def sync_lock(self, groom):
+        """Lock view as the groom's tubeViewGroup stands (set here, in the guides display or a
+        Guide groups row)."""
+        viewed = self.owner.tube_view(groom) if groom else ""
+        if (groom, viewed) == getattr(self, "_synced", None):
+            return  # (as read last: no hierarchy read on the panel's tick)
+        self._synced = (groom, viewed)
+        info = self.owner.tube_hierarchy(groom, viewed) if viewed else None
+        if info and viewed in info["levels"]:
+            self._locked, self._locked_base = info["levels"].index(viewed) + 1, info["base"]
+        else:
+            self._locked, self._locked_base = 0, None
+        self.lock_view.blockSignals(True)
+        self.lock_view.setChecked(bool(self._locked))
+        self.lock_view.blockSignals(False)
 
     def mixed_toggled(self, on):
         """Mixed view: the levels above shown where no level below continues them, on the level picked."""

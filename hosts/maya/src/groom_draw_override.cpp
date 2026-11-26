@@ -740,12 +740,12 @@ DisplaySettings GroomSubSceneOverride::readSettings() {
     s.instances = displayFlag(GroomShape::aDisplayInstances);
     s.hair = displayFlag(GroomShape::aDisplayHair);  // (the eye: the guides draw either way)
     s.guides = displayFlag(GroomShape::aDisplayGuides);
-    s.tubes = displayFlag(GroomShape::aDisplayTubes);
+    s.tubes = false;  // (the tubes: the shape's tubeWires, drawn here with their look, the Tubes switch included)
     s.guideWidth = floatPlug(GroomShape::aGuideWidth);
     s.guideColorMode = MPlug(object_, GroomShape::aGuideColorMode).asShort();
     s.guideColorLayer = MPlug(object_, GroomShape::aGuideColorLayer).asString().asChar();
     // The Tube tool up (its tubes drawn): the guides in their root tubes' region colors.
-    if (shape_ && shape_->tubeWires()) s.guideRootColors = true;
+    if (shape_ && shape_->toolTubes()) s.guideRootColors = true;
     s.isolateGroup = MPlug(object_, GroomShape::aIsolateGroup).asString().asChar();
     s.guidePoints = MPlug(object_, GroomShape::aGuidePoints).asShort();
     s.guideSmoothing = MPlug(object_, GroomShape::aGuideSmoothing).asInt();

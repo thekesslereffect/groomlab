@@ -333,15 +333,22 @@ def set_mixed_view(groom, base, level):
             cmds.setAttr(groom + ".mixedView", want, type="string")
 
 
+def show_level_guides(groom, base, level):
+    """Level `level` (1: the base) of `base`'s hierarchy's guides shown, its other levels' hidden
+    (the guide groups' eyes; groups outside the hierarchy as they are); the tubes' view untouched.
+    Returns the hierarchy's levels."""
+    shown = _request(groom, "levelVisibility", base=base, level=int(level), locked=0)
+    for name, visible in shown.items():
+        groomlab.show_guide_group(groom, name, visible=bool(visible))
+    return tube_levels(groom, picked=base)["levels"]
+
+
 def show_tube_level(groom, base, level, locked=0):
     """Show level `level` (1: the base) of `base`'s hierarchy and hide its other levels (the guide
     groups' eyes; groups outside the hierarchy are left as they are); with `locked` (Lock view)
     level `locked`'s tubes alone draw (set_tube_view), its guides as the level picked. Returns level
     `level`'s group."""
-    shown = _request(groom, "levelVisibility", base=base, level=int(level), locked=int(locked or 0))
-    levels = tube_levels(groom, picked=base)["levels"]
-    for name, visible in shown.items():
-        groomlab.show_guide_group(groom, name, visible=bool(visible))
+    levels = show_level_guides(groom, base, level)
     # (The tubes: Lock view's level alone; else as their guides.)
     set_tube_view(groom, levels[int(locked) - 1] if locked and 0 < int(locked) <= len(levels) else "")
     level = max(1, min(int(level), len(levels))) if levels else 1

@@ -2351,7 +2351,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     const bool byLayer = s.guideColorMode == 1;
     const int smoothing = std::clamp(s.guideSmoothing, 1, 16);
     const int pointMode = s.guidePoints;
-    std::uint64_t key = hashCombine(hash64(in.hierarchyVersion), (s.guides ? 1u : 0u) + (s.tubes ? 2u : 0u) + (byLayer ? 4u : 0u) +
+    std::uint64_t key = hashCombine(hash64(in.hierarchyVersion), (s.guides ? 1u : 0u) + (byLayer ? 4u : 0u) +
                                                                      32u * static_cast<unsigned>(pointMode));
     key = hashCombine(key, theme.version);
     key = hashCombine(key, static_cast<std::uint64_t>(smoothing));
@@ -2360,7 +2360,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     key = hashChars(key, s.isolateGroup);
     key = hashChars(key, s.guideColorLayer);
     key = hashChars(key, s.guideColorSeed);
-    const bool rootColors = s.guideRootColors || s.tubeWires || s.tubeShaded;  // (the Tube tool's tubes up)
+    const bool rootColors = s.guideRootColors || s.toolTubes;  // (the Tube or Roots tool up)
     key = hashCombine(key, rootColors ? 0x2007u : 0x2006u);
     if (in.clumpCenters) {
         // Hashed once per set of centers (the same pointer: the same centers, held here so no
@@ -2424,7 +2424,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
         }
         stride = std::max<std::size_t>(1, (total + kPointBudget - 1) / kPointBudget);
     }
-    if (hierarchy && (s.guides || s.tubes)) {
+    if (hierarchy && s.guides) {
         const bool attributes = hierarchy->hasAttributes();
         // Isolate: the group and its child groups at full color, the rest dimmed (none dimmed when
         // the groom has no such group).
@@ -2483,11 +2483,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             const bool alone = hiddenLayer && groomlab::guideHidden(*hierarchy, g);
             const int mixedAt = mixed.on() ? mixed.shows(*hierarchy, g) : -1;
             const bool guideHidden = alone || (mixedAt >= 0 ? mixedAt != 1 : d.hidden);
-            // (Lock view: the tubes of that group alone, whatever guides show.)
-            const GuideGroup* viewed = s.tubeViewGroup.empty() ? nullptr : hierarchy->group(g.group);
-            const bool tubeHidden = alone || (mixedAt >= 0 ? mixedAt == 0 : d.hidden);
-            const bool tubeShown = s.tubeViewGroup.empty() ? !tubeHidden : tubeDrawn(s.tubeViewGroup, viewed ? viewed->name : std::string(), tubeHidden);
-            if (s.tubes && tubeShown) appendTubeSurface(tubes, g, hierarchy->scale());
+            // (The tubes: buildBrushTubes, with their look, whichever tool is up.)
             if (guideHidden) continue;
             if (!s.guides || g.points.size() < 2) continue;
             DrawnGuide item;
@@ -2653,7 +2649,8 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
     item(DisplayItemId::SelectedTubeWires).lineWidth = 2.0f;
     item(DisplayItemId::TubeSurfaces).color = s.theme.tubeSurfaces;
     const HierarchyPtr& hierarchy = in.hierarchy;
-    const bool on = hierarchy && (s.tubeWires || s.tubeShaded);
+    // (Shown with every tool, the Tubes switch, or with the Tube or Roots tool up; drawn as the look says.)
+    const bool on = hierarchy && (s.tubes || s.toolTubes) && (s.tubeWires || s.tubeShaded);
     const bool colors = on && s.tubeColors;
     if (colors) item(DisplayItemId::TubeWires).color = {0.62f, 0.62f, 0.62f, s.theme.tubeWires[3]};  // (buildTubeDisplay's gray)
     std::uint64_t key = on ? hashCombine(hashCombine(hash64(in.hierarchyVersion), in.selectionHash),

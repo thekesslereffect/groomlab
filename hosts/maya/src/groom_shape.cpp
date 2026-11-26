@@ -364,6 +364,10 @@ void GroomShape::setRootOverlay(std::vector<RootTubeTool::Item> items, float pix
     M3dView::scheduleRefreshAllViews();
 }
 
+bool GroomShape::displayTubes() const {
+    return MPlug(thisMObject(), aDisplayTubes).asBool();
+}
+
 void GroomShape::setTubesAlwaysVisible(bool always) {
     if (always == tubesAlways_) return;
     tubesAlways_ = always;

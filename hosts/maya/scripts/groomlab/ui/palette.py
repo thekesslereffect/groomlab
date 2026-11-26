@@ -1097,7 +1097,6 @@ class GuideDisplay(widgets.PopupPanel):
     (the Tube card's Visibility block, add_tubes)."""
 
     SWITCHES = (("displayFlow", "Flow", "The flow arrows and sinks"),
-                ("displayTubes", "Tubes", "Each guide's tube (with every tool)"),
                 ("displayInstances", "Instances", "Instanced meshes on the strands"),
                 ("displayOverlaysOnTop", "On top", "Guides, parts and flow draw over the strands"),
                 ("guideSmoothing", "Smoothed", "Guides draw as a smooth curve through their points"))
@@ -1132,6 +1131,7 @@ class GuideDisplay(widgets.PopupPanel):
         row, _ = widgets.field_row("Colors", self.colors)
         self.add(row)
         self.about_to_show.append(self.read)
+        self.about_to_show.append(lambda: owner.read_tube_display())
 
     def add_tubes(self, block):
         """The tubes' display (Shaded, Wireframe, Colors, level colors, with every tool)."""
@@ -1580,40 +1580,44 @@ class ToolPalette(QtWidgets.QWidget):
         self.tube_channel_row = widgets.seg_row(self.tube_channel_buttons.values())  # one of them: a track
         self.tube_channel_row.setToolTip(_setting("tubeChannel", "hint"))
         self.brush_block.body.insertWidget(0, self.tube_channel_row)
-        self.tube_channel_box = widgets.Block("Visibility", name="paintsBlock")
+        # The tubes' display (the header's guides menu, add_tubes): one switch, the groom's Tubes
+        # (displayTubes: shown with every tool; the Tube and Roots tools show them either way), the
+        # look they are drawn with, and the level whose tubes show (the Lock view).
+        self.tube_channel_box = widgets.Block("Tubes", name="paintsBlock")
         self.tube_channel_box.setToolTip("How the tubes are drawn")
-        # Shaded and Wireframe (GH-63): how the tubes the brush shows are drawn, each on its own:
-        # shaded surfaces (off by default), to judge the profiles' shapes, and see-through wires (on).
-        # (Switch rows: a chip's text grows bold when checked and outgrew its width.)
-        self.tube_shaded = widgets.switch("Shaded", "Draw the tubes as shaded surfaces, to judge the profiles' "
-                                          "shapes", False, "tubeShaded")
-        self.tube_shaded.toggled.connect(lambda on: self.push_tube_display())
-        self.tube_channel_box.add(self.tube_shaded.row)
-        self.tube_wireframe = widgets.switch("Wireframe", "Draw the tubes as see-through wires (over the shaded "
-                                             "surfaces when Shaded is on)", True, "tubeWireframe")
-        self.tube_wireframe.toggled.connect(lambda on: self.push_tube_display())
-        self.tube_channel_box.add(self.tube_wireframe.row)
-        # Colors: each tube in its root tube's color (a color of its own when it has none); on the
-        # shaded surfaces with Shaded on (the wires gray), else the wires.
-        self.tube_colors = widgets.switch("Colors", "Color each tube as the root tube it comes from (its split "
-                                          "tubes and children in its color), or a color of its own: the shaded "
-                                          "surfaces with Shaded on (the wires stay gray), else the wires", True,
-                                          "tubeColors")
-        self.tube_colors.toggled.connect(lambda on: self.push_tube_display())
-        self.tube_channel_box.add(self.tube_colors.row)
-        # Colors (Tube levels): each split tube of a tube hierarchy a shade of its own on top of its
-        # root's color, so the tubes of a level tell apart (off at first).
-        self.tube_level_colors = widgets.switch("Colors (Tube levels)", "Each tube of a tube hierarchy's levels (a split "
-                                                "tube) in a shade of its own on top of its root tube's color, so the "
-                                                "tubes of a level tell apart. Tubes with no levels stay as they are",
-                                                False, "tubeLevelColors")
-        self.tube_level_colors.toggled.connect(lambda on: self.push_tube_display())
-        self.tube_channel_box.add(self.tube_level_colors.row)
-        # Always visible: the tubes drawn whichever tool is up (Comb, Select, ...), as set above.
-        self.tube_always = widgets.switch("Always visible", "Keep the tubes drawn with every tool (Comb, "
-                                          "Select, ...), not only the Tube tool", False, "tubesAlwaysVisible")
-        self.tube_always.toggled.connect(lambda on: self.push_tube_display())
-        self.tube_channel_box.add(self.tube_always.row)
+        self.tube_show = widgets.switch("Show tubes", "Draw each guide's tube with every tool (Comb, Select, ...); "
+                                        "the Tube and Roots tools show them either way. Kept with the groom",
+                                        False, "displayTubes")
+        self.tube_show.toggled.connect(self.set_tubes_shown)
+        self.tube_channel_box.add(self.tube_show.row)
+        # The look, each on its own: shaded surfaces (off by default) to judge the profiles' shapes,
+        # see-through wires (on), each tube in its root tube's color, each split tube a shade of its own.
+        self.tube_shaded = widgets.chip("Shaded", "Draw the tubes as shaded surfaces, to judge the profiles' shapes",
+                                        False, "tubeShaded")
+        self.tube_wireframe = widgets.chip("Wireframe", "Draw the tubes as see-through wires (over the shaded "
+                                           "surfaces when Shaded is on)", True, "tubeWireframe")
+        self.tube_colors = widgets.chip("Colors", "Color each tube as the root tube it comes from (its split tubes and "
+                                        "children in its color), or a color of its own: the shaded surfaces with "
+                                        "Shaded on (the wires stay gray), else the wires", True, "tubeColors")
+        self.tube_level_colors = widgets.chip("Level colors", "Each tube of a tube hierarchy's levels (a split tube) in "
+                                              "a shade of its own on top of its root tube's color, so the tubes of a "
+                                              "level tell apart. Tubes with no levels stay as they are", False,
+                                              "tubeLevelColors")
+        for chip_ in (self.tube_shaded, self.tube_wireframe, self.tube_colors, self.tube_level_colors):
+            chip_.toggled.connect(lambda on: self.push_tube_display())
+        self.tube_look = widgets.pill_row((self.tube_shaded, self.tube_wireframe, self.tube_colors,
+                                           self.tube_level_colors))
+        self.tube_channel_box.add(self.tube_look)
+        # Level: the tubes of one level of a tube hierarchy kept in view whichever level's guides
+        # are picked (view level 2's tubes, comb level 1's guides); Follow guides: as their guides.
+        self.tube_level = QtWidgets.QComboBox()
+        self.tube_level.setObjectName("tubeViewLevel")
+        self.tube_level.setToolTip("Which level's tubes show: Follow guides (the tubes of the guides shown), or one "
+                                   "level of the tube hierarchy kept in view whichever level's guides you pick and "
+                                   "comb (its row's tube in Guide groups; the Roots card's Lock view)")
+        self.tube_level.activated.connect(lambda _i: self.set_tube_view(self.tube_level.currentData() or ""))
+        self.tube_level_row, _ = widgets.field_row("Level", self.tube_level)
+        self.tube_channel_box.add(self.tube_level_row)
         self.display_popup.add_tubes(self.tube_channel_box)  # (the tubes' display: the header's guides menu)
 
         # Select: the soft radius (its selection's), then the profile and the selected guides' tubes.
@@ -1975,7 +1979,14 @@ class ToolPalette(QtWidgets.QWidget):
             name = self.paint_tab.current()
             self.card_editing.setText("on  <b>%s</b>" % name if name else "no map yet: + under Maps")
             return
-        self.card_editing.setText("<span style='color:%s'>\u25cf</span> %s  on  %s" % (color, group, layer_html))
+        # A level of a tube hierarchy kept in view while another's guides are picked: said here, so
+        # the brush is seen to comb these guides under those tubes.
+        viewed = self.tube_view(groom) if groom else ""
+        tubes = ""
+        if viewed and viewed != self.current_group():
+            level = self.tube_level_of(viewed, groom)
+            tubes = "  \u00b7  tubes: %s" % ("Level %d" % level if level else viewed)
+        self.card_editing.setText("<span style='color:%s'>\u25cf</span> %s  on  %s%s" % (color, group, layer_html, tubes))
 
     def editing_layer(self):
         """The corrective (or Sculpt node) brushes edit now, or "" for the base groom."""
@@ -2495,12 +2506,31 @@ class ToolPalette(QtWidgets.QWidget):
         return self.level.currentData(QtCore.Qt.UserRole + 1) or ""
 
     def target_changed(self, _index=None):
+        self.show_picked_level()
         self._target = (self.current_group(), self.level.currentData())
         self.push(level=self.level.currentData(), group=self.current_group())
         self.apply_isolation()
         self.guides_tab.show_picked()  # the list's row and Segments follow the pick
         if self.tool:
             self.show_editing()  # the card's header: what the next stroke edits
+
+    def show_picked_level(self):
+        """A level of a tube hierarchy picked (the list, Page Up / Down, the Roots card): its guides
+        shown and its other levels' hidden, as the Roots card's level row does; the level kept in
+        view (the tubes' Level) stays."""
+        group = self.current_group()
+        if group == getattr(self, "_level_shown", None):
+            return
+        self._level_shown = group
+        groom = self.groom()
+        info = self.tube_hierarchy(groom, group) if group else None
+        if not info or group not in info["levels"]:
+            return
+        from groomlab import root_tubes
+        try:
+            root_tubes.show_level_guides(groom, info["base"], info["levels"].index(group) + 1)
+        except (RuntimeError, ValueError) as e:
+            self.status.setText(str(e).strip())
 
     def pick_group(self, name):
         """Brushes and new guides use group `name` (from the groups list; "" for all groups)."""
@@ -3064,9 +3094,103 @@ class ToolPalette(QtWidgets.QWidget):
         except RuntimeError as e:
             self.status.setText(str(e))
 
+    # -- The tubes' display: shown with every tool, and the level whose tubes show -----------
+
+    def tube_hierarchy(self, groom=None, group=None):
+        """The tube hierarchy of `group` (else the group picked): {"base", "levels": [each level's
+        group, the base first]}, or None when it has one level only (or no groom)."""
+        groom = groom or self.groom()
+        if not groom:
+            return None
+        from groomlab import root_tubes
+        try:
+            info = root_tubes.tube_levels(groom, picked=(group if group is not None else self.current_group()) or "")
+        except (RuntimeError, ValueError):
+            return None
+        return info if info.get("base") and len(info.get("levels") or []) > 1 else None
+
+    def tube_view(self, groom=None):
+        """The group whose tubes alone show (the groom's tubeViewGroup), "" when they follow the guides."""
+        from maya import cmds
+        groom = groom or self.groom()
+        try:
+            return (cmds.getAttr(groom + ".tubeViewGroup") or "") if groom else ""
+        except (RuntimeError, ValueError):
+            return ""
+
+    def set_tubes_shown(self, on):
+        """Show tubes: the groom's Tubes switch (displayTubes), drawn with the look whatever tool is up."""
+        from maya import cmds
+        groom = self.groom()
+        if not groom:
+            return
+        try:
+            if bool(cmds.getAttr(groom + ".displayTubes")) != bool(on):
+                cmds.setAttr(groom + ".displayTubes", bool(on))
+        except RuntimeError as e:
+            self.status.setText(str(e))
+
+    def set_tube_view(self, group):
+        """Keep level `group`'s tubes in view whichever level's guides are picked ("": the tubes
+        follow their guides). The tubes show (Show tubes) so the pick is seen with any tool."""
+        from groomlab import root_tubes
+        groom = self.groom()
+        if not groom:
+            return
+        try:
+            root_tubes.set_tube_view(groom, group or "")
+        except RuntimeError as e:
+            self.status.setText(str(e))
+            return
+        if group and not self.tube_show.isChecked() and self.tool not in ("shape", "roots"):
+            self.tube_show.setChecked(True)  # (pinned: seen whichever tool is up)
+        self.root_card.sync_lock(groom)
+        self.read_tube_display()
+        try:
+            self.guides_tab.refresh()
+        except Exception:  # noqa: BLE001 (the list catches up on its own)
+            pass
+        if self.tool:
+            self.show_editing()
+        level = self.tube_level_of(group) if group else 0
+        self.status.setText("Tubes of level %d kept in view." % level if level else "Tubes follow the guides.")
+
+    def tube_level_of(self, group, groom=None):
+        """Level `group`'s number in its tube hierarchy (1: the base), 0 when it is in none."""
+        info = self.tube_hierarchy(groom, group) if group else None
+        return info["levels"].index(group) + 1 if info and group in info["levels"] else 0
+
+    def read_tube_display(self):
+        """Show tubes and Level as the groom stands (the popup opening, a pick, an undo)."""
+        from maya import cmds
+        groom = self.groom()
+        shown = False
+        if groom:
+            try:
+                shown = bool(cmds.getAttr(groom + ".displayTubes"))
+            except (RuntimeError, ValueError):
+                pass
+        self.tube_show.blockSignals(True)
+        self.tube_show.setChecked(shown)
+        self.tube_show.blockSignals(False)
+        viewed = self.tube_view(groom)
+        info = self.tube_hierarchy(groom, viewed or None)
+        self.tube_level.blockSignals(True)
+        self.tube_level.clear()
+        self.tube_level.addItem("Follow guides", "")
+        for n, name in enumerate((info or {}).get("levels") or []):
+            self.tube_level.addItem("Level %d" % (n + 1), name)
+        index = self.tube_level.findData(viewed) if viewed else 0
+        if viewed and index < 0:
+            self.tube_level.addItem(viewed, viewed)  # (a group of no hierarchy: kept as it is)
+            index = self.tube_level.count() - 1
+        self.tube_level.setCurrentIndex(max(0, index))
+        self.tube_level.setEnabled(self.tube_level.count() > 1)
+        self.tube_level.blockSignals(False)
+
     def push_tube_display(self):
-        """The tubes' look (the guides display: Shaded, Wireframe, Colors, Colors per level, Always
-        visible) to the brush context whatever tool is up: it gives it to the groom, drawn at once."""
+        """The tubes' look (the guides display: Shaded, Wireframe, Colors, Level colors) to the brush
+        context whatever tool is up: it gives it to the groom, drawn at once."""
         from maya import cmds
         ctx = groomlab.BRUSH_CONTEXT
         try:
@@ -3075,8 +3199,7 @@ class ToolPalette(QtWidgets.QWidget):
                 cmds.groomLabBrushCtx(ctx)
             cmds.groomLabBrushCtx(ctx, edit=True, tubeShaded=self.tube_shaded.isChecked(),
                                   tubeWireframe=self.tube_wireframe.isChecked(), tubeColors=self.tube_colors.isChecked(),
-                                  tubeLevelColors=self.tube_level_colors.isChecked(),
-                                  tubesAlwaysVisible=self.tube_always.isChecked())
+                                  tubeLevelColors=self.tube_level_colors.isChecked())
         except (RuntimeError, AttributeError) as e:
             self.status.setText(str(e))
 
