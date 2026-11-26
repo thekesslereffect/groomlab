@@ -1101,7 +1101,13 @@ std::size_t appendGuideCurve(DisplayGeometry& batch, const std::vector<Vec3f>& p
     return smooth.size();
 }
 
-MixedView::MixedView(const GuideHierarchy* hierarchy, const std::string& spec) {
+MixedView::MixedView(const GuideHierarchy* hierarchy, const std::string& whole) {
+    std::string spec = whole;
+    const std::string soloTag = ":solo";
+    if (spec.size() > soloTag.size() && spec.compare(spec.size() - soloTag.size(), soloTag.size(), soloTag) == 0) {
+        solo_ = true;
+        spec.resize(spec.size() - soloTag.size());
+    }
     const std::size_t at = spec.rfind(':');
     if (!hierarchy || at == std::string::npos || at == 0) return;
     base_ = spec.substr(0, at);
@@ -1124,7 +1130,7 @@ int MixedView::shows(const GuideHierarchy& hierarchy, const HierarchyGuide& g) c
     if (!top || top->name != base_) return -1;
     const int level = hierarchy.groupDepth(g.group) + 1;
     if (level == level_) return 1;
-    return level < level_ && !parents_.count(g.id) ? 2 : 0;
+    return level < level_ && !solo_ && !parents_.count(g.id) ? 2 : 0;
 }
 
 bool tubeDrawn(const std::string& view, const std::string& name, bool hidden) {
@@ -1144,7 +1150,8 @@ std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierar
             const GuideGroup* grp = hierarchy.group(g.group);
             const std::string name = grp ? grp->name : std::string();
             const int m = mixed.shows(hierarchy, g);
-            if (!tubeDrawn(tubeViewGroup, name, m >= 0 ? m == 0 : grp && hidden.count(name) > 0)) continue;  // (tubes: 1 and 2)
+            // (Tubes: 1 and 2 of the level view; a group hidden by its eye stays hidden.)
+            if (!tubeDrawn(tubeViewGroup, name, m == 0 || (grp && hidden.count(name) > 0))) continue;
         }
         float frozen = 0.0f;
         if (layers && hierarchy.effectiveAttribute(g, freeze, &frozen) && frozen >= 0.5f) continue;
@@ -2399,7 +2406,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
         if (hiddenLayer && guideHidden(*hierarchy, g)) return true;
         if (hierarchy && mixed.on()) {
             const int m = mixed.shows(*hierarchy, g);
-            if (m >= 0) return m != 1;
+            if (m >= 0 && m != 1) return true;  // (the level view; then the group's eye)
         }
         if (hiddenNames.empty() || !hierarchy) return false;
         const GuideGroup* grp = hierarchy->group(g.group);
@@ -2482,7 +2489,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             // by itself, kHiddenLayer: the radial menu's Visibility, is hidden either way.)
             const bool alone = hiddenLayer && groomlab::guideHidden(*hierarchy, g);
             const int mixedAt = mixed.on() ? mixed.shows(*hierarchy, g) : -1;
-            const bool guideHidden = alone || (mixedAt >= 0 ? mixedAt != 1 : d.hidden);
+            const bool guideHidden = alone || d.hidden || (mixedAt >= 0 && mixedAt != 1);  // (the eye always)
             // (The tubes: buildBrushTubes, with their look, whichever tool is up.)
             if (guideHidden) continue;
             if (!s.guides || g.points.size() < 2) continue;
@@ -2630,7 +2637,7 @@ void DisplayBuilder::buildSelection(const DisplayInputs& in, const DisplaySettin
             if (!g || guideHidden(*hierarchy, *g)) continue;
             const int m = mixed.shows(*hierarchy, *g);
             if (m == 0 || m == 2) continue;
-            const GuideGroup* grp = hiddenNames.empty() || m == 1 ? nullptr : hierarchy->group(g->group);
+            const GuideGroup* grp = hiddenNames.empty() ? nullptr : hierarchy->group(g->group);
             if (grp && hiddenNames.count(grp->name) > 0) continue;
             appendGuideCurve(weight >= 0.999f ? selected : soft, g->points, smoothing);
         }
@@ -2738,9 +2745,9 @@ void DisplayBuilder::buildOverlays(const DisplayInputs& in, const DisplaySetting
     // Parts with the guides.
     item(DisplayItemId::Parts).color = s.theme.parts;
     item(DisplayItemId::Parts).lineWidth = 2.0f;
-    if (rebuild(DisplayPart::Parts, hashCombine(in.parts ? in.parts->contentHash() : 0, s.guides ? 1u : 0u))) {
+    if (rebuild(DisplayPart::Parts, hashCombine(in.parts ? in.parts->contentHash() : 0, (s.guides ? 1u : 0u) + (s.parts ? 2u : 0u)))) {
         DisplayGeometry lines;
-        if (in.parts && s.guides) appendPartLines(lines, *in.parts);
+        if (in.parts && s.guides && s.parts) appendPartLines(lines, *in.parts);
         lines.overlay = true;
         put(DisplayItemId::Parts, std::move(lines));
     }

@@ -579,6 +579,9 @@ class GuidesTab(_GroomTab):
                 for n, name in enumerate((info or {}).get("levels") or []):
                     self._tube_levels[name] = n + 1
             self._viewed = self.owner.tube_view(self.groom)
+        # The icons' column: room for a level's tube when the groom has tube levels (every row then
+        # keeps its place, so the eyes line up).
+        self.tree.header().resizeSection(2, theme.px(112 if self._tube_levels else 86))
         named = _group_users(self.groom)
         pending = list(groups)
         while pending:  # parents before children
@@ -667,9 +670,15 @@ class GuidesTab(_GroomTab):
                                    lambda m: self.fill_row_menu(m, name), before=lambda: self.pick_row(name))
         more.setObjectName("groupMenu_" + name)
         icons = [segments, self._eye(name, shown), more]
-        level = getattr(self, "_tube_levels", {}).get(name)
-        if level:
-            icons.insert(1, self._tube(name, level))
+        levels = getattr(self, "_tube_levels", {})
+        if levels:
+            gap = QtWidgets.QWidget()  # (apart from the segments' count beside it)
+            gap.setFixedWidth(theme.px(4))
+            if name in levels:
+                icons[1:1] = [gap, self._tube(name, levels[name])]
+            else:  # (no tube: its place kept, the eyes in a column)
+                gap.setFixedWidth(theme.px(26))
+                icons.insert(1, gap)
         return widgets.RowStrip(tuple(icons))
 
     def _tube(self, name, level):

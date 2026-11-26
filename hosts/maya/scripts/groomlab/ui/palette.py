@@ -1091,47 +1091,56 @@ class TubePanel(QtWidgets.QWidget):
 
 
 class GuideDisplay(widgets.PopupPanel):
-    """How the guides draw, under the header's guides arrow (the Attribute Editor's Display > Guides
-    and display switches moved here, beside the eye that shows the guides): flow, tubes and
-    instances, the guides' width, points, colors, on top and smoothing; then the tubes' display
-    (the Tube card's Visibility block, add_tubes)."""
+    """What the viewport shows of the groom's guides, under the header's guides arrow: one row of
+    what shows (Guides, Parts, Flow, Tubes, Instances), then how the guides draw (width, points,
+    colors, smoothed, on top), then how the tubes draw (add_tubes: the look)."""
 
-    SWITCHES = (("displayFlow", "Flow", "The flow arrows and sinks"),
-                ("displayInstances", "Instances", "Instanced meshes on the strands"),
-                ("displayOverlaysOnTop", "On top", "Guides, parts and flow draw over the strands"),
-                ("guideSmoothing", "Smoothed", "Guides draw as a smooth curve through their points"))
+    SHOWN = (("displayGuides", "Guides", "The guides (with their part lines and flow; the eye beside the arrow)"),
+             ("displayParts", "Parts", "The part lines the Part tool draws"),
+             ("displayFlow", "Flow", "The flow arrows and sinks"),
+             ("displayTubes", "Tubes", "Each guide's tube, drawn with every tool as set below (the Tube and Roots "
+                                       "tools show them either way)"),
+             ("displayInstances", "Instances", "Instanced meshes on the strands"))
+    LOOK = (("guideSmoothing", "Smoothed", "Guides draw as a smooth curve through their points"),
+            ("displayOverlaysOnTop", "On top", "Guides, parts and flow draw over the strands"))
+    POINTS = (("Off", "No dots"), ("Ends", "A dot at each guide's root and tip"), ("All", "A dot at every point"))
+    COLORS = (("Group", "Each guide group's own color"), ("Layer", "A painted guide layer's values, black to white"))
 
     def __init__(self, owner):
-        super(GuideDisplay, self).__init__(owner, width=270)
+        super(GuideDisplay, self).__init__(owner, width=372)
         self.owner = owner
         self.setObjectName("guideDisplayPopup")
         self.chips = {}
-        for attr, label, tip in self.SWITCHES:
+        for attr, label, tip in self.SHOWN + self.LOOK:
             b = widgets.chip(label, tip, False, "display_" + attr)
-            b.toggled.connect(lambda on, a=attr: self.set_attr(a, bool(on)))
+            # (Smoothed: guideSmoothing's pieces per segment, 4 on, 1 straight.)
+            b.toggled.connect(lambda on, a=attr: self.set_attr(a, (4 if on else 1) if a == "guideSmoothing" else bool(on)))
             self.chips[attr] = b
-        self.add(widgets.pill_row(self.chips.values()))
+        self.add(widgets.pill_row([self.chips[a] for a, _l, _t in self.SHOWN]))
+        self.guides_block = self.add(widgets.Block("Guides", name="guideLook"))
         self.width_field = widgets.SoftSlider(2.0, 1.0, 6.0, minimum=0.5, maximum=20.0, key=None, label="Width",
                                               suffix="px")
         self.width_field.setToolTip("The guides' width in pixels")
         self.width_field.committed.connect(lambda v: self.set_attr("guideWidth", float(v)))
-        self.add(self.width_field)
-        self.points = QtWidgets.QComboBox()
-        for label in ("Off", "Roots and tips", "All"):
-            self.points.addItem(label)
-        self.points.setToolTip("The guides' points as dots: off, roots and tips, or every point")
-        self.points.activated.connect(lambda i: self.set_attr("guidePoints", int(i)))
-        row, _ = widgets.field_row("Points", self.points)
-        self.add(row)
-        self.colors = QtWidgets.QComboBox()
-        for label in ("Group", "Painted Layer"):
-            self.colors.addItem(label)
-        self.colors.setToolTip("Each guide group's own color, or a painted guide layer's values")
-        self.colors.activated.connect(lambda i: self.set_attr("guideColorMode", int(i)))
-        row, _ = widgets.field_row("Colors", self.colors)
-        self.add(row)
+        self.guides_block.add(self.width_field)
+        self.points = self._segments("Points", "guidePoints", self.POINTS)
+        self.colors = self._segments("Colors", "guideColorMode", self.COLORS)
+        self.guides_block.add(widgets.pill_row([self.chips[a] for a, _l, _t in self.LOOK]))
         self.about_to_show.append(self.read)
-        self.about_to_show.append(lambda: owner.read_tube_display())
+
+    def _segments(self, title, attr, items):
+        """A setting of a few choices as a track of segments (its index the attribute's value)."""
+        group = QtWidgets.QButtonGroup(self)
+        group.setExclusive(True)
+        buttons = []
+        for i, (label, tip) in enumerate(items):
+            b = widgets.chip(label, tip, i == 0, "display_%s_%d" % (attr, i))
+            group.addButton(b, i)
+            buttons.append(b)
+        group.buttonClicked.connect(lambda b, a=attr, g=group: self.set_attr(a, int(g.id(b))))
+        row, _ = widgets.field_row(title, widgets.seg_row(buttons))
+        self.guides_block.add(row)
+        return group
 
     def add_tubes(self, block):
         """The tubes' display (Shaded, Wireframe, Colors, level colors, with every tool)."""
@@ -1151,15 +1160,21 @@ class GuideDisplay(widgets.PopupPanel):
         for attr, b in self.chips.items():
             b.blockSignals(True)
             try:
-                b.setChecked(bool(cmds.getAttr(groom + "." + attr)))
-            except (RuntimeError, ValueError):
+                value = cmds.getAttr(groom + "." + attr)
+                b.setChecked(int(value) > 1 if attr == "guideSmoothing" else bool(value))
+            except (RuntimeError, ValueError, TypeError):
                 pass
             b.blockSignals(False)
+        for attr, group in (("guidePoints", self.points), ("guideColorMode", self.colors)):
+            try:
+                button = group.button(int(cmds.getAttr(groom + "." + attr)))
+            except (RuntimeError, ValueError, TypeError):
+                button = None
+            if button is not None:
+                button.setChecked(True)
         try:
             if not self.width_field.busy():
                 self.width_field.setValue(float(cmds.getAttr(groom + ".guideWidth")))
-            self.points.setCurrentIndex(int(cmds.getAttr(groom + ".guidePoints")))
-            self.colors.setCurrentIndex(int(cmds.getAttr(groom + ".guideColorMode")))
         except (RuntimeError, ValueError, TypeError):
             pass
 
@@ -1580,16 +1595,11 @@ class ToolPalette(QtWidgets.QWidget):
         self.tube_channel_row = widgets.seg_row(self.tube_channel_buttons.values())  # one of them: a track
         self.tube_channel_row.setToolTip(_setting("tubeChannel", "hint"))
         self.brush_block.body.insertWidget(0, self.tube_channel_row)
-        # The tubes' display (the header's guides menu, add_tubes): one switch, the groom's Tubes
-        # (displayTubes: shown with every tool; the Tube and Roots tools show them either way), the
-        # look they are drawn with, and the level whose tubes show (the Lock view).
+        # The tubes' look (the header's guides menu, add_tubes); whether they show with every tool
+        # is its Tubes pill (the groom's displayTubes: tube_show), which level's a level row's tube.
         self.tube_channel_box = widgets.Block("Tubes", name="paintsBlock")
         self.tube_channel_box.setToolTip("How the tubes are drawn")
-        self.tube_show = widgets.switch("Show tubes", "Draw each guide's tube with every tool (Comb, Select, ...); "
-                                        "the Tube and Roots tools show them either way. Kept with the groom",
-                                        False, "displayTubes")
-        self.tube_show.toggled.connect(self.set_tubes_shown)
-        self.tube_channel_box.add(self.tube_show.row)
+        self.tube_show = self.display_popup.chips["displayTubes"]
         # The look, each on its own: shaded surfaces (off by default) to judge the profiles' shapes,
         # see-through wires (on), each tube in its root tube's color, each split tube a shade of its own.
         self.tube_shaded = widgets.chip("Shaded", "Draw the tubes as shaded surfaces, to judge the profiles' shapes",
@@ -1608,16 +1618,6 @@ class ToolPalette(QtWidgets.QWidget):
         self.tube_look = widgets.pill_row((self.tube_shaded, self.tube_wireframe, self.tube_colors,
                                            self.tube_level_colors))
         self.tube_channel_box.add(self.tube_look)
-        # Level: the tubes of one level of a tube hierarchy kept in view whichever level's guides
-        # are picked (view level 2's tubes, comb level 1's guides); Follow guides: as their guides.
-        self.tube_level = QtWidgets.QComboBox()
-        self.tube_level.setObjectName("tubeViewLevel")
-        self.tube_level.setToolTip("Which level's tubes show: Follow guides (the tubes of the guides shown), or one "
-                                   "level of the tube hierarchy kept in view whichever level's guides you pick and "
-                                   "comb (its row's tube in Guide groups; the Roots card's Lock view)")
-        self.tube_level.activated.connect(lambda _i: self.set_tube_view(self.tube_level.currentData() or ""))
-        self.tube_level_row, _ = widgets.field_row("Level", self.tube_level)
-        self.tube_channel_box.add(self.tube_level_row)
         self.display_popup.add_tubes(self.tube_channel_box)  # (the tubes' display: the header's guides menu)
 
         # Select: the soft radius (its selection's), then the profile and the selected guides' tubes.
@@ -2516,19 +2516,24 @@ class ToolPalette(QtWidgets.QWidget):
 
     def show_picked_level(self):
         """A level of a tube hierarchy picked (the list, Page Up / Down, the Roots card): its guides
-        shown and its other levels' hidden, as the Roots card's level row does; the level kept in
-        view (the tubes' Level) stays."""
+        alone (the level view; Mixed view: with the tubes of the levels above it does not continue),
+        the eyes as the artist left them; another group or all groups: every group as its eye
+        says. The level kept in view (a level row's tube) stays."""
         group = self.current_group()
-        if group == getattr(self, "_level_shown", None):
-            return
-        self._level_shown = group
         groom = self.groom()
-        info = self.tube_hierarchy(groom, group) if group else None
-        if not info or group not in info["levels"]:
+        if (groom, group) == getattr(self, "_level_shown", None):
+            return
+        self._level_shown = (groom, group)
+        if not groom:
             return
         from groomlab import root_tubes
+        info = self.tube_hierarchy(groom, group) if group else None
         try:
-            root_tubes.show_level_guides(groom, info["base"], info["levels"].index(group) + 1)
+            if info and group in info["levels"]:
+                root_tubes.show_level_guides(groom, info["base"], info["levels"].index(group) + 1,
+                                             solo=not self.root_card.mixed_view.isChecked())
+            else:
+                root_tubes.set_mixed_view(groom, "", 0)
         except (RuntimeError, ValueError) as e:
             self.status.setText(str(e).strip())
 
@@ -3118,18 +3123,6 @@ class ToolPalette(QtWidgets.QWidget):
         except (RuntimeError, ValueError):
             return ""
 
-    def set_tubes_shown(self, on):
-        """Show tubes: the groom's Tubes switch (displayTubes), drawn with the look whatever tool is up."""
-        from maya import cmds
-        groom = self.groom()
-        if not groom:
-            return
-        try:
-            if bool(cmds.getAttr(groom + ".displayTubes")) != bool(on):
-                cmds.setAttr(groom + ".displayTubes", bool(on))
-        except RuntimeError as e:
-            self.status.setText(str(e))
-
     def set_tube_view(self, group):
         """Keep level `group`'s tubes in view whichever level's guides are picked ("": the tubes
         follow their guides). The tubes show (Show tubes) so the pick is seen with any tool."""
@@ -3161,32 +3154,8 @@ class ToolPalette(QtWidgets.QWidget):
         return info["levels"].index(group) + 1 if info and group in info["levels"] else 0
 
     def read_tube_display(self):
-        """Show tubes and Level as the groom stands (the popup opening, a pick, an undo)."""
-        from maya import cmds
-        groom = self.groom()
-        shown = False
-        if groom:
-            try:
-                shown = bool(cmds.getAttr(groom + ".displayTubes"))
-            except (RuntimeError, ValueError):
-                pass
-        self.tube_show.blockSignals(True)
-        self.tube_show.setChecked(shown)
-        self.tube_show.blockSignals(False)
-        viewed = self.tube_view(groom)
-        info = self.tube_hierarchy(groom, viewed or None)
-        self.tube_level.blockSignals(True)
-        self.tube_level.clear()
-        self.tube_level.addItem("Follow guides", "")
-        for n, name in enumerate((info or {}).get("levels") or []):
-            self.tube_level.addItem("Level %d" % (n + 1), name)
-        index = self.tube_level.findData(viewed) if viewed else 0
-        if viewed and index < 0:
-            self.tube_level.addItem(viewed, viewed)  # (a group of no hierarchy: kept as it is)
-            index = self.tube_level.count() - 1
-        self.tube_level.setCurrentIndex(max(0, index))
-        self.tube_level.setEnabled(self.tube_level.count() > 1)
-        self.tube_level.blockSignals(False)
+        """The guides display as the groom stands (a pin from a level row, an undo)."""
+        self.display_popup.read()
 
     def push_tube_display(self):
         """The tubes' look (the guides display: Shaded, Wireframe, Colors, Level colors) to the brush

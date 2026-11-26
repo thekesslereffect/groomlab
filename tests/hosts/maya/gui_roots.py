@@ -185,6 +185,7 @@ def tube_level_pin():
     # Level (the guides display), a level row's tube in Guide groups and the Roots card's Lock view
     # are one setting, the groom's tubeViewGroup; picking a level shows its guides alone, the pin
     # stays; the Tubes switch (displayTubes) is the one way the tubes show with every tool.
+    import groomlab
     from groomlab import root_tubes
     from groomlab.ui import palette
     groom = state["groom"]
@@ -203,18 +204,29 @@ def tube_level_pin():
         check("level 2's tubes kept in view, shown with Comb up",
               cmds.getAttr(groom + ".tubeViewGroup") == deeper and cmds.getAttr(groom + ".displayTubes")
               and window.tube_show.isChecked())
-        check("the guides display's Level says so", window.tube_level.currentData() == deeper)
         check("so does the Roots card's Lock view", window.root_card.lock_view.isChecked())
         window.pick_group(base)
-        hidden = set(cmds.getAttr(groom + ".hiddenGuideGroups").split()) if cmds.getAttr(groom + ".hiddenGuideGroups") else set()
-        check("picking level 1 shows its guides alone (hidden: %s)" % sorted(hidden), base not in hidden and deeper in hidden)
+        check("picking level 1 shows its guides alone, the eyes left alone (%s)" % cmds.getAttr(groom + ".mixedView"),
+              (cmds.getAttr(groom + ".mixedView") or "").startswith(base + ":1") and not groomlab.hidden_guide_groups(groom))
+        # A group's eye hides it whatever level is picked (the level view never overrides it).
+        eye = window.findChild(QtWidgets.QToolButton, "groupEye_" + base)
+        eye.click()
+        settle_undo()
+        check("the eye hides level 1", base in groomlab.hidden_guide_groups(groom))
+        groomlab.show_guide_group(groom, base, True)
+        window.pick_group("")
+        check("all groups: no level view", not cmds.getAttr(groom + ".mixedView"))
+        window.pick_group(base)
         check("the pin stays while level 1 is combed", cmds.getAttr(groom + ".tubeViewGroup") == deeper)
         check("the card says what shows", "tubes: Level 2" in window.card_editing.text())
         window.tube_show.setChecked(False)
         check("Show tubes off: the groom's switch", not cmds.getAttr(groom + ".displayTubes"))
         window.set_tube_view("")
-        check("Follow guides: no pin, no Lock view", cmds.getAttr(groom + ".tubeViewGroup") == ""
-              and not window.root_card.lock_view.isChecked() and window.tube_level.currentData() == "")
+        check("unpinned: the tubes follow their guides, no Lock view", cmds.getAttr(groom + ".tubeViewGroup") == ""
+              and not window.root_card.lock_view.isChecked())
+        window.display_popup.chips["displayParts"].setChecked(False)
+        check("Parts off: the groom's displayParts", not cmds.getAttr(groom + ".displayParts"))
+        window.display_popup.chips["displayParts"].setChecked(True)
     finally:
         window.stop_tool()
         window.close()

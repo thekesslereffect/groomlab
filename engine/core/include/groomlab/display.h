@@ -335,17 +335,22 @@ struct TubeDisplayOptions {
 // The tube hierarchy's Mixed view ("<base group>:<level>", "" off): working on a level, its guides
 // and tubes show, and the tubes (not the guides) of the levels above that no level below continues
 // (a guide there with no children); the hierarchy's others not, whichever of its groups are hidden.
+// The level picked in a tube hierarchy: its guides alone, whichever level they are of; with
+// ":solo" after the level ("<base group>:<level>:solo", Mixed view off), no tubes of the levels
+// above either. A group hidden by its eye stays hidden whatever the view (only its pinned tubes,
+// tubeViewGroup, show).
 class MixedView {
 public:
     MixedView(const GuideHierarchy* hierarchy, const std::string& spec);
     // 1 its guide and tube shown (the level worked on), 2 its tube alone (a level above, not
-    // continued), 0 neither, -1 not the hierarchy's (or the view off): as its group says.
+    // continued; never solo), 0 neither, -1 not the hierarchy's (or the view off): as its group says.
     int shows(const GuideHierarchy& hierarchy, const HierarchyGuide& g) const;
     bool on() const { return level_ > 0; }
 
 private:
     std::string base_;
     int level_ = 0;
+    bool solo_ = false;
     std::set<GuideId> parents_;
 };
 // Whether a guide of group `name` (hidden: its guides hidden) draws its tube under `tubeViewGroup`.
@@ -499,8 +504,9 @@ struct DisplaySettings {
     // hides them for a stroke; the guides, the selection and the overlays stay. A viewport toggle:
     // renders and exports never read it.
     bool hair = true;
-    // Guides (off: their part lines and flow arrows hidden with them).
-    bool guides = true;
+    // Guides (off: their part lines and flow arrows hidden with them); `parts`: the part lines
+    // (the Part tool's), shown with the guides.
+    bool guides = true, parts = true;
     // The tubes (buildTubeDisplay, every host's, as Maya's draw override shows them), one way of
     // drawing them: shown with every tool (`tubes`: the groom's Tubes switch, the guides display) or
     // while the Tube or Roots tool is up (`toolTubes`), each guide's tube as a wire (tubeWires; the

@@ -367,11 +367,6 @@ class RootTubeCard(QtCore.QObject):
         picked = self.owner.current_group()
         current = levels.index(picked) + 1 if picked in levels else 1
         self._current = current
-        if groom and base:
-            try:  # (Mixed view follows the level shown)
-                root_tubes.set_mixed_view(groom, base, current if self.mixed_view.isChecked() else 0)
-            except RuntimeError:
-                pass
         if self._locked and (base != self._locked_base or self._locked > len(levels)):
             self._unlock()  # (another hierarchy, or its locked level gone)
         state = (base, tuple(levels), current)
@@ -649,8 +644,8 @@ class RootTubeCard(QtCore.QObject):
     def _after_levels(self, groom, base, level):
         """The level `level` shown and picked (the brushes and new guides work there)."""
         self.owner.fill_levels(groom)
-        group = root_tubes.show_tube_level(groom, base, level, self._locked if self._locked_base == base else 0)
-        root_tubes.set_mixed_view(groom, base, level if self.mixed_view.isChecked() else 0)
+        group = root_tubes.show_tube_level(groom, base, level, self._locked if self._locked_base == base else 0,
+                                           solo=not self.mixed_view.isChecked())
         self.owner.pick_group(group)
         self._levels = None
         self.fill_levels(groom)
@@ -691,7 +686,8 @@ class RootTubeCard(QtCore.QObject):
         if not groom:
             return
         try:
-            root_tubes.set_mixed_view(groom, self._base, self._current if on and self._base else 0)
+            if self.owner.current_group() and self._base:  # (a level picked: its view, with or without the levels above)
+                root_tubes.set_mixed_view(groom, self._base, self._current, solo=not on)
         except RuntimeError as e:
             self.owner.status.setText(str(e).strip())
             return

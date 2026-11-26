@@ -188,6 +188,7 @@ public:
     // with a preview of the field when displayFlow is on.
     static MObject aFlowData;
     static MObject aDisplayFlow;
+    static MObject aDisplayParts;  // the part lines (with the guides)
     static MObject aCorrectiveData;
     // Sculpt nodes (sculpt.h): their brushed edits by node name (sculptData, JSON), and the Sculpt
     // node brushes shape ("" none: the guides or a corrective), whose output the viewport shows as

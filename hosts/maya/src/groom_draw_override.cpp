@@ -756,6 +756,7 @@ DisplaySettings GroomSubSceneOverride::readSettings() {
     s.braidTubes = MPlug(object_, GroomShape::aBraidTubes).asString().asChar();  // Show Tubes' nodes
     s.guideColorSeed = guideColorSeedOf(object_);  // the groom's own hue: two grooms' groups differ
     s.flow = displayFlag(GroomShape::aDisplayFlow);
+    s.parts = displayFlag(GroomShape::aDisplayParts);
     s.theme = displayTheme();
     return s;
 }

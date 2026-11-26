@@ -1272,11 +1272,18 @@ class PopupPanel(QtWidgets.QFrame):
             self.body.addWidget(item)
         return item
 
+    def fit(self):
+        """As tall as its rows at its width (rows that wrap, pills, report their height for the
+        width: adjustSize alone takes their one-column height, the rest spread as gaps)."""
+        self.adjustSize()
+        if self.body.hasHeightForWidth():
+            self.setFixedHeight(self.body.totalHeightForWidth(self.width()))
+
     def show_under(self, anchor):
         """Open under `anchor` (its right edges lined up), kept on the screen."""
         for fn in list(self.about_to_show):
             fn()
-        self.adjustSize()
+        self.fit()
         point = anchor.mapToGlobal(QtCore.QPoint(anchor.width() - self.width(), anchor.height() + 2))
         screen = QtWidgets.QApplication.desktop().availableGeometry(anchor) if hasattr(
             QtWidgets.QApplication, "desktop") else anchor.screen().availableGeometry()
