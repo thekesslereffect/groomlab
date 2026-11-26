@@ -470,9 +470,10 @@ public:
     std::vector<PortSpec> inputs() const override { return {{"scalp", PortType::Mesh}, {"guides", PortType::Guides, true}}; }
     std::vector<ParamSpec> paramSpecs() const override {
         return {
+            // (Per cm²: a head of hair is 80 to 120, so the slider runs to 200; fur and more are typed.)
             notAnimatable({"density", 80.0, "Strands per unit area (mappable: texture, color set, expression, guide layer)", "density"})
                 .atLeast(0)
-                .soft(0, 2000)
+                .soft(0, 200)
                 .asInput(),
             notAnimatable({"segments", std::int64_t{0},
                            "Segments its strands grow with (points: one more). 0: as many as the Resample after it asks "
