@@ -52,6 +52,41 @@ class TypedValues(unittest.TestCase):
                 uikit.evaluate(text)
 
 
+class TypedLengths(unittest.TestCase):
+    """A length field (uikit.Prop's): shown as the scene shows lengths, a bare number typed read in
+    the unit it shows (a tester typed 0.15 in a field showing 0.15 mm and got 0.15 m)."""
+
+    def units(self, system="METRIC", length_unit="ADAPTIVE", scale=1.0):
+        return types.SimpleNamespace(system=system, length_unit=length_unit, scale_length=scale)
+
+    def test_a_bare_number_is_in_the_shown_unit(self):
+        units = self.units()
+        shown = uikit.length_text(0.00015, units)
+        self.assertEqual(shown.replace(" ", ""), "0.15mm")
+        self.assertAlmostEqual(uikit.parse_length("0.15", shown, units), 0.00015, places=9)
+        self.assertAlmostEqual(uikit.parse_length("0.3", shown, units), 0.0003, places=9)
+        self.assertAlmostEqual(uikit.parse_length("2cm", shown, units), 0.02, places=7)  # its own unit
+        self.assertAlmostEqual(uikit.parse_length("0.15*2", shown, units), 0.0003, places=9)
+
+    def test_the_scenes_length_unit(self):
+        units = self.units(length_unit="CENTIMETERS")
+        shown = uikit.length_text(0.15, units)
+        self.assertEqual(shown, "15 cm")
+        self.assertAlmostEqual(uikit.parse_length("20", shown, units), 0.2, places=7)
+        self.assertEqual(uikit.length_text(0.00015, units), "0.015 cm")
+
+    def test_the_unit_scale(self):
+        units = self.units(length_unit="CENTIMETERS", scale=0.01)  # a Blender unit is a centimeter
+        shown = uikit.length_text(15.0, units)
+        self.assertEqual(shown, "15 cm")
+        self.assertAlmostEqual(uikit.parse_length("2", shown, units), 2.0, places=6)
+
+    def test_no_unit_system(self):
+        units = self.units(system="NONE")
+        self.assertEqual(uikit.length_text(0.15, units), "0.15")
+        self.assertAlmostEqual(uikit.parse_length("0.3", "0.15", units), 0.3)
+
+
 class Assets(unittest.TestCase):
     def test_icons_read(self):
         names = sorted(f[:-4] for f in os.listdir(uikit.ICON_DIR) if f.endswith(".png"))
@@ -397,4 +432,4 @@ class CharcoalTheme(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    bu.run(TypedValues, Assets, Props, Themes, Window, Drawn, Editors, CharcoalTheme)
+    bu.run(TypedValues, TypedLengths, Assets, Props, Themes, Window, Drawn, Editors, CharcoalTheme)

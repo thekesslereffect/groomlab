@@ -611,6 +611,39 @@ def evaluate(text, current=0.0):
     return value
 
 
+# A scene's length unit (unit_settings.length_unit, not Adaptive): meters a unit, and what its value
+# is shown with (a word Blender reads back: bpy.utils.units.to_value).
+LENGTH_UNITS = {"KILOMETERS": (1000.0, "km"), "METERS": (1.0, "m"), "CENTIMETERS": (0.01, "cm"),
+                "MILLIMETERS": (0.001, "mm"), "MICROMETERS": (1e-6, "um"), "MILES": (1609.344, "mi"),
+                "FEET": (0.3048, "ft"), "INCHES": (0.0254, "in"), "THOU": (0.0000254, "thou")}
+
+
+def length_text(value, units):
+    """A length in Blender units as the scene shows lengths (`units`: its unit_settings): in its
+    length unit when it picked one (Blender's own fields: 15 cm, not 150 mm), else in the unit that
+    reads best (Adaptive); with no unit system, the number alone."""
+    meters = value * (units.scale_length or 1.0)
+    if units.system == "NONE":
+        return ("%.4f" % value).rstrip("0").rstrip(".") or "0"
+    unit = LENGTH_UNITS.get(units.length_unit)
+    if unit is None:
+        return bpy.utils.units.to_string(units.system, "LENGTH", meters, precision=3)
+    shown = meters / unit[0]
+    # (Four significant figures, no exponent: 15 cm, 0.015 cm, 1234 cm.)
+    digits = max(0, min(6, 3 - int(math.floor(math.log10(abs(shown)))))) if shown else 0
+    return "%s %s" % (("%.*f" % (digits, shown)).rstrip("0").rstrip(".") or "0", unit[1])
+
+
+def parse_length(text, current, units):
+    """A typed length back in Blender units: with its unit (2cm, 1.5 mm), or a bare number in the unit
+    the field shows (`current`: its text, as Blender reads a field's own: "0.15" in a field showing
+    0.15 mm is 0.15 mm, not 0.15 m); arithmetic too. Raises ValueError."""
+    if units.system == "NONE":
+        return evaluate(text, None)
+    meters = bpy.utils.units.to_value(units.system, "LENGTH", text, str_ref_unit=current)
+    return meters / (units.scale_length or 1.0)
+
+
 class Prop:
     """An RNA property of `owner` by name: its value and what the widgets need of its definition."""
 
@@ -676,8 +709,7 @@ class Prop:
             text = str(int(value))
             return text + " px" if self.rna.subtype == "PIXEL" else text
         if self.length_unit:
-            units = bpy.context.scene.unit_settings
-            return bpy.utils.units.to_string(units.system, "LENGTH", value * units.scale_length, precision=3)
+            return length_text(value, bpy.context.scene.unit_settings)
         if self.rna.subtype == "PERCENTAGE":
             return "%d%%" % round(value)
         digits = max(0, min(int(self.rna.precision), 4)) if self.rna.precision else 2
@@ -699,9 +731,8 @@ class Prop:
         if self.kind == "STRING":
             return text
         if self.length_unit:
-            units = bpy.context.scene.unit_settings
             try:
-                return bpy.utils.units.to_value(units.system, "LENGTH", text) / (units.scale_length or 1.0)
+                return parse_length(text, self.text(), bpy.context.scene.unit_settings)
             except ValueError:
                 pass
         return evaluate(text, self.get())
