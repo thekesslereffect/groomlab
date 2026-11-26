@@ -9,7 +9,8 @@
 #include <string>
 
 #include "groomlab/version.h"
-#include "mcp_tools.h"
+#include "groomlab/editor/agent_tools.h"
+#include "mcp_groom.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -75,7 +76,7 @@ json initializeResult(const json& params) {
             {"instructions", kInstructions}};
 }
 
-json handleOne(McpTools& tools, const json& message) {
+json handleOne(agent::AgentTools& tools, const json& message) {
     if (!message.is_object()) return errorResponse(nullptr, kInvalidRequest, "a message must be a JSON object");
     if (!message.contains("method") && (message.contains("result") || message.contains("error"))) return json();  // a response: none expected
     const bool isRequest = message.contains("id");
@@ -103,7 +104,7 @@ json handleOne(McpTools& tools, const json& message) {
             const json arguments = params.value("arguments", json::object());
             if (!arguments.is_object()) return errorResponse(id, kInvalidParams, "the arguments must be a JSON object");
             std::cerr << "groomlab mcp: " << name << "\n";
-            const ToolResult result = tools.call(name, arguments);
+            const agent::ToolResult result = tools.call(name, arguments);
             return resultResponse(id, {{"content", result.content}, {"isError", result.isError}});
         }
         if (method == "resources/list") return resultResponse(id, {{"resources", json::array()}});
@@ -174,7 +175,7 @@ void send(std::FILE* out, const json& message) {
 
 }  // namespace
 
-json handleMcpMessage(McpTools& tools, const json& message) {
+json handleMcpMessage(agent::AgentTools& tools, const json& message) {
     if (message.is_array()) {  // a batch (2025-03-26): the responses together, none for notifications alone
         if (message.empty()) return errorResponse(nullptr, kInvalidRequest, "an empty batch");
         json responses = json::array();
@@ -213,7 +214,8 @@ int runMcpServer(int argc, char** argv) {
         return 1;
     }
     std::cerr << "groomlab mcp " << kVersionString << ": root " << rootPath.u8string() << "\n";
-    McpTools tools({rootPath.u8string(), executableDir(argc > 0 ? argv[0] : nullptr)});
+    HeadlessTarget target(rootPath.u8string(), executableDir(argc > 0 ? argv[0] : nullptr));
+    agent::AgentTools tools(target);
 
     std::string line;
     while (std::getline(std::cin, line)) {

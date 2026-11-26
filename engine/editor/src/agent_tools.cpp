@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
-// The MCP tools (mcp_tools.h): each tool's schema and description, written for a language model,
+// The agent tools (agent_tools.h): each tool's schema and description, written for a language model,
 // and what it does. The arguments are checked against the schema first (unknown names, missing
 // ones, wrong types), then by each tool (ranges, names, paths inside the root).
 
-#include "mcp_tools.h"
+#include "groomlab/editor/agent_tools.h"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 
-#include "cli_export.h"
-#include "groomlab/alembic_io.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_edit.h"
@@ -28,11 +28,8 @@
 #include "groomlab/presets.h"
 #include "groomlab/schema.h"
 #include "groomlab/tube.h"
-#include "mcp_groom.h"
-#include "mesh_files.h"
-#include "preview_render.h"
 
-namespace groomlab::cli {
+namespace groomlab::agent {
 
 namespace {
 
@@ -227,7 +224,7 @@ TubeProfile tubeFrom(const json& t, TubeProfile base, const GuideHierarchy& h) {
 }
 
 // String params that name files (a texture map, curves to import) must lie inside the root too.
-void checkParamPaths(const Workspace& w, const json& value) {
+void checkParamPaths(const AgentFolders& w, const json& value) {
     if (value.is_object() || value.is_array()) {
         for (const json& v : value) checkParamPaths(w, v);
         return;
@@ -240,7 +237,7 @@ void checkParamPaths(const Workspace& w, const json& value) {
     const bool looksLikeFile = s.find('/') != std::string::npos || s.find('\\') != std::string::npos ||
                                fileTypes.count(lower(fs::u8path(s).extension().u8string())) != 0;
     if (looksLikeFile && !w.insideRoot(s)) {
-        throw ToolError("the file '" + s + "' is outside the folder this server may use (" + w.root() +
+        throw ToolError("the file '" + s + "' is outside the folder this server may use (" + w.root +
                         "): copy it into that folder, or start the server with a --root that holds it");
     }
 }
@@ -468,12 +465,87 @@ struct Random {
     double unit() { return static_cast<double>(next() >> 11) * (1.0 / 9007199254740992.0); }
 };
 
+// ---- The groom -------------------------------------------------------------------------------------
+
+// The groom's graph as JSON text (the default graph for an empty one) and its guide hierarchy's.
+std::string graphText(AgentGroom& g) { return graphOrDefault(g.session().data().graphJson); }
+std::string hierarchyText(AgentGroom& g) { return g.session().data().hierarchyJson; }
+
+// The scalp size presets and new nodes are fitted to (presetScalpSize, the groom's own scale
+// divided out); nullopt without a scalp.
+std::optional<double> fitSize(AgentGroom& g) {
+    GroomSession& s = g.session();
+    const MeshPtr& scalp = s.rawScalp();
+    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
+    if (size && s.groomScale() > 0.0) *size /= s.groomScale();
+    return size;
+}
+
+// An edit: `change` gets copies of the graph and the hierarchy JSON and changes them; what changed
+// goes to the groom as one undo step named `label` (ToolError, nothing changed, when the graph
+// would not load).
+void edit(AgentGroom& g, const std::string& label, const std::function<void(std::string& graph, std::string& hierarchy)>& change) {
+    const std::string oldGraph = graphText(g), oldHierarchy = hierarchyText(g);
+    std::string graph = oldGraph, hierarchy = oldHierarchy;
+    change(graph, hierarchy);
+    if (graph == oldGraph && hierarchy == oldHierarchy) return;
+    auto stroke = std::make_shared<StrokeEdit>();
+    stroke->mode = "agent";
+    if (graph != oldGraph) {
+        stroke->set(StrokeField::Graph, graph);
+        stroke->text(StrokeField::Graph).before = oldGraph;
+        stroke->text(StrokeField::Graph).hasBefore = true;
+    }
+    if (hierarchy != oldHierarchy) {
+        stroke->set(StrokeField::Guides, hierarchy);
+        stroke->text(StrokeField::Guides).before = oldHierarchy;
+        stroke->text(StrokeField::Guides).hasBefore = true;
+    }
+    GroomEdit step;
+    step.label = label;
+    step.stroke = std::move(stroke);
+    g.commit(std::move(step));
+}
+
+// Evaluates the groom (at its frame) and says how it went: strand and point counts, bounds,
+// errors, the nodes' notes, the time.
+json summary(AgentGroom& g, float density = 1.0f, const std::string& viewNode = {}, bool timings = false) {
+    ViewRequest request;
+    request.density = density;
+    request.viewNode = viewNode;
+    request.time = frameToSeconds(g.frame, g.framesPerSecond());
+    request.wantBounds = true;
+    const auto t0 = std::chrono::steady_clock::now();
+    const ViewResult& view = g.view(request);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    json out;
+    out["strands"] = view.strands ? view.strands->strandCount() : 0;
+    out["points"] = view.strands ? view.strands->pointCount() : 0;
+    out["guides"] = view.hierarchy ? view.hierarchy->guides().size() : 0;
+    if (density < 1.0f) out["density"] = density;
+    if (!view.viewedNode.empty()) out["node"] = view.viewedNode;
+    if (view.bounds.valid) out["bounds"] = {{"min", vec(view.bounds.lo)}, {"max", vec(view.bounds.hi)}};
+    out["errors"] = view.errors;
+    json notes = json::object();
+    for (const auto& [node, note] : g.session().nodeNotes()) notes[node] = note;
+    if (!notes.empty()) out["notes"] = notes;
+    out["ms"] = static_cast<long long>(ms + 0.5);
+    if (timings) {
+        auto times = g.session().nodeTimes();
+        std::sort(times.begin(), times.end(), [](const auto& a, const auto& b) { return a.second > b.second || (a.second == b.second && a.first < b.first); });
+        json slow = json::object();
+        for (std::size_t i = 0; i < times.size() && i < 12; ++i) slow[times[i].first] = std::round(times[i].second * 10.0) / 10.0;
+        out["nodeMs"] = slow;
+    }
+    return out;
+}
+
 }  // namespace
 
 // ==== The tools ======================================================================================
 
-struct McpTools::Impl {
-    Workspace w;
+struct AgentTools::Impl {
+    AgentTarget& target;
 
     struct Tool {
         std::string name, title, description;
@@ -482,12 +554,14 @@ struct McpTools::Impl {
     };
     std::vector<Tool> tools;
 
-    explicit Impl(const McpSettings& s) : w(s.root, s.exeDir) { define(); }
+    explicit Impl(AgentTarget& on) : target(on) { define(); }
+
+    const AgentFolders& files() const { return target.folders(); }
 
     // Ends a changing tool's answer: what the groom is now.
-    json withSummary(Groom& g, json out) {
-        out["groom"] = g.name;
-        out["summary"] = w.summary(g);
+    json withSummary(AgentGroom& g, json out) {
+        out["groom"] = g.name();
+        out["summary"] = summary(g);
         return out;
     }
 
@@ -528,9 +602,9 @@ struct McpTools::Impl {
 
     ToolResult describeNode(const json& a) {
         if (a.contains("node")) {
-            Groom& g = w.groom(str(a, "groom"));
+            AgentGroom& g = target.groom(str(a, "groom"));
             const std::string name = str(a, "node");
-            const std::string graphText = Workspace::graphText(g);
+            const std::string graphText = agent::graphText(g);
             const json node = nodeJsonOf(json::parse(graphText), name);
             json spec = trimSpec(json::parse(GraphEdit(graphText).nodeSpecJson(name)));
             const json values = node.value("params", json::object());
@@ -566,7 +640,7 @@ struct McpTools::Impl {
 
     ToolResult listPresets(const json&) {
         json presets = json::array();
-        for (const PresetInfo& p : groomlab::listPresets(w.presetDirs())) {
+        for (const PresetInfo& p : groomlab::listPresets(files().presetDirs())) {
             json e = {{"name", p.name}, {"title", p.title}};
             if (!p.category.empty()) e["category"] = p.category;
             if (!p.description.empty()) e["description"] = p.description;
@@ -577,9 +651,9 @@ struct McpTools::Impl {
 
     std::vector<std::pair<std::string, std::string>> sampleMeshes() const {
         std::vector<std::pair<std::string, std::string>> out;  // (sample name, file)
-        if (w.meshDir().empty()) return out;
+        if (files().meshDir.empty()) return out;
         std::error_code ec;
-        for (const auto& entry : fs::directory_iterator(fs::u8path(w.meshDir()), ec)) {
+        for (const auto& entry : fs::directory_iterator(fs::u8path(files().meshDir), ec)) {
             if (!entry.is_regular_file() || lower(entry.path().extension().u8string()) != ".obj") continue;
             std::string stem = entry.path().stem().u8string();
             const auto underscore = stem.find('_');
@@ -607,7 +681,7 @@ struct McpTools::Impl {
     }
 
     ToolResult getDocs(const json& a) {
-        const std::vector<DocPage> pages = readDocs(w.docsDir());
+        const std::vector<DocPage> pages = readDocs(files().docsDir);
         if (pages.empty()) throw ToolError("the docs are not installed beside groomlab-cli; read them at " + std::string(kSiteDocs));
         const std::string topic = lower(str(a, "topic"));
         if (topic.empty()) {
@@ -668,7 +742,7 @@ struct McpTools::Impl {
             throw ToolError("no sample mesh '" + mesh + "' (samples: " + (names.empty() ? std::string("none installed") : names) +
                             "; or give a .obj or .abc file's path)");
         }
-        const std::string path = w.resolve(mesh);
+        const std::string path = files().resolve(mesh);
         std::error_code ec;
         const auto size = fs::file_size(fs::u8path(path), ec);
         if (ec) throw ToolError("no mesh file '" + mesh + "'");
@@ -676,23 +750,23 @@ struct McpTools::Impl {
         return path;
     }
 
-    json applyPreset(Groom& g, const std::string& preset, const std::string& mode, const std::string& after) {
+    json applyPreset(AgentGroom& g, const std::string& preset, const std::string& mode, const std::string& after) {
         std::string path;
         if (preset.find('/') != std::string::npos || preset.find('\\') != std::string::npos || hasExtension(preset, ".json")) {
-            path = w.resolve(preset);
+            path = files().resolve(preset);
         } else {
-            path = presetPath(preset, w.presetDirs());
+            path = presetPath(preset, files().presetDirs());
             if (path.empty()) throw ToolError("no preset '" + preset + "' (list_presets lists them)");
         }
         const std::string text = readText(path);
         const json parsed = json::parse(text, nullptr, false);
         if (!parsed.is_object() || !parsed.contains("nodes")) throw ToolError("'" + preset + "' is not a GroomLab preset (no \"nodes\")");
         const std::string stem = fs::u8path(path).stem().u8string();
-        const std::optional<double> size = Workspace::fitSize(g);
+        const std::optional<double> size = fitSize(g);
         json out = {{"preset", stem}, {"title", parsed.value("about", json::object()).value("title", presetTitle(stem))}, {"mode", mode}};
         if (mode == "insert") {
             std::string made;
-            w.edit(g, "insert preset " + stem, [&](std::string& graph, std::string&) {
+            edit(g, "insert preset " + stem, [&](std::string& graph, std::string&) {
                 graph = insertPresetJson(graph, text, size, after, presetNodeName(stem), &made);
             });
             out["node"] = made;
@@ -700,7 +774,7 @@ struct McpTools::Impl {
             const std::string graph = applyPresetControlsToGraph(presetGraphJson(text, size), presetControlsJson(text, size));
             // The guide groups it reads, made empty when missing (a hand-placed look: add_guides fills them).
             json groupsMade = json::array();
-            w.edit(g, "preset " + stem, [&](std::string& current, std::string& hierarchy) {
+            edit(g, "preset " + stem, [&](std::string& current, std::string& hierarchy) {
                 current = graph;
                 const std::vector<PresetGroup> groups = presetRequiredGroups(text);
                 if (groups.empty()) return;
@@ -718,7 +792,7 @@ struct McpTools::Impl {
             }
         }
         json missing = json::array();
-        const MapCatalog& maps = g.scene->session().data().maps;
+        const MapCatalog& maps = g.session().data().maps;
         for (const PresetMap& m : presetRequiredMaps(text)) {
             if (!maps.count(m.name)) missing.push_back(m.name);
         }
@@ -732,20 +806,15 @@ struct McpTools::Impl {
     ToolResult newGroom(const json& a) {
         const std::string name = str(a, "name");
         checkName(name, "a groom's name");
-        if (w.grooms().count(name)) throw ToolError("a groom named '" + name + "' is open already: pick another name");
+        if (target.find(name)) throw ToolError("a groom named '" + name + "' is open already: pick another name");
         const std::string path = meshPath(str(a, "mesh"));
-        std::shared_ptr<const ScalpMesh> mesh;
-        try {
-            mesh = readMeshFile(path, str(a, "object"));
-        } catch (const MeshFileError& e) {
-            throw ToolError(e.what());
-        }
+        const std::shared_ptr<const ScalpMesh> mesh = target.readMesh(path, str(a, "object"));
         GroomFile file;
         file.data.scalp = mesh;
         file.data.graphJson = defaultGraphJsonFor(presetScalpSize(*mesh));
         file.source = fs::u8path(path).filename().u8string();
-        Groom& g = w.add(name, std::make_unique<GroomScene>(std::move(file)));
-        g.mesh = w.insideRoot(path) ? w.shown(path) : str(a, "mesh") + " (sample)";
+        AgentGroom& g = target.open(name, std::move(file));
+        g.mesh = files().insideRoot(path) ? files().shown(path) : str(a, "mesh") + " (sample)";
         json out = {{"mesh", g.mesh}};
         Vec3f lo = mesh->points().empty() ? Vec3f() : mesh->points().front(), hi = lo;
         for (const Vec3f& p : mesh->points()) {
@@ -757,19 +826,19 @@ struct McpTools::Impl {
         try {
             if (a.contains("preset")) out["preset"] = applyPreset(g, str(a, "preset"), "replace", {});
         } catch (...) {
-            w.grooms().erase(name);  // no half-made groom
+            target.close(name);  // no half-made groom
             throw;
         }
-        g.undo.clear();  // the groom starts here
+        g.history().clear();  // the groom starts here
         return textResult(withSummary(g, out));
     }
 
     ToolResult openGroom(const json& a) {
-        const std::string path = w.resolve(str(a, "path"));
+        const std::string path = files().resolve(str(a, "path"));
         if (!hasExtension(path, ".groom")) throw ToolError("open_groom reads .groom files");
         std::string name = str(a, "name", fs::u8path(path).stem().u8string());
         checkName(name, "a groom's name");
-        if (w.grooms().count(name)) throw ToolError("a groom named '" + name + "' is open already: give another \"name\"");
+        if (target.find(name)) throw ToolError("a groom named '" + name + "' is open already: give another \"name\"");
         GroomFile file;
         try {
             file = groomFileFromJson(readText(path, 1ull << 30), fs::u8path(path).parent_path().u8string());
@@ -781,40 +850,39 @@ struct McpTools::Impl {
         std::vector<std::string> refs{file.scalpCache.file, file.guideCache.file, file.driverCache.file};
         for (const auto& [node, ref] : file.simCaches) refs.push_back(ref.file);
         for (const std::string& ref : refs) {
-            if (!ref.empty() && !w.insideRoot(ref)) throw ToolError("the groom reads '" + ref + "', outside the folder this server may use");
+            if (!ref.empty() && !files().insideRoot(ref)) throw ToolError("the groom reads '" + ref + "', outside the folder this server may use");
         }
         const json graph = json::parse(file.data.graphJson, nullptr, false);
         if (graph.is_object()) {
-            for (const json& n : graph.value("nodes", json::array())) checkParamPaths(w, n.value("params", json::object()));
+            for (const json& n : graph.value("nodes", json::array())) checkParamPaths(files(), n.value("params", json::object()));
         }
-        Groom& g = w.add(name, std::make_unique<GroomScene>(std::move(file)));
+        AgentGroom& g = target.open(name, std::move(file));
         g.path = path;
-        const GroomFile& f = g.scene->file();
-        return textResult(withSummary(g, {{"path", w.shown(path)}, {"upAxis", f.upAxis}, {"units", f.units},
-                                          {"nodes", json::parse(Workspace::graphText(g)).value("nodes", json::array()).size()}}));
+        return textResult(withSummary(g, {{"path", files().shown(path)}, {"upAxis", g.upAxis()}, {"units", g.units()},
+                                          {"nodes", json::parse(graphText(g)).value("nodes", json::array()).size()}}));
     }
 
     ToolResult listGrooms(const json&) {
         json list = json::array();
-        for (auto& [name, g] : w.grooms()) {
-            json e = {{"name", name}, {"undoSteps", g.undo.size()}, {"frame", g.frame}};
-            if (!g.path.empty()) e["path"] = w.shown(g.path);
-            if (!g.mesh.empty()) e["mesh"] = g.mesh;
+        for (AgentGroom* g : target.grooms()) {
+            json e = {{"name", g->name()}, {"undoSteps", g->history().undoIndex()}, {"frame", g->frame}};
+            if (!g->path.empty()) e["path"] = files().shown(g->path);
+            if (!g->mesh.empty()) e["mesh"] = g->mesh;
             list.push_back(e);
         }
         return textResult({{"grooms", list}});
     }
 
     ToolResult applyPresetTool(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         const std::string mode = str(a, "mode", "replace");
         if (mode == "insert" && !a.contains("after")) throw ToolError("mode insert needs \"after\": the node the look goes after");
         return textResult(withSummary(g, applyPreset(g, str(a, "preset"), mode, str(a, "after"))));
     }
 
     ToolResult getGraph(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
-        const json graph = json::parse(Workspace::graphText(g));
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const json graph = json::parse(graphText(g));
         if (flag(a, "full", false)) return textResult(graph);
         std::map<std::string, json> inputs;
         for (const json& c : graph.value("connections", json::array())) {
@@ -847,21 +915,21 @@ struct McpTools::Impl {
             if (inputs.count(name)) entry["inputs"] = inputs[name];
             nodes.push_back(entry);
         }
-        return textResult({{"groom", g.name}, {"nodes", nodes}, {"output", graph.value("output", std::string())},
+        return textResult({{"groom", g.name()}, {"nodes", nodes}, {"output", graph.value("output", std::string())},
                            {"note", "params lists only values that differ from the node's defaults (describe_node shows them all)."}});
     }
 
     ToolResult addNode(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         const std::string type = str(a, "type");
         if (type == "Script") throw ToolError("add a script node with add_script_node");
         const json params = a.value("params", json::object());
-        checkParamPaths(w, params);
+        checkParamPaths(files(), params);
         if (a.contains("name")) checkName(str(a, "name"), "a node's name");
         std::string made, placed;
-        w.edit(g, "add " + type, [&](std::string& graph, std::string&) {
+        edit(g, "add " + type, [&](std::string& graph, std::string&) {
             GraphEdit e(graph);
-            made = e.addNode(type, str(a, "name"), params.empty() ? std::string() : params.dump(), std::nullopt, std::nullopt, Workspace::fitSize(g));
+            made = e.addNode(type, str(a, "name"), params.empty() ? std::string() : params.dump(), std::nullopt, std::nullopt, fitSize(g));
             placed = placeNode(e, made, a);
             graph = e.toJson();
         });
@@ -869,11 +937,11 @@ struct McpTools::Impl {
     }
 
     ToolResult removeNode(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         const std::string node = str(a, "node");
         const bool reconnect = flag(a, "reconnect", true);
         std::vector<std::string> rejoined;
-        w.edit(g, "remove " + node, [&](std::string& graph, std::string&) {
+        edit(g, "remove " + node, [&](std::string& graph, std::string&) {
             GraphEdit e(graph);
             if (!e.hasNode(node)) throw ToolError("no node '" + node + "' in the graph");
             if (node == e.outputNode()) throw ToolError("'" + node + "' is the graph's output: it cannot be removed");
@@ -902,10 +970,10 @@ struct McpTools::Impl {
     }
 
     ToolResult connect(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         const auto [from, output] = splitSource(str(a, "from"));
         const std::string out = a.contains("output") ? str(a, "output") : output;
-        w.edit(g, "connect " + from + " -> " + str(a, "to"), [&](std::string& graph, std::string&) {
+        edit(g, "connect " + from + " -> " + str(a, "to"), [&](std::string& graph, std::string&) {
             GraphEdit e(graph);
             e.connectByHand(from, str(a, "to"), str(a, "input"), out);
             graph = e.toJson();
@@ -914,8 +982,8 @@ struct McpTools::Impl {
     }
 
     ToolResult disconnect(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
-        w.edit(g, "disconnect " + str(a, "to") + "." + str(a, "input"), [&](std::string& graph, std::string&) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        edit(g, "disconnect " + str(a, "to") + "." + str(a, "input"), [&](std::string& graph, std::string&) {
             GraphEdit e(graph);
             if (!e.disconnect(str(a, "to"), str(a, "input"))) throw ToolError("nothing feeds " + str(a, "to") + "." + str(a, "input"));
             graph = e.toJson();
@@ -924,13 +992,13 @@ struct McpTools::Impl {
     }
 
     ToolResult setParams(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         const std::string node = str(a, "node");
         const json& params = a["params"];
         if (params.empty()) throw ToolError("no params given");
-        checkParamPaths(w, params);
+        checkParamPaths(files(), params);
         std::vector<std::string> set;
-        w.edit(g, "set " + node, [&](std::string& graphText, std::string&) {
+        edit(g, "set " + node, [&](std::string& graphText, std::string&) {
             json graph = json::parse(graphText);
             json* target = nullptr;
             for (json& n : graph["nodes"]) {
@@ -981,30 +1049,30 @@ struct McpTools::Impl {
     }
 
     // The hierarchy of a groom, its scale set, to edit.
-    GuideHierarchy hierarchyOf(Groom& g) {
-        GuideHierarchy h = GuideHierarchy::fromJson(Workspace::hierarchyText(g));
-        const double k = g.scene->session().groomScale();
+    GuideHierarchy hierarchyOf(AgentGroom& g) {
+        GuideHierarchy h = GuideHierarchy::fromJson(hierarchyText(g));
+        const double k = g.session().groomScale();
         if (k > 0.0) h.setScale(static_cast<float>(k));
         return h;
     }
 
-    MeshPtr scalpOf(Groom& g) {
-        const MeshPtr scalp = g.scene->session().scalp();
+    MeshPtr scalpOf(AgentGroom& g) {
+        const MeshPtr scalp = g.session().scalp();
         if (!scalp || scalp->triangleCount() == 0) throw ToolError("the groom has no scalp");
         return scalp;
     }
 
-    Vec3f upOf(Groom& g) const { return g.scene->file().upAxis == "Z" ? Vec3f(0, 0, 1) : Vec3f(0, 1, 0); }
+    Vec3f upOf(AgentGroom& g) const { return g.upAxis() == "Z" ? Vec3f(0, 0, 1) : Vec3f(0, 1, 0); }
 
     ToolResult addGuides(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         const json& list = a["guides"];
         if (list.empty() || list.size() > kMaxGuidesPerCall) throw ToolError("give 1 to " + std::to_string(kMaxGuidesPerCall) + " guides");
         const std::string groupName = str(a, "group", "guides");
         const bool snap = flag(a, "snap", true);
         const MeshPtr scalp = scalpOf(g);
         const Vec3f down = -upOf(g);
-        const Vec3f back = g.scene->file().upAxis == "Z" ? Vec3f(0, 1, 0) : Vec3f(0, 0, -1);
+        const Vec3f back = g.upAxis() == "Z" ? Vec3f(0, 1, 0) : Vec3f(0, 0, -1);
         Vec3f lo = scalp->points().front(), hi = lo;
         for (const Vec3f& p : scalp->points()) {
             lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
@@ -1012,7 +1080,7 @@ struct McpTools::Impl {
         }
         const Vec3f middle = (lo + hi) * 0.5f;
         std::vector<GuideId> ids;
-        w.edit(g, "add guides", [&](std::string&, std::string& hierarchy) {
+        edit(g, "add guides", [&](std::string&, std::string& hierarchy) {
             GuideHierarchy h = hierarchyOf(g);
             GroupId group = h.findGroup(groupName);
             if (group == kNoGroup) group = h.addGroup(groupName);
@@ -1081,9 +1149,9 @@ struct McpTools::Impl {
     }
 
     ToolResult getGuides(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
-        const GuideHierarchy stored = GuideHierarchy::fromJson(Workspace::hierarchyText(g));
-        const HierarchyPtr live = g.scene->session().hierarchy();  // rooted on the scalp
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const GuideHierarchy stored = GuideHierarchy::fromJson(hierarchyText(g));
+        const HierarchyPtr live = g.session().hierarchy();  // rooted on the scalp
         const GuideHierarchy& h = live ? *live : stored;
         const std::string only = str(a, "group");
         const std::size_t limit = static_cast<std::size_t>(std::clamp(num(a, "limit", 100.0), 1.0, 2000.0));
@@ -1114,19 +1182,19 @@ struct McpTools::Impl {
             if (guide.isChild()) e["parent"] = guide.parent;
             guides.push_back(e);
         }
-        json out = {{"groom", g.name}, {"groups", groups}, {"guides", guides}, {"count", total}};
+        json out = {{"groom", g.name()}, {"groups", groups}, {"guides", guides}, {"count", total}};
         if (total > guides.size()) out["note"] = "the first " + std::to_string(guides.size()) + " guides are listed (raise limit)";
         return textResult(out);
     }
 
     ToolResult setTube(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         if (!a.contains("shape") && !a.contains("width") && !a.contains("aspect") && !a.contains("twist_degrees")) {
             throw ToolError("say what to set: shape, width, aspect or twist_degrees");
         }
         const MeshPtr scalp = scalpOf(g);
         std::size_t changed = 0;
-        w.edit(g, "set tubes", [&](std::string&, std::string& hierarchy) {
+        edit(g, "set tubes", [&](std::string&, std::string& hierarchy) {
             GuideHierarchy h = hierarchyOf(g);
             std::vector<GuideId> targets;
             if (a.contains("guides")) {
@@ -1152,7 +1220,7 @@ struct McpTools::Impl {
     }
 
     ToolResult addScriptNode(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         json def;
         if (a.contains("definition")) {
             def = a["definition"];
@@ -1170,7 +1238,7 @@ struct McpTools::Impl {
         }
         if (def.value("script", std::string()).size() > kMaxScriptBytes) throw ToolError("the script is longer than 64 KB");
         // Authored on this groom: its numbers are this scalp's, nothing to fit.
-        if (const std::optional<double> size = Workspace::fitSize(g)) def["size"] = *size;
+        if (const std::optional<double> size = fitSize(g)) def["size"] = *size;
         const json errors = json::parse(scriptNodeErrorsJson(def.dump())).value("errors", json::array());
         if (!errors.empty()) {
             ToolResult r = textResult({{"errors", errors}, {"message", "The script node has errors (line and column of the script); nothing changed. Fix them and call add_script_node again."}});
@@ -1179,7 +1247,7 @@ struct McpTools::Impl {
         }
         const std::string existing = str(a, "node");
         std::string made = existing, placed;
-        w.edit(g, existing.empty() ? "add script node" : "edit " + existing, [&](std::string& graph, std::string&) {
+        edit(g, existing.empty() ? "add script node" : "edit " + existing, [&](std::string& graph, std::string&) {
             if (!existing.empty()) {
                 json doc = json::parse(graph);
                 bool found = false;
@@ -1204,7 +1272,7 @@ struct McpTools::Impl {
             GraphEdit e(graph);
             const std::string name = a.contains("name") ? str(a, "name") : e.uniqueName(libraryNodeName(def.value("label", std::string("My Script"))));
             checkName(name, "a node's name");
-            made = e.addNode("Script", name, json{{"definition", def}}.dump(), std::nullopt, std::nullopt, Workspace::fitSize(g));
+            made = e.addNode("Script", name, json{{"definition", def}}.dump(), std::nullopt, std::nullopt, fitSize(g));
             placed = placeNode(e, made, a);
             graph = e.toJson();
         });
@@ -1212,51 +1280,56 @@ struct McpTools::Impl {
     }
 
     ToolResult saveNode(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         const std::string node = str(a, "node");
-        const std::string graphText = Workspace::graphText(g);
+        const std::string graphText = agent::graphText(g);
         const json n = nodeJsonOf(json::parse(graphText), node);
         std::string text;
         if (n.value("type", std::string()) == "Script") {
             text = n.value("params", json::object()).value("definition", json::object()).dump(2);
         } else if (n.value("type", std::string()) == "Compound") {
-            text = nodeFileFromCompound(graphText, node, "{}", Workspace::fitSize(g));
+            text = nodeFileFromCompound(graphText, node, "{}", fitSize(g));
         } else {
             throw ToolError("only script and compound nodes are saved as .glnode files");
         }
         checkNodeFile(text);
         const std::string id = json::parse(text).value("id", std::string("my.node"));
-        const std::string path = w.resolveForWrite(str(a, "path", id + ".glnode"));
+        const std::string path = files().resolveForWrite(str(a, "path", id + ".glnode"));
         if (!hasExtension(path, ".glnode")) throw ToolError("a node file ends in .glnode");
         writeText(path, text + "\n");
-        return textResult({{"path", w.shown(path)}, {"id", id},
+        return textResult({{"path", files().shown(path)}, {"id", id},
                            {"note", "Use it in GroomLab with Import Node... (Maya's Graph Editor, the app), or copy it into Documents/GroomLab/nodes."}});
     }
 
     ToolResult undoTool(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         const int steps = static_cast<int>(num(a, "steps", 1));
         if (steps < 1 || steps > static_cast<int>(kMaxUndo)) throw ToolError("steps must be 1 to " + std::to_string(kMaxUndo));
-        if (g.undo.empty()) throw ToolError("nothing to undo");
-        const std::vector<std::string> labels = w.undo(g, steps);
-        return textResult(withSummary(g, {{"undone", labels}, {"undoStepsLeft", g.undo.size()}}));
+        if (!g.history().canUndo()) throw ToolError("nothing to undo");
+        std::vector<std::string> labels;
+        for (int i = 0; i < steps && g.history().canUndo(); ++i) {
+            labels.push_back(g.history().toUndo().title());
+            const std::string error = g.undo();
+            if (!error.empty()) throw ToolError("undo: " + error);
+        }
+        return textResult(withSummary(g, {{"undone", labels}, {"undoStepsLeft", g.history().undoIndex()}}));
     }
 
     // ---- check ----
     ToolResult evaluate(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         if (a.contains("frame")) g.frame = num(a, "frame", g.frame);
         const double density = num(a, "density", 1.0);
         if (density < 0.0 || density > 1.0) throw ToolError("density must be 0 to 1");
-        json out = w.summary(g, static_cast<float>(density), str(a, "node"), true);
-        out["groom"] = g.name;
+        json out = summary(g, static_cast<float>(density), str(a, "node"), true);
+        out["groom"] = g.name();
         out["frame"] = g.frame;
         return textResult(out);
     }
 
     // ---- see ----
     ToolResult renderPreviewTool(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         if (a.contains("frame")) g.frame = num(a, "frame", g.frame);
         PreviewOptions o;
         if (a.contains("views")) {
@@ -1268,23 +1341,23 @@ struct McpTools::Impl {
         }
         o.size = static_cast<int>(num(a, "size", 512));
         o.maxStrands = static_cast<std::size_t>(std::clamp(num(a, "max_strands", 50000.0), 100.0, 300000.0));
-        o.zUp = g.scene->file().upAxis == "Z";
+        o.zUp = g.upAxis() == "Z";
         const double density = num(a, "density", 1.0);
         if (density < 0.0 || density > 1.0) throw ToolError("density must be 0 to 1");
         ViewRequest request;
         request.density = static_cast<float>(density);
         request.viewNode = str(a, "node");
-        request.time = frameToSeconds(g.frame, g.scene->framesPerSecond());
-        const ViewResult& view = g.scene->view(request);
+        request.time = frameToSeconds(g.frame, g.framesPerSecond());
+        const ViewResult& view = g.view(request);
         const StrandsPtr strands = view.placed();
-        const MeshPtr scalp = view.scalp ? view.scalp : g.scene->session().rawScalp();
+        const MeshPtr scalp = view.scalp ? view.scalp : g.session().rawScalp();
         PreviewImage image;
         try {
-            image = renderPreview(scalp.get(), strands.get(), o);
+            image = target.preview(g, scalp.get(), strands.get(), o);
         } catch (const std::invalid_argument& e) {
             throw ToolError(e.what());
         }
-        json info = {{"groom", g.name}, {"views", o.views}, {"width", image.width}, {"height", image.height},
+        json info = {{"groom", g.name()}, {"views", o.views}, {"width", image.width}, {"height", image.height},
                      {"columns", image.columns}, {"strands", image.strandsTotal}, {"strandsDrawn", image.strandsDrawn}};
         if (image.stride > 1) {
             info["note"] = "drew 1 in " + std::to_string(image.stride) + " strands (max_strands " + std::to_string(o.maxStrands) +
@@ -1292,10 +1365,10 @@ struct McpTools::Impl {
         }
         if (!view.errors.empty()) info["errors"] = view.errors;
         if (a.contains("save_to")) {
-            const std::string path = w.resolveForWrite(str(a, "save_to"));
+            const std::string path = files().resolveForWrite(str(a, "save_to"));
             if (!hasExtension(path, ".png")) throw ToolError("save_to must be a .png file");
             writeText(path, std::string(image.png.begin(), image.png.end()));
-            info["saved"] = w.shown(path);
+            info["saved"] = files().shown(path);
         }
         ToolResult r;
         r.content.push_back({{"type", "image"}, {"data", base64Encode(image.png)}, {"mimeType", "image/png"}});
@@ -1305,14 +1378,10 @@ struct McpTools::Impl {
 
     // ---- deliver ----
     ToolResult saveGroom(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
-        const std::string path = w.resolveForWrite(str(a, "path"));
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const std::string path = files().resolveForWrite(str(a, "path"));
         if (!hasExtension(path, ".groom")) throw ToolError("a groom file ends in .groom");
-        const GroomSession& s = g.scene->session();
-        GroomFile file = g.scene->file();
-        file.data = s.data();
-        file.data.scalpHistory = nullptr;
-        file.framesPerSecond = s.framesPerSecond();
+        const GroomFile file = g.toFile();
         try {
             writeGroomFile(path, file);
         } catch (const GroomFileError& e) {
@@ -1320,13 +1389,13 @@ struct McpTools::Impl {
         }
         g.path = path;
         std::error_code ec;
-        return textResult({{"groom", g.name}, {"path", w.shown(path)}, {"bytes", fs::file_size(fs::u8path(path), ec)}});
+        return textResult({{"groom", g.name()}, {"path", files().shown(path)}, {"bytes", fs::file_size(fs::u8path(path), ec)}});
     }
 
     ToolResult exportTool(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
-        ExportOptions o;
-        o.out = w.resolveForWrite(str(a, "path"));
+        AgentGroom& g = target.groom(str(a, "groom"));
+        ExportRequest o;
+        o.path = files().resolveForWrite(str(a, "path"));
         if (a.contains("frames")) {
             const json& f = a["frames"];
             if (f.is_number()) {
@@ -1353,20 +1422,14 @@ struct McpTools::Impl {
         if (o.step > 0.0 && (o.end - o.start) / o.step + 1.0 > static_cast<double>(kMaxExportFrames)) {
             throw ToolError("at most " + std::to_string(kMaxExportFrames) + " frames in one export");
         }
-        ExportReport report;
-        try {
-            report = exportStrands(*g.scene, o, nullptr);
-        } catch (const std::invalid_argument& e) {
-            throw ToolError(e.what());
-        }
-        const char* format = isVrscenePath(o.out) ? "vrscene" : isUsdPath(o.out) ? "usd" : "alembic";
-        return textResult({{"groom", g.name}, {"path", w.shown(o.out)}, {"format", format},
+        const ExportReport report = target.exportCurves(g, o);
+        return textResult({{"groom", g.name()}, {"path", files().shown(o.path)}, {"format", report.format},
                            {"frames", report.frames}, {"strandsPerFrame", report.frames ? report.strandTotal / report.frames : 0},
                            {"ms", static_cast<long long>(report.milliseconds + 0.5)}});
     }
 
     ToolResult sampleScalp(const json& a) {
-        Groom& g = w.groom(str(a, "groom"));
+        AgentGroom& g = target.groom(str(a, "groom"));
         const MeshPtr scalp = scalpOf(g);
         const std::size_t count = static_cast<std::size_t>(std::clamp(num(a, "count", 40.0), 1.0, 500.0));
         const bool facing = a.contains("min_up");
@@ -1421,7 +1484,7 @@ struct McpTools::Impl {
         }
         json points = json::array();
         for (const std::size_t i : chosen) points.push_back({{"p", vec(candidates[i].first)}, {"n", vec(candidates[i].second)}});
-        return textResult({{"groom", g.name}, {"points", points}, {"upAxis", g.scene->file().upAxis},
+        return textResult({{"groom", g.name()}, {"points", points}, {"upAxis", g.upAxis()},
                            {"hint", "add_guides takes these as roots: {\"root\": p, \"length\": ..., \"droop\": 0.5} grows a guide along n."}});
     }
 
@@ -1657,12 +1720,12 @@ struct McpTools::Impl {
     }
 };
 
-McpTools::McpTools(McpSettings settings) : impl_(std::make_unique<Impl>(settings)) {}
-McpTools::~McpTools() = default;
+AgentTools::AgentTools(AgentTarget& target) : impl_(std::make_unique<Impl>(target)) {}
+AgentTools::~AgentTools() = default;
 
-const std::string& McpTools::root() const { return impl_->w.root(); }
+AgentTarget& AgentTools::target() { return impl_->target; }
 
-json McpTools::list() const {
+json AgentTools::list() const {
     json out = json::array();
     for (const Impl::Tool& t : impl_->tools) {
         out.push_back({{"name", t.name}, {"title", t.title}, {"description", t.description}, {"inputSchema", t.schema}});
@@ -1670,9 +1733,9 @@ json McpTools::list() const {
     return out;
 }
 
-bool McpTools::has(const std::string& name) const { return impl_->find(name) != nullptr; }
+bool AgentTools::has(const std::string& name) const { return impl_->find(name) != nullptr; }
 
-ToolResult McpTools::call(const std::string& name, const json& arguments) {
+ToolResult AgentTools::call(const std::string& name, const json& arguments) {
     const Impl::Tool* tool = impl_->find(name);
     auto failure = [](const std::string& message) {
         ToolResult r = textResult({{"error", message}});
@@ -1687,8 +1750,6 @@ ToolResult McpTools::call(const std::string& name, const json& arguments) {
         return failure(e.what());
     } catch (const GraphError& e) {
         return failure(std::string("graph: ") + e.what());
-    } catch (const AlembicError& e) {
-        return failure(std::string("alembic: ") + e.what());
     } catch (const json::exception& e) {
         return failure(std::string("bad JSON: ") + e.what());
     } catch (const std::bad_alloc&) {
@@ -1698,4 +1759,4 @@ ToolResult McpTools::call(const std::string& name, const json& arguments) {
     }
 }
 
-}  // namespace groomlab::cli
+}  // namespace groomlab::agent

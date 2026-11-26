@@ -37,6 +37,13 @@ void EditHistory::clear() {
     index_ = 0;
 }
 
+void EditHistory::limit(std::size_t maxSteps) {
+    if (steps_.size() <= maxSteps) return;
+    const std::size_t drop = steps_.size() - maxSteps;
+    steps_.erase(steps_.begin(), steps_.begin() + static_cast<std::ptrdiff_t>(drop));
+    index_ = index_ > drop ? index_ - drop : 0;
+}
+
 std::string undoStep(EditHistory& history, EditorHost& host) {
     if (!history.canUndo()) return {};
     std::string error = host.apply(history.toUndo(), false);

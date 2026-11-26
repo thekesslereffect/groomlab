@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "preview_render.h"
+#include "groomlab/editor/agent_preview.h"
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,7 @@
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/strand_set.h"
 
-namespace groomlab::cli {
+namespace groomlab::agent {
 
 namespace {
 
@@ -323,4 +323,4 @@ std::string base64Encode(const std::vector<std::uint8_t>& bytes) {
     return out;
 }
 
-}  // namespace groomlab::cli
+}  // namespace groomlab::agent

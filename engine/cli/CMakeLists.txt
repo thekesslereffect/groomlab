@@ -11,13 +11,11 @@ if(TARGET groomlab_alembic)
         mcp_groom.h
         mcp_server.cpp
         mcp_server.h
-        mcp_tools.cpp
-        mcp_tools.h
         mesh_files.cpp
-        mesh_files.h
-        preview_render.cpp
-        preview_render.h)
-    target_link_libraries(groomlab-cli PRIVATE groomlab::alembic nlohmann_json::nlohmann_json)
+        mesh_files.h)
+    # The tools themselves are the editor's (agent_tools.h); the server holds the protocol and the
+    # grooms it opens in memory (mcp_groom.h).
+    target_link_libraries(groomlab-cli PRIVATE groomlab::alembic groomlab::editor nlohmann_json::nlohmann_json)
     target_compile_definitions(groomlab-cli PRIVATE GROOMLAB_HAS_ALEMBIC=1)
     # A build tree's server finds GroomLab's presets, nodes, sample meshes and docs in the sources;
     # an installed one beside it (GroomLab/bin/../presets and so on).

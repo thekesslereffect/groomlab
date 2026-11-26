@@ -98,6 +98,11 @@ public:
     GroomEdit takeLast();
     // Nothing to undo or redo (what came before can no longer come back).
     void clear();
+    // At most `maxSteps` steps kept: the oldest past them dropped (they can no longer be undone).
+    void limit(std::size_t maxSteps);
+    // Step `i` of the history, oldest first (i < size()): undone back to undoIndex(), the rest
+    // could be redone.
+    const GroomEdit& step(std::size_t i) const { return steps_[i]; }
 
 private:
     std::vector<GroomEdit> steps_;
