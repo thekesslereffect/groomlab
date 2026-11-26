@@ -17,6 +17,8 @@ a section on its card, "title" / "tray" / "hint" / "tool" / "status" / "count" i
 "primary" its operators in the accent, "pills" its switches as pills (each as wide as its name, wrapping),
 "dot" its color as a small dot (a card header's group)."""
 
+import os
+
 import bpy
 
 from . import editors, icons, uikit
@@ -43,6 +45,10 @@ ICONS = {
     "UNLOCKED": "ui_lock_open", "OPTIONS": "ui_sliders", "CURVE_PATH": "ui_segments", "MOD_VERTEX_WEIGHT": "ui_weight",
     "TRIA_UP_BAR": "ui_front", "TRIA_DOWN_BAR": "ui_behind", "CAMERA_DATA": "ui_photo_camera",
 }
+# A tube hierarchy level row's tube (the app's ui_tube.svg); ui_layers until icons/ui_tube.png is
+# rendered (tools/make_blender_icons.py).
+ICONS["MESH_CYLINDER"] = ("ui_tube" if os.path.isfile(os.path.join(os.path.dirname(__file__), "icons", "ui_tube.png"))
+                          else "ui_layers")
 
 
 def icon_name(icon="NONE", icon_value=0):

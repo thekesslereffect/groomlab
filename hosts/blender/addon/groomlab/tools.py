@@ -1296,13 +1296,13 @@ def _take_levels(scene, r):
         t.tube_level = levels.index(group) + 1 if group in levels else 1
 
 
-def tube_level_show(scalp, level):
-    """Level `level` (1: the base) shown, the hierarchy's other levels hidden, its group picked."""
+def show_level_guides(scalp, base, level):
+    """Level `level` (1: the base) of `base`'s hierarchy's guides shown, its other levels' hidden
+    (the groups' eyes; groups outside the hierarchy as they are); the tubes' view untouched.
+    Returns level `level`'s group (None: none)."""
     scene = groom.scene_of(scalp)
     t = scene.groomlab_tools
-    if not t.tube_base:
-        tube_levels(scalp)
-    r = call(scalp, "tube_level_show", base=t.tube_base, level=int(level))
+    r = call(scalp, "tube_level_show", base=base, level=int(level))
     shown = r.get("shown") or {}
     hidden = set(g.name for g in t.groups if g.hidden)
     picked = None
@@ -1312,7 +1312,18 @@ def tube_level_show(scalp, level):
             picked = name
         else:
             hidden.add(name)
-    set_hidden_groups(scalp, sorted(hidden))
+    if hidden != set(g.name for g in t.groups if g.hidden):
+        set_hidden_groups(scalp, sorted(hidden))
+    return picked
+
+
+def tube_level_show(scalp, level):
+    """Level `level` (1: the base) shown, the hierarchy's other levels hidden, its group picked."""
+    scene = groom.scene_of(scalp)
+    t = scene.groomlab_tools
+    if not t.tube_base:
+        tube_levels(scalp)
+    picked = show_level_guides(scalp, t.tube_base, level)
     if picked:
         with props.quiet():
             t.group = picked
@@ -1401,6 +1412,7 @@ def _fill_groups(scene, info, gt):
             item.hidden = bool(g.get("hidden"))
             item.segment_length = float(g.get("segmentLength") or 0.0)
             item.segments = int(g.get("segments") or 0)
+            item.tube_level = int(g.get("tubeLevel") or 0)
             item.depth = depth
             color = g.get("color")
             item.has_color = bool(color)

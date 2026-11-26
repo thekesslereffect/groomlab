@@ -25,13 +25,87 @@ def _push(*keys):
     return update
 
 
-def _tube_lock(self, context):
-    """Lock view: the level shown now kept (its tubes stay drawn), or let go."""
+def _tube_lock_get(self):
+    """Lock view: a level's tubes kept in view (the one setting, tube_view_group)."""
+    return bool(self.tube_view_group)
+
+
+def _tube_lock_set(self, on):
+    """Lock view on: the level shown now kept in view (its tubes stay drawn); off: let go."""
+    levels = [x for x in self.tube_levels.split(",") if x]
+    self.tube_view_group = levels[self.tube_level - 1] if on and 0 < self.tube_level <= len(levels) else ""
+
+
+def _tube_view(self, context):
+    """The level kept in view changed (the guides display's Level, a Guide groups row's tube, the
+    Roots card's Lock view): pinned with no tube tool up, the groom's Tubes switch goes on so it is
+    seen; the display asks the helper again."""
     if props.is_quiet():
         return
-    with props.quiet():
-        self.tube_locked_level = self.tube_level if self.tube_lock_view else 0
+    from . import tools
+    scalp = tools.active(context)
+    if self.tube_view_group and self.tool not in ("shape", "roots") and scalp is not None:
+        d = scalp.groomlab_tools
+        if not d.show_tubes:
+            d.show_tubes = True  # (its update redraws)
     _tube_display(self, context)
+
+
+def tube_hierarchy(t, group):
+    """The levels' groups (the base first) of the tube hierarchy holding `group`, from the Guide
+    groups rows (the helper's tubeLevel), or [] when it is in none."""
+    rows = {g.name: g for g in t.groups}
+    row = rows.get(group)
+    if row is None or not row.tube_level:
+        return []
+    top = row
+    while top.parent and top.parent in rows:
+        top = rows[top.parent]
+    levels = {}
+    for g in t.groups:
+        if not g.tube_level:
+            continue
+        up = g
+        while up.parent and up.parent in rows:
+            up = rows[up.parent]
+        if up.name == top.name:
+            levels[g.tube_level] = g.name
+    return [levels[k] for k in sorted(levels)]
+
+
+FOLLOW_GUIDES = "__follow__"
+
+
+def _tube_view_items(self, context):
+    """Follow guides, then the levels of the kept level's hierarchy (none kept: the picked
+    group's), as the guides display's Level lists them."""
+    from . import tools
+    viewed = self.tube_view_group
+    _level, group = tools.group_target(context.scene) if context is not None else (0, "")
+    levels = tube_hierarchy(self, viewed or group or "")
+    items = [(FOLLOW_GUIDES, "Follow guides", "The tubes of the guides shown", "NONE", 0)]
+    for k, name in enumerate(levels):
+        items.append((name, "Level %d" % (k + 1), "Level %d's tubes (%s) kept in view whichever level's guides are "
+                      "picked" % (k + 1, name), "NONE", k + 1))
+    if viewed and viewed not in levels:
+        items.append((viewed, viewed, "%s's tubes kept in view" % viewed, "NONE", len(items)))  # (kept as it is)
+    _tube_view_cache[:] = items
+    return _tube_view_cache
+
+
+_tube_view_cache = []
+
+
+def _tube_view_level_get(self):
+    items = _tube_view_items(self, bpy.context)
+    viewed = self.tube_view_group
+    return next((i[4] for i in items if viewed and i[0] == viewed), 0)
+
+
+def _tube_view_level_set(self, value):
+    items = _tube_view_items(self, bpy.context)
+    picked = next((i[0] for i in items if i[4] == value), FOLLOW_GUIDES)
+    self.tube_view_group = "" if picked == FOLLOW_GUIDES else picked
 
 
 def _tube_display(self, context):
@@ -141,6 +215,14 @@ def _group_changed(self, context):
     tools.push_safely(context)
     scalp = tools.active(context)
     if scalp is not None and tools.is_hierarchy(scalp):
+        # A level of a tube hierarchy picked (the list, Page Up / Down): its guides shown and its
+        # other levels' hidden, as the Roots card's level row does; the level kept in view stays.
+        levels = tube_hierarchy(self, self.group)
+        if len(levels) > 1 and self.group in levels:
+            try:
+                tools.show_level_guides(scalp, levels[0], levels.index(self.group) + 1)
+            except tools.HelperError as e:
+                tools.status(context.scene, e.message)
         try:
             tools.refresh_segments(scalp, context.scene)  # Segments works on the picked group
         except tools.HelperError:
@@ -406,6 +488,7 @@ class GroomLabGroupItem(bpy.types.PropertyGroup):
     depth: IntProperty()
     segment_length: FloatProperty()  # above 0: its guides go by length (issue #98)
     segments: IntProperty()     # the group's segments (its new guides'): the row's segments button
+    tube_level: IntProperty()   # its level in a tube hierarchy (1: the base; 0: in none): the row's tube
     has_color: BoolProperty()   # its own viewport color (else `color` is its automatic one)
     color: FloatVectorProperty(size=3, subtype="COLOR_GAMMA", min=0.0, max=1.0, default=(0.5, 0.5, 0.5))
 
@@ -711,9 +794,6 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                     description="Each tube of a tube hierarchy's levels (a split tube) in a shade of "
                                                 "its own on top of its root tube's color, so the tubes of a level "
                                                 "tell apart")
-    tubes_always: BoolProperty(name="Always visible", default=False, update=_tube_display,
-                               description="Keep the tubes drawn whichever GroomLab tool is up (Comb, Select, ...), "
-                                           "not only the Tube tool")
     # The Tube card's Tube roots block (the core's root tool, root_tube_tool.h): the mode the
     # helper's tool is in ("": not on; place, draw, edit, select, duplicate), what it holds, and the
     # settings new root tubes take.
@@ -752,12 +832,20 @@ class GroomLabTools(bpy.types.PropertyGroup):
     tube_base: StringProperty()
     tube_levels: StringProperty()
     tube_level: IntProperty(default=1)
-    # Lock view (the level whose tubes stay drawn while others are picked; 0: off) and Mixed view
-    # (the levels above the one picked show their tubes where no level below continues them).
-    tube_lock_view: BoolProperty(name="Lock view", default=False, update=_tube_lock,
+    # The level whose tubes stay in view while others' guides are picked (its group; "": the tubes
+    # follow their guides): one setting, read and written by the Roots card's Lock view, the guides
+    # display's Level (tube_view_level) and a Guide groups row's tube. Mixed view: the levels above
+    # the one picked show their tubes where no level below continues them.
+    tube_view_group: StringProperty(update=_tube_view)
+    tube_lock_view: BoolProperty(name="Lock view", get=_tube_lock_get, set=_tube_lock_set,
                                  description="Keep the tubes of the level shown now in view while you pick other "
                                              "levels to work on, whose guides show. Only the tubes' view")
-    tube_locked_level: IntProperty(default=0)
+    tube_view_level: EnumProperty(name="Level", items=_tube_view_items, get=_tube_view_level_get,
+                                  set=_tube_view_level_set,
+                                  description="Which level's tubes show: Follow guides (the tubes of the guides "
+                                              "shown), or one level of the tube hierarchy kept in view whichever "
+                                              "level's guides you pick and comb (its row's tube in Guide groups; "
+                                              "the Roots card's Lock view)")
     tube_mixed_view: BoolProperty(name="Mixed view", default=True, update=_tube_display,
                                   description="Working on a level, also show the tubes (not the guides) of the "
                                               "levels above where no level below continues them, and their roots in "
@@ -857,8 +945,9 @@ STRAND_COLORS = defs.enum_items("strandColor")
 class GroomLabGroomDisplay(bpy.types.PropertyGroup):
     """A groom's viewport display (Maya's groom attributes) and its kept state."""
     show_guides: BoolProperty(name="Guides", default=True, update=_display, description="Draw the guides")
-    show_tubes: BoolProperty(name="Tubes", default=False, update=_display,
-                             description="Draw each guide's tube (where its children grow)")
+    show_tubes: BoolProperty(name="Show tubes", default=False, update=_display,
+                             description="Draw each guide's tube with every tool (Comb, Select, ...), with the "
+                                         "tubes' look; the Tube and Roots tools show them either way")
     show_flow: BoolProperty(name="Flow", default=True, update=_display, description="Draw parts and flow arrows")
     show_strands: BoolProperty(name="Strands", default=True, update=_display, description="Show the hair in the viewport")
     # The cards view (Maya's displayCards and displayCardTextures; cards_view.py).

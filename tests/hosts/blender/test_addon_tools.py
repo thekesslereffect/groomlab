@@ -668,17 +668,27 @@ class ToolsTest(unittest.TestCase):
         bpy.ops.groomlab.guides_edit(action="CLEAR")
         display.refresh(head)
         self.assertNotIn("selectedGuides", [e[0] for e in display.draw_list(head)])
-        # Display toggles: tubes on, guides off.
+        # Display toggles: tubes on (Show tubes: with every tool, drawn with their look: wires, else
+        # shaded surfaces), guides off.
         d = head.groomlab_tools
         d.show_tubes = True
         display.refresh(head)
-        tubes = [e for e in display.draw_list(head) if e[0] == "tubes"]
+        drawn_ids = [e[0] for e in display.draw_list(head)]
+        self.assertIn("tubeWires", drawn_ids)
+        self.assertNotIn("tubes", drawn_ids)  # (one way of drawing them: no plain surfaces besides)
+        t.tube_shaded = True
+        display.refresh(head)
+        tubes = [e for e in display.draw_list(head) if e[0] == "tubeSurfaces"]
         self.assertTrue(tubes and tubes[0][1] == "triangles" and tubes[0][4].shape[1] == 4)
-        self.assertTrue(tubes[0][7])  # pulled through the strands round the guide, as the guides are
+        t.tube_shaded = False
+        d.show_tubes = False
+        display.refresh(head)
+        self.assertFalse({"tubeWires", "tubeSurfaces"} & {e[0] for e in display.draw_list(head)})
         # The Shape brush: every tube it can shape as a wire, the selected guides' apart (warm,
         # thicker), as Maya draws them while the brush is on; gone when the tool is left.
         self.assertIn("shape", [x["id"] for x in tools.catalog()["tools"]])
         bpy.ops.groomlab.tool(tool="shape")
+        self.assertTrue(display.settings_for(head, bpy.context.scene).get("toolTubes"))
         self.assertTrue(display.settings_for(head, bpy.context.scene).get("tubeWires"))
         ids = sorted(guides_of(head))
         tools.selection_set(head, ids=ids[:1], mode="replace")
@@ -704,7 +714,6 @@ class ToolsTest(unittest.TestCase):
         bpy.ops.groomlab.tool_exit()
         display.refresh(head)
         self.assertFalse({"tubeWires", "selectedTubeWires"} & {e[0] for e in display.draw_list(head)})
-        d.show_tubes = False
         d.show_guides = False
         display.refresh(head)
         self.assertNotIn("guides", [e[0] for e in display.draw_list(head)])
@@ -1312,6 +1321,46 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(len(t.tube_levels.split(",")), 2)
         self.assertEqual(t.tube_level, 2)
         self.assertGreater(t.guide_count, guides)
+        # A level kept in view while another level's guides are combed (Maya's gui_roots
+        # tube_level_pin): the guides display's Level, a level row's tube and the card's Lock view
+        # are one setting, tube_view_group; picking a level shows its guides alone, the pin stays;
+        # the Tubes switch (Show tubes) is the one way the tubes show with every tool.
+        scene = bpy.context.scene
+        base, deeper = t.tube_levels.split(",")
+        rows = {g.name: g for g in t.groups}
+        self.assertEqual((rows[base].tube_level, rows[deeper].tube_level), (1, 2))  # each level row's tube
+        self.assertEqual(t.group, deeper)
+        bpy.ops.groomlab.tool(tool="comb")
+        d = head.groomlab_tools
+        d.show_tubes = False
+        self.assertEqual(bpy.ops.groomlab.tube_view(group=deeper), {"FINISHED"})
+        self.assertEqual(t.tube_view_group, deeper)
+        self.assertTrue(d.show_tubes, "pinned with Comb up: Show tubes on")
+        s = display.settings_for(head, scene)
+        self.assertEqual((s["tubeViewGroup"], s["toolTubes"], s["tubes"]), (deeper, False, True))
+        self.assertTrue(s["tubeWires"])  # the look, whatever tool
+        self.assertEqual(t.tube_view_level, deeper)  # the guides display's Level says so
+        self.assertTrue(t.tube_lock_view)  # so does the Roots card's Lock view
+        t.group = base  # (the list's row picked)
+        rows = {g.name: g for g in t.groups}
+        self.assertFalse(rows[base].hidden)
+        self.assertTrue(rows[deeper].hidden, "picking level 1 shows its guides alone")
+        self.assertEqual(t.tube_view_group, deeper, "the pin stays while level 1 is combed")
+        self.assertIn("tubes: Level 2", palette.editing_text(bpy.context, "comb")[0])
+        display.mark(head)
+        display.refresh(head)
+        self.assertIn("tubeWires", [e[0] for e in display.draw_list(head)])  # level 2's tubes, Comb up
+        t.tube_view_level = tool_props.FOLLOW_GUIDES
+        self.assertEqual(t.tube_view_group, "")
+        self.assertFalse(t.tube_lock_view)
+        self.assertNotIn("tubes:", palette.editing_text(bpy.context, "comb")[0])
+        t.tube_lock_view = True
+        levels = t.tube_levels.split(",")
+        self.assertEqual(t.tube_view_group, levels[t.tube_level - 1])
+        t.tube_lock_view = False
+        self.assertEqual(t.tube_view_group, "")
+        d.show_tubes = False
+        bpy.ops.groomlab.tool(tool="shape")
         self.assertEqual(bpy.ops.groomlab.tube_level(action="SHOW", level=1), {"FINISHED"})
         self.assertEqual(t.tube_level, 1)
         self.assertEqual(bpy.ops.groomlab.tube_level(action="REMOVE"), {"FINISHED"})

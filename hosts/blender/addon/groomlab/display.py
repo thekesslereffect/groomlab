@@ -148,17 +148,17 @@ def settings_for(scalp, scene):
     if painting and t.show_on_guides and m is not None and m.kind == "guides":
         s["guideColorMode"] = "layer"
         s["guideColorLayer"] = m.name
-    if t.tool in ("shape", "roots") or (t.tubes_always and t.tool):
-        # While the Tube or Roots brush is on (Always visible: any tool): every tube it can
-        # shape as a wire and/or shaded, in its root tube's color (Maya's Tube card switches).
-        s["tubeWires"] = bool(t.tube_wireframe)
-        s["tubeShaded"] = bool(t.tube_shaded)
-        s["tubeColors"] = bool(t.tube_colors)
-        s["tubeLevelColors"] = bool(t.tube_level_colors)
-    # The Tube hierarchy's Lock view (that level's tubes alone) and Mixed view ("<base>:<level>").
-    levels = [x for x in t.tube_levels.split(",") if x]
-    locked = t.tube_locked_level if t.tube_lock_view else 0
-    s["tubeViewGroup"] = levels[locked - 1] if 0 < locked <= len(levels) else ""
+    # The tubes, one way: shown with the Tube or Roots brush up (toolTubes) or with every tool (the
+    # groom's Tubes switch, "tubes"), drawn with their look (the guides display's Shaded,
+    # Wireframe, Colors, Level colors) whichever tool is up, in their root tubes' colors.
+    s["toolTubes"] = t.tool in ("shape", "roots")
+    s["tubeWires"] = bool(t.tube_wireframe)
+    s["tubeShaded"] = bool(t.tube_shaded)
+    s["tubeColors"] = bool(t.tube_colors)
+    s["tubeLevelColors"] = bool(t.tube_level_colors)
+    # The level kept in view (that level's tubes alone: Lock view, the guides display's Level, a
+    # row's tube) and Mixed view ("<base>:<level>").
+    s["tubeViewGroup"] = t.tube_view_group
     s["mixedView"] = "%s:%d" % (t.tube_base, t.tube_level) if t.tube_mixed_view and t.tube_base else ""
     if t.isolate:
         _level, group = tools.group_target(scene)

@@ -31,7 +31,7 @@ import os
 import bpy
 from bpy.props import EnumProperty, IntProperty, StringProperty
 
-from . import groom, icons, menu, photos, process, tools, updates
+from . import groom, icons, menu, photos, process, tool_props, tools, updates
 from . import definitions as defs
 from .ops import active_groom
 from .ui import _wrap
@@ -401,10 +401,17 @@ def editing_text(context, tool):
             return "no map yet: + under Maps", "NONE"
         return "on %s%s" % (m.name, "" if t.map_read_by else "  ·  unused"), "NONE"  # (its info: what reads it)
     group = t.group if t.group and t.group != tools.ALL_GROUPS else "All groups"
+    # A level of a tube hierarchy kept in view while another's guides are picked: said here, so the
+    # brush is seen to comb these guides under those tubes.
+    tubes = ""
+    if t.tube_view_group and t.tube_view_group != t.group:
+        levels = tool_props.tube_hierarchy(t, t.tube_view_group)
+        tubes = "  \u00b7  tubes: %s" % ("Level %d" % (levels.index(t.tube_view_group) + 1)
+                                         if t.tube_view_group in levels else t.tube_view_group)
     kind, name = tools.picked_corrective(scene)
     if kind in ("layer", "node"):
-        return "%s on %s" % (group, name), "SHAPEKEY_DATA"
-    return "%s on Base groom" % group, "NONE"
+        return "%s on %s%s" % (group, name, tubes), "SHAPEKEY_DATA"
+    return "%s on Base groom%s" % (group, tubes), "NONE"
 
 
 class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
@@ -1122,17 +1129,24 @@ class GROOMLAB_PT_guide_display(_Popover, bpy.types.Panel):
         t = context.scene.groomlab_tools
         prefs = getattr(context, "preferences", None)
         width = self.bl_ui_units_x * 20 * ((prefs.system.ui_scale if prefs else 1.0) or 1.0)  # (its content: a bit wider)
-        pills(layout, context, [(d, p, None) for p in ("show_guides", "show_flow", "show_tubes")], width)
+        pills(layout, context, [(d, p, None) for p in ("show_guides", "show_flow")], width)
         layout.prop(d, "guide_width", slider=True)
         layout.prop(d, "guide_points")
         layout.prop(d, "guide_color_mode", text="Colors")
         if d.guide_color_mode == "layer":
             layout.prop(d, "guide_color_layer")
         pills(layout, context, [(d, "guides_smoothed", None)], width)
+        # The tubes, one way (Maya's guides display's Tubes section): Show tubes (the groom's Tubes
+        # switch: with every tool; the Tube and Roots tools show them either way), the look they are
+        # drawn with, and the level whose tubes show (Lock view's setting, a level row's tube).
         layout.separator(type="LINE")
         layout.label(text="Tubes")
+        layout.prop(d, "show_tubes")
         pills(layout, context, [(t, "tube_shaded", None), (t, "tube_wireframe", None), (t, "tube_colors", None),
-                                (t, "tube_level_colors", "Level colors"), (t, "tubes_always", "With every tool")], width)
+                                (t, "tube_level_colors", "Level colors")], width)
+        level = layout.row()
+        level.enabled = bool(t.tube_view_group or tool_props.tube_hierarchy(t, t.group))  # (no hierarchy: Follow guides)
+        level.prop(t, "tube_view_level")
 
 
 class GROOMLAB_PT_group_segments(_Popover, bpy.types.Panel):
@@ -1251,6 +1265,12 @@ class GROOMLAB_UL_groups(bpy.types.UIList):
         sub.label(text="%d" % item.guides)
         row_button(sub, "GROUPS", index, text="%d" % item.segments if item.segments else "", icon="CURVE_PATH",
                    panel=GROOMLAB_PT_group_segments.__name__)
+        if item.tube_level:
+            # A tube hierarchy level's tube: its tubes kept in view whichever level's guides are
+            # picked (pressed while kept); again: the tubes follow their guides.
+            kept = data.tube_view_group == item.name
+            sub.operator("groomlab.tube_view", text="", icon="MESH_CYLINDER", emboss=False,
+                         depress=kept).group = "" if kept else item.name
         op = sub.operator("groomlab.group_edit", text="", icon="HIDE_ON" if item.hidden else "HIDE_OFF", emboss=False)
         op.action = "HIDE"
         op.group = item.name

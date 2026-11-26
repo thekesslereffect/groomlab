@@ -906,8 +906,10 @@ class ToolsTest(unittest.TestCase):
         self.assertIn(("prop", "segments_by_length"), segments)
         self.assertNotIn(("prop", "guide_color_mode"), log)  # how the guides draw: the guides' popover
         display = drawn(palette.GROOMLAB_PT_guide_display)
-        for name in ("show_flow", "show_tubes", "guide_width", "guide_points", "guide_color_mode", "guides_smoothed"):
+        for name in ("show_flow", "show_tubes", "guide_width", "guide_points", "guide_color_mode", "guides_smoothed",
+                     "tube_shaded", "tube_wireframe", "tube_colors", "tube_level_colors", "tube_view_level"):
             self.assertIn(("prop", name), display)
+        self.assertNotIn(("prop", "tubes_always"), display)  # (Show tubes: the one switch)
         self.assertIn(("popover", "GROOMLAB_PT_guide_display"), log)  # beside the guides' eye
         # The card's header: the brush's name and what the next stroke edits.
         self.assertIn(("label", "Comb"), log)

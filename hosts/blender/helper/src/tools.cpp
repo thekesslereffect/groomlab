@@ -1046,6 +1046,17 @@ json guidesInfo(ToolState& t) {
     std::size_t frozen = 0, primaries = 0;
     if (h) {
         const std::map<GroupId, std::array<float, 3>> automatic = autoGuideColors(*h, guideHueSeed(t.colorSeed));
+        // The tube hierarchies' levels (a top group with child groups): each level's group and its
+        // level (1: the base), a row's tube in Guide groups (its tubes kept in view).
+        std::map<std::string, int> tubeLevel;
+        std::set<GroupId> parents;
+        for (const GuideGroup& g : h->groups()) parents.insert(g.parent);
+        for (const GuideGroup& g : h->groups()) {
+            if (g.parent != kNoGroup || !parents.count(g.id)) continue;
+            const TubeLevels info = tubeLevels(*h, {}, g.name);
+            if (info.base != g.name || info.levels.size() < 2) continue;
+            for (std::size_t k = 0; k < info.levels.size(); ++k) tubeLevel[info.levels[k]] = static_cast<int>(k + 1);
+        }
         for (const GuideGroup& g : h->groups()) {
             const GuideGroup* parent = g.parent == kNoGroup ? nullptr : h->group(g.parent);
             // The color it draws in when the host gives it none: its own (a ToGuides node's), else its automatic one.
@@ -1060,7 +1071,8 @@ json guidesInfo(ToolState& t) {
                               {"color", t.groupColors.count(g.name) ? json(t.groupColors.at(g.name)) : json(nullptr)},
                               {"autoColor", guideColorHex(drawn)},
                               {"segments", g.segments},
-                              {"segmentLength", g.segmentLength}});
+                              {"segmentLength", g.segmentLength},
+                              {"tubeLevel", tubeLevel.count(g.name) ? tubeLevel.at(g.name) : 0}});
         }
         for (const HierarchyGuide& g : h->guides()) {
             if (!g.isChild()) ++primaries;
@@ -2473,9 +2485,10 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
     for (const auto& [key, x] : v.items()) {
         const char* k = key.c_str();
         if (key == "guides") s.guides = settingBool(x, k);
-        else if (key == "tubes") s.tubes = settingBool(x, k);
+        else if (key == "tubes") s.tubes = settingBool(x, k);            // the Tubes switch: the tubes with every tool
+        else if (key == "toolTubes") s.toolTubes = settingBool(x, k);    // the Tube or Roots tool up: its tubes shown
         else if (key == "flow") s.flow = settingBool(x, k);
-        else if (key == "tubeWires") s.tubeWires = settingBool(x, k);    // the Tube brush's tubes (the core's display)
+        else if (key == "tubeWires") s.tubeWires = settingBool(x, k);    // the tubes' look (the core's display)
         else if (key == "tubeShaded") s.tubeShaded = settingBool(x, k);
         else if (key == "tubeColors") s.tubeColors = settingBool(x, k);
         else if (key == "tubeLevelColors") s.tubeLevelColors = settingBool(x, k);  // Colors (Tube levels)
