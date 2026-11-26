@@ -32,7 +32,6 @@
 #include <QVBoxLayout>
 
 #include "groomlab/brush_catalog.h"
-#include "groomlab/root_tubes.h"
 
 #include "brush_panel.h"
 #include "brush_session.h"
@@ -626,7 +625,6 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         tubes_->displayBlock()->setParent(guideDisplay_);
         guideDisplay_->add(tubes_->displayBlock());
         tubes_->displayBlock()->show();
-        guideDisplay_->onShow([this] { tubes_->fillViewLevels(); });  // (Level: the groom's levels now)
     }
     noTool_ = label(tr("Pick a tool, then drag over the groom in the viewport."), "hint", work_);
     noTool_->setObjectName(QStringLiteral("noTool"));
@@ -815,26 +813,9 @@ void GroomTools::groupPicked(const std::string& name) {
     BrushSettings& b = session_->settings().brush;
     b.group = name;
     b.level = h->groupDepth(id);
-    // A level of a tube hierarchy: its guides shown, its other levels' hidden (as the Roots card's
-    // level row does); the level whose tubes are kept in view stays (Maya's show_picked_level).
-    bool shown = false;
-    try {
-        const TubeLevels info = tubeLevels(*h, {}, name);
-        const auto at = std::find(info.levels.begin(), info.levels.end(), name);
-        if (info.levels.size() > 1 && at != info.levels.end()) {
-            const int level = static_cast<int>(at - info.levels.begin()) + 1;
-            for (const auto& [group, visible] : tubeLevelVisibility(*h, info.base, level)) {
-                session_->document()->setGroupHidden(group, !visible);
-            }
-            shown = true;
-        }
-    } catch (const std::exception& e) {
-        setStatus(QString::fromUtf8(e.what()));
-    }
-    refresh();
+    refresh();  // (a level of a tube hierarchy: its level view, refresh's)
     emit settingsChanged();
     emit isolateChanged();
-    if (shown) emit groupsShownChanged();
 }
 
 void GroomTools::refreshTiles() {
@@ -990,6 +971,17 @@ void GroomTools::refresh() {
         updating_ = false;
     }
     if (card_->hasSettings()) card_->setEditing(editingText(card_->tool()));  // (the group picked, a level)
+    // Another group picked (a row, the Roots card, a script): a level of a tube hierarchy shows its
+    // guides alone (the level view), the eyes as the artist left them; another group or all groups:
+    // every group as its eye says (Maya's show_picked_level). The level kept in view stays.
+    if (GroomDocument* doc = session_ ? session_->document() : nullptr) {
+        const std::string group = currentGroup();
+        if (doc != levelViewDocument_ || group != levelViewGroup_) {
+            levelViewDocument_ = doc;
+            levelViewGroup_ = group;
+            tubes_->applyLevelView(group);
+        }
+    }
     refreshTubes();
     for (auto& [button, enabled] : enables_) {
         if (button) button->setEnabled(enabled());

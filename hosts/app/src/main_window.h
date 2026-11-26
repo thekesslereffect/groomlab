@@ -948,6 +948,7 @@ private:
     QCheckBox* locked_ = nullptr;
     QCheckBox* followScalp_ = nullptr;
     QCheckBox* flow_ = nullptr;
+    QCheckBox* parts_ = nullptr;  // the part lines (DisplaySettings::parts; the guides display's Parts)
     QCheckBox* instances_ = nullptr;
     QSpinBox* guideSmoothing_ = nullptr;
     QLineEdit* isolateGroup_ = nullptr;

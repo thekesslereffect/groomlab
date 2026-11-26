@@ -352,6 +352,11 @@ QWidget* GuidesPanel::rowIcons(QTreeWidgetItem* item, int segments, bool shown) 
     // guides are picked (view level 2's tubes, comb level 1's guides), in the accent; again: the
     // tubes follow their guides.
     QToolButton* tube = nullptr;
+    QWidget* gap = nullptr;  // (apart from the segments' count beside it; no tube: its place kept)
+    if (!tubeLevels_.empty()) {
+        gap = new QWidget(tree_);
+        gap->setFixedWidth(tubeLevels_.count(name) ? 4 : 26);
+    }
     if (const auto level = tubeLevels_.find(name); level != tubeLevels_.end() && document_) {
         const bool kept = document_->tubeViewGroup() == name;
         tube = rowGlyph(QStringLiteral("tube"),
@@ -364,7 +369,7 @@ QWidget* GuidesPanel::rowIcons(QTreeWidgetItem* item, int segments, bool shown) 
             QTimer::singleShot(0, this, [this, name, kept] { emit tubeViewRequested(kept ? std::string() : name); });
         });
     }
-    return rowStrip({seg, tube, eye, more}, tree_);
+    return rowStrip({seg, gap, tube, eye, more}, tree_);
 }
 
 QColor GuidesPanel::groupColor(const std::string& name) const {
@@ -547,7 +552,8 @@ void GuidesPanel::refresh() {
         if (select) tree_->setCurrentItem(select);
         else if (tree_->topLevelItemCount() > 0) tree_->setCurrentItem(tree_->topLevelItem(0));
         for (const auto& [item, segments, shown] : strips) tree_->setItemWidget(item, 2, rowIcons(item, segments, shown));
-        tree_->header()->resizeSection(2, tubeLevels_.empty() ? 92 : 114);  // (a level row: its tube too)
+        // (The groom has tube levels: every row keeps room for a level's tube, the eyes in a column.)
+        tree_->header()->resizeSection(2, tubeLevels_.empty() ? 92 : 118);
         updating_ = false;
         header_->setCount(document_ ? (h ? static_cast<int>(h->groups().size()) : 0) : -1);
         fitRows(tree_);

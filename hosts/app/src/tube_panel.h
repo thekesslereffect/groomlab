@@ -67,19 +67,19 @@ public:
     enum class Mode { New, Edit, Roots };
     void setMode(Mode mode);  // Edit to start with
     Mode mode() const { return mode_; }
-    // The tubes' display (Maya's guides display's Tubes section): Show tubes (showTubesBox: the
-    // host binds it to its Tubes switch, DisplaySettings::tubes), the look as pills (Shaded,
-    // Wireframe, Colors, Level colors) and Level (viewLevelBox: Follow guides or a level of the tube
-    // hierarchy kept in view, the document's tubeViewGroup). The Groom Tools put it in the guides'
-    // display popup.
+    // The tubes' look (Maya's guides display's Tubes block): Shaded, Wireframe, Colors, Level
+    // colors as pills. The Groom Tools put it in the guides' display popup; whether the tubes show
+    // with every tool is the popup's Tubes pill (the host's DisplaySettings::tubes).
     QWidget* displayBlock() const { return display_; }
-    QCheckBox* showTubesBox() const { return show_; }
-    QComboBox* viewLevelBox() const { return viewLevel_; }
     // The level whose tubes stay in view whichever level's guides are picked (the document's
-    // tubeViewGroup; "": the tubes follow their guides). One setting: Level here, the Roots card's
-    // Lock view, a level row's tube in Guide groups (tubeViewChanged tells the host).
+    // tubeViewGroup; "": the tubes follow their guides). One setting: the Roots card's Lock view and
+    // a level row's tube in Guide groups (tubeViewChanged tells the host).
     void setTubeView(const std::string& group);
-    void fillViewLevels();  // Level's entries as the hierarchy and the document stand
+    // The level view for group `group` picked (the list, the Roots card's level row): a level of a
+    // tube hierarchy shows its guides alone (the document's mixedView "<base>:<level>", ":solo"
+    // after it with Mixed view off: no tubes of the levels above), the groups' eyes untouched;
+    // another group or all groups (""): off, every group as its eye says.
+    void applyLevelView(const std::string& group);
     // Level `group`'s number in its tube hierarchy (1: the base), 0 when it is in none.
     int tubeLevelOf(const std::string& group) const;
 
@@ -290,11 +290,9 @@ private:
     ValueSlider* multiplier_ = nullptr;  // Subdivision multiplier (RootSubdivisionOptions::multiplier)
     bool paintingDensity_ = false;
     QCheckBox *lockView_ = nullptr, *mixedView_ = nullptr, *levelColors_ = nullptr;
-    void applyTubeViews();  // the document's Mixed view as the switch and the level say (its tube view kept)
     void syncLock();        // Lock view as the document's tubeViewGroup stands
     QToolButton *rootSnap_ = nullptr, *rootDrawPath_ = nullptr;  // pills
-    QCheckBox *colors_ = nullptr, *show_ = nullptr;
-    QComboBox* viewLevel_ = nullptr;
+    QCheckBox* colors_ = nullptr;
     QToolButton* levelMenu_ = nullptr;
     ValueSlider *rootDensity_ = nullptr, *rootLength_ = nullptr, *rootSegments_ = nullptr, *rootTaper_ = nullptr;
     QPushButton *addLevel_ = nullptr, *removeLevel_ = nullptr;
