@@ -194,6 +194,42 @@ class AgentLink(unittest.TestCase):
         cmds.undo()
         self.assertEqual([reference._short(c) for c in reference.list_references()], ["portrait"])
 
+    def test_morph_to_photos_is_the_photos_window_s(self):
+        # A photo of a wider head lined up; morph_to_photos as Maya's Photos window does it (a
+        # blendShape on the scalp), one undo step with the call; reset removes it.
+        from groomlab import agent_link, reference
+        folder = tempfile.mkdtemp(prefix="groomlab_agent_morph_")
+        image = os.path.join(folder, "wide.png")
+        write_png(image, 320, 240)
+        link = agent_link.Answerer(self.token)
+
+        def call(name, arguments, error=False):
+            line = json.dumps({"token": self.token, "id": 8, "method": "tools/call", "params": {"name": name, "arguments": arguments}})
+            result = json.loads(link.answer(line))["result"]
+            self.assertEqual(result["isError"], error, json.dumps(result)[:1500])
+            texts = [c["text"] for c in result["content"] if c["type"] == "text"]
+            return json.loads(texts[-1]) if texts else None
+
+        call("add_photo", {"path": image})
+        marks = call("mesh_landmarks", {"view": "front", "photo": "wide", "count": 14})
+        pairs = [{"point": m["p"], "pixel": [160 + 1.25 * (m["pixel"][0] - 160), m["pixel"][1]]} for m in marks["points"]
+                 if 0 < 160 + 1.25 * (m["pixel"][0] - 160) < 320 and 0 < m["pixel"][1] < 240]
+        self.assertGreaterEqual(len(pairs), 6)
+        aligned = call("align_photo", {"pairs": pairs, "focal_mm": 50, "keep_focal": True, "view": "front"})
+        self.assertTrue(aligned["linedUp"])
+        morphed = call("morph_to_photos", {})
+        self.assertEqual(cmds.undoInfo(q=True, undoName=True), "Agent: morph_to_photos")
+        self.assertTrue(reference.photo_morph_node(self.shape))
+        photo = morphed["photos"][0]
+        self.assertLess(photo["rmsAfter"], 0.5 * photo["rmsBefore"], json.dumps(morphed))
+        cmds.undo()
+        self.assertIsNone(reference.photo_morph_node(self.shape))
+        cmds.redo()
+        self.assertTrue(reference.photo_morph_node(self.shape))
+        call("morph_to_photos", {"reset": True})
+        self.assertIsNone(reference.photo_morph_node(self.shape))
+        self.assertIn("not morphed", json.dumps(call("morph_to_photos", {"reset": True}, error=True)))
+
     def test_render_frame_is_maya_s_renderers(self):
         from groomlab import agent_link
         tools = {t["name"]: t for t in self.ask("tools/list")["result"]["tools"]}

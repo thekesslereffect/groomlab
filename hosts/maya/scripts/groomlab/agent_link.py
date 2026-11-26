@@ -50,6 +50,23 @@ def _changed():
             pass
 
 
+def morph_json(text):
+    """groomLabAgent's morph_to_photos (agent_cmd.cpp): reference.morph_to_photos, or
+    reset_photo_morph, for {"groom", "stiffness", "symmetric", "reset"}; JSON back ({"error"} when
+    it fails)."""
+    from groomlab import reference
+    args = json.loads(text)
+    try:
+        if args.get("reset"):
+            if not reference.reset_photo_morph(args["groom"]):
+                return json.dumps({"error": "the scalp is not morphed (morph_to_photos first)"})
+            return json.dumps({"reset": True})
+        return json.dumps(reference.morph_to_photos(args["groom"], stiffness=float(args.get("stiffness", 0.0)),
+                                                    symmetric=bool(args.get("symmetric", True))))
+    except (ValueError, RuntimeError) as e:
+        return json.dumps({"error": str(e)})
+
+
 def _groom_shapes():
     """The scene's grooms by the name the agent knows them by (their transform's) -> their shape."""
     import groomlab

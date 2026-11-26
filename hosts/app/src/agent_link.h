@@ -42,6 +42,7 @@ public:
     int clients() const { return static_cast<int>(sockets_.size()); }
     QString file() const { return QString::fromStdString(file_); }
     int port() const { return port_; }
+    std::string root() const;  // the folder the agent's files are read and written in
 
     // One request line answered (the answer line): what a connection's lines go through.
     std::string answer(const std::string& line);

@@ -56,6 +56,9 @@ struct GroomEdit {
     // The groom's reference photos before and after (groom_file.h "referencePhotos" text: the
     // agent tools' photo edits, agent_photos.h), with `side`.
     std::optional<std::pair<std::string, std::string>> referencePhotos;
+    // The scalp before and after (the agent tools' Morph to Photos where the groom keeps its own
+    // scalp: groomlab-cli's), with `side`.
+    std::optional<std::pair<std::shared_ptr<const ScalpMesh>, std::shared_ptr<const ScalpMesh>>> scalp;
     // A whole-graph step that only moved things (`whole` too): undone and redone without
     // evaluating.
     bool layout = false;

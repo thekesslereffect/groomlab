@@ -9,6 +9,7 @@
 // that let it read them: the photo under a labelled pixel grid, the mesh with numbered points, the
 // mesh lined up over the photo.
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -18,6 +19,7 @@
 
 #include "groomlab/reference_edit.h"
 #include "groomlab/reference_guides.h"
+#include "groomlab/transfer_markers_edit.h"
 
 namespace groomlab::agent {
 
@@ -43,8 +45,11 @@ double focalMmToPixels(double mm, double width);
 double focalPixelsToMm(double px, double width);
 
 // A camera looking at the scalp's middle from a side ("front", "back", "left", "right", "top",
-// "three_quarter": the character's, as render_preview's; `upAxis` "Y" or "Z"), far enough to frame
-// it in a `width` x `height` image at `focalMm`. Throws std::invalid_argument for another view.
+// "three_quarter": the character's, as render_preview's; three_quarter_front_left / _right and
+// three_quarter_back_left / _right: 45 degrees round from the front or the back toward that side;
+// `upAxis` "Y" or "Z"), far enough to frame it in a `width` x `height` image at `focalMm`. Throws
+// std::invalid_argument for another view.
+const std::vector<std::string>& viewCameraNames();
 RefCamera viewCamera(const ScalpMesh& scalp, const std::string& upAxis, const std::string& view, int width, int height,
                      double focalMm = 50.0);
 
@@ -57,6 +62,25 @@ struct MeshCandidate {
 };
 std::vector<MeshCandidate> meshCandidates(const ScalpMesh& scalp, const RefCamera& camera, int count);
 
+// Morph to Photos as the hosts' Reference windows do it (pin_morph.h): a pin for each lined-up
+// photo's landmark pair (the same spot paired in several photos: one pin, seen in each), its point
+// on `restRefined` (the scalp before the first morph, as the session refines it) found by the pair's
+// spot on `current` (the scalp as it is now, where the pairs were picked: the same triangles), and
+// `rest`'s points moved (stiffness 0..0.95; symmetric: mirrored across the plane through the rest's
+// middle along `axis`, 0 x).
+struct PhotoMorph {
+    bool ok = false;
+    std::string error;
+    std::vector<Vec3f> points;  // rest's points, moved
+    int pins = 0, views = 0;
+    double rmsBefore = 0.0, rmsAfter = 0.0;  // the pins' reprojection error, pixels
+};
+PhotoMorph morphToPhotos(const ScalpMesh& rest, const ScalpMesh& restRefined, const ScalpMesh& current, const std::vector<AgentPhoto>& photos,
+                         double stiffness, bool symmetric, int axis = 0);
+// Where a pair's mesh point is on `to` (the same triangles as `from`): its spot on the surface (its
+// root, else the spot of `from` nearest the point as stored).
+Vec3f markerOn(const ScalpMesh& from, const ScalpMesh& to, const MarkerPoint& point);
+
 // The photo under a pixel grid every `gridStep` photo pixels (labelled with its pixel coordinates),
 // its landmarks numbered (green: paired, yellow: pending), its flow arrows and mask touch-ups, at
 // most `maxSize` pixels across (labels in photo pixels). With `preview` (previewReferenceView: the
@@ -64,9 +88,19 @@ std::vector<MeshCandidate> meshCandidates(const ScalpMesh& scalp, const RefCamer
 std::vector<std::uint8_t> photoGridPng(const RefImage& image, const AgentPhoto& photo, int gridStep, int maxSize,
                                        const ReferenceViewPreview* preview = nullptr, int* shownWidth = nullptr,
                                        int* shownHeight = nullptr);
+// A part of the photo, `region` (x0, y0, x1, y1 in its pixels), enlarged to at most `maxSize`
+// across under a finer grid every `gridStep` pixels (labelled in the photo's pixels), its landmarks.
+std::vector<std::uint8_t> photoRegionPng(const RefImage& image, const AgentPhoto& photo, const std::array<int, 4>& region, int gridStep,
+                                         int maxSize, int* shownWidth = nullptr, int* shownHeight = nullptr);
 // The mesh through `camera`, the candidates' numbers on it.
+// `labels`: named points besides (their code drawn at their pixel, cyan).
+struct PointLabel {
+    std::string code;
+    float u = 0.0f, v = 0.0f;
+};
 std::vector<std::uint8_t> meshCandidatesPng(const ScalpMesh& scalp, const RefCamera& camera,
-                                            const std::vector<MeshCandidate>& candidates, int maxSize);
+                                            const std::vector<MeshCandidate>& candidates, int maxSize,
+                                            const std::vector<PointLabel>& labels = {});
 // The mesh's outline and wireframe over the photo through the photo's camera, each landmark pair's
 // photo point (green) and its mesh point through the camera (red) joined by a line: how well it
 // lines up.

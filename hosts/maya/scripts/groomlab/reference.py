@@ -1052,6 +1052,8 @@ def _apply_photo(groom, camera, photo, found):
                          * 25.4 / cmds.getAttr(camera + ".glRefWidth"))
         if was_locked:
             lock_reference(camera, True)
+        if cmds.getAttr(camera + ".glRefRms") < 0.0:  # (lined up: what Morph to Photos reads)
+            cmds.setAttr(camera + ".glRefRms", float(photo.get("rms") or 0.0))
     if photo.get("state"):
         state = photo["state"]
         from_reference.store_photo_state(groom, camera, json.dumps(state) if not isinstance(state, str) else state)

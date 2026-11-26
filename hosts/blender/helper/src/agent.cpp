@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "groomlab/editor/agent_link.h"
+#include "groomlab/editor/agent_photos.h"
 #include "groomlab/editor/agent_tools.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/version.h"
@@ -32,7 +33,8 @@ namespace {
 // the session's undo stack (tools.h commitStroke / commitStep), its history read from that stack.
 class HelperAgentGroom : public agent::AgentGroom {
 public:
-    HelperAgentGroom(std::string name, Session& s) : AgentGroom(std::move(name)), s_(s), bound_(s.groom.get()) {}
+    HelperAgentGroom(std::string name, Session& s, std::map<int, json>& morphs)
+        : AgentGroom(std::move(name)), s_(s), bound_(s.groom.get()), morphs_(morphs) {}
     Session& sessionOf() { return s_; }
     bool boundTo(const Session& s) const { return &s == &s_ && s.groom.get() == bound_; }
 
@@ -103,10 +105,47 @@ public:
     void setCollider(const std::string&, MeshPtr) override {
         throw ToolError("in Blender, colliders are Blender meshes: add one with GroomLab > Add > Collider, then name it in a ColliderMesh node");
     }
+    // Morph to Photos as the add-on's Photos panel does it: the scalp's points moved here (from the
+    // scalp before the first morph), the add-on setting them as the scalp's photo morph shape key
+    // (agent_request's "morph"): Blender's undo takes it back.
+    MorphOutcome morphToPhotos(const MorphRequest& request) override {
+        const MeshPtr now = s_.groom->rawScalp();
+        if (!now || now->triangleCount() == 0) throw ToolError("the groom has no scalp");
+        MorphOutcome out;
+        if (request.reset) {
+            if (!rest_) throw ToolError("the scalp is not morphed by the agent (morph_to_photos first; a morph made in Blender's Photos panel: its Reset Morph)");
+            s_.groom->setScalp(rest_);
+            morphs_[s_.id] = {{"reset", true}};
+            out.note = "the scalp's photo morph shape key removed";
+            return out;
+        }
+        if (!rest_ || rest_->triangleCount() != now->triangleCount()) {
+            rest_ = now;
+            restRefined_ = s_.groom->scalp();
+        }
+        const agent::PhotoMorph m = agent::morphToPhotos(*rest_, restRefined_ ? *restRefined_ : *rest_, *s_.groom->scalp(),
+                                                         agent::photosFromJson(referencePhotos), request.stiffness, request.symmetric);
+        if (!m.ok) throw ToolError(m.error);
+        s_.groom->setScalp(std::make_shared<ScalpMesh>(rest_->withPoints(m.points)));
+        json points = json::array();
+        for (const Vec3f& p : m.points) {
+            float host[3];
+            s_.space.toHost(p, host);
+            points.push_back(host[0]), points.push_back(host[1]), points.push_back(host[2]);
+        }
+        morphs_[s_.id] = {{"points", std::move(points)}};
+        out.pins = m.pins;
+        out.pinsRmsBefore = m.rmsBefore;
+        out.pinsRmsAfter = m.rmsAfter;
+        out.note = "the scalp's photo morph shape key (GroomLab Photo Morph), as the Photos panel's Morph";
+        return out;
+    }
 
 private:
     Session& s_;
     const GroomSession* bound_;
+    std::map<int, json>& morphs_;
+    MeshPtr rest_, restRefined_;  // the scalp before the first morph
     EditHistory history_;
 };
 
@@ -123,7 +162,7 @@ public:
             for (auto& old : grooms_) {
                 if (old && old->name() == name && old->boundTo(*s)) g = std::move(old);
             }
-            if (!g) g = std::make_unique<HelperAgentGroom>(name, *s);
+            if (!g) g = std::make_unique<HelperAgentGroom>(name, *s, morphs);
             // (as the session has them now: the add-on's Photos panel and the frame change them)
             g->referencePhotos = s->file.referencePhotos;
             g->frame = secondsToFrame(s->seconds, s->groom->framesPerSecond());
@@ -134,6 +173,7 @@ public:
         active_ = active;
     }
     void clear() { grooms_.clear(); }
+    std::map<int, json> morphs;  // the morphs a request made, by session (agent_request's "morph")
 
     std::vector<agent::AgentGroom*> grooms() override {
         std::vector<agent::AgentGroom*> out;
@@ -292,6 +332,7 @@ json runAgentCommand(const std::string& cmd, const json& args, std::map<int, std
     }
     std::vector<Before> was;
     for (const auto& [name, s] : grooms) was.push_back(before(*s));
+    l.target.morphs.clear();
     const std::string reply = agent::answerLinkRequest(*l.tools, l.token, line);
     // The tool called (the add-on names Blender's undo step after it).
     json tool = nullptr;
@@ -308,9 +349,12 @@ json runAgentCommand(const std::string& cmd, const json& args, std::map<int, std
         const bool stack = now.done != b.done || now.redo != b.redo || now.last != b.last;
         const bool graph = now.graph != b.graph, guides = now.guides != b.guides, photos = now.photos != b.photos,
                    scalp = now.scalp != b.scalp;
-        if (!stack && !graph && !guides && !photos && !scalp) continue;
-        changed.push_back({{"session", s.id}, {"groom", grooms[i].first}, {"undo", undoStateJson(s)}, {"graphChanged", graph},
-                           {"scalpChanged", scalp}, {"photosChanged", photos}});
+        const auto morph = l.target.morphs.find(s.id);
+        if (!stack && !graph && !guides && !photos && !scalp && morph == l.target.morphs.end()) continue;
+        json entry = {{"session", s.id}, {"groom", grooms[i].first}, {"undo", undoStateJson(s)}, {"graphChanged", graph},
+                      {"scalpChanged", scalp}, {"photosChanged", photos}};
+        if (morph != l.target.morphs.end()) entry["morph"] = morph->second;
+        changed.push_back(std::move(entry));
     }
     return {{"reply", reply}, {"tool", tool}, {"changed", changed}};
 }

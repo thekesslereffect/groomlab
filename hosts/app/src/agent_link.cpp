@@ -33,7 +33,7 @@ namespace fs = std::filesystem;
 // The open document as an agent's groom: its session read, its edits recorded in its own history.
 class AppAgentGroom : public agent::AgentGroom {
 public:
-    AppAgentGroom(std::string name, GroomDocument& doc) : AgentGroom(std::move(name)), doc_(doc) {}
+    AppAgentGroom(std::string name, GroomDocument& doc, MainWindow& window) : AgentGroom(std::move(name)), doc_(doc), window_(window) {}
     GroomDocument& document() { return doc_; }
 
     GroomSession& session() override { return doc_.session(); }
@@ -51,6 +51,18 @@ public:
     std::string undo() override { return doc_.undo(); }
     std::string redo() override { return doc_.redo(); }
     SimRun simulateTo(int toFrame) override { return doc_.simulateTo(toFrame); }
+    // Morph to Photos as the Photos tab does it: the groom carried onto the morphed scalp (a
+    // transfer: one step of the document's history).
+    MorphOutcome morphToPhotos(const MorphRequest& request) override {
+        QString error;
+        if (!window_.morphScalpToPhotos(request.stiffness, request.symmetric, request.reset, &error)) throw ToolError(error.toStdString());
+        MorphOutcome out;
+        out.undoable = false;
+        out.note = request.reset ? "the groom carried back onto its unmorphed scalp"
+                                 : "the groom carried onto the morphed scalp, as the Photos tab's Morph does: a transfer, which starts the "
+                                   "app's history over (morph_to_photos reset brings the unmorphed scalp back)";
+        return out;
+    }
     void setCollider(const std::string&, MeshPtr) override {
         throw ToolError("in the app, colliders are props: add one with File > Add Prop, then name it in a ColliderMesh node");
     }
@@ -64,6 +76,7 @@ public:
 
 private:
     GroomDocument& doc_;
+    MainWindow& window_;
 };
 
 // The app's one groom: the document open now.
@@ -82,7 +95,7 @@ public:
         }
         if (!groom_ || &groom_->document() != doc) {
             const std::string name = doc->path().empty() ? std::string("untitled") : fs::u8path(doc->path()).stem().u8string();
-            groom_ = std::make_unique<AppAgentGroom>(name, *doc);
+            groom_ = std::make_unique<AppAgentGroom>(name, *doc, window_);
         }
         // (the photos as the document has them now: the Reference window edits them too)
         groom_->referencePhotos = doc->referencePhotos();
@@ -159,6 +172,8 @@ private:
 AppAgentLink::AppAgentLink(MainWindow& window) : QObject(&window), window_(window) {}
 
 AppAgentLink::~AppAgentLink() { stop(); }
+
+std::string AppAgentLink::root() const { return target_ ? target_->folders_.root : std::string(); }
 
 bool AppAgentLink::start(QString* error) {
     stop();

@@ -252,6 +252,39 @@ def everything_else(c, root):
     assert grown["guides"] > 20 and grown["group"] == "fromReference", grown
     compared, result = c.call("render_preview", dict(g, camera={"photo": "front"}, size=240))
     assert compared["width"] == 240 and compared["height"] == 240, compared
+    shown, _ = c.call("render_preview", dict(g, camera={"photo": "front"}))
+    assert shown["width"] == width and shown["height"] == height, shown  # (the camera's own size)
+
+    # A whole head: its facial landmarks by name, paired by name with a view hint and refined by
+    # the outline; the scalp morphed to the photo and reset; the scalp from the landmarks; the look.
+    f = {"groom": "face"}
+    made, _ = c.call("new_groom", {"name": "face", "mesh": "nika"})
+    assert made["head"]["face"] and "scalp_from_landmarks" in made["head"]["note"], made
+    c.call("add_photo", dict(f, path="photos/front.png"))
+    zoom, result = c.call("photo_view", dict(f, region=[180, 150, 300, 260]))
+    assert zoom["grid"] in (5, 10) and zoom["region"] == [180, 150, 300, 260] and image_of(result)[0] == zoom["shown"][0], zoom
+    named, _ = c.call("mesh_landmarks", dict(f, view="front", photo="front", count=8))
+    names = {n["name"]: n for n in named["named"]}
+    assert {"nose_tip", "chin", "left_eye", "right_eye", "left_mouth_corner"} <= set(names), sorted(names)
+    picks = ["nose_tip", "chin", "left_eye", "right_eye", "left_mouth_corner", "right_mouth_corner", "left_eye_outer", "right_eye_outer"]
+    by_name = [{"pixel": project(names[n]["p"]), "point": n} for n in picks if n in names]
+    lined, result = c.call("align_photo", dict(f, pairs=by_name, view="front", refine=True))
+    assert lined["linedUp"] and lined["rmsPixels"] < 1.0, lined
+    assert "refine" in lined and isinstance(lined["refine"]["done"], bool), lined
+    assert "viewAngleFromHint" in lined, lined
+    together, result = c.call("align_photos", dict(f, photos=[{"photo": "front", "view": "front", "pairs": by_name}]))
+    shot = together["photos"][0]
+    assert together["focal_mm"] > 20 and shot["rmsPixels"] < 2.0 and abs(shot["yaw"]) < 30, together
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 1
+    morphed, result = c.call("morph_to_photos", dict(f, stiffness=0.2))
+    assert morphed["pins"] >= 6 and morphed["photos"][0]["photo"] == "front", morphed
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 1
+    c.call("morph_to_photos", dict(f, reset=True))
+    region, _ = c.call("scalp_from_landmarks", f)
+    assert region["linked"].endswith(".density") and 0.05 < region["scalpShare"] < 0.7, region
+    grown, _ = c.call("guides_from_photos", dict(f, guide_count=80, apply_look=True))
+    assert grown["guides"] > 5 and "unseenShare" in grown, grown
+    assert "lookApplied" in grown or "look" not in grown, grown
 
     # A root tube drawn round the crown, cut into cells, then split a level down.
     drawn, _ = c.call("root_tube", dict(g, op="draw", center="crown", radius=3, length=12))
