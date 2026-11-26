@@ -31,6 +31,20 @@ from maya import cmds  # noqa: E402
 import groomlab  # noqa: E402
 
 
+def write_png(path, width, height):
+    """A gray gradient PNG (no imaging library in mayapy)."""
+    import struct
+    import zlib
+    rows = b"".join(b"\x00" + bytes(v for x in range(width) for v in (x * 255 // width, y * 255 // height, 128))
+                    for y in range(height))
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
 class AgentLink(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -125,6 +139,77 @@ class AgentLink(unittest.TestCase):
         top = cmds.undoInfo(q=True, undoName=True)
         self.call("measure_guides")
         self.assertEqual(cmds.undoInfo(q=True, undoName=True), top)
+
+    def test_photos_are_the_scenes_reference_cameras(self):
+        # Through the link's own answering (agent_link.Answerer, the listener's without a socket):
+        # a photo the agent adds is a reference camera of the scene, as Maya's Photos window makes
+        # one, made in the call's undo chunk, saved with the scene and read back by the next call.
+        from groomlab import agent_link, reference
+        folder = tempfile.mkdtemp(prefix="groomlab_agent_photo_")
+        image = os.path.join(folder, "portrait.png")
+        write_png(image, 320, 240)
+        link = agent_link.Answerer(self.token)
+
+        def call(name, arguments, error=False):
+            line = json.dumps({"token": self.token, "id": 7, "method": "tools/call", "params": {"name": name, "arguments": arguments}})
+            result = json.loads(link.answer(line))["result"]
+            self.assertEqual(result["isError"], error, json.dumps(result)[:1500])
+            texts = [c["text"] for c in result["content"] if c["type"] == "text"]
+            return json.loads(texts[-1]) if texts else None
+
+        self.assertEqual(reference.list_references(), [])
+        self.assertEqual(call("add_photo", {"path": image})["photo"], "portrait")
+        self.assertEqual(cmds.undoInfo(q=True, undoName=True), "Agent: add_photo")
+        cameras = reference.list_references()
+        self.assertEqual(len(cameras), 1)
+        camera = cameras[0]
+        self.assertEqual(reference._short(camera), "portrait")
+        self.assertEqual((cmds.getAttr(camera + ".glRefWidth"), cmds.getAttr(camera + ".glRefHeight")), (320, 240))
+        # A flow arrow on it: kept for the groom on that camera (what the Photos window reads).
+        call("photo_edit", {"photo": "portrait", "op": "add_flow", "points": [[100, 40], [110, 160]]})
+        stored = reference.photos_for_file(self.shape)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(len(stored[0]["state"]["strokes"]), 1)
+        # Maya's undo takes the arrow back, then the photo; redo makes them again.
+        cmds.undo()
+        self.assertEqual(reference.photos_for_file(self.shape)[0]["state"]["strokes"], [])
+        cmds.undo()
+        self.assertEqual(reference.list_references(), [])
+        cmds.redo()
+        cmds.redo()
+        self.assertEqual(len(reference.photos_for_file(self.shape)[0]["state"]["strokes"]), 1)
+        # Saved and opened again: the camera is there, and the agent sees its photo.
+        scene = os.path.join(folder, "photos.ma").replace("\\", "/")
+        cmds.file(rename=scene)
+        cmds.file(save=True, type="mayaAscii")
+        cmds.file(new=True, force=True)
+        cmds.file(scene, open=True, force=True)
+        self.shape = cmds.ls(type="groomLabShape", long=True)[0]
+        self.assertEqual([reference._short(c) for c in reference.list_references()], ["portrait"])
+        seen = call("photo_view", {"photo": "portrait"})
+        self.assertEqual((seen["width"], seen["height"]), (320, 240))
+        # Removed by the agent: the camera goes; undo brings it back.
+        call("photo_edit", {"photo": "portrait", "op": "remove_photo"})
+        self.assertEqual(reference.list_references(), [])
+        cmds.undo()
+        self.assertEqual([reference._short(c) for c in reference.list_references()], ["portrait"])
+
+    def test_render_frame_is_maya_s_renderers(self):
+        from groomlab import agent_link
+        tools = {t["name"]: t for t in self.ask("tools/list")["result"]["tools"]}
+        self.assertEqual(tools["render_frame"]["inputSchema"]["properties"]["renderer"]["enum"],
+                         ["arnold", "hardware2", "vray", "renderman"])
+        link = agent_link.Answerer(self.token)
+
+        def render(arguments):
+            line = json.dumps({"token": self.token, "id": 9, "method": "tools/call", "params": {"name": "render_frame", "arguments": arguments}})
+            return json.loads(link.answer(line))["result"]
+
+        # Hardware 2.0 needs Maya's UI: said; a size out of range: said.
+        refused = render({"renderer": "hardware2"})
+        self.assertTrue(refused["isError"])
+        self.assertIn("UI", refused["content"][0]["text"])
+        self.assertTrue(render({"renderer": "arnold", "width": 5000})["isError"])
 
     def test_what_maya_does_its_own_way(self):
         self.assertIn("Create Groom", self.call("new_groom", {"name": "x", "mesh": "nika"}, error=True)["error"])

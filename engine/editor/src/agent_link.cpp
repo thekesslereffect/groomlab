@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -185,6 +186,96 @@ std::string answerLinkRequest(AgentTools& tools, const std::string& token, const
         return dumpLine(errorAnswer(id, -32603, e.what()));
     }
     return dumpLine(errorAnswer(id, kLinkUnknownMethod, "unknown method '" + method + "'"));
+}
+
+bool isToolCall(const std::string& line, const std::string& tool) {
+    const json request = json::parse(line, nullptr, false);
+    if (!request.is_object() || request.value("method", std::string()) != "tools/call") return false;
+    const json params = request.value("params", json::object());
+    return params.is_object() && params.contains("name") && params["name"] == tool;
+}
+
+bool pngSize(const std::vector<std::uint8_t>& png, int& width, int& height) {
+    static const std::uint8_t sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    if (png.size() < 24 || !std::equal(sig, sig + 8, png.begin())) return false;
+    auto be = [&](std::size_t at) {
+        return static_cast<int>((static_cast<std::uint32_t>(png[at]) << 24) | (static_cast<std::uint32_t>(png[at + 1]) << 16) |
+                                (static_cast<std::uint32_t>(png[at + 2]) << 8) | static_cast<std::uint32_t>(png[at + 3]));
+    };
+    width = be(16);
+    height = be(20);
+    return width > 0 && height > 0;
+}
+
+namespace {
+
+json renderJson(const RenderRequest& r) {
+    json j = {{"groom", r.groom}, {"renderer", r.renderer}, {"width", r.width}, {"height", r.height},
+              {"quality", r.quality}, {"samples", r.samples}, {"camera", r.camera}};
+    j["frame"] = r.frame ? json(*r.frame) : json(nullptr);
+    return j;
+}
+
+RenderRequest renderOf(const json& j) {
+    RenderRequest r;
+    r.groom = j.value("groom", std::string());
+    r.renderer = j.value("renderer", std::string());
+    r.width = j.value("width", 640);
+    r.height = j.value("height", 480);
+    r.quality = j.value("quality", std::string("draft"));
+    r.samples = j.value("samples", 0);
+    r.camera = j.value("camera", std::string());
+    if (j.contains("frame") && j["frame"].is_number()) r.frame = j["frame"].get<double>();
+    return r;
+}
+
+std::string toolAnswer(const json& id, const ToolResult& result) {
+    return dumpLine({{"id", id}, {"result", {{"content", result.content}, {"isError", result.isError}}}});
+}
+
+ToolResult toolFailure(const std::string& message) {
+    ToolResult r;
+    r.content.push_back({{"type", "text"}, {"text", json{{"error", message}}.dump(-1, ' ', false, json::error_handler_t::replace)}});
+    r.isError = true;
+    return r;
+}
+
+}  // namespace
+
+json beginHostRender(AgentTools& tools, const std::string& token, const std::string& line) {
+    const json request = json::parse(line, nullptr, false);
+    const bool own = request.is_object() && !token.empty() && request.value("token", std::string()) == token &&
+                     isToolCall(line, "render_frame");
+    if (!own) return {{"reply", answerLinkRequest(tools, token, line)}};  // (refused there, or not a render)
+    const json id = request.contains("id") ? request["id"] : json(nullptr);
+    const json params = request.value("params", json::object());
+    const json arguments = params.value("arguments", json::object());
+    try {
+        return {{"render", renderJson(tools.renderRequest(arguments))}, {"id", id}};
+    } catch (const std::exception& e) {
+        return {{"reply", toolAnswer(id, toolFailure(e.what()))}};
+    }
+}
+
+std::string finishHostRender(AgentTools& tools, const json& begun, const std::string& pngFile, double seconds, const json& info,
+                             const std::string& error) {
+    const json id = begun.value("id", json(nullptr));
+    if (!error.empty()) return toolAnswer(id, toolFailure(error));
+    try {
+        const RenderRequest r = renderOf(begun.value("render", json::object()));
+        RenderedFrame f;
+        std::ifstream in(std::filesystem::u8path(pngFile), std::ios::binary);
+        f.image.png.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        if (!pngSize(f.image.png, f.image.width, f.image.height)) {
+            return toolAnswer(id, toolFailure("the " + r.renderer + " render wrote no PNG image (" + pngFile + ")"));
+        }
+        f.seconds = seconds;
+        f.file = pngFile;
+        if (info.is_object()) f.info = info;
+        return toolAnswer(id, tools.renderResult(r, f));
+    } catch (const std::exception& e) {
+        return toolAnswer(id, toolFailure(e.what()));
+    }
 }
 
 std::string linkRequestLine(const std::string& token, std::int64_t id, const std::string& method, const json& params) {

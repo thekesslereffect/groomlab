@@ -123,15 +123,19 @@ few leave their work to the program's own menus (making a groom, exporting curve
 
 - **Maya**: each tool call is one undo step named `Agent: <tool>`; the agent's `undo`, `redo` and
   `history` are Maya's undo queue. Files are read and written in the Maya project's folder, and
-  `render_preview` with `viewport: true` shows the viewport as you see it.
+  `render_preview` with `viewport: true` shows the viewport as you see it. The photos the agent adds
+  and lines up are reference cameras in the scene, the same ones the Photos window shows, so they
+  are saved with the scene. `render_frame` renders with Arnold, Hardware 2.0 (with Maya's window
+  open), V-Ray Standalone or RenderMan, if installed.
 - **The app**: each change is one step of Edit > Undo, the same history as yours, so the agent's
   `undo` takes back your last step too. Files are read and written in the open groom's folder
   (`Documents\GroomLab` for an unsaved one); `render_preview` with `viewport: true` shows the
-  viewport.
+  viewport, and `render_frame` renders the app's lookdev view.
 - **Blender**: each change is one step of the groom's GroomLab history (Ctrl+Z in the Groom Tools)
   and one Blender undo step named `Agent: <tool>`, so Edit > Undo takes it back as it takes back a
   stroke. Files are read and written in the `.blend`'s folder (`Documents\GroomLab` while it is
-  unsaved). Photos the agent adds become cameras of the scene.
+  unsaved). Photos the agent adds become cameras of the scene. `render_frame` renders with Cycles or
+  EEVEE.
 
 With no program running its link, `--live` works on grooms of its own and says so. The link listens
 on 127.0.0.1 only, and every request carries a token from a file in `Documents\GroomLab\agent_link`
@@ -166,12 +170,14 @@ groom answers with a short summary: strand and point counts, guides, bounds, and
 | `measure_guides` | Numbers that describe the guides per group or for the selection: count, lengths, the mean root-to-tip direction (also in words), straightness, curl, how far they lean from the scalp. |
 | `evaluate` | Counts, bounds, errors, notes and the slowest nodes' timings. |
 | `render_preview` | A PNG of the groom that the agent can look at: the scalp shaded and the strands drawn in the hair's color, from the front, back, left, right, three-quarter or top view, several in a grid, or a turntable; in a look (studio, flat, rim, clay); through a camera or a lined-up photo's; the guides or tubes drawn over the hair, or two images, before and after the last change (`compare`). |
+| `render_frame` | Live only: a frame from the program's own renderer (Arnold and others in Maya, the app's lookdev, Cycles or EEVEE in Blender), at the size and quality given (640x480, draft by default), returned as an image. |
 | `save_groom`, `export` | A `.groom` file, or the strands as Alembic or USD curves over a frame range (as `groomlab-cli eval` writes them). |
 
 <Callout type="info" title="The preview is not a render">
   `render_preview` is a simple CPU drawing (no GPU) for checking shape, length, direction and color:
   flat shading, one-pixel strands, no shadows. Grooms with more than 50,000 strands are thinned for
-  it, and the response says so. Render in Arnold, Cycles or the app for the real look.
+  it, and the response says so. For the real look, the agent can use `render_frame` while it is
+  live in Maya, the app or Blender.
 </Callout>
 
 ## An example session
@@ -253,6 +259,8 @@ JSON Schemas for GroomLab's file formats, for agents and tools that write them d
 
 ## Not yet
 
+- **Renders without a host.** `render_frame` works only live. The server alone (`mcp --root`) draws
+  `render_preview`'s CPU pictures only.
 - **Painting maps.** A preset that reads painted maps (density, length) says which maps are missing.
   These maps can only be painted in GroomLab itself.
 - **Flow arrows, parts and sculpts.** These come from the brushes in Maya, the app and Blender.

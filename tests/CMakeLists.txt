@@ -521,6 +521,13 @@ if(TARGET groomlab-helper AND TARGET groomlab-cli)
                              ENVIRONMENT "${_addon_env};GROOMLAB_EXTENSION_ZIP=${GROOMLAB_BLENDER_EXTENSION_ZIP}")
         # The agent link: a client grooms the scene's groom through the add-on's listener and the helper.
         set_tests_properties(blender.addon_agent PROPERTIES LABELS "blender" ENVIRONMENT "${_addon_env}")
+        # The same in a Blender with its window: the link's own timer, the CLI, and the Blender undo
+        # step pushed from that timer taken back by Blender's undo (gui_: run_blender_test.py).
+        add_test(NAME blender.gui_agent_undo
+            COMMAND "${_blender_python}" -B "${CMAKE_CURRENT_SOURCE_DIR}/hosts/blender/run_blender_test.py" "${_blender_exe}"
+                    "${GROOMLAB_BLENDER_EXTENSION_ZIP}" "${CMAKE_CURRENT_SOURCE_DIR}/hosts/blender/gui_addon_agent_undo.py")
+        set_tests_properties(blender.gui_agent_undo PROPERTIES LABELS "blender;gui" RUN_SERIAL TRUE TIMEOUT 700
+                             ENVIRONMENT "${_addon_env}")
         # The GroomLab window's parts that need no screen (typed values, icons, theme, its operators).
         set_tests_properties(blender.addon_window PROPERTIES LABELS "blender" ENVIRONMENT "${_addon_env}")
         # The UI from the shared definitions (engine/ui): every id Blender shows bound, the Groom Tools' operators.
@@ -920,8 +927,9 @@ if(GROOMLAB_GUI_TESTS AND GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
         LABELS "gui;maya"
         FIXTURES_REQUIRED maya_gui_trust
         # A prefs folder of its own: the user's prefs could auto-load an installed
-        # GroomLab module, and the build's plugin would then be skipped.
-        ENVIRONMENT "MAYA_DEBUG_ENABLE_CRASH_REPORTING=0;MAYA_APP_DIR=${CMAKE_CURRENT_BINARY_DIR}/maya_app_dir;PYTHONPATH=${GROOMLAB_MAYA_PYTHONPATH};GROOMLAB_PLUGIN=$<TARGET_FILE:GroomLab>;GROOMLAB_SCRIPTS=${PROJECT_SOURCE_DIR}/hosts/maya/scripts;GROOMLAB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya;GROOMLAB_GUI_LOG=${CMAKE_CURRENT_BINARY_DIR}/gui.log;GROOMLAB_AGENT_LINK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gui_agent_link")
+        # GroomLab module, and the build's plugin would then be skipped. MtoA finds GroomLab's
+        # translator as the module points it there (render_frame arnold, the render suite).
+        ENVIRONMENT "$<$<TARGET_EXISTS:groomLabTranslator>:MTOA_EXTENSIONS_PATH=$<TARGET_FILE_DIR:groomLabTranslator>;>MAYA_DEBUG_ENABLE_CRASH_REPORTING=0;MAYA_APP_DIR=${CMAKE_CURRENT_BINARY_DIR}/maya_app_dir;PYTHONPATH=${GROOMLAB_MAYA_PYTHONPATH};GROOMLAB_PLUGIN=$<TARGET_FILE:GroomLab>;GROOMLAB_SCRIPTS=${PROJECT_SOURCE_DIR}/hosts/maya/scripts;GROOMLAB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya;GROOMLAB_GUI_LOG=${CMAKE_CURRENT_BINARY_DIR}/gui.log;GROOMLAB_AGENT_LINK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gui_agent_link")
     # The drawing suites again on DirectX 11: fresh prefs give OpenGL, but many artists run
     # Viewport 2.0 on DirectX 11, where buffers behave differently (GPU-only vertex buffers
     # cannot be written there). MAYA_VP2_DEVICE_OVERRIDE picks the device without touching prefs.

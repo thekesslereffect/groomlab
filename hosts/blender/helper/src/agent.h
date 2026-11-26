@@ -12,6 +12,9 @@
 //   agent_request {line, grooms {name: session}, groom (the active one's name)}
 //       -> {reply (the answer line), tool, changed [{session, undo, graphChanged, scalpChanged,
 //           photosChanged}]}
+//   agent_render_begin {line, grooms, groom}: a render_frame call checked -> {render {groom,
+//       session, renderer, width, height, quality, samples, frame, camera}, id} or {reply}
+//   agent_render_end {begun, png, seconds, info, error} -> {reply}: the PNG the add-on rendered
 
 #include <map>
 #include <memory>

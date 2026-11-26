@@ -77,4 +77,17 @@ std::string answerLinkRequest(AgentTools& tools, const std::string& token, const
 std::string linkRequestLine(const std::string& token, std::int64_t id, const std::string& method, const nlohmann::json& params);
 nlohmann::json linkResult(const std::string& line, std::int64_t id);
 
+// Whether a request line is a tools/call of `tool` (what a host's glue answers itself).
+bool isToolCall(const std::string& line, const std::string& tool);
+// render_frame where the host's glue renders (Maya's and Blender's Python): the line checked (the
+// token, the groom, the arguments) into {"render": the request, "id": the request's id}, or
+// {"reply": the answer line} when it is refused. The glue renders a PNG and finishes it:
+// finishHostRender gives the answer line, the PNG file's image in it (`error`: why it failed,
+// told to the agent instead).
+nlohmann::json beginHostRender(AgentTools& tools, const std::string& token, const std::string& line);
+std::string finishHostRender(AgentTools& tools, const nlohmann::json& begun, const std::string& pngFile, double seconds,
+                             const nlohmann::json& info, const std::string& error);
+// The size of a PNG's bytes (false: not a PNG).
+bool pngSize(const std::vector<std::uint8_t>& png, int& width, int& height);
+
 }  // namespace groomlab::agent

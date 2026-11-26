@@ -3,13 +3,17 @@
 // writes the discovery file; an agent's client (a socket here, as groomlab-cli mcp --live talks:
 // JSON lines with the file's token) lists the tools, places and combs guides on the open groom,
 // each one step of the document's history; the agent's undo and Edit > Undo are one stack; the
-// header's badge shows while it is connected and its Stop turns the link off.
+// header's badge shows while it is connected and its Stop turns the link off. render_frame renders
+// the lookdev offscreen.
 
+#include <cstdlib>
 #include <filesystem>
+#include <set>
 #include <string>
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QImage>
 #include <QTcpSocket>
 #include <QToolButton>
 
@@ -146,6 +150,25 @@ TEST(AppAgentLink, AnAgentGroomsTheOpenGroomInTheDocumentsHistory) {
     const json shot = call("render_preview", {{"viewport", true}, {"size", 128}});
     ASSERT_EQ(shot["result"]["isError"], false) << shot.dump().substr(0, 500);
     EXPECT_EQ(shot["result"]["content"][0]["type"], "image");
+    // A frame of the lookdev render, at the size asked for; what the app does not do, said.
+    const json rendered = call("render_frame", {{"renderer", "lookdev"}, {"width", 160}, {"height", 120}});
+    ASSERT_EQ(rendered["result"]["isError"], false) << rendered.dump().substr(0, 500);
+    EXPECT_EQ(rendered["result"]["content"][0]["type"], "image");
+    const json renderInfo = textOf(rendered);
+    EXPECT_EQ(renderInfo["renderer"], "lookdev");
+    EXPECT_EQ(renderInfo["width"], 160);
+    EXPECT_EQ(renderInfo["height"], 120);
+    const QImage frame = QImage::fromData(
+        QByteArray::fromBase64(QByteArray::fromStdString(rendered["result"]["content"][0]["data"].get<std::string>())), "PNG");
+    ASSERT_EQ(frame.size(), QSize(160, 120));
+    if (const char* keep = std::getenv("GROOMLAB_KEEP_AGENT_RENDER")) frame.save(QString::fromUtf8(keep));
+    std::set<QRgb> colors;
+    for (int y = 0; y < frame.height(); y += 4) {
+        for (int x = 0; x < frame.width(); x += 4) colors.insert(frame.pixel(x, y));
+    }
+    EXPECT_GT(colors.size(), 20u);  // (the hair and the scalp drawn, not a blank)
+    EXPECT_EQ(call("render_frame", {{"renderer", "cycles"}})["result"]["isError"], true);
+    EXPECT_EQ(call("render_frame", {{"frame", 12}})["result"]["isError"], true);
 
     // The badge's Stop: the link off, its file gone, the badge hidden.
     tools->agentBadge()->findChild<QToolButton*>(QStringLiteral("agentStop"))->click();

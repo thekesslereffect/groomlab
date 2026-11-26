@@ -693,3 +693,82 @@ TEST(AgentLink, RequestsAreAnsweredOnlyWithTheToken) {
                  std::runtime_error);
     EXPECT_THROW(linkResult(answerLinkRequest(tools, token, linkRequestLine(token, 9, "ping", nullptr)), 10), std::runtime_error);
 }
+
+namespace {
+
+// A host with a renderer of its own (a flat picture of the size asked for), as the app's lookdev.
+class RenderingTarget : public SessionTarget {
+public:
+    std::vector<RendererInfo> renderers() override { return {{"flat", "one color"}, {"other", "another"}}; }
+    RenderedFrame render(AgentGroom&, const RenderRequest& r) override {
+        last = r;
+        RenderedFrame f;
+        f.image.width = r.width;
+        f.image.height = r.height;
+        f.image.png = encodePng(r.width, r.height, 3, std::vector<std::uint8_t>(static_cast<std::size_t>(r.width * r.height * 3), 128));
+        f.seconds = 0.25;
+        f.info = {{"note", "flat"}};
+        return f;
+    }
+    RenderRequest last;
+};
+
+}  // namespace
+
+TEST(AgentTools, RenderFrameIsTheHostsRenderersOnly) {
+    // Headless: no renderers, no render_frame.
+    SessionTarget headless;
+    AgentTools plain(headless);
+    EXPECT_FALSE(plain.has("render_frame"));
+    RenderingTarget target;
+    AgentTools tools(target);
+    ASSERT_TRUE(tools.has("render_frame"));
+    call(tools, "new_groom", {{"name", "b"}, {"mesh", "ball"}});
+    // The request as the host gets it; the image and what it says.
+    const ToolResult r = tools.call("render_frame", {{"renderer", "other"}, {"width", 64}, {"height", 32}, {"quality", "final"}});
+    ASSERT_FALSE(r.isError) << r.content.dump();
+    EXPECT_EQ(r.content[0]["type"], "image");
+    const json info = json::parse(r.content[1]["text"].get<std::string>());
+    EXPECT_EQ(info["renderer"], "other");
+    EXPECT_EQ(info["width"], 64);
+    EXPECT_EQ(info["note"], "flat");
+    EXPECT_EQ(target.last.groom, "b");
+    EXPECT_EQ(target.last.quality, "final");
+    // The defaults, and what is out of range.
+    call(tools, "render_frame", json::object());
+    EXPECT_EQ(target.last.renderer, "flat");
+    EXPECT_EQ(target.last.width, 640);
+    EXPECT_EQ(target.last.height, 480);
+    call(tools, "render_frame", {{"width", 4096}}, true);
+    call(tools, "render_frame", {{"samples", 5000}}, true);
+    call(tools, "render_frame", {{"renderer", "cycles"}}, true);
+
+    // A host whose glue renders: the line checked into a request, the PNG it wrote answered.
+    const std::string token = newLinkToken();
+    const std::string line = linkRequestLine(token, 11, "tools/call", {{"name", "render_frame"}, {"arguments", {{"width", 20}, {"height", 16}}}});
+    EXPECT_TRUE(isToolCall(line, "render_frame"));
+    EXPECT_FALSE(isToolCall(line, "undo"));
+    const json begun = beginHostRender(tools, token, line);
+    ASSERT_TRUE(begun.contains("render")) << begun.dump();
+    EXPECT_EQ(begun["render"]["groom"], "b");
+    EXPECT_EQ(begun["render"]["width"], 20);
+    EXPECT_EQ(begun["id"], 11);
+    const fs::path png = fs::path(target.folders().root) / "glue.png";
+    {
+        const std::vector<std::uint8_t> bytes = encodePng(20, 16, 3, std::vector<std::uint8_t>(960, 200));
+        std::ofstream(png, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    const json done = linkResult(finishHostRender(tools, begun, png.u8string(), 1.5, {{"camera", "persp"}}, ""), 11);
+    EXPECT_EQ(done["isError"], false);
+    EXPECT_EQ(done["content"][0]["type"], "image");
+    const json doneInfo = json::parse(done["content"][1]["text"].get<std::string>());
+    EXPECT_EQ(doneInfo["width"], 20);
+    EXPECT_EQ(doneInfo["camera"], "persp");
+    EXPECT_EQ(doneInfo["file"], "glue.png");  // (inside the root: shown relative)
+    // Its failure, a bad argument and a wrong token, each answered.
+    EXPECT_EQ(linkResult(finishHostRender(tools, begun, "", 0.0, json::object(), "no renderer here"), 11)["isError"], true);
+    const json bad = beginHostRender(tools, token, linkRequestLine(token, 12, "tools/call", {{"name", "render_frame"}, {"arguments", {{"width", 1}}}}));
+    EXPECT_EQ(linkResult(bad["reply"].get<std::string>(), 12)["isError"], true);
+    const json refused = json::parse(beginHostRender(tools, token, linkRequestLine("wrong", 13, "tools/call", {{"name", "render_frame"}}))["reply"].get<std::string>());
+    EXPECT_EQ(refused["error"]["code"], kLinkBadToken);
+}

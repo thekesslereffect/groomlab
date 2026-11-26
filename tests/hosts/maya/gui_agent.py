@@ -179,6 +179,43 @@ def viewed(answer):
     result = answer.get("result") or {}
     images = [c for c in result.get("content", []) if c.get("type") == "image"]
     check("render_preview viewport: the view as the artist sees it", not result.get("isError") and len(images) == 1)
+    call("render_frame", {"renderer": "hardware2", "width": 160, "height": 120}, rendered_hw2)
+
+
+def frame_of(answer, name):
+    """The rendered image's size and its info; kept in GROOMLAB_KEEP_AGENT_RENDER's folder when set."""
+    import base64
+    result, data = result_json(answer)
+    images = [c for c in result.get("content", []) if c.get("type") == "image"]
+    keep = os.environ.get("GROOMLAB_KEEP_AGENT_RENDER")
+    if keep and images:
+        with open(os.path.join(keep, name + ".png"), "wb") as f:
+            f.write(base64.b64decode(images[0]["data"]))
+    return result, data, images
+
+
+def rendered_hw2(answer):
+    result, data, images = frame_of(answer, "hardware2")
+    check("render_frame hardware2: Maya's Hardware 2.0 frame at the size asked for",
+          not result.get("isError") and len(images) == 1 and (data or {}).get("width") == 160 and data.get("height") == 120)
+    call("render_frame", {"renderer": "arnold", "width": 160, "height": 120}, rendered_arnold)
+
+
+def rendered_arnold(answer):
+    from groomlab import agent_render
+    result, data, images = frame_of(answer, "arnold")
+    if agent_render._mtoa_installed():
+        ok = not result.get("isError") and len(images) == 1 and (data or {}).get("renderer") == "arnold"
+        check("render_frame arnold: kick's frame of the groom%s" % ("" if ok else " (%s)" % json.dumps(data)[:400]), ok)
+        if ok:  # (lit: a scene without lights gets the render's own, not a black frame)
+            import base64
+            from groomlab.ui.qt import QtGui
+            image = QtGui.QImage.fromData(base64.b64decode(images[0]["data"]), "PNG")
+            lumas = [QtGui.QColor(image.pixel(x, y)).lightness() for y in range(0, image.height(), 6)
+                     for x in range(0, image.width(), 6)]
+            check("the Arnold frame is lit (brightest %d)" % max(lumas), max(lumas) > 60 and len(set(lumas)) > 10)
+    else:
+        check("render_frame arnold without MtoA: said", result.get("isError") and "not installed" in json.dumps(result))
     soon(stop)
 
 
