@@ -1997,6 +1997,7 @@ def eyes_check(groom, folder):
     import groomlab
     from groomlab.ui.qt import QtGui
     transform = cmds.listRelatives(groom, parent=True, fullPath=True)[0]
+    cmds.setAttr(groom + ".displayTubes", False)  # (the guides alone: no tubes over the hair)
 
     def shot(name):
         """The capture's guide pixels (green to cyan) and hair pixels (brown: red over blue, where the

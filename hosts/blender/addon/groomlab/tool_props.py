@@ -898,7 +898,7 @@ STRAND_COLORS = defs.enum_items("strandColor")
 class GroomLabGroomDisplay(bpy.types.PropertyGroup):
     """A groom's viewport display (Maya's groom attributes) and its kept state."""
     show_guides: BoolProperty(name="Guides", default=True, update=_display, description="Draw the guides")
-    show_tubes: BoolProperty(name="Tubes", default=False, update=_display,
+    show_tubes: BoolProperty(name="Tubes", default=True, update=_display,
                              description="Draw each guide's tube with every tool (Comb, Select, ...), with the "
                                          "tubes' look; the Tube and Roots tools show them either way")
     show_flow: BoolProperty(name="Flow", default=True, update=_display, description="Draw parts and flow arrows")

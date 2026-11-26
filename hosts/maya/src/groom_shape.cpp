@@ -366,7 +366,8 @@ void GroomShape::setRootOverlay(std::vector<RootTubeTool::Item> items, float pix
 }
 
 bool GroomShape::displayTubes() const {
-    return MPlug(thisMObject(), aDisplayTubes).asBool();
+    const MObject self = thisMObject();
+    return MPlug(self, aDisplayTubes).asBool() && MPlug(self, aDisplayGuides).asBool();
 }
 
 void GroomShape::setTubesAlwaysVisible(bool always) {
@@ -377,12 +378,12 @@ void GroomShape::setTubesAlwaysVisible(bool always) {
 
 void GroomShape::setTubeWires(bool on, bool shaded, bool wireframe, bool colors, bool levelColors) {
     // The look (Shaded, Wireframe, Colors, level colors) is kept whether the tubes show or not: the
-    // guides display sets it with any tool up, and Always visible draws it once Tube or Roots is put
-    // down; a change made while the tubes show is drawn at once.
+    // guides display sets it with any tool up, and the groom's Tubes switch draws it once Tube or
+    // Roots is put down; a change made while the tubes show (the switch's too) is drawn at once.
     const bool look = shaded != tubeShaded_ || wireframe != tubeWireframe_ || colors != tubeColors_ ||
                       levelColors != tubeLevelColors_;
     if (on == tubeWires_ && !look) return;
-    const bool drawn = tubeWires_ || on || tubesAlways_;
+    const bool drawn = tubeWires() || on;
     tubeWires_ = on;
     tubeShaded_ = shaded;
     tubeWireframe_ = wireframe;
@@ -1089,7 +1090,7 @@ MStatus GroomShape::initialize() {
     nAttr.setKeyable(false);
     nAttr.setChannelBox(true);
 
-    aDisplayTubes = nAttr.create("displayTubes", "gldt", MFnNumericData::kBoolean, false, &status);
+    aDisplayTubes = nAttr.create("displayTubes", "gldt", MFnNumericData::kBoolean, true, &status);  // (the tubes on at first)
     CHECK_MSTATUS_AND_RETURN_IT(status);
     nAttr.setKeyable(false);
     nAttr.setChannelBox(true);

@@ -350,6 +350,7 @@ void MainWindow::buildProperties() {
     keep("flow", flow_);
     parts_ = check(settings_.parts);
     keep("parts", parts_);
+    settings_.tubes = true;  // (the tubes shown with every tool at first, as Maya's and Blender's)
     tubes_ = check(settings_.tubes);
     keep("tubes", tubes_);
     instances_ = check(settings_.instances);

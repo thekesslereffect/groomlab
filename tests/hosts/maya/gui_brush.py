@@ -178,6 +178,7 @@ def step_shape_wires():
     # none being selected), on OpenGL and DirectX 11 alike; a stroke paints the tubes near it, one
     # undo step; another brush and the wires go.
     groomlab, groom, ctx = state["groomlab"], state["groom"], state["ctx"]
+    cmds.setAttr(groom + ".displayTubes", False)  # (the tubes shown with every tool at first: off here)
     before = cyan_pixels("shape_off")
     groomlab.brush_tool("shape", radius=120, strength=1.0, tube_channel="width")
     on = cyan_pixels("shape_on")

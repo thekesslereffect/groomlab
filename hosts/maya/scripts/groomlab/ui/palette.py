@@ -1098,8 +1098,8 @@ class GuideDisplay(widgets.PopupPanel):
     SHOWN = (("displayGuides", "Guides", "The guides (with their part lines and flow; the eye beside the arrow)"),
              ("displayParts", "Parts", "The part lines the Part tool draws"),
              ("displayFlow", "Flow", "The flow arrows and sinks"),
-             ("displayTubes", "Tubes", "Each guide's tube, drawn with every tool as set below (the Tube and Roots "
-                                       "tools show them either way)"),
+             ("displayTubes", "Tubes", "Each guide's tube with the guides, drawn with every tool as set below (the "
+                                       "Tube and Roots tools show them either way)"),
              ("displayInstances", "Instances", "Instanced meshes on the strands"))
     LOOK = (("guideSmoothing", "Smoothed", "Guides draw as a smooth curve through their points"),
             ("displayOverlaysOnTop", "On top", "Guides, parts and flow draw over the strands"))

@@ -508,7 +508,8 @@ struct DisplaySettings {
     // (the Part tool's), shown with the guides.
     bool guides = true, parts = true;
     // The tubes (buildTubeDisplay, every host's, as Maya's draw override shows them), one way of
-    // drawing them: shown with every tool (`tubes`: the groom's Tubes switch, the guides display) or
+    // drawing them: shown with every tool (`tubes`: the groom's Tubes switch, the guides display,
+    // with the guides: their eye hides them too) or
     // while the Tube or Roots tool is up (`toolTubes`), each guide's tube as a wire (tubeWires; the
     // selected ones apart, warm) and/or a shaded surface a little inside it (tubeShaded), in its
     // root tube's color with tubeColors: tubeWires, tubeShaded, tubeColors and tubeLevelColors are

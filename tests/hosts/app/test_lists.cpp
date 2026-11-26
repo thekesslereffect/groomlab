@@ -272,6 +272,13 @@ TEST(AppLists, ATubeLevelKeptInViewWhileAnotherLevelIsCombed) {
     };
     tools->tile("comb")->click();
     EXPECT_FALSE(window.displaySettings().toolTubes) << "Comb: no tube tool up";
+    EXPECT_TRUE(window.displaySettings().tubes) << "the tubes shown at first";
+    {
+        auto* pill = tools->findChild<QToolButton*>(QStringLiteral("display_tubes"));
+        ASSERT_TRUE(pill);
+        pill->setChecked(false);  // (off, so the pin is seen to turn them on)
+        QCoreApplication::processEvents();
+    }
     EXPECT_FALSE(window.displaySettings().tubes);
     panel->refresh();
     ASSERT_TRUE(tubeOf(deeper)) << "a level row has its tube";

@@ -643,7 +643,7 @@ public:
     void setTubesAlwaysVisible(bool always);
     bool toolTubes() const { return tubeWires_; }  // the Tube or Roots tool up
     bool tubeWires() const { return tubeWires_ || tubesAlways_ || displayTubes(); }
-    bool displayTubes() const;  // the groom's Tubes switch (displayTubes)
+    bool displayTubes() const;  // the groom's Tubes switch (displayTubes), with the guides shown (their eye)
     bool tubeShaded() const { return tubeWires() && tubeShaded_; }
     bool tubeWireframe() const { return tubeWires() && tubeWireframe_; }
     bool tubeColors() const { return tubeWires() && tubeColors_; }
