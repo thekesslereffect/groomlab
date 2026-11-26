@@ -2485,6 +2485,7 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
     for (const auto& [key, x] : v.items()) {
         const char* k = key.c_str();
         if (key == "guides") s.guides = settingBool(x, k);
+        else if (key == "parts") s.parts = settingBool(x, k);            // the part lines (with the guides)
         else if (key == "tubes") s.tubes = settingBool(x, k);            // the Tubes switch: the tubes with every tool
         else if (key == "toolTubes") s.toolTubes = settingBool(x, k);    // the Tube or Roots tool up: its tubes shown
         else if (key == "flow") s.flow = settingBool(x, k);

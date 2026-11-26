@@ -1296,34 +1296,17 @@ def _take_levels(scene, r):
         t.tube_level = levels.index(group) + 1 if group in levels else 1
 
 
-def show_level_guides(scalp, base, level):
-    """Level `level` (1: the base) of `base`'s hierarchy's guides shown, its other levels' hidden
-    (the groups' eyes; groups outside the hierarchy as they are); the tubes' view untouched.
-    Returns level `level`'s group (None: none)."""
-    scene = groom.scene_of(scalp)
-    t = scene.groomlab_tools
-    r = call(scalp, "tube_level_show", base=base, level=int(level))
-    shown = r.get("shown") or {}
-    hidden = set(g.name for g in t.groups if g.hidden)
-    picked = None
-    for name, visible in shown.items():
-        if visible:
-            hidden.discard(name)
-            picked = name
-        else:
-            hidden.add(name)
-    if hidden != set(g.name for g in t.groups if g.hidden):
-        set_hidden_groups(scalp, sorted(hidden))
-    return picked
-
-
 def tube_level_show(scalp, level):
-    """Level `level` (1: the base) shown, the hierarchy's other levels hidden, its group picked."""
+    """Level `level` (1: the base) picked: its guides alone through the level view (the display's
+    mixedView from the group picked; the groups' eyes untouched)."""
     scene = groom.scene_of(scalp)
     t = scene.groomlab_tools
     if not t.tube_base:
         tube_levels(scalp)
-    picked = show_level_guides(scalp, t.tube_base, level)
+    r = call(scalp, "tube_level_show", base=t.tube_base, level=int(level))
+    picked = next((name for name, visible in (r.get("shown") or {}).items() if visible), None)
+    from . import display
+    display.mark(scalp)
     if picked:
         with props.quiet():
             t.group = picked

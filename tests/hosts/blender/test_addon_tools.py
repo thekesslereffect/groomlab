@@ -1322,14 +1322,17 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(t.tube_level, 2)
         self.assertGreater(t.guide_count, guides)
         # A level kept in view while another level's guides are combed (Maya's gui_roots
-        # tube_level_pin): the guides display's Level, a level row's tube and the card's Lock view
-        # are one setting, tube_view_group; picking a level shows its guides alone, the pin stays;
-        # the Tubes switch (Show tubes) is the one way the tubes show with every tool.
+        # tube_level_pin): a level row's tube and the card's Lock view are one setting,
+        # tube_view_group; picking a level shows its guides alone through the level view (mixedView),
+        # the eyes untouched, the pin stays; the Tubes switch is the one way the tubes show with
+        # every tool.
         scene = bpy.context.scene
         base, deeper = t.tube_levels.split(",")
         rows = {g.name: g for g in t.groups}
         self.assertEqual((rows[base].tube_level, rows[deeper].tube_level), (1, 2))  # each level row's tube
         self.assertEqual(t.group, deeper)
+        self.assertEqual(display.settings_for(head, scene)["mixedView"], base + ":2")
+        self.assertFalse([g.name for g in t.groups if g.hidden], "no eye flipped")
         bpy.ops.groomlab.tool(tool="comb")
         d = head.groomlab_tools
         d.show_tubes = False
@@ -1339,18 +1342,41 @@ class ToolsTest(unittest.TestCase):
         s = display.settings_for(head, scene)
         self.assertEqual((s["tubeViewGroup"], s["toolTubes"], s["tubes"]), (deeper, False, True))
         self.assertTrue(s["tubeWires"])  # the look, whatever tool
-        self.assertEqual(t.tube_view_level, deeper)  # the guides display's Level says so
         self.assertTrue(t.tube_lock_view)  # so does the Roots card's Lock view
         t.group = base  # (the list's row picked)
-        rows = {g.name: g for g in t.groups}
-        self.assertFalse(rows[base].hidden)
-        self.assertTrue(rows[deeper].hidden, "picking level 1 shows its guides alone")
+        self.assertEqual(display.settings_for(head, scene)["mixedView"], base + ":1")
+        self.assertFalse([g.name for g in t.groups if g.hidden], "picking level 1: the eyes untouched")
         self.assertEqual(t.tube_view_group, deeper, "the pin stays while level 1 is combed")
+        # Mixed view off: the level alone, no tubes of the levels above (":solo").
+        t.tube_mixed_view = False
+        self.assertEqual(display.settings_for(head, scene)["mixedView"], base + ":1:solo")
+        t.tube_mixed_view = True
+        # A level row's eye hides that group under the level view (the eye always wins).
+        def guide_points():
+            display.mark(head)
+            display.refresh(head)
+            return sum(len(e[2]) for e in display.draw_list(head) if e[0] == "guides")
+        shown = guide_points()
+        self.assertGreater(shown, 0)
+        bpy.ops.groomlab.group_edit(action="HIDE", group=base)
+        self.assertTrue({g.name: g for g in t.groups}[base].hidden)
+        self.assertLess(guide_points(), shown, "the eye hides level 1's guides")
+        bpy.ops.groomlab.group_edit(action="HIDE", group=base)
+        self.assertFalse({g.name: g for g in t.groups}[base].hidden)
+        self.assertEqual(guide_points(), shown)
+        # Every row keeps room for the tube (a blank on a row of no level), the eyes in a column.
+        for i, g in enumerate(t.groups):
+            log = []
+            palette.GROOMLAB_UL_groups.draw_item(palette.GROOMLAB_UL_groups, bpy.context, bu.FakeLayout(log), t, g, 0, t,
+                                                 "group_index", i)
+            tube = log.count(("operator", "groomlab.tube_view"))
+            blank = log.count(("label", ""))
+            self.assertEqual((tube, blank), (1, 0) if g.tube_level else (0, 1), g.name)
         self.assertIn("tubes: Level 2", palette.editing_text(bpy.context, "comb")[0])
         display.mark(head)
         display.refresh(head)
         self.assertIn("tubeWires", [e[0] for e in display.draw_list(head)])  # level 2's tubes, Comb up
-        t.tube_view_level = tool_props.FOLLOW_GUIDES
+        self.assertEqual(bpy.ops.groomlab.tube_view(group=""), {"FINISHED"})  # (the kept row's tube again)
         self.assertEqual(t.tube_view_group, "")
         self.assertFalse(t.tube_lock_view)
         self.assertNotIn("tubes:", palette.editing_text(bpy.context, "comb")[0])
@@ -1363,6 +1389,8 @@ class ToolsTest(unittest.TestCase):
         bpy.ops.groomlab.tool(tool="shape")
         self.assertEqual(bpy.ops.groomlab.tube_level(action="SHOW", level=1), {"FINISHED"})
         self.assertEqual(t.tube_level, 1)
+        self.assertEqual(display.settings_for(head, scene)["mixedView"], base + ":1")
+        self.assertFalse([g.name for g in t.groups if g.hidden], "the Roots card's level row: the eyes untouched")
         self.assertEqual(bpy.ops.groomlab.tube_level(action="REMOVE"), {"FINISHED"})
         self.assertEqual(len(t.tube_levels.split(",")), 1)
         self.assertEqual(t.guide_count, guides)

@@ -134,7 +134,7 @@ def settings_for(scalp, scene):
     from . import tools
     d = scalp.groomlab_tools
     t = scene.groomlab_tools
-    s = {"guides": bool(d.show_guides), "tubes": bool(d.show_tubes), "flow": bool(d.show_flow),
+    s = {"guides": bool(d.show_guides), "parts": bool(d.show_parts), "tubes": bool(d.show_tubes), "flow": bool(d.show_flow),
          "guidePoints": d.guide_points, "guideColorMode": d.guide_color_mode,
          "guideWidth": float(d.guide_width), "guideSmoothing": 4 if d.guides_smoothed else 1,
          # The automatic guide colors start from the groom's own hue (its name, as Maya's transform).
@@ -156,14 +156,25 @@ def settings_for(scalp, scene):
     s["tubeShaded"] = bool(t.tube_shaded)
     s["tubeColors"] = bool(t.tube_colors)
     s["tubeLevelColors"] = bool(t.tube_level_colors)
-    # The level kept in view (that level's tubes alone: Lock view, the guides display's Level, a
-    # row's tube) and Mixed view ("<base>:<level>").
+    # The level kept in view (that level's tubes alone: Lock view, a row's tube) and the level view:
+    # a level of a tube hierarchy picked shows its guides alone ("<base>:<level>"; Mixed view off:
+    # ":solo", no tubes of the levels above); another group or all groups: as the eyes say.
     s["tubeViewGroup"] = t.tube_view_group
-    s["mixedView"] = "%s:%d" % (t.tube_base, t.tube_level) if t.tube_mixed_view and t.tube_base else ""
+    s["mixedView"] = level_view(t)
     if t.isolate:
         _level, group = tools.group_target(scene)
         s["isolateGroup"] = group or ""
     return s
+
+
+def level_view(t):
+    """The level view for the group picked: "<base>:<level>" (":solo" after it with the Roots card's
+    Mixed view off) for a level of a tube hierarchy, else ""."""
+    from . import tool_props
+    levels = tool_props.tube_hierarchy(t, t.group)
+    if len(levels) < 2 or t.group not in levels:
+        return ""
+    return "%s:%d%s" % (levels[0], levels.index(t.group) + 1, "" if t.tube_mixed_view else ":solo")
 
 
 # scalpMapView's name for a field node's result (the core's kNodeMapPrefix).
