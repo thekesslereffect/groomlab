@@ -38,6 +38,7 @@
 #include "reference_window.h"
 #include "theme.h"
 #include "transfer_window.h"
+#include "tube_panel.h"
 #include "viewport.h"
 
 namespace groomlab::app {
@@ -720,7 +721,17 @@ void MainWindow::fillGuideDisplay() {
         return c;
     };
     mirror(tr("Flow"), "display_flow", flow_, tr("The flow arrows and the field they make (a pale preview)"));
-    mirror(tr("Tubes"), "display_tubes", tubes_, tr("Each guide's tube, the volume its children and Interpolate's Fill Tubes fill"));
+    // (The Tubes switch: the Tubes section's Show tubes, below, the tubes with their look.)
+    if (QCheckBox* show = groomTools_->tubePanel()->showTubesBox()) {
+        show->setChecked(tubes_->isChecked());
+        connect(show, &QCheckBox::toggled, tubes_, [this](bool on) {
+            if (tubes_->isChecked() != on) tubes_->setChecked(on);
+        });
+        connect(tubes_, &QCheckBox::toggled, show, [show](bool on) {
+            const QSignalBlocker block(show);
+            show->setChecked(on);
+        });
+    }
     mirror(tr("Instances"), "display_instances", instances_, tr("Each Instance node's copies of its prototype mesh (else small markers)"));
     // Smoothed: the guides drawn as a smooth curve through their points (Guide Smoothing's pieces
     // per segment), else straight segments.

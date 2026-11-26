@@ -821,7 +821,11 @@ TEST(AppTubes, TubeRootsAndTheHierarchyFromTheCard) {
     EXPECT_FALSE(panel.rootsBlock()->isHidden());
     EXPECT_FALSE(panel.levelsBlock()->isHidden());
     EXPECT_TRUE(panel.colors()) << "Colors on, as Maya's";
-    EXPECT_FALSE(panel.alwaysVisible());
+    // The tubes' display (the guides display's Tubes section): Show tubes (the host's Tubes switch),
+    // the look, Level; no switch of its own for other tools (Always visible is the Tubes switch).
+    ASSERT_TRUE(panel.showTubesBox() && panel.viewLevelBox());
+    EXPECT_EQ(panel.displayBlock()->findChild<QCheckBox*>(QStringLiteral("tubesAlwaysVisible")), nullptr);
+    EXPECT_EQ(panel.viewLevelBox()->itemText(0), QStringLiteral("Follow guides"));
     int changes = 0;
     QObject::connect(&panel, &TubePanel::rootModeChanged, [&changes] { ++changes; });
     // Draw root: the root mode, placing; the card's id the Roots brush's; again: Draw root again

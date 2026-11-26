@@ -878,6 +878,8 @@ void MainWindow::warmStroke() {
 }
 
 void MainWindow::guidesEdited() {
+    // (The groups' eyes too: the Roots card's level row shows a level's guides alone.)
+    if (document_) settings_.hiddenGuideGroups = document_->hiddenGroupsText();
     reevaluate();
     refreshUndoActions();
     refreshGroups();

@@ -229,6 +229,11 @@ signals:
     void groomPicked(int index);   // the picker's menu: another groom of the document
     void tabChanged(const QString& id);
     void toolStopRequested();  // a corrective picked greys the tool's tile: no tool (the camera)
+    // A tube hierarchy level's tubes kept in view, or let go (""): the guides display's Level, a
+    // Guide groups row's tube, the Roots card's Lock view (TubePanel::setTubeView).
+    void tubeViewChanged(const QString& group);
+    // A level of a tube hierarchy picked in the list: its guides shown, its other levels' hidden.
+    void groupsShownChanged();
 
 private:
     QToolButton* makeTile(const std::string& id, const QString& label, const QString& tip);

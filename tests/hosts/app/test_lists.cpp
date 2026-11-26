@@ -11,6 +11,10 @@
 #include <vector>
 
 #include <QAction>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QCoreApplication>
+#include <QEvent>
 #include <QImage>
 #include <QLabel>
 #include <QListWidget>
@@ -33,6 +37,8 @@
 #include "main_window.h"
 #include "maps_panel.h"
 #include "overlay.h"
+#include "brush_panel.h"
+#include "tube_panel.h"
 #include "viewport.h"
 
 namespace groomlab::app {
@@ -234,6 +240,80 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     doc->setGroupHidden("bangs", true);
     panel->refresh();
     EXPECT_EQ(panel->rebuilds(), rebuilds + 1);
+}
+
+TEST(AppLists, ATubeLevelKeptInViewWhileAnotherLevelIsCombed) {
+    // Maya's gui_roots tube_level_pin: a tube hierarchy's level kept in view while another level's
+    // guides are combed. The tubes' Level (the guides display), a level row's tube in Guide groups
+    // and the Roots card's Lock view are one setting, the document's tubeViewGroup; picking a level
+    // shows its guides alone, the pin stays; the Tubes switch is the one way the tubes show with
+    // every tool, drawn with their look.
+    MainWindow window;
+    window.resize(1280, 800);
+    window.show();
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(sampleCopy("groomlab_app_lists_tube_pin"))));
+    GroomDocument* doc = window.document();
+    auto* tools = window.findChild<GroomTools*>();
+    auto* panel = window.findChild<GuidesPanel*>();
+    ASSERT_TRUE(tools && panel);
+    TubePanel* tubes = tools->tubePanel();
+    tubes->refreshRoots();
+    tubes->addLevel();
+    ASSERT_EQ(tubes->levels().size(), 2u);
+    const std::string base = tubes->levels()[0], deeper = tubes->levels()[1];
+    auto tubeOf = [&](const std::string& group) {
+        return panel->findChild<QToolButton*>(QStringLiteral("groupTube_") + QString::fromStdString(group));
+    };
+    tools->tile("comb")->click();
+    EXPECT_FALSE(window.displaySettings().toolTubes) << "Comb: no tube tool up";
+    EXPECT_FALSE(window.displaySettings().tubes);
+    panel->refresh();
+    ASSERT_TRUE(tubeOf(deeper)) << "a level row has its tube";
+    EXPECT_TRUE(tubeOf(base));
+    EXPECT_FALSE(tubeOf(deeper)->property("kept").toBool());
+    tubeOf(deeper)->click();
+    QCoreApplication::processEvents();
+    EXPECT_EQ(doc->tubeViewGroup(), deeper) << "level 2's tubes kept in view";
+    EXPECT_EQ(window.displaySettings().tubeViewGroup, deeper);
+    EXPECT_TRUE(window.displaySettings().tubes) << "pinned with Comb up: Show tubes on";
+    EXPECT_TRUE(tubes->showTubesBox()->isChecked());
+    EXPECT_EQ(tubes->viewLevelBox()->currentData().toString().toStdString(), deeper) << "the guides display's Level says so";
+    auto* lock = tubes->findChild<QCheckBox*>(QStringLiteral("tubeLockView"));
+    ASSERT_TRUE(lock);
+    EXPECT_TRUE(lock->isChecked()) << "so does the Roots card's Lock view";
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);  // (the rows made again)
+    ASSERT_TRUE(tubeOf(deeper));
+    EXPECT_TRUE(tubeOf(deeper)->property("kept").toBool()) << "its row's tube in the accent";
+    // Picking level 1 in the list: its guides alone, the pin stays.
+    emit panel->groupClicked(base);
+    EXPECT_FALSE(doc->hiddenGroups().count(base));
+    EXPECT_TRUE(doc->hiddenGroups().count(deeper)) << "the other level's guides hidden";
+    EXPECT_NE(window.displaySettings().hiddenGuideGroups.find(deeper), std::string::npos) << "and drawn so";
+    EXPECT_EQ(doc->tubeViewGroup(), deeper) << "the pin stays while level 1 is combed";
+    EXPECT_TRUE(tools->card()->editing().contains(QStringLiteral("tubes: Level 2"))) << tools->card()->editing().toStdString();
+    // The Tube tool shows them either way; the look passed whichever tool is up.
+    tools->tile("shape")->click();
+    EXPECT_TRUE(window.displaySettings().toolTubes);
+    tools->tile("comb")->click();
+    EXPECT_FALSE(window.displaySettings().toolTubes);
+    EXPECT_TRUE(window.displaySettings().tubeWires) << "Wireframe: the look, whatever tool";
+    // Show tubes off: the Tubes switch (Properties > Display > Tubes).
+    tubes->showTubesBox()->setChecked(false);
+    EXPECT_FALSE(window.displaySettings().tubes);
+    // Follow guides: no pin, no Lock view.
+    tubes->viewLevelBox()->setCurrentIndex(0);
+    emit tubes->viewLevelBox()->activated(0);
+    EXPECT_EQ(doc->tubeViewGroup(), "");
+    EXPECT_EQ(window.displaySettings().tubeViewGroup, "");
+    EXPECT_FALSE(lock->isChecked());
+    EXPECT_FALSE(tools->card()->editing().contains(QStringLiteral("tubes:")));
+    // Lock view (the Roots card's ⋯): the same setting.
+    lock->setChecked(true);
+    ASSERT_GT(tubes->shownLevel(), 0);
+    EXPECT_EQ(doc->tubeViewGroup(), tubes->levels()[static_cast<std::size_t>(tubes->shownLevel() - 1)]);
+    EXPECT_EQ(tubes->viewLevelBox()->currentData().toString().toStdString(), doc->tubeViewGroup());
+    lock->setChecked(false);
+    EXPECT_EQ(doc->tubeViewGroup(), "");
 }
 
 TEST(AppLists, MapsBarMenuAndOperations) {

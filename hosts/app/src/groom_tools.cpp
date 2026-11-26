@@ -32,6 +32,7 @@
 #include <QVBoxLayout>
 
 #include "groomlab/brush_catalog.h"
+#include "groomlab/root_tubes.h"
 
 #include "brush_panel.h"
 #include "brush_session.h"
@@ -605,6 +606,12 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     connect(tubes_, &TubePanel::message, this, [this](const QString& text) { setStatus(text); });
     connect(tubes_, &TubePanel::displayChanged, this, &GroomTools::settingsChanged);  // (the brush's tubes drawn again)
     connect(tubes_, &TubePanel::rootModeChanged, this, &GroomTools::rootModeChanged);
+    connect(tubes_, &TubePanel::tubeViewChanged, this, [this](const QString& group) {
+        // (The pin shows on the list's level rows and in the card's header.)
+        if (guides_) guides_->refresh();
+        if (card_->hasSettings()) card_->setEditing(editingText(card_->tool()));
+        emit tubeViewChanged(group);
+    });
     card_->setTubes(tubes_);
     // The guides' display popup: the window's rows (Flow, Tubes, Instances, Smoothed, Width,
     // Points, Colors: guideDisplayRows), then the tubes' display (Maya's Tube card's Visibility).
@@ -619,6 +626,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         tubes_->displayBlock()->setParent(guideDisplay_);
         guideDisplay_->add(tubes_->displayBlock());
         tubes_->displayBlock()->show();
+        guideDisplay_->onShow([this] { tubes_->fillViewLevels(); });  // (Level: the groom's levels now)
     }
     noTool_ = label(tr("Pick a tool, then drag over the groom in the viewport."), "hint", work_);
     noTool_->setObjectName(QStringLiteral("noTool"));
@@ -807,9 +815,26 @@ void GroomTools::groupPicked(const std::string& name) {
     BrushSettings& b = session_->settings().brush;
     b.group = name;
     b.level = h->groupDepth(id);
+    // A level of a tube hierarchy: its guides shown, its other levels' hidden (as the Roots card's
+    // level row does); the level whose tubes are kept in view stays (Maya's show_picked_level).
+    bool shown = false;
+    try {
+        const TubeLevels info = tubeLevels(*h, {}, name);
+        const auto at = std::find(info.levels.begin(), info.levels.end(), name);
+        if (info.levels.size() > 1 && at != info.levels.end()) {
+            const int level = static_cast<int>(at - info.levels.begin()) + 1;
+            for (const auto& [group, visible] : tubeLevelVisibility(*h, info.base, level)) {
+                session_->document()->setGroupHidden(group, !visible);
+            }
+            shown = true;
+        }
+    } catch (const std::exception& e) {
+        setStatus(QString::fromUtf8(e.what()));
+    }
     refresh();
     emit settingsChanged();
     emit isolateChanged();
+    if (shown) emit groupsShownChanged();
 }
 
 void GroomTools::refreshTiles() {
@@ -1077,6 +1102,7 @@ void GroomTools::setGroupsContent(QWidget* content) {
         guides_ = guides;
         guides->header()->addGlyph(isolate_, 0);  // Isolate: the eye, before New Group
         connect(guides, &GuidesPanel::groupClicked, this, [this](const std::string& name) { groupPicked(name); });
+        connect(guides, &GuidesPanel::tubeViewRequested, this, [this](const std::string& group) { tubes_->setTubeView(group); });
         connect(guides, &GuidesPanel::displayChanged, this, [this] { refreshCard(); });  // (a group's color)
     }
     fitScroll(content);
@@ -1157,8 +1183,17 @@ QString GroomTools::editingText(const std::string& tool) const {
     }
     const QString on = layer.isEmpty() ? tr("Base groom")
                                        : QStringLiteral("<span style='color:%1'>%2</span>").arg(theme::accentInk().name(), layer.toHtmlEscaped());
-    return QStringLiteral("<span style='color:%1'>●</span> %2 <span style='color:%3'>on</span> %4")
-        .arg(dot.name(), (group.empty() ? tr("All groups") : qs(group)).toHtmlEscaped(), theme::textMuted().name(), on);
+    // A level of a tube hierarchy kept in view while another's guides are picked: said here, so the
+    // brush is seen to comb these guides under those tubes.
+    QString tubes;
+    const GroomDocument* doc = session_ ? session_->document() : nullptr;
+    const std::string viewed = doc ? doc->tubeViewGroup() : std::string();
+    if (!viewed.empty() && viewed != group) {
+        const int level = tubes_ ? tubes_->tubeLevelOf(viewed) : 0;
+        tubes = QStringLiteral("  ·  tubes: %1").arg(level ? tr("Level %1").arg(level) : qs(viewed).toHtmlEscaped());
+    }
+    return QStringLiteral("<span style='color:%1'>●</span> %2 <span style='color:%3'>on</span> %4%5")
+        .arg(dot.name(), (group.empty() ? tr("All groups") : qs(group)).toHtmlEscaped(), theme::textMuted().name(), on, tubes);
 }
 
 }  // namespace groomlab::app

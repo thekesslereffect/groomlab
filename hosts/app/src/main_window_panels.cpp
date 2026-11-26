@@ -235,6 +235,15 @@ void MainWindow::buildPanels() {
         redisplay();
     });
     connect(groomTools_, &GroomTools::guidesEdited, this, [this] { guidesEdited(); });
+    connect(groomTools_, &GroomTools::tubeViewChanged, this, [this](const QString& group) {
+        // A level's tubes kept in view with no tube tool up: the Tubes switch on, so it is seen.
+        if (!group.isEmpty() && !toolTubesUp() && !tubes_->isChecked()) tubes_->setChecked(true);
+    });
+    connect(groomTools_, &GroomTools::groupsShownChanged, this, [this] {
+        if (document_) settings_.hiddenGuideGroups = document_->hiddenGroupsText();
+        redisplay();
+        guidesPanel_->invalidate();  // (the rows' eyes)
+    });
     connect(groomTools_, &GroomTools::tubesPreviewed, this, [this] { reevaluate(); });
     connect(groomTools_, &GroomTools::lengthsPreviewed, this, [this] {
         viewport_->refreshOverlay();

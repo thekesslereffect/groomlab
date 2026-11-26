@@ -67,9 +67,21 @@ public:
     enum class Mode { New, Edit, Roots };
     void setMode(Mode mode);  // Edit to start with
     Mode mode() const { return mode_; }
-    // The tubes' display switches (Shaded, Wireframe, Colors, level colors, Always visible): the
-    // Groom Tools put them in the guides' display popup.
+    // The tubes' display (Maya's guides display's Tubes section): Show tubes (showTubesBox: the
+    // host binds it to its Tubes switch, DisplaySettings::tubes), the look as pills (Shaded,
+    // Wireframe, Colors, Level colors) and Level (viewLevelBox: Follow guides or a level of the tube
+    // hierarchy kept in view, the document's tubeViewGroup). The Groom Tools put it in the guides'
+    // display popup.
     QWidget* displayBlock() const { return display_; }
+    QCheckBox* showTubesBox() const { return show_; }
+    QComboBox* viewLevelBox() const { return viewLevel_; }
+    // The level whose tubes stay in view whichever level's guides are picked (the document's
+    // tubeViewGroup; "": the tubes follow their guides). One setting: Level here, the Roots card's
+    // Lock view, a level row's tube in Guide groups (tubeViewChanged tells the host).
+    void setTubeView(const std::string& group);
+    void fillViewLevels();  // Level's entries as the hierarchy and the document stand
+    // Level `group`'s number in its tube hierarchy (1: the base), 0 when it is in none.
+    int tubeLevelOf(const std::string& group) const;
 
     void setSession(BrushSession* session);  // its document is the groom (null: none)
     // The targets' tubes, the library and Fill Tubes read again. Left alone while the artist is
@@ -85,13 +97,13 @@ public:
     const std::string& tipChoice() const { return tipChoice_; }
     int activeProfile() const { return active_; }
     void setActiveProfile(int profile);
-    // The Tube brush's tubes in the viewport (Maya's Tube card): shaded surfaces, wires, each in
-    // its root tube's color (Colors), drawn whatever the tool (Always visible).
+    // The tubes' look in the viewport (Maya's): shaded surfaces, wires, each in its root tube's
+    // color (Colors), each split tube a shade of its own (Level colors); passed whatever tool is up
+    // (they show with the Tube or Roots tool, or with every tool by the Tubes switch).
     bool shaded() const;
     bool wireframe() const;
     bool colors() const;
-    bool levelColors() const;  // Colors (Tube levels)
-    bool alwaysVisible() const;
+    bool levelColors() const;  // Level colors (Colors per level)
     const std::vector<GuideId>& targets() const { return targets_; }
     const std::string& source() const { return source_; }  // "selection", "solo" or "none"
     bool libraryShape(const std::string& name) const;
@@ -201,6 +213,9 @@ signals:
     void settingsChanged();  // the placement tube changed (the brush session's settings)
     void message(const QString& text);  // what went wrong, or what was made ("" clears)
     void displayChanged();   // Shaded or Wireframe toggled: the host draws the brush's tubes again
+    // The level kept in view changed (setTubeView; "": none): the host turns its Tubes switch on
+    // when no tube tool is up, and shows the pin in the list and the card's header.
+    void tubeViewChanged(const QString& group);
     // The root mode started, left or changed its outlines (the host: the viewport's tool and
     // overlay, the guides hidden while editing).
     void rootModeChanged();
@@ -275,10 +290,11 @@ private:
     ValueSlider* multiplier_ = nullptr;  // Subdivision multiplier (RootSubdivisionOptions::multiplier)
     bool paintingDensity_ = false;
     QCheckBox *lockView_ = nullptr, *mixedView_ = nullptr, *levelColors_ = nullptr;
-    int lockedLevel_ = 0;  // Lock view: the level whose tubes stay drawn (0: off)
-    void applyTubeViews();  // the document's Lock and Mixed views as the switches and the level say
+    void applyTubeViews();  // the document's Mixed view as the switch and the level say (its tube view kept)
+    void syncLock();        // Lock view as the document's tubeViewGroup stands
     QToolButton *rootSnap_ = nullptr, *rootDrawPath_ = nullptr;  // pills
-    QCheckBox *colors_ = nullptr, *always_ = nullptr;
+    QCheckBox *colors_ = nullptr, *show_ = nullptr;
+    QComboBox* viewLevel_ = nullptr;
     QToolButton* levelMenu_ = nullptr;
     ValueSlider *rootDensity_ = nullptr, *rootLength_ = nullptr, *rootSegments_ = nullptr, *rootTaper_ = nullptr;
     QPushButton *addLevel_ = nullptr, *removeLevel_ = nullptr;

@@ -36,6 +36,7 @@
 #include "groomlab/brush.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/parts.h"
+#include "groomlab/root_tubes.h"
 #include "groomlab/stroke.h"
 #include "card_parts.h"
 #include "glass.h"
@@ -347,7 +348,23 @@ QWidget* GuidesPanel::rowIcons(QTreeWidgetItem* item, int segments, bool shown) 
     QToolButton* more = rowMenuButton(tr("Rename, select, children, mirror, move, color, delete"), [this](QMenu* menu) { fillRowMenu(menu); },
                                       pick, tree_);
     more->setObjectName(QStringLiteral("groupMenu_") + qs(name));
-    return rowStrip({seg, eye, more}, tree_);
+    // A tube hierarchy level's tube (before the eye): its tubes kept in view whichever level's
+    // guides are picked (view level 2's tubes, comb level 1's guides), in the accent; again: the
+    // tubes follow their guides.
+    QToolButton* tube = nullptr;
+    if (const auto level = tubeLevels_.find(name); level != tubeLevels_.end() && document_) {
+        const bool kept = document_->tubeViewGroup() == name;
+        tube = rowGlyph(QStringLiteral("tube"),
+                        kept ? tr("Level %1's tubes kept in view: click to let the tubes follow their guides again").arg(level->second)
+                             : tr("Keep level %1's tubes in view whichever level's guides you pick and comb").arg(level->second),
+                        tree_, {}, kept);
+        tube->setObjectName(QStringLiteral("groupTube_") + qs(name));
+        tube->setProperty("kept", kept);
+        connect(tube, &QToolButton::clicked, this, [this, name, kept] {
+            QTimer::singleShot(0, this, [this, name, kept] { emit tubeViewRequested(kept ? std::string() : name); });
+        });
+    }
+    return rowStrip({seg, tube, eye, more}, tree_);
 }
 
 QColor GuidesPanel::groupColor(const std::string& name) const {
@@ -449,7 +466,7 @@ void GuidesPanel::refresh() {
             key += "|" + g.name + ":" + std::to_string(g.parent) + ":" + std::to_string(counts[g.id]) + ":" + std::to_string(points[g.id]) +
                    ":" + std::to_string(g.segments) + (g.hasColor ? "c" : "");
         }
-        key += "#" + document_->hiddenGroupsText() + "#" + document_->groupColorsText();
+        key += "#" + document_->hiddenGroupsText() + "#" + document_->groupColorsText() + "#" + document_->tubeViewGroup();
     }
     const DisplayTheme look = theme::displayTheme();
     // The automatic colors as the viewport draws them: a hue per group from the groom's own.
@@ -462,6 +479,22 @@ void GuidesPanel::refresh() {
         const std::string current = groupOf(tree_->currentItem());
         tree_->clear();
         colors_.clear();
+        // The tube hierarchies' levels (a top group with child groups, root_tubes' tubeLevels): a
+        // row's tube keeps that level's tubes in view.
+        tubeLevels_.clear();
+        if (h) {
+            std::set<GroupId> parents;
+            for (const GuideGroup& g : h->groups()) parents.insert(g.parent);
+            for (const GuideGroup& g : h->groups()) {
+                if (g.parent != kNoGroup || !parents.count(g.id)) continue;
+                try {
+                    const TubeLevels info = tubeLevels(*h, {}, g.name);
+                    if (info.base != g.name || info.levels.size() < 2) continue;
+                    for (std::size_t k = 0; k < info.levels.size(); ++k) tubeLevels_[info.levels[k]] = static_cast<int>(k + 1);
+                } catch (const std::exception&) {
+                }
+            }
+        }
         std::vector<std::tuple<QTreeWidgetItem*, int, bool>> strips;
         QTreeWidgetItem* select = nullptr;
         if (h) {
@@ -514,6 +547,7 @@ void GuidesPanel::refresh() {
         if (select) tree_->setCurrentItem(select);
         else if (tree_->topLevelItemCount() > 0) tree_->setCurrentItem(tree_->topLevelItem(0));
         for (const auto& [item, segments, shown] : strips) tree_->setItemWidget(item, 2, rowIcons(item, segments, shown));
+        tree_->header()->resizeSection(2, tubeLevels_.empty() ? 92 : 114);  // (a level row: its tube too)
         updating_ = false;
         header_->setCount(document_ ? (h ? static_cast<int>(h->groups().size()) : 0) : -1);
         fitRows(tree_);

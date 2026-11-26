@@ -724,6 +724,7 @@ private:
     static constexpr int kStatsIdleMs = 150;
     static constexpr int kStatsMaxAgeMs = 500;
     void refreshTool();  // the Groom Tools' tile and card from the brush settings and the tool mode
+    bool toolTubesUp() const;  // the Tube or Roots brush up (its tubes shown: DisplaySettings::toolTubes)
     // A Groom Tools tile (a catalog id): the Select tool (again: the camera), a brush (each keeps
     // its own strength, radius, falloff and curves, as Maya's palette does), Paint on the Paint
     // tab's map (again: done painting).
@@ -910,7 +911,7 @@ private:
     ValueSlider* density_ = nullptr;
     ValueSlider* budget_ = nullptr;
     QCheckBox* guides_ = nullptr;
-    QCheckBox* tubes_ = nullptr;  // the guides' tubes (tube guides) as shaded surfaces
+    QCheckBox* tubes_ = nullptr;  // the Tubes switch: the guides' tubes with every tool, drawn with their look (Show tubes)
     QCheckBox* lighting_ = nullptr;
     QCheckBox* widthCoverage_ = nullptr;
     QCheckBox* coverageDensity_ = nullptr;

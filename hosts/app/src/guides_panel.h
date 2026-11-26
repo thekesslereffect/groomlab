@@ -156,6 +156,9 @@ signals:
     void displayChanged();
     void message(const QString& text);
     void groupClicked(const std::string& name);  // a row clicked: the brushes' group (Maya's pick_group)
+    // A tube hierarchy level row's tube clicked: that level's tubes kept in view ("": the kept
+    // level's row again, the tubes follow their guides). The host sets the document's tubeViewGroup.
+    void tubeViewRequested(const std::string& group);
     void bakeRequested(const std::string& node);  // Bake to Guides: the graph's guides into a group to brush
 
 protected:
@@ -189,6 +192,7 @@ private:
     PopupPanel* segmentsPopup_ = nullptr;
     QLabel* segmentsScope_ = nullptr;
     std::map<std::string, QColor> colors_;  // each group's row color
+    std::map<std::string, int> tubeLevels_;  // the tube hierarchies' levels' groups: their level (1: the base)
     QLabel* selection_ = nullptr;
     QPushButton* edits_ = nullptr;
     QMenu* editsMenu_ = nullptr;
