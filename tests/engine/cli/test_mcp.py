@@ -7,8 +7,10 @@ Starts `groomlab-cli mcp --root <work folder>`, then: initialize, tools/list (ev
 schema), the discovery tools, new_groom on the Nika sample, apply_preset, add_node, set_params,
 sample_scalp, add_guides, set_tube, add_script_node with an error and then fixed, evaluate (no
 errors), render_preview (a real PNG with something drawn, the same twice), save_groom and open_groom
-(the same strands), export USD, save_node, a path outside the root refused, undo. Standard library
-only.
+(the same strands), export USD, save_node, a path outside the root refused, undo. Then a groom by
+hand: scalp_landmarks, guides placed along the scalp, combed from the crown to the nape, cut,
+density painted, measure_guides, previews from two cameras (guides drawn, before and after), undo,
+redo and history, saved and opened again. Standard library only.
 """
 
 import base64
@@ -101,6 +103,91 @@ def png_pixels(data):
     return width, height, rows
 
 
+def image_of(result, index=0):
+    images = [x for x in result["content"] if x["type"] == "image"]
+    return png_pixels(base64.b64decode(images[index]["data"]))
+
+
+def groom_by_hand(c):
+    """A groom made the way an artist grooms: landmarks, strokes, painting, and checks in numbers and pictures."""
+    g = {"groom": "head"}
+    c.call("new_groom", {"name": "head", "mesh": "nika"})
+    marks, _ = c.call("scalp_landmarks", g)
+    lm = marks["landmarks"]
+    for name in ["top", "crown", "front_hairline", "nape", "left_temple", "right_temple", "left_ear", "right_ear"]:
+        assert name in lm, name
+    assert marks["upAxis"] == "Y", marks
+    assert lm["top"]["p"][1] >= lm["crown"]["p"][1] > lm["nape"]["p"][1], lm
+    assert lm["crown"]["p"][2] < lm["top"]["p"][2] < lm["front_hairline"]["p"][2], lm  # front is +Z
+    assert lm["left_temple"]["p"][0] > 0 > lm["right_temple"]["p"][0], lm  # the character's left: +X
+
+    # Guides placed along the scalp: front to back over the top, then ear to ear.
+    placed, _ = c.call("brush_stroke", dict(g, mode="place", **{"from": "front_hairline", "via": ["top", "crown"], "to": "nape",
+                                                               "length": 14, "spacing": 2.5, "match_neighbors": False}))
+    across, _ = c.call("brush_stroke", dict(g, mode="place", **{"from": "left_ear", "via": ["crown"], "to": "right_ear",
+                                                               "length": 14, "spacing": 2.5}))
+    assert placed["changed"]["guidesAdded"] >= 8 and across["changed"]["guidesAdded"] >= 8, (placed, across)
+    count = placed["changed"]["guidesAdded"] + across["changed"]["guidesAdded"]
+    standing, _ = c.call("measure_guides", g)
+    assert standing["groups"][0]["count"] == count, standing
+
+    # Combed from the crown to the nape, off the scalp to reach along the guides: they lean back, lengths kept.
+    combed, _ = c.call("brush_stroke", dict(g, mode="comb", **{"from": "crown", "to": "nape", "offset": 3, "radius": 6}))
+    ch = combed["changed"]
+    assert ch["guidesTouched"] > 0 and ch["maxMove"] > 1, combed
+    assert abs(ch["meanLengthAfter"] - ch["meanLengthBefore"]) < 0.1, combed
+    leaning, _ = c.call("measure_guides", g)
+    assert leaning["groups"][0]["direction"][2] < standing["groups"][0]["direction"][2], (standing, leaning)  # more to -Z
+
+    # Cut where a band over the back crosses them: shorter.
+    cut, _ = c.call("brush_stroke", dict(g, mode="cut", **{"from": "left_ear", "via": ["back"], "to": "right_ear", "offset": 6,
+                                                          "radius": 4}))
+    assert cut["changed"]["guidesTouched"] > 0 and cut["changed"]["meanLengthAfter"] < cut["changed"]["meanLengthBefore"], cut
+
+    # Density painted away along the nape: fewer strands, the map's values say so.
+    dense, _ = c.call("paint_map", dict(g, **{"for": "scatter.density", "fill": 1}))
+    thin, _ = c.call("paint_map", dict(g, **{"for": "scatter.density", "from": "left_ear", "via": ["nape"], "to": "right_ear",
+                                            "value": 0, "radius": 4}))
+    assert thin["values"]["min"] == 0 and thin["values"]["max"] == 1 and thin["verticesPainted"] > 0, thin
+    assert thin["summary"]["strands"] < dense["summary"]["strands"], (dense, thin)
+
+    # Selected about the crown: the selection measured on its own.
+    picked, _ = c.call("select_guides", dict(g, center="crown", radius=5))
+    assert picked["selected"] > 0, picked
+    crown, _ = c.call("measure_guides", dict(g, selection=True))
+    assert crown["groups"][0]["count"] == picked["selected"], crown
+
+    # Looked at from two cameras with the guides drawn; then before and after the last change.
+    info, result = c.call("render_preview", dict(g, views=["back", "left"], size=256, guides=True))
+    width, height, rows = image_of(result)
+    assert (width, height) == (256, 128), (width, height)
+    orange = sum(1 for row in rows for i in range(0, len(row), 3) if row[i] > 200 and 90 < row[i + 1] < 220 and row[i + 2] < 90)
+    assert orange > 50, "the guides are drawn (%d orange pixels)" % orange
+    info, result = c.call("render_preview", dict(g, views=["back"], size=128, compare=True))
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 2 and "before" in info["images"][0], info
+    assert image_of(result, 0)[2] != image_of(result, 1)[2], "the density stroke shows"
+
+    # Undo, redo and the history.
+    history, _ = c.call("history", g)
+    titles = [s["title"] for s in history["steps"]]
+    paint = "paint map " + thin["map"]
+    assert titles == ["place stroke", "place stroke", "comb stroke", "cut stroke", paint, paint], titles
+    undone, _ = c.call("undo", dict(g, steps=2))
+    assert undone["undone"] == [paint, paint] and undone["summary"]["strands"] == cut["summary"]["strands"], undone
+    redone, _ = c.call("redo", dict(g, steps=2))
+    assert redone["redone"] == [paint, paint] and redone["summary"]["strands"] == thin["summary"]["strands"], (redone, thin)
+    c.call("redo", g, expect_error=True)
+
+    # Saved and opened again: the same guides and strands.
+    c.call("save_groom", dict(g, path="out/head.groom"))
+    again, _ = c.call("open_groom", {"path": "out/head.groom", "name": "head2"})
+    assert again["summary"]["strands"] == thin["summary"]["strands"], again
+    reread, _ = c.call("measure_guides", {"groom": "head2"})
+    final, _ = c.call("measure_guides", g)
+    assert reread["groups"][0]["count"] == final["groups"][0]["count"], (reread, final)
+    assert abs(reread["groups"][0]["length"]["mean"] - final["groups"][0]["length"]["mean"]) < 1e-3, (reread, final)
+
+
 def main():
     exe, root = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
     shutil.rmtree(root, ignore_errors=True)
@@ -120,7 +207,9 @@ def main():
             assert t["description"] and t["inputSchema"]["type"] == "object" and isinstance(t["inputSchema"]["properties"], dict), t
         for wanted in ["list_nodes", "describe_node", "list_presets", "list_sample_meshes", "get_docs", "new_groom", "open_groom",
                        "apply_preset", "get_graph", "add_node", "remove_node", "connect", "disconnect", "set_params", "add_guides",
-                       "set_tube", "add_script_node", "save_node", "undo", "evaluate", "render_preview", "save_groom", "export"]:
+                       "set_tube", "add_script_node", "save_node", "undo", "evaluate", "render_preview", "save_groom", "export",
+                       "redo", "history", "scalp_landmarks", "brush_stroke", "select_guides", "guide_op", "paint_map",
+                       "measure_guides"]:
             assert wanted in names, wanted
         assert c.request("tools/call", {"name": "no_such_tool", "arguments": {}})["error"]["code"] == -32602
         assert c.request("no/such/method")["error"]["code"] == -32601
@@ -232,6 +321,8 @@ def main():
         assert bird["summary"]["strands"] == 0, bird
         drawn, _ = c.call("add_guides", {"groom": "nika2", "group": "feathers", "guides": guides[:2]})
         assert drawn["summary"]["strands"] == 2 * (1 + 140), drawn
+
+        groom_by_hand(c)
     finally:
         code = c.close()
     assert code == 0, "the server exited with %d" % code

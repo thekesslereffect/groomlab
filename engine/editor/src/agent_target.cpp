@@ -95,10 +95,21 @@ const ScalpMaps& AgentStrokeHost::scalpMaps() {
 }
 
 void AgentStrokeHost::commit(StrokeEdit edit) {
-    // The staged texts the stroke did not set itself go in the same step.
+    // A text the stroke wrote as it found it (the guides written again from the hierarchy it read,
+    // unchanged) is no change; the staged texts the stroke did not change go in the same step.
     for (std::size_t i = 0; i < kStrokeFields; ++i) {
+        const StrokeField field = static_cast<StrokeField>(i);
+        StrokeEdit::Text& t = edit.texts[i];
         const StrokeEdit::Text& s = staged_.texts[i];
-        if (s.set && !edit.texts[i].set) edit.set(static_cast<StrokeField>(i), s.after);
+        if (t.set) {
+            std::string found = storedText(field);
+            if (field == StrokeField::Guides) {
+                const std::shared_ptr<const GuideHierarchy> h = authoredHierarchy();
+                found = h ? h->toJson() : std::string();
+            }
+            if (t.after == found) t = StrokeEdit::Text{};
+        }
+        if (s.set && !t.set) edit.set(field, s.after);
     }
     bool any = false;
     for (std::size_t i = 0; i < kStrokeFields; ++i) {

@@ -114,9 +114,14 @@ groom answers with a short summary: strand and point counts, guides, bounds, and
 | `get_graph`, `add_node`, `remove_node`, `connect`, `disconnect`, `set_params` | Reading and editing the node graph. `add_node` with `after` inserts a node into the chain; `set_params` checks values against the param's kind, range and choices. |
 | `sample_scalp`, `add_guides`, `get_guides`, `set_tube` | Guide curves: points spread over the scalp, guides from point lists or grown from a root (length, droop), and their tubes (shape, width, aspect, twist) for tube locks. |
 | `add_script_node`, `save_node` | A [script node](/docs/custom-nodes#script-nodes) written from text. Errors come back with their line and column, and nothing changes until the script is valid. Saves script and compound nodes as `.glnode` files. |
-| `undo` | Steps back through a groom's changes (64 kept). |
+| `scalp_landmarks` | Named places on the scalp (top, crown, front hairline, nape, back, temples, ear sides) with the surface's normal, and the groom's directions (up, front, the character's left...). Approximate; strokes, painting and selection take the names as points. |
+| `brush_stroke` | One of the brushes run along a path, as an artist's stroke: comb, smooth, straighten, lift, length, cut, twist, attract, slide, erase, shape, clump, paint, freeze / unfreeze, place, draw, part, flow. The path is world points, or `from` / `via` / `to` (landmarks or points) along the scalp's surface; radius, strength, level or group, symmetry. The answer says what changed: guides touched, added and removed, how far points moved, lengths before and after. |
+| `select_guides`, `guide_op` | A selection by ids, a sphere around a point or landmark, a group or a level; and the Edit Guides menu's operations on it (delete, lock, freeze, mirror, move or duplicate to a group, resample...), Generate Children and tube edits. |
+| `paint_map` | A scalp map made, filled and painted along a path, for example density (`"for": "scatter.density"`: the map linked to the param, 0 where no hair grows) or a clump mask. |
+| `undo`, `redo`, `history` | Steps back and forward through a groom's changes (64 kept), and the list of them. Each tool call is one step. |
+| `measure_guides` | Numbers that describe the guides per group or for the selection: count, lengths, the mean root-to-tip direction (also in words), straightness, curl, how far they lean from the scalp. |
 | `evaluate` | Counts, bounds, errors, notes and the slowest nodes' timings. |
-| `render_preview` | A PNG of the groom that the agent can look at: the scalp shaded and the strands drawn in the hair's color, from the front, side, back, three-quarter or top view, several in a grid. |
+| `render_preview` | A PNG of the groom that the agent can look at: the scalp shaded and the strands drawn in the hair's color, from the front, back, left, right, three-quarter or top view, several in a grid; the guides drawn over the hair (`guides`), or two images, before and after the last change (`compare`). |
 | `save_groom`, `export` | A `.groom` file, or the strands as Alembic or USD curves over a frame range (as `groomlab-cli eval` writes them). |
 
 <Callout type="info" title="The preview is not a render">
@@ -141,6 +146,11 @@ A typical agent does something like this:
    the image and changes what it sees: `set_tube` for flatter locks, `set_params` on `clump`.
 5. `save_groom` with `{"path": "anime.groom"}`, which you then open in Maya or the app to keep
    grooming with brushes.
+
+To groom by hand, an agent places guides with `brush_stroke` (`{"mode": "place", "from": "front_hairline", "via": ["top", "crown"],
+"to": "nape", "length": 14}`), combs them (`{"mode": "comb", "from": "crown", "to": "nape", "offset": 3}`), checks the result
+with `measure_guides` and `render_preview` (`{"views": ["back", "left"], "guides": true}`), and paints density with
+`paint_map`.
 
 If a change goes wrong, the agent can call `undo`. If an argument is wrong, the tool's error says
 why (a param's range, the node names it has, a path outside the folder), and the agent tries again.

@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "groomlab/vec3.h"
+
 namespace groomlab {
 
 class ScalpMesh;
@@ -19,7 +21,9 @@ class StrandSet;
 
 namespace agent {
 
-// The views render_preview takes: "front", "side" (from +X), "back", "three_quarter", "top".
+// The views render_preview takes: "front", "side" (from +X), "back", "three_quarter", "top",
+// "left" (the head's left side: from +X, as "side"), "right" (from -X). A Y-up head faces +Z (a
+// Z-up one -Y: the views turn with it).
 const std::vector<std::string>& previewViewNames();
 
 struct PreviewOptions {
@@ -27,6 +31,8 @@ struct PreviewOptions {
     std::vector<std::string> views{"three_quarter"};  // laid out left to right, top to bottom
     std::size_t maxStrands = 50000;                 // more than this: every k-th strand is drawn
     bool zUp = false;                               // the points are Z-up (Blender, Houdini)
+    // Guide curves drawn over the hair (world points, root first), bright, hidden only by the scalp.
+    std::vector<std::vector<Vec3f>> guides;
 };
 
 struct PreviewImage {

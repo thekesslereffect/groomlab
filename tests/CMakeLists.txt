@@ -54,6 +54,7 @@ add_executable(groomlab_tests
     engine/core/test_root_subdivision.cpp
     engine/core/test_incremental.cpp
     engine/core/test_keyed_params.cpp
+    engine/editor/test_agent_tools.cpp
     engine/editor/test_edit_history.cpp
     engine/editor/test_game_exports.cpp
     engine/editor/test_graph_edits.cpp

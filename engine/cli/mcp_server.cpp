@@ -51,9 +51,11 @@ const char* kInstructions =
     "guides shape the strands through Interpolate, look nodes such as Clump, Curl, Noise, Length, "
     "HairColor and Width style them). Start with new_groom on a sample mesh (list_sample_meshes) "
     "and a preset (list_presets), look at it with render_preview, then refine: get_graph, "
-    "describe_node, set_params, add_node. Read get_docs for how a feature works. Every change can "
-    "be undone (undo). Save with save_groom; export curves with export. Paths are relative to the "
-    "server's root folder.";
+    "describe_node, set_params, add_node. Groom guides by hand with brush_stroke (paths between "
+    "scalp_landmarks such as crown and nape), select_guides, guide_op and paint_map, and check the "
+    "result with measure_guides and render_preview (guides, compare). Read get_docs for how a "
+    "feature works. Every change is one step of undo, redo and history. Save with save_groom; "
+    "export curves with export. Paths are relative to the server's root folder.";
 
 json errorResponse(const json& id, int code, const std::string& message) {
     return {{"jsonrpc", "2.0"}, {"id", id}, {"error", {{"code", code}, {"message", message}}}};

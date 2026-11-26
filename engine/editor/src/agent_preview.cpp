@@ -24,6 +24,8 @@ constexpr float kPi = 3.14159265358979f;
 const Color kBackground{0.035f, 0.037f, 0.042f};
 const Color kSkin{0.42f, 0.36f, 0.33f};
 const Color kDefaultHair{0.20f, 0.12f, 0.07f};  // strands without a color channel: a mid brown
+const Color kGuide{1.0f, 0.62f, 0.05f};          // guides drawn over the hair: orange, roots brighter
+const Color kGuideRoot{1.0f, 0.95f, 0.3f};
 
 // A view: the direction from the groom toward the camera and the screen's up, Y-up.
 struct View {
@@ -33,13 +35,14 @@ struct View {
 View viewNamed(const std::string& name) {
     if (name == "front") return {{0, 0, 1}, {0, 1, 0}};
     if (name == "back") return {{0, 0, -1}, {0, 1, 0}};
-    if (name == "side") return {{1, 0, 0}, {0, 1, 0}};
+    if (name == "side" || name == "left") return {{1, 0, 0}, {0, 1, 0}};
+    if (name == "right") return {{-1, 0, 0}, {0, 1, 0}};
     if (name == "top") return {{0, 1, 0}, {0, 0, -1}};
     if (name == "three_quarter") {
         const float az = 35.0f * kPi / 180.0f, el = 15.0f * kPi / 180.0f;
         return {Vec3f(std::sin(az) * std::cos(el), std::sin(el), std::cos(az) * std::cos(el)), {0, 1, 0}};
     }
-    throw std::invalid_argument("unknown view '" + name + "' (front, side, back, three_quarter, top)");
+    throw std::invalid_argument("unknown view '" + name + "' (front, back, left, right, side, three_quarter, top)");
 }
 
 // A Y-up direction as the same direction in a Z-up world: Y-up (x, y, z) is Z-up (x, -z, y).
@@ -110,7 +113,7 @@ float toSrgb(float linear) {
 }  // namespace
 
 const std::vector<std::string>& previewViewNames() {
-    static const std::vector<std::string> names{"front", "side", "back", "three_quarter", "top"};
+    static const std::vector<std::string> names{"front", "side", "back", "three_quarter", "top", "left", "right"};
     return names;
 }
 
@@ -154,6 +157,7 @@ PreviewImage renderPreview(const ScalpMesh* scalp, const StrandSet* strands, con
         const std::size_t n = strands->strandPointCount(s);
         for (std::size_t i = 0; i < n; ++i) framed.push_back(p[i]);
     }
+    for (const std::vector<Vec3f>& guide : options.guides) framed.insert(framed.end(), guide.begin(), guide.end());
 
     const int ss = tile <= 512 ? 2 : 1;  // supersampling: rendered at twice the size up to 512 px tiles
     const int inner = tile * ss;
@@ -231,6 +235,8 @@ PreviewImage renderPreview(const ScalpMesh* scalp, const StrandSet* strands, con
                 }
             }
         }
+        // What the scalp hides, for the guides (drawn over the hair, behind the head hidden).
+        const std::vector<float> scalpDepth = options.guides.empty() ? std::vector<float>() : r.depth;
         // Strands: Kajiya-Kay diffuse and highlight from each segment's tangent, a little darker
         // toward the root (the hair's own shadow).
         const float bias = std::min(0.006f * depthRange, 2.0f / r.scale);  // (at most a couple of pixels deep)
@@ -258,6 +264,41 @@ PreviewImage renderPreview(const ScalpMesh* scalp, const StrandSet* strands, con
                 const Color col{base[0] * shade + 0.12f * spec, base[1] * shade + 0.12f * spec, base[2] * shade + 0.12f * spec};
                 drawLine(r, prev, next, bias, col);
                 prev = next;
+            }
+        }
+        // Guides: lines two pixels wide over the hair, a dot at the root; the scalp hides them.
+        if (!options.guides.empty()) {
+            const float guideBias = std::min(0.01f * depthRange, 3.0f / r.scale);
+            auto over = [&](float fx, float fy, float z, const Color& c) {
+                for (int oy = 0; oy < 2; ++oy) {
+                    for (int ox = 0; ox < 2; ++ox) {
+                        const int x = static_cast<int>(std::floor(fx)) + ox, y = static_cast<int>(std::floor(fy)) + oy;
+                        if (x < 0 || y < 0 || x >= r.w || y >= r.h) continue;
+                        const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(r.w) + static_cast<std::size_t>(x);
+                        if (z - guideBias >= scalpDepth[i]) continue;
+                        r.color[i] = c;
+                    }
+                }
+            };
+            for (const std::vector<Vec3f>& guide : options.guides) {
+                for (std::size_t i = 1; i < guide.size(); ++i) {
+                    const Vec3f a = r.project(guide[i - 1]), b = r.project(guide[i]);
+                    const float dx = b.x - a.x, dy = b.y - a.y;
+                    const int steps = std::max(1, static_cast<int>(std::ceil(std::max(std::abs(dx), std::abs(dy)))));
+                    if (steps > 4 * (r.w + r.h)) continue;
+                    for (int k = 0; k <= steps; ++k) {
+                        const float t = static_cast<float>(k) / static_cast<float>(steps);
+                        over(a.x + dx * t, a.y + dy * t, a.z + (b.z - a.z) * t, kGuide);
+                    }
+                }
+                if (!guide.empty()) {
+                    const Vec3f root = r.project(guide.front());
+                    for (int oy = -1; oy <= 1; ++oy) {
+                        for (int ox = -1; ox <= 1; ++ox) {
+                            over(root.x + static_cast<float>(ox), root.y + static_cast<float>(oy), root.z, kGuideRoot);
+                        }
+                    }
+                }
             }
         }
         // Filtered down into the image's tile, as sRGB.
