@@ -225,6 +225,8 @@ class _Link(object):
         scene = groom.scene_of(scalp)
         try:
             tools.follow_graph(scalp, ch)
+            if ch.get("morph"):
+                _morph(scalp, ch["morph"])
             if ch.get("photosChanged"):
                 photos.restore_from_groom(scalp, scene)
             tools.after_edit(scalp, scene, ch.get("undo"), refresh=True)
@@ -361,6 +363,25 @@ def _run_render():
         return
     with bpy.context.temp_override(window=window, screen=window.screen):
         bpy.ops.render.render(write_still=True)
+
+
+def _morph(scalp, morph):
+    """The helper's morph_to_photos on the scalp as the Photos panel's Morph keeps it: the
+    photos.MORPH_KEY shape key at 1 (its points), or removed (reset)."""
+    from . import photos
+    mesh = scalp.data
+    keys = mesh.shape_keys
+    if morph.get("reset"):
+        key = keys.key_blocks.get(photos.MORPH_KEY) if keys is not None else None
+        if key is not None:
+            scalp.shape_key_remove(key)
+    else:
+        if keys is None:
+            scalp.shape_key_add(name="Basis", from_mix=False)
+        key = mesh.shape_keys.key_blocks.get(photos.MORPH_KEY) or scalp.shape_key_add(name=photos.MORPH_KEY, from_mix=False)
+        key.data.foreach_set("co", [float(c) for c in morph["points"]])
+        key.value = 1.0
+    mesh.update()
 
 
 def _tick():

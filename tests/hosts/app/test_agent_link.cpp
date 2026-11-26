@@ -13,6 +13,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QColor>
 #include <QImage>
 #include <QTcpSocket>
 #include <QToolButton>
@@ -30,6 +31,7 @@
 
 using nlohmann::json;
 using namespace groomlab::app;
+using groomlab::Vec3f;
 namespace fs = std::filesystem;
 
 namespace {
@@ -145,6 +147,37 @@ TEST(AppAgentLink, AnAgentGroomsTheOpenGroomInTheDocumentsHistory) {
     EXPECT_TRUE(hasNode(curl));
     call("undo", json::object());
     EXPECT_FALSE(hasNode(curl));
+
+    // A photo of a wider head lined up, the scalp morphed to it as the Photos tab does (the groom
+    // carried onto the morphed scalp: a transfer, the history starting over), reset.
+    {
+        QImage photo(320, 240, QImage::Format_RGB888);
+        photo.fill(QColor(200, 200, 200));
+        const fs::path wide = fs::u8path(window.agentLink()->root()) / "groomlab_agent_test_wide.png";
+        const QString file = QString::fromStdString(wide.u8string());
+        ASSERT_TRUE(photo.save(file));
+        ASSERT_EQ(call("add_photo", {{"path", file.toStdString()}, {"name", "wide"}})["result"]["isError"], false);
+        const json marks = textOf(call("mesh_landmarks", {{"view", "front"}, {"photo", "wide"}, {"count", 14}}));
+        json pairs = json::array();
+        for (const json& m : marks["points"]) {
+            const double u = 160.0 + 1.25 * (m["pixel"][0].get<double>() - 160.0), v = m["pixel"][1].get<double>();
+            if (u > 0 && u < 320 && v > 0 && v < 240) pairs.push_back({{"pixel", {u, v}}, {"point", m["p"]}});
+        }
+        ASSERT_GE(pairs.size(), 6u);
+        EXPECT_EQ(textOf(call("align_photo", {{"pairs", pairs}, {"focal_mm", 50}, {"keep_focal", true}, {"view", "front"}}))["linedUp"], true);
+        const std::vector<Vec3f> before = doc->file().data.scalp->points();
+        const json morphed = call("morph_to_photos", json::object());
+        ASSERT_EQ(morphed["result"]["isError"], false) << morphed.dump().substr(0, 800);
+        const json info = textOf(morphed);
+        EXPECT_LT(info["photos"][0]["rmsAfter"].get<double>(), 0.5 * info["photos"][0]["rmsBefore"].get<double>()) << info.dump();
+        EXPECT_EQ(info["undoable"], false);
+        EXPECT_NE(window.document()->file().data.scalp->points(), before);
+        ASSERT_EQ(call("morph_to_photos", {{"reset", true}})["result"]["isError"], false);
+        EXPECT_EQ(window.document()->file().data.scalp->points(), before);
+        std::error_code ec;
+        fs::remove(wide, ec);
+    }
+    doc = window.document();
 
     // The viewport as the artist sees it.
     const json shot = call("render_preview", {{"viewport", true}, {"size", 128}});

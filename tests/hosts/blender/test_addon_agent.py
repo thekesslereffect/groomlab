@@ -57,6 +57,19 @@ def text_of(answer):
     return None
 
 
+def write_png(path, width, height):
+    """A plain gray PNG."""
+    import struct
+    import zlib
+    rows = b"".join(b"\x00" + bytes([200, 200, 200]) * width for _ in range(height))
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
 class LineReader(object):
     """A stream's lines into a queue from a thread of its own (the link answers on this thread)."""
 
@@ -206,6 +219,29 @@ class AgentLinkTest(unittest.TestCase):
         self.assertEqual((scene.render.engine, (scene.render.resolution_x, scene.render.resolution_y), len(bpy.data.objects)),
                          (engine, size, objects))
         self.assertTrue(request("tools/call", {"name": "render_frame", "arguments": {"camera": "nope"}})["result"]["isError"])
+
+        # A photo of a wider head lined up; morph_to_photos as the Photos panel's Morph: the scalp's
+        # photo morph shape key at 1; reset removes it.
+        photos_mod = importlib.import_module(bu.MODULE + ".photos")
+        wide = os.path.join(agent_link.link().folders["root"], "groomlab_agent_test_wide.png")
+        write_png(wide, 320, 240)
+        try:
+            call("add_photo", {"path": wide, "name": "wide"})
+            seen = call("mesh_landmarks", {"view": "front", "photo": "wide", "count": 14})
+            pairs = [{"point": m["p"], "pixel": [160 + 1.25 * (m["pixel"][0] - 160), m["pixel"][1]]} for m in seen["points"]
+                     if 0 < 160 + 1.25 * (m["pixel"][0] - 160) < 320 and 0 < m["pixel"][1] < 240]
+            self.assertGreaterEqual(len(pairs), 6)
+            self.assertTrue(call("align_photo", {"pairs": pairs, "focal_mm": 50, "keep_focal": True, "view": "front"})["linedUp"])
+            morphed = call("morph_to_photos", {})
+            self.assertLess(morphed["photos"][0]["rmsAfter"], 0.5 * morphed["photos"][0]["rmsBefore"], json.dumps(morphed))
+            key = head.data.shape_keys.key_blocks.get(photos_mod.MORPH_KEY)
+            self.assertIsNotNone(key)
+            self.assertEqual(key.value, 1.0)
+            call("morph_to_photos", {"reset": True})
+            self.assertIsNone(head.data.shape_keys.key_blocks.get(photos_mod.MORPH_KEY))
+        finally:
+            if os.path.exists(wide):
+                os.remove(wide)
 
         # groomlab-cli mcp --live blender finds this Blender through the file and forwards to it.
         if bu.CLI and os.path.isfile(bu.CLI):

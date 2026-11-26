@@ -12,6 +12,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -23,8 +24,10 @@
 #include <unistd.h>
 #endif
 
+#include "groomlab/editor/agent_align.h"
 #include "groomlab/editor/agent_canvas.h"
 #include "groomlab/editor/agent_expressions.h"
+#include "groomlab/editor/agent_face.h"
 #include "groomlab/editor/agent_grooming.h"
 #include "groomlab/editor/agent_link.h"
 #include "groomlab/editor/agent_photos.h"
@@ -771,4 +774,234 @@ TEST(AgentTools, RenderFrameIsTheHostsRenderersOnly) {
     EXPECT_EQ(linkResult(bad["reply"].get<std::string>(), 12)["isError"], true);
     const json refused = json::parse(beginHostRender(tools, token, linkRequestLine("wrong", 13, "tools/call", {{"name", "render_frame"}}))["reply"].get<std::string>());
     EXPECT_EQ(refused["error"]["code"], kLinkBadToken);
+}
+
+namespace {
+
+// An OBJ's vertices and faces (fans), as the shipped sample meshes have them.
+std::shared_ptr<const ScalpMesh> readObjFile(const fs::path& path) {
+    std::ifstream in(path);
+    std::vector<Vec3f> points;
+    std::vector<ScalpMesh::Triangle> triangles;
+    for (std::string line; std::getline(in, line);) {
+        std::istringstream s(line);
+        std::string tag;
+        s >> tag;
+        if (tag == "v") {
+            float x = 0, y = 0, z = 0;
+            s >> x >> y >> z;
+            points.push_back({x, y, z});
+        } else if (tag == "f") {
+            std::vector<std::int32_t> ids;
+            for (std::string t; s >> t;) ids.push_back(std::stoi(t.substr(0, t.find('/'))) - 1);
+            for (std::size_t k = 2; k < ids.size(); ++k) triangles.push_back({ids[0], ids[k - 1], ids[k]});
+        }
+    }
+    return std::make_shared<ScalpMesh>(std::move(points), std::move(triangles));
+}
+
+std::shared_ptr<const ScalpMesh> nikaHead() {
+    return readObjFile(fs::u8path(GROOMLAB_TEST_DATA) / ".." / ".." / "engine" / "assets" / "meshes" / "nika_head.obj");
+}
+
+CameraMat3 mul3(const CameraMat3& a, const CameraMat3& b) {
+    CameraMat3 r{};
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            for (int k = 0; k < 3; ++k) r[i][j] += a[i][k] * b[k][j];
+    return r;
+}
+
+}  // namespace
+
+TEST(AgentFace, NikasFacialLandmarksLandWhereTheyAre) {
+    const auto head = nikaHead();
+    ASSERT_GT(head->triangleCount(), 1000u);
+    const FaceLandmarks face = faceLandmarks(*head, "Y");
+    ASSERT_TRUE(face.head) << face.why;
+    auto at = [&](const std::string& name) {
+        const FaceLandmark* l = face.find(name);
+        EXPECT_TRUE(l) << name;
+        return l ? l->point : Vec3f();
+    };
+    // Nika: centimetres, y up, facing +z; the nose tip at about (0, -0.6, 11.4), the chin under it.
+    EXPECT_LT((at("nose_tip") - Vec3f(0.0f, -0.6f, 11.4f)).length(), 1.0f);
+    EXPECT_GT(face.find("nose_tip")->confidence, 0.6f);
+    EXPECT_NEAR(at("chin").y, -8.3f, 1.2f);
+    EXPECT_GT(at("chin").z, 6.5f);
+    for (int side = 0; side < 2; ++side) {
+        const float s = side == 0 ? 1.0f : -1.0f;  // (the character's left is +x)
+        const std::string p = side == 0 ? "left_" : "right_";
+        const Vec3f eye = at(p + "eye"), inner = at(p + "eye_inner"), outer = at(p + "eye_outer");
+        EXPECT_GT(s * eye.x, 1.5f) << p;
+        EXPECT_LT(s * eye.x, 3.6f) << p;
+        EXPECT_NEAR(eye.y, 2.5f, 1.2f) << p;
+        EXPECT_LT(s * inner.x, s * eye.x) << p;  // (inner: toward the nose)
+        EXPECT_GT(s * outer.x, s * eye.x) << p;
+        const Vec3f mouth = at(p + "mouth_corner");
+        EXPECT_NEAR(mouth.y, -3.3f, 1.0f) << p;
+        EXPECT_GT(s * mouth.x, 1.2f) << p;
+        const Vec3f top = at(p + "ear_top"), lobe = at(p + "earlobe");
+        EXPECT_GT(s * top.x, 7.0f) << p;
+        EXPECT_GT(top.y - lobe.y, 3.0f) << p;  // (an ear: 4-7 cm tall)
+        EXPECT_LT(top.y - lobe.y, 8.0f) << p;
+        EXPECT_GT(face.find(p + "ear_top")->confidence, 0.4f) << p;
+    }
+    const Vec3f hairline = at("hairline_middle");
+    EXPECT_NEAR(hairline.y, 9.9f, 1.5f);
+    EXPECT_GT(hairline.z, 4.0f);
+    // The scalp's region: the top and the back of the head are hair, the face and the neck not.
+    const ScalpLandmarks marks = scalpLandmarks(*head, "Y");
+    EXPECT_GT(hairRegionWeight(face, marks, head->closestPoint({0.0f, 14.0f, 0.0f}).position), 0.95f);
+    EXPECT_GT(hairRegionWeight(face, marks, head->closestPoint({0.0f, 6.0f, -12.0f}).position), 0.95f);
+    EXPECT_LT(hairRegionWeight(face, marks, at("nose_tip")), 0.05f);
+    EXPECT_LT(hairRegionWeight(face, marks, at("left_eye")), 0.05f);
+    EXPECT_LT(hairRegionWeight(face, marks, head->closestPoint({0.0f, -12.0f, -4.0f}).position), 0.05f);
+    // The front hairline on the face's hairline, not low on the forehead.
+    EXPECT_NEAR(hairlinePoint(*head, face, marks, 0.0f).y, hairline.y, 0.6f);
+    // A scalp cap and a ball (no face): nothing named, and why.
+    const FaceLandmarks none = faceLandmarks(*readObjFile(fs::u8path(GROOMLAB_TEST_DATA) / "app" / "head_scalp.obj"), "Y");
+    EXPECT_FALSE(none.head);
+    EXPECT_FALSE(none.why.empty());
+    EXPECT_FALSE(faceLandmarks(*ball(), "Y").head);
+}
+
+TEST(AgentAlign, TheOutlineTightensARoughCameraOnASyntheticPortrait) {
+    const auto head = nikaHead();
+    const FaceLandmarks face = faceLandmarks(*head, "Y");
+    ASSERT_TRUE(face.head);
+    // The truth: a portrait 384 x 512 from the front left, tilted a little; the head on a white
+    // backdrop (no hair).
+    RefCamera truth = viewCamera(*head, "Y", "three_quarter_front_left", 384, 512, 85.0);
+    truth.pose.rotation = mul3(rotationFromEulerXYZDegrees({-4.0, 6.0, 0.0}), truth.pose.rotation);
+    Canvas canvas(384, 512, {1.0f, 1.0f, 1.0f});
+    std::vector<float> depth;
+    canvas.mesh(*head, truth, {0.55f, 0.45f, 0.4f}, depth);
+    RefImage photo;
+    photo.width = 384;
+    photo.height = 512;
+    photo.channels = 3;
+    for (int y = 0; y < 512; ++y)
+        for (int x = 0; x < 384; ++x)
+            for (int c = 0; c < 3; ++c) photo.pixels.push_back(canvas.at(x, y)[static_cast<std::size_t>(c)]);
+    // Rough pairs: six named points, each a few pixels off.
+    std::vector<CameraCorrespondence> pairs;
+    const double noise[6][2] = {{3, -2}, {-2, 3}, {2, 2}, {-3, -2}, {2, -3}, {-2, 2}};
+    int k = 0;
+    for (const char* name : {"nose_tip", "chin", "left_eye", "right_eye", "left_mouth_corner", "left_earlobe"}) {
+        const Vec3f p = face.find(name)->point;
+        float u = 0, v = 0;
+        ASSERT_TRUE(truth.project(p, u, v)) << name;
+        pairs.push_back({u + noise[k][0], v + noise[k][1], {p.x, p.y, p.z}});
+        ++k;
+    }
+    CameraSolveOptions options;
+    options.imageWidth = 384;
+    options.imageHeight = 512;
+    options.focalPx = truth.focalPx;
+    options.fixFocal = true;
+    options.hasInitialPose = true;
+    options.initialPose = truth.pose;
+    const CameraSolveResult solved = solveCamera(pairs, options);
+    ASSERT_TRUE(solved.ok);
+    RefCamera start = truth;
+    start.pose = solved.pose;
+    // How far a camera is from the truth: the mesh's points' mean distance in the picture.
+    auto off = [&](const RefCamera& c) {
+        double sum = 0.0;
+        int n = 0;
+        for (const Vec3f& p : head->points()) {
+            float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+            if (!truth.project(p, u0, v0) || !c.project(p, u1, v1)) continue;
+            sum += std::sqrt((u1 - u0) * (u1 - u0) + (v1 - v0) * (v1 - v0));
+            ++n;
+        }
+        return sum / std::max(1, n);
+    };
+    const ScalpLandmarks marks = scalpLandmarks(*head, "Y");
+    const OutlineFit fit = refineWithOutline(*head, photo, RefImage{}, start, pairs,
+                                             [&](const Vec3f& q) { return hairRegionWeight(face, marks, q) < 0.5f; });
+    ASSERT_TRUE(fit.ok) << fit.why;
+    EXPECT_GT(fit.samples, 50);
+    EXPECT_LT(fit.outlineAfter, fit.outlineBefore);
+    EXPECT_LT(fit.outlineAfter, 1.5);
+    EXPECT_LT(off(fit.camera), 0.6 * off(start)) << off(start) << " -> " << off(fit.camera);
+    // A photo with no plain backdrop: nothing to match, said.
+    RefImage busy = photo;
+    for (std::size_t i = 0; i < busy.pixels.size(); ++i) busy.pixels[i] = static_cast<float>((i * 7919) % 255) / 255.0f;
+    EXPECT_FALSE(refineWithOutline(*head, busy, RefImage{}, start, pairs, nullptr).ok);
+}
+
+TEST(AgentTools, MorphToPhotosLandsThePairsAndUndoes) {
+    SessionTarget target;
+    AgentTools tools(target);
+    call(tools, "new_groom", {{"name", "ball"}, {"mesh", "ball"}});
+    AgentGroom& g = target.groom("ball");
+    const std::vector<Vec3f> original = g.session().rawScalp()->points();
+    writePhoto(fs::u8path(target.folders().root) / "wide.png", 320, 240);
+    call(tools, "add_photo", {{"path", "wide.png"}});
+    // The photo's head a quarter wider than the ball: its pairs where a wider ball would put them.
+    const RefCamera truth = viewCamera(*g.session().scalp(), "Y", "front", 320, 240, 50.0);
+    const json marks = call(tools, "mesh_landmarks", {{"view", "front"}, {"photo", "wide"}, {"count", 14}});
+    json pairs = json::array();
+    for (const json& p : marks["points"]) {
+        const Vec3f at(p["p"][0].get<float>(), p["p"][1].get<float>(), p["p"][2].get<float>());
+        float u = 0, v = 0;
+        if (truth.project(Vec3f(at.x * 1.25f, at.y, at.z), u, v) && u > 0 && v > 0 && u < 320 && v < 240) {
+            pairs.push_back({{"pixel", {u, v}}, {"point", p["p"]}});
+        }
+    }
+    ASSERT_GE(pairs.size(), 6u);
+    const json aligned = call(tools, "align_photo", {{"pairs", pairs}, {"focal_mm", 50.0}, {"keep_focal", true}, {"view", "front"}});
+    ASSERT_EQ(aligned["linedUp"], true);
+    const ToolResult morphed = tools.call("morph_to_photos", json::object());
+    ASSERT_FALSE(morphed.isError) << morphed.content.dump();
+    EXPECT_EQ(images(morphed), 1);
+    const json info = json::parse(morphed.content.back()["text"].get<std::string>());
+    const json& photo = info["photos"][0];
+    EXPECT_GT(photo["rmsBefore"].get<double>(), 2.0);
+    EXPECT_LT(photo["rmsAfter"].get<double>(), 0.3 * photo["rmsBefore"].get<double>()) << info.dump();
+    EXPECT_GT(info["pins"].get<int>(), 5);
+    const std::vector<Vec3f> once = g.session().rawScalp()->points();
+    EXPECT_NE(once, original);
+    // Morphs never stack: the same morph again gives the same scalp.
+    call(tools, "morph_to_photos", json::object());
+    const std::vector<Vec3f> twice = g.session().rawScalp()->points();
+    ASSERT_EQ(twice.size(), once.size());
+    float most = 0.0f;
+    for (std::size_t i = 0; i < once.size(); ++i) most = std::max(most, (twice[i] - once[i]).length());
+    EXPECT_LT(most, 1e-3f);
+    // Undo: the morph taken back; reset: the scalp before the first morph.
+    call(tools, "undo", json::object());
+    call(tools, "morph_to_photos", {{"reset", true}});
+    EXPECT_EQ(g.session().rawScalp()->points(), original);
+    call(tools, "undo", json::object());
+    EXPECT_EQ(g.session().rawScalp()->points(), once);
+    call(tools, "morph_to_photos", {{"stiffness", 2.0}}, true);
+}
+
+TEST(AgentTools, PhotoRegionsAndAPreviewAtTheCamerasSize) {
+    SessionTarget target;
+    AgentTools tools(target);
+    call(tools, "new_groom", {{"name", "ball"}, {"mesh", "ball"}});
+    writePhoto(fs::u8path(target.folders().root) / "shot.png", 320, 240);
+    call(tools, "add_photo", {{"path", "shot.png"}});
+    // A region enlarged under a fine grid, labelled in the photo's pixels.
+    const ToolResult zoom = tools.call("photo_view", {{"region", {100, 80, 160, 120}}, {"size", 600}});
+    ASSERT_FALSE(zoom.isError) << zoom.content.dump();
+    const json info = json::parse(zoom.content.back()["text"].get<std::string>());
+    EXPECT_EQ(info["region"], json::array({100, 80, 160, 120}));
+    EXPECT_EQ(info["grid"], 5);
+    EXPECT_EQ(info["shown"], json::array({600, 400}));
+    call(tools, "photo_view", {{"region", {100, 80, 104, 120}}}, true);
+    // A camera's picture at the camera's own size.
+    const ToolResult shot = tools.call("render_preview", {{"camera", {{"eye", {0, 0, 60}}, {"target", {0, 0, 0}}, {"width", 385}, {"height", 510}}}});
+    ASSERT_FALSE(shot.isError) << shot.content.dump();
+    const json drawn = json::parse(shot.content.back()["text"].get<std::string>());
+    EXPECT_EQ(drawn["width"], 385);
+    EXPECT_EQ(drawn["height"], 510);
+    // Not a head: no named landmarks, and new_groom says nothing of a face.
+    const json marks = call(tools, "mesh_landmarks", {{"view", "front"}});
+    EXPECT_FALSE(marks.contains("named"));
+    call(tools, "scalp_from_landmarks", json::object(), true);
 }

@@ -20,7 +20,9 @@
 
 #include "groomlab/card_files.h"
 #include "groomlab/display.h"
+#include "groomlab/editor/agent_align.h"
 #include "groomlab/editor/agent_expressions.h"
+#include "groomlab/editor/agent_face.h"
 #include "groomlab/editor/agent_grooming.h"
 #include "groomlab/editor/agent_photos.h"
 #include "groomlab/editor/game_exports.h"
@@ -877,14 +879,222 @@ struct AgentTools::Impl {
         }
         out["scalp"] = {{"points", mesh->pointCount()}, {"triangles", mesh->triangleCount()}, {"min", vec(lo)}, {"max", vec(hi)},
                         {"upAxis", "Y"}, {"units", "cm"}};
+        const std::string scalpRegion = str(a, "scalp", "whole");
+        if (scalpRegion != "whole" && scalpRegion != "from_landmarks") throw ToolError("scalp is \"whole\" or \"from_landmarks\"");
         try {
             if (a.contains("preset")) out["preset"] = applyPreset(g, str(a, "preset"), "replace", {});
+            // A whole head (its face found): hair everywhere until density is painted; or above the
+            // hairline the face's landmarks give.
+            const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalpOf(g));
+            if (face->head) {
+                out["head"] = {{"face", true},
+                               {"note", scalpRegion == "from_landmarks"
+                                            ? "A whole head (face and neck): Scatter's density reads scalpRegion, 1 above the hairline the "
+                                              "face's landmarks give, 0 on the face, ears and neck. Check it with render_preview; repaint "
+                                              "it with paint_map."
+                                            : "This mesh is a whole head (face and neck): hair grows over all of it until Scatter's density "
+                                              "is painted. Run scalp_from_landmarks (or new_groom with scalp \"from_landmarks\") to keep "
+                                              "the hair above the hairline the face's landmarks give."}};
+                if (scalpRegion == "from_landmarks") out["scalpRegion"] = applyScalpRegion(g);
+            } else if (scalpRegion == "from_landmarks") {
+                throw ToolError("scalp from_landmarks needs a whole head with its face (" + face->why + ")");
+            }
         } catch (...) {
             target.close(name);  // no half-made groom
             throw;
         }
         g.history().clear();  // the groom starts here
         return textResult(withSummary(g, out));
+    }
+
+    // A whole head's scalp from its face's landmarks: a vertex map (scalpRegion, or the one
+    // Scatter's density reads already) 1 above the hairline, 0 on the face, ears and neck, read by
+    // Scatter's density. One undo step.
+    json applyScalpRegion(AgentGroom& g, float softness = 0.15f) {
+        const MeshPtr scalp = scalpOf(g);
+        const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalp);
+        if (!face->head) throw ToolError("no face found on the scalp (" + face->why + "): paint scatter.density with paint_map instead");
+        GroomSession& session = g.session();
+        const MeshPtr cage = session.cageScalp() ? session.cageScalp() : scalp;
+        ScalpMaps maps = session.scalpMaps();
+        const std::string oldMaps = maps.toJson();
+        std::string graph = graphText(g);
+        const std::string oldGraph = graph;
+        GuideHierarchy h = hierarchyOf(g);
+        h.evaluate(scalp.get());
+        std::string scatter;
+        for (const json& n : json::parse(graph).value("nodes", json::array())) {
+            if (n.value("type", std::string()) == "Scatter") {
+                scatter = n.value("name", std::string());
+                break;
+            }
+        }
+        if (scatter.empty()) throw ToolError("the graph has no Scatter node to read the scalp's region");
+        ParamPaintRequest request;
+        request.kind = "vertices";
+        // (the map it reads already, else a new one: its value as it is, the map white over it)
+        bool reads = false;
+        try {
+            reads = !paramMapOf(graph, maps, &h, scatter, "density").map.empty();
+        } catch (const std::exception& e) {
+            throw ToolError(std::string("Scatter's density: ") + e.what());
+        }
+        request.name = reads ? std::string() : std::string("scalpRegion");
+        const MapFiles noFiles;
+        const ParamPaint pp = paintParam(graph, maps, &h, cage.get(), scatter, "density", request, noFiles);
+        if (pp.made && !pp.created.guideLayer) maps = pp.created.maps;
+        if (!pp.graph.empty()) graph = pp.graph;
+        auto entry = maps.maps.find(pp.map);
+        if (entry == maps.maps.end() || entry->second.kind != "vertices") {
+            throw ToolError("Scatter's density reads '" + pp.map + "', not a vertex map: paint it with paint_map instead");
+        }
+        const ScalpLandmarks marks = scalpLandmarks(*scalp, g.upAxis());
+        const int channels = std::max(1, entry->second.channels);
+        std::vector<float> values(cage->pointCount() * static_cast<std::size_t>(channels), 1.0f);
+        std::size_t hair = 0;
+        for (std::size_t i = 0; i < cage->pointCount(); ++i) {
+            const float w = hairRegionWeight(*face, marks, cage->points()[i], softness);
+            for (int c = 0; c < channels; ++c) values[i * static_cast<std::size_t>(channels) + static_cast<std::size_t>(c)] = c == 3 ? 1.0f : w;
+            if (w > 0.5f) ++hair;
+        }
+        entry->second.values = std::move(values);
+        AgentStrokeHost& host = g.strokeHost();
+        host.clearStage();
+        host.resetCommitted();
+        host.label = "scalp from landmarks";
+        if (maps.toJson() != oldMaps) host.stage(StrokeField::ScalpMaps, maps.toJson());
+        if (graph != oldGraph) host.stage(StrokeField::Graph, graph);
+        try {
+            host.commit(StrokeEdit{});
+        } catch (...) {
+            host.clearStage();
+            throw;
+        }
+        host.clearStage();
+        return {{"map", pp.map}, {"linked", scatter + ".density"}, {"scalpShare", r4(static_cast<double>(hair) / std::max<std::size_t>(1, cage->pointCount()))},
+                {"hairline", "through the forehead's hairline_middle, the temples, over the ears and down to the nape"}};
+    }
+
+    ToolResult scalpFromLandmarks(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const double softness = num(a, "softness", 0.15);
+        if (softness < 0.02 || softness > 1.0) throw ToolError("softness is 0.02 to 1 (a share of the face's lower third)");
+        json out = applyScalpRegion(g, static_cast<float>(softness));
+        out["hint"] = "Look with render_preview (front and side): hair should start at the forehead and stop above the ears; "
+                      "paint_map on the same map fixes what the landmarks got wrong.";
+        return textResult(withSummary(g, out));
+    }
+
+    // The look the photos suggest set on the graph: HairColor's melanin and redness, Clump's size and
+    // strength, Curl's radius and frequency, Flyaway's fraction (each node the graph's first of its
+    // type, added before the chain's color and width end when it has none). One undo step.
+    json applyPhotoLook(AgentGroom& g, const ReferenceLookFit& look) {
+        std::vector<std::pair<std::string, json>> wants;
+        wants.push_back({"HairColor", {{"mode", "melanin"}, {"melanin", r4(look.melanin)}, {"redness", r4(look.redness)}}});
+        if (look.clumped) wants.push_back({"Clump", {{"clumpBy", "size"}, {"size", r4(look.clumpSize)}, {"strength", r4(look.clumpStrength)}}});
+        if (look.curly) wants.push_back({"Curl", {{"radius", r4(look.curlRadius)}, {"frequency", r4(look.curlFrequency)}}});
+        if (look.flyawayFraction > 0.0f) wants.push_back({"Flyaway", {{"fraction", r4(look.flyawayFraction)}}});
+        json done = json::object();
+        edit(g, "apply photo look", [&](std::string& graph, std::string&) {
+            for (const auto& [type, values] : wants) {
+                auto firstOf = [&](const std::vector<std::string>& types) {
+                    for (const json& n : json::parse(graph).value("nodes", json::array())) {
+                        if (std::find(types.begin(), types.end(), n.value("type", std::string())) != types.end()) return n.value("name", std::string());
+                    }
+                    return std::string();
+                };
+                std::string node = firstOf({type});
+                bool added = false;
+                if (node.empty()) {
+                    GraphEdit e(graph);
+                    node = e.addNode(type, "", std::string(), std::nullopt, std::nullopt, fitSize(g));
+                    const std::string anchor = type == "HairColor" ? firstOf({"Width", "Resample", "Output"}) : firstOf({"HairColor", "Width", "Resample", "Output"});
+                    if (!anchor.empty()) {
+                        GraphEdit attempt = e;
+                        try {
+                            insertBefore(attempt, node, anchor);
+                            e = attempt;
+                        } catch (const std::exception&) {
+                        }
+                    }
+                    graph = e.toJson();
+                    added = true;
+                }
+                const json spec = json::parse(GraphEdit(graph).nodeSpecJson(node));
+                json gj = json::parse(graph);
+                json set = json::object();
+                for (json& n : gj["nodes"]) {
+                    if (n.value("name", std::string()) != node) continue;
+                    if (!n.contains("params") || !n["params"].is_object()) n["params"] = json::object();
+                    for (const auto& [param, value] : values.items()) {
+                        if (paramSpecOf(spec, param).is_null()) continue;
+                        n["params"][param] = value;
+                        set[param] = value;
+                    }
+                }
+                graph = gj.dump();
+                done[type] = {{"node", node}, {"set", set}, {"added", added}};
+            }
+        });
+        return done;
+    }
+
+    ToolResult morphToPhotosTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr before = scalpOf(g);
+        AgentGroom::MorphRequest request;
+        request.stiffness = num(a, "stiffness", 0.0);
+        if (request.stiffness < 0.0 || request.stiffness > 0.95) throw ToolError("stiffness is 0 to 0.95");
+        request.symmetric = flag(a, "symmetric", true);
+        request.reset = flag(a, "reset", false);
+        const AgentGroom::MorphOutcome outcome = g.morphToPhotos(request);
+        const MeshPtr after = scalpOf(g);
+        const std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        auto rmsOf = [&before](const AgentPhoto& p, const ScalpMesh& scalp) {
+            const MarkerLists& marks = p.state.landmarks;
+            double sum = 0.0;
+            for (std::size_t k = 0; k < marks.pairCount(); ++k) {
+                const Vec3f at = markerOn(*before, scalp, marks.point(kLandmarkMesh, k));
+                const Vec3f& want = marks.point(kLandmarkPhoto, k).point;
+                float u = 0.0f, v = 0.0f;
+                if (!p.camera->project(at, u, v)) u = v = -1e4f;
+                sum += (u - want.x) * (u - want.x) + (v - want.y) * (v - want.y);
+            }
+            return marks.pairCount() ? std::sqrt(sum / static_cast<double>(marks.pairCount())) : 0.0;
+        };
+        ToolResult r;
+        json per = json::array();
+        int shown = 0;
+        for (const AgentPhoto& p : photos) {
+            if (!p.camera || p.state.landmarks.pairCount() == 0) continue;
+            per.push_back({{"photo", p.name}, {"pairs", p.state.landmarks.pairCount()}, {"rmsBefore", r4(rmsOf(p, *before))},
+                           {"rmsAfter", r4(rmsOf(p, *after))}});
+            if (shown++ >= 3) continue;
+            AgentPhoto moved = p;
+            for (std::size_t k = 0; k < moved.state.landmarks.pairCount(); ++k) {
+                MarkerPoint m = moved.state.landmarks.point(kLandmarkMesh, k);
+                m.point = markerOn(*before, *after, m);
+                moved.state.landmarks.set(kLandmarkMesh, k, m);
+            }
+            const RefImage image = loadImage(p.image, 3);
+            r.content.push_back({{"type", "image"}, {"data", base64Encode(photoOverlayPng(image, *after, moved, 512))}, {"mimeType", "image/png"}});
+        }
+        json info = {{"groom", g.name()}, {"reset", request.reset}, {"photos", per}};
+        if (!request.reset) {
+            if (outcome.pins > 0) info["pins"] = outcome.pins;
+            if (outcome.pinsRmsBefore >= 0.0) info["pinsRms"] = {{"before", r4(outcome.pinsRmsBefore)}, {"after", r4(outcome.pinsRmsAfter)}};
+            info["stiffness"] = request.stiffness;
+            info["symmetric"] = request.symmetric;
+        }
+        if (!outcome.note.empty()) info["note"] = outcome.note;
+        info["undoable"] = outcome.undoable;
+        info["hint"] = request.reset ? std::string("the scalp as it was before the first morph")
+                                     : std::string("the images: each lined-up photo with the morphed scalp's outline over it and its pairs "
+                                                   "(green: the photo's, red: the mesh's). A morph always starts from the scalp before the "
+                                                   "first one; reset puts that back") +
+                                           (outcome.undoable ? "; undo takes this one back." : ".");
+        r.content.push_back({{"type", "text"}, {"text", withSummary(g, info).dump(-1, ' ', false, json::error_handler_t::replace)}});
+        return r;
     }
 
     ToolResult openGroom(const json& a) {
@@ -1435,6 +1645,7 @@ struct AgentTools::Impl {
 
     ToolResult renderPreviewTool(const json& a) {
         AgentGroom& g = target.groom(str(a, "groom"));
+        std::string sizeNote;
         if (a.contains("frame")) g.frame = num(a, "frame", g.frame);
         PreviewOptions o;
         if (a.contains("views")) {
@@ -1482,7 +1693,9 @@ struct AgentTools::Impl {
                 o.camera = cam;
             }
         }
-        o.size = static_cast<int>(num(a, "size", 512));
+        // A camera's own size when no size is asked for (up to 1024 across; the shape kept).
+        o.size = static_cast<int>(num(a, "size", o.camera ? std::min(1024.0, o.camera->width) : 512.0));
+        if (o.camera && !a.contains("size") && o.camera->width > 1024.0) sizeNote = "the camera's image is drawn 1024 pixels across";
         o.maxStrands = static_cast<std::size_t>(std::clamp(num(a, "max_strands", 50000.0), 100.0, 300000.0));
         o.zUp = g.upAxis() == "Z";
         if (flag(a, "viewport", false)) {
@@ -1497,6 +1710,7 @@ struct AgentTools::Impl {
         const bool compare = flag(a, "compare", false);
         if (compare && !g.history().canUndo()) throw ToolError("compare needs an edit to compare with: this groom has none to undo");
         json info = {{"groom", g.name()}, {"views", o.camera ? json::array({"camera"}) : json(o.views)}, {"look", o.look}};
+        if (!sizeNote.empty()) info["note"] = sizeNote;
         if (o.camera) info["camera"] = cameraInfo(*o.camera);
         ToolResult r;
         // Before the last edit: the step taken back for the picture, then done again.
@@ -1659,7 +1873,33 @@ struct AgentTools::Impl {
 
     // ---- groom by hand ----
     // The groom's landmarks (agent_grooming.h) on the scalp as it is now.
-    ScalpLandmarks landmarksOf(AgentGroom& g) { return scalpLandmarks(*scalpOf(g), g.upAxis()); }
+    // The face's landmarks of a groom's scalp (computed once a scalp: a few thousand rays).
+    std::map<std::string, std::shared_ptr<const FaceLandmarks>> faces;
+    std::shared_ptr<const FaceLandmarks> faceOf(AgentGroom& g, const MeshPtr& scalp) {
+        const std::string key = std::to_string(scalp->contentHash()) + g.upAxis();
+        auto it = faces.find(key);
+        if (it != faces.end()) return it->second;
+        if (faces.size() > 16) faces.clear();
+        return faces[key] = std::make_shared<const FaceLandmarks>(faceLandmarks(*scalp, g.upAxis()));
+    }
+
+    // The scalp's landmarks; on a whole head (a face found) its front_hairline and temples on the
+    // face's hairline, and the face's own landmarks by name besides.
+    ScalpLandmarks landmarksOf(AgentGroom& g) {
+        const MeshPtr scalp = scalpOf(g);
+        ScalpLandmarks marks = scalpLandmarks(*scalp, g.upAxis());
+        const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalp);
+        if (!face->head) return marks;
+        for (Landmark& l : marks.points) {
+            const float angle = l.name == "front_hairline" ? 0.0f : l.name == "left_temple" ? 45.0f : l.name == "right_temple" ? -45.0f : 999.0f;
+            if (angle > 360.0f) continue;
+            l.point = hairlinePoint(*scalp, *face, marks, angle, &l.normal);
+        }
+        for (const FaceLandmark& f : face->points) {
+            if (!marks.find(f.name)) marks.points.push_back({f.name, f.point, f.normal});
+        }
+        return marks;
+    }
 
     // A point an agent gave: [x, y, z], or a landmark's name.
     Vec3f pointOrLandmark(const json& v, const ScalpLandmarks& marks, const char* what) {
@@ -1667,7 +1907,7 @@ struct AgentTools::Impl {
             const std::string name = v.get<std::string>();
             if (const Landmark* l = marks.find(name)) return l->point;
             std::string names;
-            for (const std::string& n : landmarkNames()) names += (names.empty() ? "" : ", ") + n;
+            for (const Landmark& n : marks.points) names += (names.empty() ? "" : ", ") + n.name;
             throw ToolError(std::string(what) + ": no landmark '" + name + "' (landmarks: " + names + "; or give [x, y, z])");
         }
         return toPoint(v, what);
@@ -1769,7 +2009,7 @@ struct AgentTools::Impl {
     ToolResult brushStroke(const json& a) {
         AgentGroom& g = target.groom(str(a, "groom"));
         const MeshPtr scalp = scalpOf(g);
-        const ScalpLandmarks marks = scalpLandmarks(*scalp, g.upAxis());
+        const ScalpLandmarks marks = landmarksOf(g);
         const std::string mode = str(a, "mode");
         BrushToolSettings s;
         if (mode == "freeze" || mode == "unfreeze") {
@@ -2080,7 +2320,7 @@ struct AgentTools::Impl {
             if (stroke) {
                 const std::string mapKind = maps.maps.count(name) ? maps.maps.at(name).kind : std::string("guides");
                 if (mapKind == "texture") throw ToolError("'" + name + "' is a texture map: paint it in GroomLab (vertex maps and guide layers paint here)");
-                const ScalpLandmarks marks = scalpLandmarks(*scalp, g.upAxis());
+                const ScalpLandmarks marks = landmarksOf(g);
                 BrushToolSettings s;
                 s.setMode("paint");
                 s.brush.attribute = name;
@@ -2268,9 +2508,30 @@ struct AgentTools::Impl {
         std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
         const AgentPhoto& p = photoNamed(photos, str(a, "photo"));
         const RefImage image = loadImage(p.image, 3);
-        const int step = a.contains("grid") ? static_cast<int>(num(a, "grid", 50)) : gridStepFor(p.width, p.height);
-        if (step < 8) throw ToolError("grid must be 8 pixels or more");
         const int size = static_cast<int>(std::clamp(num(a, "size", kPhotoShown), 128.0, 1536.0));
+        if (a.contains("region")) {
+            const json& r = a["region"];
+            if (!r.is_array() || r.size() != 4) throw ToolError("region is [x0, y0, x1, y1] in the photo's pixels");
+            std::array<int, 4> box{};
+            for (int k = 0; k < 4; ++k) {
+                if (!r[static_cast<std::size_t>(k)].is_number()) throw ToolError("region is [x0, y0, x1, y1] in the photo's pixels");
+                box[static_cast<std::size_t>(k)] = static_cast<int>(std::lround(r[static_cast<std::size_t>(k)].get<double>()));
+            }
+            box = {std::clamp(std::min(box[0], box[2]), 0, p.width), std::clamp(std::min(box[1], box[3]), 0, p.height),
+                   std::clamp(std::max(box[0], box[2]), 0, p.width), std::clamp(std::max(box[1], box[3]), 0, p.height)};
+            if (box[2] - box[0] < 8 || box[3] - box[1] < 8) throw ToolError("the region must be 8 pixels across or more, inside the photo");
+            const int across = std::max(box[2] - box[0], box[3] - box[1]);
+            const int fine = a.contains("grid") ? static_cast<int>(num(a, "grid", 10)) : across <= 120 ? 5 : across <= 300 ? 10 : 25;
+            if (fine < 1) throw ToolError("grid must be 1 pixel or more");
+            int shownW = 0, shownH = 0;
+            const auto png = photoRegionPng(image, p, box, fine, size, &shownW, &shownH);
+            return imageResult(png, {{"groom", g.name()}, {"photo", p.name}, {"region", box}, {"grid", fine}, {"shown", {shownW, shownH}},
+                                     {"scale", r4(static_cast<double>(shownW) / static_cast<double>(box[2] - box[0]))},
+                                     {"note", "the labels are the photo's own pixels (x right, y down from its top-left): read a "
+                                              "feature's pixel here, then pair it in align_photo"}});
+        }
+        const int step = a.contains("grid") ? static_cast<int>(num(a, "grid", 50)) : gridStepFor(p.width, p.height);
+        if (step < 8) throw ToolError("grid must be 8 pixels or more (finer: give a region)");
         std::optional<ReferenceViewPreview> preview;
         json info = {{"groom", g.name()}, {"photo", p.name}, {"width", p.width}, {"height", p.height}, {"grid", step},
                      {"linedUp", p.camera.has_value()}, {"landmarks", p.state.landmarks.summary("none")},
@@ -2319,12 +2580,43 @@ struct AgentTools::Impl {
             points.push_back({{"n", i + 1}, {"p", vec(found[i].point)}, {"normal", vec(found[i].normal)},
                               {"pixel", {std::round(found[i].u), std::round(found[i].v)}}});
         }
+        // A whole head's facial landmarks this camera sees, by name (heuristic: their confidence).
+        const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalp);
+        json named = json::array();
+        std::vector<PointLabel> labels;
+        if (face->head) {
+            const Vec3f eye = camera.eye();
+            for (const FaceLandmark& f : face->points) {
+                float u = 0.0f, v = 0.0f;
+                if (!camera.project(f.point, u, v) || u < 0.0f || v < 0.0f || u > camera.width || v > camera.height) continue;
+                if (f.normal.dot((eye - f.point).normalized()) < 0.05f) continue;  // (facing away: hidden)
+                static const std::map<std::string, std::string> codes = {
+                    {"nose_tip", "NT"},         {"chin", "CH"},           {"left_eye", "LE"},          {"right_eye", "RE"},
+                    {"left_eye_inner", "LEI"},  {"left_eye_outer", "LEO"}, {"right_eye_inner", "REI"}, {"right_eye_outer", "REO"},
+                    {"left_mouth_corner", "LM"}, {"right_mouth_corner", "RM"}, {"left_ear_top", "LET"}, {"left_earlobe", "LEB"},
+                    {"right_ear_top", "RET"},   {"right_earlobe", "REB"},  {"hairline_middle", "HL"},  {"crown", "CR"},
+                    {"nape", "NP"}};
+                const auto c = codes.find(f.name);
+                const std::string code = c != codes.end() ? c->second : f.name;
+                labels.push_back({code, u, v});
+                named.push_back({{"name", f.name}, {"code", code}, {"p", vec(f.point)}, {"pixel", {std::round(u), std::round(v)}},
+                                 {"confidence", r4(f.confidence)}});
+            }
+        }
         const int size = static_cast<int>(std::clamp(num(a, "size", kPhotoShown), 128.0, 1536.0));
-        return imageResult(meshCandidatesPng(*scalp, camera, found, size),
-                           {{"groom", g.name()}, {"view", view}, {"camera", cameraInfo(camera)}, {"points", points},
-                            {"hint", "Find the same features on the photo (photo_view's grid gives their pixels) and pair them in "
-                                     "align_photo: {\"pixel\": [u, v], \"point\": p}. Pick points spread over the photo, not on a line; "
-                                     "pixel is where this camera sees each point (not the photo)."}});
+        json info = {{"groom", g.name()}, {"view", view}, {"camera", cameraInfo(camera)}, {"points", points},
+                     {"hint", "Find the same features on the photo (photo_view's grid, or a zoomed region, gives their pixels) and pair "
+                              "them in align_photo: {\"pixel\": [u, v], \"point\": p or a name}. Pick points spread over the photo, "
+                              "not on a line; pixel is where this camera sees each point (not the photo)."}};
+        if (face->head) {
+            info["named"] = named;
+            info["namedNote"] = "Facial landmarks found from the mesh's shape (heuristic: trust those with confidence 0.6 or more; "
+                                "check the rest on the picture, cyan codes). Use their names as align_photo points, so an earlobe "
+                                "is paired with the photo's earlobe, not the middle of the ear.";
+        } else {
+            info["namedNote"] = face->why;
+        }
+        return imageResult(meshCandidatesPng(*scalp, camera, found, size, labels), info);
     }
 
     ToolResult alignPhoto(const json& a) {
@@ -2359,12 +2651,107 @@ struct AgentTools::Impl {
         double focal = p.camera && p.camera->focalPx > 0.0 ? p.camera->focalPx : focalMmToPixels(50.0, p.width);
         if (a.contains("focal_mm")) focal = focalMmToPixels(num(a, "focal_mm", 50.0), p.width);
         const bool keep = flag(a, "keep_focal", false);
-        const ReferenceLandmarkSolve solve =
-            solveReferenceLandmarks(lists, p.width, p.height, focal, keep, p.camera ? &p.camera->pose : nullptr, true);
+        // A view hint: the solve starts from a camera on that side (the photo's own when none).
+        std::optional<RefCamera> hint;
+        const std::string viewHint = str(a, "view");
+        if (!viewHint.empty()) {
+            try {
+                hint = viewCamera(*scalp, g.upAxis(), viewHint, p.width, p.height, focalPixelsToMm(focal, p.width));
+            } catch (const std::invalid_argument& e) {
+                throw ToolError(e.what());
+            }
+        }
+        const CameraPose* start = hint ? &hint->pose : p.camera ? &p.camera->pose : nullptr;
+        ReferenceLandmarkSolve solve = solveReferenceLandmarks(lists, p.width, p.height, focal, keep, start, true);
+        json info = {{"groom", g.name()}, {"photo", p.name}, {"pairs", solve.pairs}, {"linedUp", solve.ok}};
+        // The pairs' names a landmark gave, and those the mesh's shape found only roughly.
+        json unsure = json::array();
+        for (const json& pair : pairs) {
+            if (!pair["point"].is_string()) continue;
+            const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalp);
+            if (const FaceLandmark* f = face->find(pair["point"].get<std::string>()); f && f->confidence < 0.5f) unsure.push_back(f->name);
+        }
+        if (!unsure.empty()) info["unsureLandmarks"] = unsure;
+        // Tightened by the outline where it is not hair (refine).
+        if (solve.ok && flag(a, "refine", false)) {
+            const RefImage image = loadImage(p.image, 3);
+            std::vector<CameraCorrespondence> correspondences;
+            for (std::size_t i = 0; i < lists.pairCount(); ++i) {
+                const Vec3f& w = lists.point(kLandmarkMesh, i).point;
+                const Vec3f& px = lists.point(kLandmarkPhoto, i).point;
+                correspondences.push_back({px.x, px.y, {w.x, w.y, w.z}});
+            }
+            // The photo's hair (what guides_from_photos would read), when it tells the hair from the rest.
+            RefImage hair;
+            {
+                ReferenceView view;
+                view.camera = solve.camera;
+                view.image = image;
+                if (!p.mask.empty()) view.mask = loadImage(p.mask, 1);
+                view.maskStrokes = p.state.maskStrokes;
+                const ReferenceViewPreview preview = previewReferenceView(*scalp, view, ReferenceGuideOptions{});
+                if (!preview.mask.empty()) {
+                    hair.width = p.width;
+                    hair.height = p.height;
+                    hair.channels = 1;
+                    hair.pixels.assign(static_cast<std::size_t>(p.width) * static_cast<std::size_t>(p.height), 0.0f);
+                    const RefImage subject = subjectMask(image);
+                    double inHair = 0.0, inSubject = 0.0;
+                    const auto& c = preview.crop;
+                    for (int y = 0; y < p.height; ++y) {
+                        for (int x = 0; x < p.width; ++x) {
+                            const float mu = (static_cast<float>(x) + 0.5f - static_cast<float>(c[0])) / static_cast<float>(std::max(1, c[2])) *
+                                             static_cast<float>(preview.mask.width);
+                            const float mv = (static_cast<float>(y) + 0.5f - static_cast<float>(c[1])) / static_cast<float>(std::max(1, c[3])) *
+                                             static_cast<float>(preview.mask.height);
+                            float m = 0.0f;
+                            if (mu >= 0.0f && mv >= 0.0f && mu < static_cast<float>(preview.mask.width) && mv < static_cast<float>(preview.mask.height)) {
+                                m = preview.mask.sample(mu, mv);
+                            }
+                            hair.pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(p.width) + static_cast<std::size_t>(x)] = m;
+                            if (subject.at(x, y) > 0.5f) inSubject += 1.0, inHair += m > 0.5f ? 1.0 : 0.0;
+                        }
+                    }
+                    if (inSubject > 0.0 && inHair / inSubject > 0.85) hair = RefImage{};  // (it saw the whole subject as hair: no help)
+                }
+            }
+            const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalp);
+            const ScalpLandmarks marks2 = scalpLandmarks(*scalp, g.upAxis());
+            std::function<bool(const Vec3f&)> usable;
+            if (face->head) usable = [face, marks2](const Vec3f& q) { return hairRegionWeight(*face, marks2, q) < 0.5f; };
+            const OutlineFit fit = refineWithOutline(*scalp, image, hair, solve.camera, correspondences, usable);
+            json r = {{"done", fit.ok}};
+            if (!fit.ok) {
+                r["why"] = fit.why;
+            } else {
+                r["pairsRmsBefore"] = r4(fit.pairsBefore);
+                r["pairsRmsAfter"] = r4(fit.pairsAfter);
+                r["outlineBefore"] = r4(fit.outlineBefore);
+                r["outlineAfter"] = r4(fit.outlineAfter);
+                r["outlineSamples"] = fit.samples;
+                r["photoOutlinePixels"] = fit.edgePixels;
+                r["hairMaskUsed"] = !hair.empty();
+                // Kept when the outline fits better and the pairs stay about where they were.
+                const bool better = fit.outlineAfter < 0.9 * fit.outlineBefore && fit.pairsAfter <= std::max(1.25 * fit.pairsBefore, fit.pairsBefore + 1.0);
+                r["kept"] = better;
+                if (better) {
+                    solve.camera = fit.camera;
+                    solve.rms = fit.pairsAfter;
+                    solve.errors.clear();
+                    for (const CameraCorrespondence& q : correspondences) {
+                        float u = 0, v = 0;
+                        fit.camera.project(Vec3f(static_cast<float>(q.world[0]), static_cast<float>(q.world[1]), static_cast<float>(q.world[2])), u, v);
+                        solve.errors.push_back(std::sqrt((u - q.u) * (u - q.u) + (v - q.v) * (v - q.v)));
+                    }
+                }
+                r["note"] = "the outline counted: the mesh's face, ears and neck (below its hairline) against the photo's subject's "
+                            "edge where the photo shows no hair; outline numbers are mean pixels to the photo's edge (capped)";
+            }
+            info["refine"] = r;
+        }
         p.state.landmarks = lists;
         if (solve.ok) p.camera = solve.camera;
         g.commitPhotos("align photo " + p.name, photosToJson(photos));
-        json info = {{"groom", g.name()}, {"photo", p.name}, {"pairs", solve.pairs}, {"linedUp", solve.ok}};
         if (!solve.ok) {
             info["why"] = solve.why;
         } else {
@@ -2377,7 +2764,24 @@ struct AgentTools::Impl {
             }
             if (!bad.empty()) info["badPairs"] = bad;
             info["focalSolved"] = solve.focalSolved;
+            if (!solve.focalSolved) {
+                info["focalNote"] = keep ? "the focal length was kept, as asked"
+                                         : solve.pairs < kReferenceMinPairsFocal
+                                               ? "the focal length was kept: 6 pairs or more can solve it"
+                                               : "the focal length was kept: these pairs cannot tell it (they lie too near a plane, or "
+                                                 "too close together in depth); give focal_mm if you know the lens";
+            }
             info["camera"] = cameraInfo(solve.camera);
+            if (hint) {
+                const Vec3f want = -hint->axis(2), got = -solve.camera.axis(2);
+                const double angle = std::acos(std::clamp(static_cast<double>(want.dot(got)), -1.0, 1.0)) * 57.29578;
+                info["viewAngleFromHint"] = std::round(angle * 10.0) / 10.0;
+                if (angle > 25.0) {
+                    info["viewWarning"] = "the solved camera looks " + std::to_string(static_cast<int>(std::lround(angle))) +
+                                          " degrees away from the view hint: a pair may be wrong, or too few pairs hold the camera "
+                                          "(add pairs spread in height and depth, e.g. the chin and the neck)";
+                }
+            }
             info["hint"] = std::string("The image: the mesh's outline (cyan) over the photo, each pair's photo point (green ring) "
                                        "joined to its mesh point through the camera (red). ") +
                            (bad.empty() ? "Under about 1% of the photo's width is lined up." : "Fix or drop the pairs listed in badPairs first.");
@@ -2481,6 +2885,33 @@ struct AgentTools::Impl {
             h.evaluate(scalp.get());
             hierarchy = h.toJson();
         });
+        // The scalp's regions no lined-up photo sees (a share of each; the face, ears and neck left out on a whole head).
+        json unseen = json::object();
+        json alignMore = json::array();
+        if (result.scalpCoverage.size() == scalp->pointCount()) {
+            const ScalpLandmarks marks = scalpLandmarks(*scalp, g.upAxis());
+            const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalp);
+            std::map<std::string, std::array<double, 2>> counts;  // region -> {unseen, all}
+            for (std::size_t i = 0; i < scalp->pointCount(); ++i) {
+                const Vec3f& q = scalp->points()[i];
+                if (face->head && hairRegionWeight(*face, marks, q) < 0.5f) continue;
+                const Vec3f d = (q - marks.middle).normalized();
+                const float a2 = d.dot(marks.frame.left), b2 = d.dot(marks.frame.up), c2 = d.dot(marks.frame.front);
+                std::string region = "top";
+                if (b2 < 0.75f) {
+                    const float theta = std::atan2(a2, c2) * 57.29578f;
+                    region = std::abs(theta) < 45.0f ? "front" : std::abs(theta) > 135.0f ? "back" : theta > 0.0f ? "left" : "right";
+                }
+                counts[region][1] += 1.0;
+                if (result.scalpCoverage[i] < 0.0f) counts[region][0] += 1.0;
+            }
+            for (const auto& [region, c] : counts) {
+                if (c[1] <= 0.0) continue;
+                const double share = c[0] / c[1];
+                unseen[region] = r4(share);
+                if (share > 0.4) alignMore.push_back(region);
+            }
+        }
         json out = {{"group", groupName}, {"guides", added}, {"photos", used}, {"symmetry", referenceSymmetryName(result.symmetry)},
                     {"rootsTried", result.rootsTried}, {"rootsBald", result.rootsBald}, {"rootsUnseen", result.rootsUnseen},
                     {"rootsShort", result.rootsShort}, {"maxLength", r4(result.maxLength)}, {"seconds", r4(result.seconds)}};
@@ -2491,8 +2922,18 @@ struct AgentTools::Impl {
                            {"clumped", look.clumped}, {"clumpSize", r4(look.clumpSize)}, {"clumpStrength", r4(look.clumpStrength)},
                            {"flyawayFraction", r4(look.flyawayFraction)}, {"frizzFraction", r4(look.frizzFraction)},
                            {"coverage", r4(look.coverage)}};
-            out["lookHint"] = "What the photos suggest for HairColor (melanin, redness), Curl (frequency, radius), Clump (size, "
-                              "strength) and Flyaway: set them with set_params if they fit.";
+            if (flag(a, "apply_look", false)) {
+                out["lookApplied"] = applyPhotoLook(g, look);
+            } else {
+                out["lookHint"] = "What the photos suggest for HairColor (melanin, redness), Curl (frequency, radius), Clump (size, "
+                                  "strength) and Flyaway: apply_look: true sets them, or set_params one by one.";
+            }
+        }
+        if (!unseen.empty()) out["unseenShare"] = unseen;
+        if (!alignMore.empty()) {
+            out["alignMore"] = alignMore;
+            out["alignHint"] = "No lined-up photo sees much of these sides of the scalp: their guides are guessed (mirrored or "
+                               "from the priors). Line up a photo from each (align_photo with view), then grow again.";
         }
         return textResult(withSummary(g, out));
     }
@@ -3217,9 +3658,20 @@ struct AgentTools::Impl {
             objectSchema({{"name", prop("string", "A name for the groom (letters, digits, _ - .), used by every other tool.")},
                           {"mesh", prop("string", "A sample mesh's name (\"nika\", \"manny\", \"wolf\", \"buddy\") or a mesh file's path (.obj, .abc).")},
                           {"object", prop("string", "The mesh's name inside an Alembic file (default: its first mesh).")},
-                          {"preset", prop("string", "A preset to start from (list_presets), instead of the default graph.")}},
+                          {"preset", prop("string", "A preset to start from (list_presets), instead of the default graph.")},
+                          {"scalp", enumProp({"whole", "from_landmarks"},
+                                             "whole (default): hair over the whole mesh until density is painted; from_landmarks: on a "
+                                             "whole head, Scatter's density 1 above the hairline the face's landmarks give, 0 on the face, "
+                                             "ears and neck (scalp_from_landmarks).")}},
                          {"name", "mesh"}),
             &Impl::newGroom);
+        add("scalp_from_landmarks", "Scalp from the face's landmarks",
+            "On a whole head (face and neck in the mesh): paints the vertex map Scatter's density reads (scalpRegion, made and "
+            "linked when it reads none) 1 above a hairline through the forehead's middle, the temples, over the ears and down "
+            "to the nape (from the facial landmarks mesh_landmarks names), 0 on the face, ears and neck. One undo step. "
+            "Heuristic: check with render_preview and fix with paint_map.",
+            objectSchema({{"groom", groom}, {"softness", prop("number", "The hairline's blend, a share of the face's lower third (default 0.15).")}}),
+            &Impl::scalpFromLandmarks);
         add("open_groom", "Open a groom file",
             "Opens a .groom file (from Maya, the app, Blender or save_groom) by name, to change, preview or export it.",
             objectSchema({{"path", prop("string", "The .groom file, relative to the server's folder.")},
@@ -3590,35 +4042,49 @@ struct AgentTools::Impl {
             &Impl::addPhoto);
         add("photo_view", "Look at a photo",
             "Shows a reference photo under a pixel grid labelled in its own pixels (read features' coordinates off it), with its "
-            "landmarks numbered, flow arrows and mask touch-ups. analysis (a lined-up photo): the hair mask and strand flow "
-            "guides_from_photos would read, tinted over it.",
+            "landmarks numbered, flow arrows and mask touch-ups. region: a part of it enlarged under a fine grid (10 px), to read "
+            "pixels exactly. analysis (a lined-up photo): the hair mask and strand flow guides_from_photos would read, tinted over it.",
             objectSchema({{"groom", groom}, {"photo", photoName},
-                          {"grid", prop("integer", "Grid spacing in photo pixels (default: about 10 lines across).")},
+                          {"grid", prop("integer", "Grid spacing in photo pixels (default: about 10 lines across; with region 5-25).")},
                           {"size", prop("integer", "The picture's larger side in pixels (default 768).")},
+                          {"region", {{"type", "array"}, {"items", {{"type", "number"}}},
+                                      {"description", "Zoom: [x0, y0, x1, y1] of the photo's pixels, enlarged under a fine grid labelled "
+                                                      "in the photo's pixels, to read a feature's pixel exactly."}}},
                           {"analysis", prop("boolean", "Show the hair mask and flow it reads.")}}),
             &Impl::photoView);
         add("mesh_landmarks", "Numbered mesh points",
             "Renders the scalp mesh from a side (front, back, left, right, top, three_quarter; or photo: through the photo's "
             "camera) with numbered points you can find on a photo too (its outline's extremes, the nearest point, then spread "
-            "out), and gives each point's 3D position. Pair them with the photo's pixels in align_photo. Give the photo to render "
-            "at its size.",
+            "out), and gives each point's 3D position. On a whole head (face included) also the facial landmarks found from its "
+            "shape, by name (named: nose_tip, chin, left/right_eye and their inner/outer corners, left/right_mouth_corner, "
+            "left/right_ear_top, left/right_earlobe, hairline_middle, crown, nape; heuristic, each with a confidence): align_photo "
+            "takes the names as points. Pair them with the photo's pixels in align_photo. Give the photo to render at its size.",
             objectSchema({{"groom", groom}, {"photo", photoName},
-                          {"view", enumProp({"front", "back", "left", "right", "top", "three_quarter", "photo"}, "The side (default front).")},
+                          {"view", enumProp([] {
+                              std::vector<std::string> v = viewCameraNames();
+                              v.push_back("photo");
+                              return v;
+                          }(), "The side (default front; the character's left and right).")},
                           {"count", prop("integer", "How many points (4-80, default 24).")},
                           {"focal_mm", prop("number", "The view's focal length on a 36 mm film back (default 50).")},
                           {"size", prop("integer", "The picture's larger side (default 768).")}}),
             &Impl::meshLandmarks);
         add("align_photo", "Line a photo up",
             "Solves the photo's camera from pairs of a photo pixel and the same feature's point on the mesh (camera_solve: 4 pairs "
-            "with the focal length kept, 6 or more not all on a plane solve it too). One undo step. Answers with the reprojection "
-            "error (pixels; each pair's, and pairs that disagree) and a picture of the mesh's outline over the photo through the "
-            "solved camera.",
+            "with the focal length kept; 6 or more spread in depth can solve it too, focalSolved says whether they did). One undo "
+            "step. Points: [x, y, z], or a landmark's name (mesh_landmarks' named facial landmarks: nose_tip, left_earlobe...). "
+            "view: the side the photo was taken from (a start for the solve: profiles and backs line up far better with it). "
+            "refine: then tighten the camera so the mesh's outline lies on the photo's where neither is hair (jaw, chin, neck, "
+            "ears; the pairs kept in the fit), reported before and after. Answers with the reprojection error (pixels; each "
+            "pair's, and pairs that disagree) and a picture of the mesh's outline over the photo through the solved camera.",
             objectSchema({{"groom", groom}, {"photo", photoName},
                           {"pairs", {{"type", "array"}, {"items", {{"type", "object"}}},
                                      {"description", "[{\"pixel\": [u, v], \"point\": [x, y, z] or a landmark's name}, ...]."}}},
                           {"append", prop("boolean", "Add to the photo's pairs (default: replace them).")},
-                          {"keep_focal", prop("boolean", "Keep the focal length (default: solved with 6 pairs or more).")},
-                          {"focal_mm", prop("number", "The focal length to start from or keep (36 mm film back; default 50 or the camera's).")}},
+                          {"keep_focal", prop("boolean", "Keep the focal length (default: solved with 6 pairs or more when they can tell it).")},
+                          {"focal_mm", prop("number", "The focal length to start from or keep (36 mm film back; default 50 or the camera's).")},
+                          {"view", enumProp(viewCameraNames(), "The side the photo shows (the character's left and right): the solve's start.")},
+                          {"refine", prop("boolean", "Tighten the camera with the outline where it is not hair (default false).")}},
                          {"pairs"}),
             &Impl::alignPhoto);
         add("photo_edit", "Edit a photo's marks",
@@ -3640,12 +4106,26 @@ struct AgentTools::Impl {
         add("guides_from_photos", "Guides from photos",
             "Grows guides from the lined-up photos (reference_guides: the hair's silhouette and strand flow in each photo, their "
             "flow arrows and mask touch-ups), into one group (default fromReference, replaced each time). One undo step. Answers "
-            "with the guides made, the roots that were bald or unseen, and the look the photos suggest (melanin, curls, clumps).",
+            "with the guides made, the roots that were bald or unseen, the scalp's sides no photo sees (unseenShare, alignMore: "
+            "line up a photo from there), and the look the photos suggest (melanin, curls, clumps; apply_look sets it).",
             objectSchema({{"groom", groom}, {"guide_count", prop("integer", "Roots tried, spread over the scalp (default 300).")},
                           {"max_length", prop("number", "The longest guide (scene units; default 0: what the photos show).")},
                           {"symmetry", enumProp({"auto", "none", "x", "topology"}, "Mirror what one side shows (default auto).")},
-                          {"group", prop("string", "The guide group (default fromReference).")}}),
+                          {"group", prop("string", "The guide group (default fromReference).")},
+                          {"apply_look", prop("boolean", "Also set the look the photos suggest (HairColor melanin and redness, Clump, "
+                                                         "Curl, Flyaway; nodes added where missing): a second undo step.")}}),
             &Impl::guidesFromPhotos);
+        add("morph_to_photos", "Morph the scalp to the photos",
+            "Shapes the scalp so every lined-up photo's landmark pairs land on their photo points (KeenTools-style pins: one photo "
+            "slides a pair across its view, two or more set its depth too), the rest of the mesh following smoothly; always from "
+            "the scalp as it was before the first morph, so morphs never stack. Use it when the mesh is another person's head "
+            "than the photos'. One undo step (reset: the scalp before the first morph again). Answers each photo's pairs' error "
+            "before and after (pixels) and the morphed outline over the photos.",
+            objectSchema({{"groom", groom},
+                          {"stiffness", prop("number", "0 (default: every pair lands) to 0.95 (the scalp keeps its shape, pairs fall short).")},
+                          {"symmetric", prop("boolean", "Both sides alike: each pair mirrored across the head's middle (default true).")},
+                          {"reset", prop("boolean", "Put the scalp back as it was before the first morph.")}}),
+            &Impl::morphToPhotosTool);
 
         // ---- roots and tubes ----
         const json point3OrName = pointOrName("[x, y, z] or a landmark's name.");

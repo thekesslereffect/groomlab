@@ -257,6 +257,9 @@ public:
     bool transferToMesh(const QString& path, const TransferOptions& options, bool maps = true);
     // The groom onto a mesh in hand (Morph to Photos: the same topology, by its UVs); `what` names it.
     bool transferOnto(MeshPtr mesh, const TransferOptions& options, bool maps, const QString& what);
+    // Morph to Photos as the Photos tab's Morph does it (its stiffness and symmetry), or its Reset
+    // Morph: the groom carried onto the morphed scalp, one undo step. False and *error when not.
+    bool morphScalpToPhotos(double stiffness, bool symmetric, bool reset, QString* error);
     // Marker pairs from a JSON file (transfer.h's format: Maya's transferMarkers attribute, a groom
     // file's "transferMarkers"); false (and a message) when it cannot be read.
     bool readTransferMarkers(const QString& path, std::vector<TransferMarker>* markers);

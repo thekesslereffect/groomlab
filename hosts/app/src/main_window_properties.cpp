@@ -628,6 +628,36 @@ void MainWindow::buildProperties() {
     });
 }
 
+bool MainWindow::morphScalpToPhotos(double stiffness, bool symmetric, bool reset, QString* error) {
+    if (!document_ || !photos_) {
+        if (error) *error = tr("No groom open");
+        return false;
+    }
+    if (refuseWhileBusy(tr("morphing the scalp"))) {
+        if (error) *error = tr("the app is busy (an export, a bake or a simulation): try again when it is done");
+        return false;
+    }
+    std::shared_ptr<const ScalpMesh> scalp;
+    if (reset) {
+        scalp = photos_->unmorphedScalp();
+        if (!scalp) {
+            if (error) *error = tr("the scalp is not morphed (morph_to_photos first)");
+            return false;
+        }
+    } else {
+        scalp = photos_->morphedScalp(stiffness, symmetric, error);
+        if (!scalp) return false;
+    }
+    settleCommit();
+    TransferOptions options;
+    options.method = scalp->hasUVs() ? TransferMethod::UV : TransferMethod::Closest;
+    if (!transferOnto(scalp, options, true, reset ? tr("its unmorphed scalp") : tr("the photos"))) {
+        if (error && error->isEmpty()) *error = tr("the groom could not be carried onto the morphed scalp");
+        return false;
+    }
+    return true;
+}
+
 void MainWindow::refreshProperties() {
     if (!properties_) return;
     const bool open = document_ != nullptr;

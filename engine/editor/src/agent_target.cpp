@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/editor/agent_target.h"
 
+#include "groomlab/editor/agent_photos.h"
+
 #include <algorithm>
 #include <filesystem>
 
@@ -140,6 +142,7 @@ AgentGroom::~AgentGroom() = default;
 std::string AgentGroom::apply(const GroomEdit& edit, bool after) {
     GroomSession& s = session();
     if (edit.referencePhotos) referencePhotos = after ? edit.referencePhotos->second : edit.referencePhotos->first;
+    if (edit.scalp) s.setScalp(after ? edit.scalp->second : edit.scalp->first);
     if (edit.whole) {
         try {
             s.setGraphJson((after ? edit.graphAfter : edit.graphBefore).dump());
@@ -181,6 +184,45 @@ void AgentGroom::commit(GroomEdit edit) {
 
 std::string AgentGroom::undo() { return undoStep(history_, *this); }
 std::string AgentGroom::redo() { return redoStep(history_, *this); }
+
+AgentGroom::MorphOutcome AgentGroom::morphToPhotos(const MorphRequest& request) {
+    GroomSession& s = session();
+    const std::shared_ptr<const ScalpMesh> now = s.rawScalp();
+    if (!now || now->triangleCount() == 0) throw ToolError("the groom has no scalp");
+    MorphOutcome out;
+    if (request.reset) {
+        if (!morphRest_) throw ToolError("the scalp is not morphed (morph_to_photos first)");
+        if (morphRest_ == now) {
+            out.note = "the scalp is as it was before the first morph already";
+            return out;
+        }
+        GroomEdit step;
+        step.side = true;
+        step.label = "reset photo morph";
+        step.scalp = std::make_pair(now, morphRest_);
+        commit(std::move(step));
+        return out;
+    }
+    // The scalp before the first morph: kept from now on (the pairs' spots are found on it).
+    if (!morphRest_ || morphRest_->triangleCount() != now->triangleCount()) {
+        morphRest_ = now;
+        morphRestRefined_ = s.scalp();
+    }
+    const std::shared_ptr<const ScalpMesh> current = s.scalp();
+    const PhotoMorph m = agent::morphToPhotos(*morphRest_, morphRestRefined_ ? *morphRestRefined_ : *morphRest_, current ? *current : *now,
+                                              photosFromJson(referencePhotos), request.stiffness, request.symmetric);
+    if (!m.ok) throw ToolError(m.error);
+    auto morphed = std::make_shared<ScalpMesh>(morphRest_->withPoints(m.points));
+    GroomEdit step;
+    step.side = true;
+    step.label = "morph to photos";
+    step.scalp = std::make_pair(now, std::shared_ptr<const ScalpMesh>(morphed));
+    commit(std::move(step));
+    out.pins = m.pins;
+    out.pinsRmsBefore = m.rmsBefore;
+    out.pinsRmsAfter = m.rmsAfter;
+    return out;
+}
 
 SimRun AgentGroom::simulateTo(int toFrame) { return session().simulateTo(toFrame); }
 

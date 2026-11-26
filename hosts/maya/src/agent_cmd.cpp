@@ -188,6 +188,27 @@ public:
     }
 
     SimRun simulateTo(int toFrame) override { return shape()->simulateTo(toFrame); }
+    // Morph to Photos as Maya's Photos window does it (reference.morph_to_photos: a blendShape on
+    // the scalp from the reference cameras' pairs; reset_photo_morph), inside the call's undo chunk.
+    MorphOutcome morphToPhotos(const MorphRequest& request) override {
+        MFnDagNode fn(node_.object());
+        const std::string shapePath = fn.fullPathName().asChar();
+        const json args = {{"groom", shapePath}, {"stiffness", request.stiffness}, {"symmetric", request.symmetric}, {"reset", request.reset}};
+        const std::string code = "__import__('groomlab.agent_link', fromlist=['morph_json']).morph_json(" + json(args.dump()).dump() + ")";
+        MString result;
+        if (!MGlobal::executePythonCommand(MString(code.c_str()), result, false, true) || result.length() == 0) {
+            throw ToolError("Maya's Morph to Photos did not run (see Maya's Script Editor)");
+        }
+        const json r = json::parse(result.asChar(), nullptr, false);
+        if (!r.is_object()) throw ToolError("Maya's Morph to Photos gave no answer");
+        if (r.contains("error")) throw ToolError(r["error"].get<std::string>());
+        shape()->ensureEvaluated();
+        MorphOutcome out;
+        out.pins = r.value("pins", 0);
+        if (r.contains("rms_before")) out.pinsRmsBefore = r.value("rms_before", -1.0), out.pinsRmsAfter = r.value("rms_after", -1.0);
+        out.note = request.reset ? "the scalp's photo morph (blendShape) removed" : "a blendShape on the scalp, as the Photos window's Morph to Photos";
+        return out;
+    }
     void setCollider(const std::string&, MeshPtr) override {
         throw ToolError("in Maya, colliders are meshes of the scene: connect one to the groom's colliders "
                         "(GroomLab > Simulate), then name it in a ColliderMesh node");

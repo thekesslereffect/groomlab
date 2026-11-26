@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/editor/agent_photos.h"
 
+#include "groomlab/pin_morph.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -122,8 +124,17 @@ RefCamera viewCamera(const ScalpMesh& scalp, const std::string& upAxis, const st
     } else if (view == "three_quarter") {
         const float az = 35.0f * 3.14159265f / 180.0f, el = 15.0f * 3.14159265f / 180.0f;
         toEye = (front * (std::cos(az) * std::cos(el)) + left * (std::sin(az) * std::cos(el)) + up * std::sin(el)).normalized();
+    } else if (view.rfind("three_quarter_", 0) == 0) {
+        const std::string rest = view.substr(14);
+        const float az = (rest == "front_left" ? 45.0f : rest == "front_right" ? -45.0f : rest == "back_left" ? 135.0f
+                                                                                           : rest == "back_right" ? -135.0f : 999.0f);
+        if (az > 360.0f) throw std::invalid_argument("unknown view '" + view + "'");
+        const float t = az * 3.14159265f / 180.0f;
+        toEye = (front * std::cos(t) + left * std::sin(t)).normalized();
     } else {
-        throw std::invalid_argument("unknown view '" + view + "' (front, back, left, right, top, three_quarter)");
+        throw std::invalid_argument("unknown view '" + view +
+                                    "' (front, back, left, right, top, three_quarter, three_quarter_front_left / _right, "
+                                    "three_quarter_back_left / _right)");
     }
     RefCamera c;
     c.width = width;
@@ -139,6 +150,12 @@ RefCamera viewCamera(const ScalpMesh& scalp, const std::string& upAxis, const st
     for (int r = 0; r < 3; ++r) c.pose.rotation[static_cast<std::size_t>(r)] = {part(x, r), part(y, r), part(z, r)};
     c.pose.position = {eye.x, eye.y, eye.z};
     return c;
+}
+
+const std::vector<std::string>& viewCameraNames() {
+    static const std::vector<std::string> names = {"front", "back", "left", "right", "top", "three_quarter", "three_quarter_front_left",
+                                                   "three_quarter_front_right", "three_quarter_back_left", "three_quarter_back_right"};
+    return names;
 }
 
 std::vector<MeshCandidate> meshCandidates(const ScalpMesh& scalp, const RefCamera& camera, int count) {
@@ -277,8 +294,132 @@ std::vector<std::uint8_t> photoGridPng(const RefImage& image, const AgentPhoto& 
     return c.png();
 }
 
+Vec3f markerOn(const ScalpMesh& from, const ScalpMesh& to, const MarkerPoint& point) {
+    StrandRoot root = point.root;
+    if (!(root.face >= 0 && static_cast<std::size_t>(root.face) < from.triangleCount())) root = from.closestPoint(point.point).root;
+    if (root.face >= 0 && static_cast<std::size_t>(root.face) < to.triangleCount() && from.triangleCount() == to.triangleCount()) return to.position(root);
+    return point.point;
+}
+
+PhotoMorph morphToPhotos(const ScalpMesh& rest, const ScalpMesh& restRefined, const ScalpMesh& current, const std::vector<AgentPhoto>& photos,
+                         double stiffness, bool symmetric, int axis) {
+    PhotoMorph out;
+    if (rest.pointCount() == 0) {
+        out.error = "the groom has no scalp";
+        return out;
+    }
+    if (!(stiffness >= 0.0 && stiffness <= 0.95)) {
+        out.error = "stiffness is 0 to 0.95";
+        return out;
+    }
+    Vec3f lo, hi;
+    bounds(rest, lo, hi);
+    const Vec3f middle = (lo + hi) * 0.5f;
+    const float size = std::max(1e-6f, (hi - lo).length());
+    // About the head's middle (the morph mirrors across the plane where the axis is 0).
+    const Vec3f shift = Vec3f(axis == 0 ? middle.x : 0.0f, axis == 1 ? middle.y : 0.0f, axis == 2 ? middle.z : 0.0f);
+    auto vec = [&](const Vec3f& p) { return CameraVec3{p.x - shift.x, p.y - shift.y, p.z - shift.z}; };
+    std::vector<PinView> views;
+    std::vector<MorphPin> pins;
+    for (const AgentPhoto& p : photos) {
+        if (!p.camera || !(p.camera->focalPx > 0.0) || p.state.landmarks.pairCount() == 0) continue;
+        PinView view;
+        view.pose = p.camera->pose;
+        for (int i = 0; i < 3; ++i) view.pose.position[static_cast<std::size_t>(i)] -= (i == 0 ? shift.x : i == 1 ? shift.y : shift.z);
+        view.focalPx = p.camera->focalPx;
+        view.width = p.camera->width;
+        view.height = p.camera->height;
+        views.push_back(view);
+        const int index = static_cast<int>(views.size()) - 1;
+        const MarkerLists& marks = p.state.landmarks;
+        for (std::size_t k = 0; k < marks.pairCount(); ++k) {
+            // The pair's spot on the rest scalp: picked there (its point on it), or on the scalp as
+            // it is now (a morph since: the same spot of its surface), whichever it lies on.
+            const MarkerPoint& mp = marks.point(kLandmarkMesh, k);
+            Vec3f at = markerOn(current, restRefined, mp);
+            if (!(mp.root.face >= 0)) {
+                const SurfacePoint onRest = restRefined.closestPoint(mp.point), onNow = current.closestPoint(mp.point);
+                if ((onRest.position - mp.point).length() <= (onNow.position - mp.point).length()) at = onRest.position;
+            }
+            const CameraVec3 m = vec(at);
+            MorphPin* pin = nullptr;
+            for (MorphPin& q : pins) {
+                const double d = std::sqrt((q.mesh[0] - m[0]) * (q.mesh[0] - m[0]) + (q.mesh[1] - m[1]) * (q.mesh[1] - m[1]) +
+                                           (q.mesh[2] - m[2]) * (q.mesh[2] - m[2]));
+                if (d <= 1e-4 * size) pin = &q;
+            }
+            if (!pin) {
+                pins.push_back({m, {}});
+                pin = &pins.back();
+            }
+            const MarkerPoint& photo = marks.point(kLandmarkPhoto, k);
+            pin->sights.push_back({index, photo.point.x, photo.point.y});
+        }
+    }
+    if (pins.empty()) {
+        out.error = "no lined-up photo has landmark pairs: align_photo first";
+        return out;
+    }
+    std::vector<CameraVec3> points;
+    for (const Vec3f& p : rest.points()) points.push_back(vec(p));
+    PinMorphOptions options;
+    options.stiffness = stiffness;
+    options.symmetric = symmetric;
+    options.axis = axis;
+    const PinMorphResult r = morphToPins(points, pins, views, options);
+    if (!r.ok) {
+        out.error = r.error.empty() ? std::string("the morph failed") : r.error;
+        return out;
+    }
+    out.ok = true;
+    out.pins = static_cast<int>(pins.size());
+    out.views = static_cast<int>(views.size());
+    out.rmsBefore = r.rmsBeforePx;
+    out.rmsAfter = r.rmsAfterPx;
+    for (const CameraVec3& p : r.points) {
+        out.points.push_back(Vec3f(static_cast<float>(p[0]) + shift.x, static_cast<float>(p[1]) + shift.y, static_cast<float>(p[2]) + shift.z));
+    }
+    return out;
+}
+
+std::vector<std::uint8_t> photoRegionPng(const RefImage& image, const AgentPhoto& photo, const std::array<int, 4>& region, int gridStep,
+                                         int maxSize, int* shownWidth, int* shownHeight) {
+    const int x0 = std::clamp(region[0], 0, image.width - 1), y0 = std::clamp(region[1], 0, image.height - 1);
+    const int x1 = std::clamp(region[2], x0 + 1, image.width), y1 = std::clamp(region[3], y0 + 1, image.height);
+    const RefImage part = cropImage(image, x0, y0, x1 - x0, y1 - y0);
+    const float k = static_cast<float>(maxSize) / static_cast<float>(std::max(part.width, part.height));
+    Canvas c = Canvas::ofImage(part, k);
+    if (shownWidth) *shownWidth = c.width();
+    if (shownHeight) *shownHeight = c.height();
+    const int step = std::max(1, gridStep);
+    auto sx = [&](float x) { return (x - static_cast<float>(x0)) * k; };
+    auto sy = [&](float y) { return (y - static_cast<float>(y0)) * k; };
+    // The grid: every `step` pixels, labelled each time (every other when crowded), in photo pixels.
+    const int every = step * k < 28.0f ? 2 : 1;
+    int n = 0;
+    for (int g = (x0 / step + 1) * step; g < x1; g += step, ++n) {
+        c.line(sx(static_cast<float>(g)), 0.0f, sx(static_cast<float>(g)), static_cast<float>(c.height()), kGrid, 1.0f, g % (5 * step) == 0 ? 0.6f : 0.3f);
+        if (n % every == 0) c.text(static_cast<int>(sx(static_cast<float>(g))) + 2, 3, std::to_string(g), kGrid, 2);
+    }
+    n = 0;
+    for (int g = (y0 / step + 1) * step; g < y1; g += step, ++n) {
+        c.line(0.0f, sy(static_cast<float>(g)), static_cast<float>(c.width()), sy(static_cast<float>(g)), kGrid, 1.0f, g % (5 * step) == 0 ? 0.6f : 0.3f);
+        if (n % every == 0) c.text(3, static_cast<int>(sy(static_cast<float>(g))) + 2, std::to_string(g), kGrid, 2);
+    }
+    const auto& marks = photo.state.landmarks;
+    const auto& pts = marks.points(kLandmarkPhoto);
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+        const float x = sx(pts[i].point.x), y = sy(pts[i].point.y);
+        if (x < 0 || y < 0 || x > static_cast<float>(c.width()) || y > static_cast<float>(c.height())) continue;
+        const Rgb col = marks.matched(kLandmarkPhoto, i) ? kPaired : kPending;
+        c.ring(x, y, 6.0f, col, 2.0f);
+        c.text(static_cast<int>(x) + 8, static_cast<int>(y) - 3, std::to_string(i + 1), col, 2);
+    }
+    return c.png();
+}
+
 std::vector<std::uint8_t> meshCandidatesPng(const ScalpMesh& scalp, const RefCamera& camera, const std::vector<MeshCandidate>& candidates,
-                                            int maxSize) {
+                                            int maxSize, const std::vector<PointLabel>& labels) {
     const float k = fitScale(static_cast<int>(camera.width), static_cast<int>(camera.height), maxSize);
     Canvas c(std::max(1, static_cast<int>(camera.width * k)), std::max(1, static_cast<int>(camera.height * k)));
     std::vector<float> depth;
@@ -287,6 +428,11 @@ std::vector<std::uint8_t> meshCandidatesPng(const ScalpMesh& scalp, const RefCam
         const float x = candidates[i].u * k, y = candidates[i].v * k;
         c.dot(x, y, 3.0f, kMeshPoint);
         c.text(static_cast<int>(x) + 5, static_cast<int>(y) - 4, std::to_string(i + 1), {1.0f, 1.0f, 0.6f}, 2);
+    }
+    for (const PointLabel& l : labels) {
+        const float x = l.u * k, y = l.v * k;
+        c.dot(x, y, 3.0f, {0.2f, 0.9f, 1.0f});
+        c.text(static_cast<int>(x) + 5, static_cast<int>(y) + 4, l.code, {0.2f, 0.9f, 1.0f}, 2);
     }
     return c.png();
 }

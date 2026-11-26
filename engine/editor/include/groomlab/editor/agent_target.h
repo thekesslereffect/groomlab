@@ -122,6 +122,24 @@ public:
     virtual std::string redo();
     // The host strokes run on (default: an AgentStrokeHost on session()).
     virtual AgentStrokeHost& strokeHost();
+    // Morph to Photos (morph_to_photos): the scalp shaped so every lined-up photo's landmark pairs
+    // land on their photo points (pin_morph.h, agent_photos.h morphToPhotos), always from the scalp
+    // as it was before the first morph (morphs never stack); `reset` puts that scalp back. One undo
+    // step. Default: the session's scalp replaced (a GroomEdit scalp step: groomlab-cli's grooms);
+    // a host with its own path overrides it (Maya's blendShape, the app's transfer, Blender's shape
+    // key). Throws ToolError.
+    struct MorphRequest {
+        double stiffness = 0.0;  // 0..0.95
+        bool symmetric = true;   // mirrored across the head's middle
+        bool reset = false;
+    };
+    struct MorphOutcome {
+        int pins = 0;
+        double pinsRmsBefore = -1.0, pinsRmsAfter = -1.0;  // the pins' error, pixels (-1: the host does not say)
+        std::string note;  // what the host says besides
+        bool undoable = true;  // a step of the groom's history (the app's transfer starts it over instead)
+    };
+    virtual MorphOutcome morphToPhotos(const MorphRequest& request);
     // What a host does its own way (defaults: the session's): Simulate Range to `frame`, a
     // collider mesh by name, the Cards nodes' cards baked for a game export.
     virtual SimRun simulateTo(int toFrame);
@@ -144,6 +162,8 @@ private:
     std::string name_;
     EditHistory history_;
     std::unique_ptr<AgentStrokeHost> strokes_;
+    // The scalp before the first morph (morphToPhotos), raw and as the session refines it.
+    std::shared_ptr<const ScalpMesh> morphRest_, morphRestRefined_;
 };
 
 // What a groom's animated inputs come from (groom_file.h caches): set where given.
