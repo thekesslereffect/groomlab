@@ -31,6 +31,7 @@
 #include "groomlab/editor/agent_grooming.h"
 #include "groomlab/editor/agent_link.h"
 #include "groomlab/editor/agent_photos.h"
+#include "groomlab/editor/agent_shoot.h"
 #include "groomlab/editor/agent_tools.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/png.h"
@@ -1004,4 +1005,132 @@ TEST(AgentTools, PhotoRegionsAndAPreviewAtTheCamerasSize) {
     const json marks = call(tools, "mesh_landmarks", {{"view", "front"}});
     EXPECT_FALSE(marks.contains("named"));
     call(tools, "scalp_from_landmarks", json::object(), true);
+}
+
+namespace {
+
+// A camera of a shoot round the head: `yaw` degrees round from the front (toward the subject's
+// left), `pitch` up, at `distance` from the head's middle, a `focalMm` lens, 385 x 510 pixels.
+RefCamera shootCamera(const ScalpLandmarks& m, double yaw, double pitch, double distance, double focalMm) {
+    const double y = yaw * 3.14159265 / 180.0, p = pitch * 3.14159265 / 180.0;
+    const Vec3f toEye = (m.frame.front * static_cast<float>(std::cos(y) * std::cos(p)) + m.frame.left * static_cast<float>(std::sin(y) * std::cos(p)) +
+                         m.frame.up * static_cast<float>(std::sin(p)))
+                            .normalized();
+    const Vec3f eye = m.middle + toEye * static_cast<float>(distance);
+    const Vec3f z = toEye, x = m.frame.up.cross(z).normalized(), yy = z.cross(x);
+    RefCamera c;
+    c.width = 385;
+    c.height = 510;
+    c.focalPx = focalMm / 36.0 * 385.0;
+    auto part = [](const Vec3f& v, int r) { return static_cast<double>(r == 0 ? v.x : r == 1 ? v.y : v.z); };
+    for (int r = 0; r < 3; ++r) c.pose.rotation[static_cast<std::size_t>(r)] = {part(x, r), part(yy, r), part(z, r)};
+    c.pose.position = {eye.x, eye.y, eye.z};
+    return c;
+}
+
+// `count` points of the head the camera sees face on, spread, each picked a few pixels off.
+std::vector<CameraCorrespondence> picks(const ScalpMesh& head, const RefCamera& c, int count, double noise, int seed) {
+    std::vector<std::size_t> seen;
+    const Vec3f eye = c.eye();
+    for (std::size_t i = 0; i < head.pointCount(); ++i) {
+        const Vec3f& p = head.points()[i];
+        float u = 0, v = 0;
+        if (!c.project(p, u, v) || u < 10 || v < 10 || u > c.width - 10 || v > c.height - 10) continue;
+        if (head.vertexNormals()[i].dot((eye - p).normalized()) < 0.5f) continue;
+        seen.push_back(i);
+    }
+    std::vector<CameraCorrespondence> out;
+    for (int k = 0; k < count && !seen.empty(); ++k) {
+        const Vec3f& p = head.points()[seen[(static_cast<std::size_t>(k) * 7919u + static_cast<std::size_t>(seed) * 131u) % seen.size()]];
+        float u = 0, v = 0;
+        c.project(p, u, v);
+        const double du = noise * std::sin(1.7 * (k + 1) + seed), dv = noise * std::cos(2.3 * (k + 1) + seed);
+        out.push_back({u + du, v + dv, {p.x, p.y, p.z}});
+    }
+    return out;
+}
+
+double lookAngle(const RefCamera& a, const RefCamera& b) {
+    return std::acos(std::clamp(static_cast<double>(a.axis(2).dot(b.axis(2))), -1.0, 1.0)) * 57.29578;
+}
+
+}  // namespace
+
+TEST(AgentShoot, PhotosOfOneShootSolveTogether) {
+    const auto head = nikaHead();
+    const ScalpLandmarks m = scalpLandmarks(*head, "Y");
+    // Four photos round the head with a 120 mm lens at about 90 cm, a little off level.
+    const double yaws[4] = {0.0, -90.0, 180.0, 45.0}, pitches[4] = {2.0, -1.0, 3.0, 0.0}, distances[4] = {90.0, 92.0, 88.0, 91.0};
+    std::vector<RefCamera> truth;
+    std::vector<ShootView> views;
+    for (int i = 0; i < 4; ++i) {
+        truth.push_back(shootCamera(m, yaws[i], pitches[i], distances[i], 120.0));
+        ShootView v;
+        v.pairs = picks(*head, truth.back(), 10, 2.0, i);
+        v.width = 385;
+        v.height = 510;
+        v.yawDegrees = yaws[i];
+        views.push_back(v);
+    }
+    ShootOptions o;
+    o.center = m.middle;
+    o.up = m.frame.up;
+    o.front = m.frame.front;
+    const ShootSolve s = solveShoot(views, o);
+    ASSERT_TRUE(s.ok) << s.why;
+    EXPECT_NEAR(s.focalMm, 120.0, 18.0);
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_LT(lookAngle(s.cameras[static_cast<std::size_t>(i)].camera, truth[static_cast<std::size_t>(i)]), 3.0) << i;
+        EXPECT_LT(s.cameras[static_cast<std::size_t>(i)].rms, 4.0) << i;
+        EXPECT_FALSE(s.cameras[static_cast<std::size_t>(i)].fights) << i;
+    }
+    // A photo whose picks are muddled (each pixel paired with another point): it fights the rest.
+    std::vector<ShootView> wrong = views;
+    std::vector<CameraCorrespondence>& muddled = wrong[3].pairs;
+    for (std::size_t k = 0; k + 3 < muddled.size(); k += 2) std::swap(muddled[k].u, muddled[k + 3].u), std::swap(muddled[k].v, muddled[k + 3].v);
+    const ShootSolve f = solveShoot(wrong, o);
+    ASSERT_TRUE(f.ok);
+    EXPECT_TRUE(f.cameras[3].fights);
+}
+
+TEST(AgentShoot, ALoneProfileWithFourPicksStaysNearItsView) {
+    const auto head = nikaHead();
+    const ScalpLandmarks m = scalpLandmarks(*head, "Y");
+    const RefCamera truth = shootCamera(m, -90.0, 0.0, 90.0, 110.0);
+    ShootView v;
+    v.pairs = picks(*head, truth, 4, 4.0, 3);
+    v.width = 385;
+    v.height = 510;
+    v.yawDegrees = -90.0;
+    // The shoot's focal from the photos lined up already.
+    ShootOptions o;
+    o.center = m.middle;
+    o.up = m.frame.up;
+    o.front = m.frame.front;
+    o.focalMm = 110.0;
+    const ShootSolve s = solveShoot({v}, o);
+    ASSERT_TRUE(s.ok) << s.why;
+    EXPECT_LT(lookAngle(s.cameras[0].camera, truth), 8.0);
+    EXPECT_LT(std::abs(s.cameras[0].pitch), 8.0);
+}
+
+TEST(AgentShoot, AFreeFocalPortraitStaysALongLens) {
+    const auto head = nikaHead();
+    const ScalpLandmarks m = scalpLandmarks(*head, "Y");
+    // A 135 mm portrait (near orthographic), picks a few pixels off: not a 60 mm solve.
+    const RefCamera truth = shootCamera(m, 0.0, 1.0, 110.0, 135.0);
+    ShootView v;
+    v.pairs = picks(*head, truth, 10, 3.0, 5);
+    v.width = 385;
+    v.height = 510;
+    v.yawDegrees = 0.0;
+    ShootOptions o;
+    o.center = m.middle;
+    o.up = m.frame.up;
+    o.front = m.frame.front;
+    const ShootSolve s = solveShoot({v}, o);
+    ASSERT_TRUE(s.ok) << s.why;
+    EXPECT_GT(s.focalMm, 95.0) << s.focalNote;
+    EXPECT_LT(s.focalMm, 180.0);
+    EXPECT_LT(lookAngle(s.cameras[0].camera, truth), 4.0);
 }

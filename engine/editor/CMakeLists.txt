@@ -11,6 +11,7 @@ add_library(groomlab_editor STATIC
     src/agent_link.cpp
     src/agent_photos.cpp
     src/agent_preview.cpp
+    src/agent_shoot.cpp
     src/agent_target.cpp
     src/agent_tools.cpp
     src/game_exports.cpp

@@ -272,6 +272,10 @@ def everything_else(c, root):
     assert lined["linedUp"] and lined["rmsPixels"] < 1.0, lined
     assert "refine" in lined and isinstance(lined["refine"]["done"], bool), lined
     assert "viewAngleFromHint" in lined, lined
+    together, result = c.call("align_photos", dict(f, photos=[{"photo": "front", "view": "front", "pairs": by_name}]))
+    shot = together["photos"][0]
+    assert together["focal_mm"] > 20 and shot["rmsPixels"] < 2.0 and abs(shot["yaw"]) < 30, together
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 1
     morphed, result = c.call("morph_to_photos", dict(f, stiffness=0.2))
     assert morphed["pins"] >= 6 and morphed["photos"][0]["photo"] == "front", morphed
     assert len([x for x in result["content"] if x["type"] == "image"]) == 1

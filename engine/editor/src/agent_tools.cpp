@@ -24,6 +24,7 @@
 #include "groomlab/editor/agent_expressions.h"
 #include "groomlab/editor/agent_face.h"
 #include "groomlab/editor/agent_grooming.h"
+#include "groomlab/editor/agent_shoot.h"
 #include "groomlab/editor/agent_photos.h"
 #include "groomlab/editor/game_exports.h"
 #include "groomlab/root_subdivision.h"
@@ -991,7 +992,11 @@ struct AgentTools::Impl {
     json applyPhotoLook(AgentGroom& g, const ReferenceLookFit& look) {
         std::vector<std::pair<std::string, json>> wants;
         wants.push_back({"HairColor", {{"mode", "melanin"}, {"melanin", r4(look.melanin)}, {"redness", r4(look.redness)}}});
-        if (look.clumped) wants.push_back({"Clump", {{"clumpBy", "size"}, {"size", r4(look.clumpSize)}, {"strength", r4(look.clumpStrength)}}});
+        // (Clump's strength at most 0.5: the measure saturates at 1 on any clumped photo, and a whole
+        // groom gathered that hard reads as spikes, not locks)
+        if (look.clumped) {
+            wants.push_back({"Clump", {{"clumpBy", "size"}, {"size", r4(look.clumpSize)}, {"strength", r4(std::min(0.5f, look.clumpStrength))}}});
+        }
         if (look.curly) wants.push_back({"Curl", {{"radius", r4(look.curlRadius)}, {"frequency", r4(look.curlFrequency)}}});
         if (look.flyawayFraction > 0.0f) wants.push_back({"Flyaway", {{"fraction", r4(look.flyawayFraction)}}});
         json done = json::object();
@@ -2619,19 +2624,15 @@ struct AgentTools::Impl {
         return imageResult(meshCandidatesPng(*scalp, camera, found, size, labels), info);
     }
 
-    ToolResult alignPhoto(const json& a) {
-        AgentGroom& g = target.groom(str(a, "groom"));
-        const MeshPtr scalp = scalpOf(g);
-        const ScalpLandmarks marks = landmarksOf(g);
-        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
-        AgentPhoto& p = photoNamed(photos, str(a, "photo"));
-        MarkerLists lists = flag(a, "append", false) ? p.state.landmarks : MarkerLists{};
+    // A photo's pairs as an agent gave them ({"pixel", "point": [x, y, z] or a landmark's name}),
+    // after `lists`' own.
+    MarkerLists pairsOf(const json& pairs, const AgentPhoto& p, const ScalpMesh& scalp, const ScalpLandmarks& marks, MarkerLists lists,
+                        const std::string& prefix = "pairs") {
         if (lists.pendingCount() > 0) throw ToolError("the photo has a landmark without its partner: clear_landmarks with photo_edit first");
-        const json& pairs = a["pairs"];
-        if (pairs.empty() || pairs.size() > 200) throw ToolError("give 1 to 200 pairs");
+        if (!pairs.is_array() || pairs.empty() || pairs.size() > 200) throw ToolError(prefix + ": give 1 to 200 pairs");
         for (std::size_t i = 0; i < pairs.size(); ++i) {
             const json& pair = pairs[i];
-            const std::string where = "pairs[" + std::to_string(i) + "]";
+            const std::string where = prefix + "[" + std::to_string(i) + "]";
             if (!pair.is_object() || !pair.contains("pixel") || !pair.contains("point")) {
                 throw ToolError(where + " must be {\"pixel\": [u, v], \"point\": [x, y, z] or a landmark}");
             }
@@ -2642,12 +2643,45 @@ struct AgentTools::Impl {
                 throw ToolError(where + ".pixel lies outside the photo (" + std::to_string(p.width) + " x " + std::to_string(p.height) + ")");
             }
             MarkerPoint mesh;
-            const SurfacePoint at = scalp->closestPoint(pointOrLandmark(pair["point"], marks, (where + ".point").c_str()));
+            const SurfacePoint at = scalp.closestPoint(pointOrLandmark(pair["point"], marks, (where + ".point").c_str()));
             mesh.root = at.root;
             mesh.point = at.position;
             lists.add(kLandmarkPhoto, ReferencePhotoEditor::photoPoint(u, v));
             lists.add(kLandmarkMesh, mesh);
         }
+        return lists;
+    }
+
+    static std::vector<CameraCorrespondence> correspondencesOf(const MarkerLists& lists) {
+        std::vector<CameraCorrespondence> out;
+        for (std::size_t i = 0; i < lists.pairCount(); ++i) {
+            const Vec3f& w = lists.point(kLandmarkMesh, i).point;
+            const Vec3f& px = lists.point(kLandmarkPhoto, i).point;
+            out.push_back({px.x, px.y, {w.x, w.y, w.z}});
+        }
+        return out;
+    }
+
+    // The shoot's frame: the head's middle and directions.
+    ShootOptions shootFrame(AgentGroom& g) {
+        const ScalpLandmarks m = scalpLandmarks(*scalpOf(g), g.upAxis());
+        ShootOptions o;
+        o.center = m.middle;
+        o.up = m.frame.up;
+        o.front = m.frame.front;
+        return o;
+    }
+
+    static double focalMmOf(const RefCamera& c) { return focalPixelsToMm(c.focalPx, c.width); }
+
+    ToolResult alignPhoto(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr scalp = scalpOf(g);
+        const ScalpLandmarks marks = landmarksOf(g);
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        AgentPhoto& p = photoNamed(photos, str(a, "photo"));
+        const json& pairs = a["pairs"];
+        const MarkerLists lists = pairsOf(pairs, p, *scalp, marks, flag(a, "append", false) ? p.state.landmarks : MarkerLists{});
         double focal = p.camera && p.camera->focalPx > 0.0 ? p.camera->focalPx : focalMmToPixels(50.0, p.width);
         if (a.contains("focal_mm")) focal = focalMmToPixels(num(a, "focal_mm", 50.0), p.width);
         const bool keep = flag(a, "keep_focal", false);
@@ -2664,6 +2698,81 @@ struct AgentTools::Impl {
         const CameraPose* start = hint ? &hint->pose : p.camera ? &p.camera->pose : nullptr;
         ReferenceLandmarkSolve solve = solveReferenceLandmarks(lists, p.width, p.height, focal, keep, start, true);
         json info = {{"groom", g.name()}, {"photo", p.name}, {"pairs", solve.pairs}, {"linedUp", solve.ok}};
+        // The same solve with what a photo shoot is like (agent_shoot.h): the view's angle round the
+        // head and level, the focal and distance of the shoot's photos lined up already (like: "auto"
+        // the others, a photo's name, "none"), a free focal leaning to a portrait lens. Kept unless
+        // its pairs fit clearly worse.
+        const std::string like = str(a, "like", "auto");
+        std::vector<ShootView> shoot;
+        if (like != "none") {
+            for (const AgentPhoto& o : photos) {
+                if (o.name == p.name || !o.camera || (like != "auto" && o.name != like)) continue;
+                ShootView v;
+                v.width = o.width;
+                v.height = o.height;
+                v.fixed = *o.camera;
+                shoot.push_back(v);
+            }
+            if (like != "auto" && shoot.empty()) throw ToolError("like: no lined-up photo '" + like + "'");
+        }
+        double yaw = 0.0;
+        bool level = true;
+        const bool hasYaw = !viewHint.empty() && viewYaw(viewHint, yaw, &level);
+        if (lists.pairCount() >= 3 && (hasYaw || !shoot.empty() || !keep)) {
+            ShootOptions o = shootFrame(g);
+            if (keep || a.contains("focal_mm")) {
+                if (keep || !shoot.empty()) o.focalMm = focalPixelsToMm(focal, p.width);
+            }
+            if (!o.focalMm && !shoot.empty()) {
+                std::vector<double> fs;
+                for (const ShootView& v : shoot) fs.push_back(focalMmOf(*v.fixed));
+                std::sort(fs.begin(), fs.end());
+                o.focalMm = fs[fs.size() / 2];
+            }
+            o.priorWeight = num(a, "prior_weight", 1.0);
+            ShootView view;
+            view.pairs = correspondencesOf(lists);
+            view.width = p.width;
+            view.height = p.height;
+            if (hasYaw) view.yawDegrees = yaw;
+            view.level = hasYaw && level;
+            std::vector<ShootView> views = shoot;
+            views.push_back(view);
+            const ShootSolve s = solveShoot(views, o);
+            json priors = {{"done", s.ok}};
+            if (s.ok) {
+                const ShootCamera& c = s.cameras.back();
+                const double plain = solve.ok ? solve.rms : std::numeric_limits<double>::infinity();
+                const bool plainFar = solve.ok && hint &&
+                                      std::acos(std::clamp(static_cast<double>((-hint->axis(2)).dot(-solve.camera.axis(2))), -1.0, 1.0)) * 57.29578 > 25.0;
+                // Kept: when its pairs fit nearly as well, or the pairs alone left the camera far from the view.
+                const bool take = !solve.ok || c.rms <= std::max(1.15 * plain, plain + 0.3) || (plainFar && c.rms <= std::max(2.0 * plain, plain + 4.0));
+                priors["rms"] = r4(c.rms);
+                priors["focal_mm"] = r4(s.focalMm);
+                if (!s.focalNote.empty()) priors["focalNote"] = s.focalNote;
+                priors["pairsAloneRms"] = solve.ok ? json(r4(solve.rms)) : json(nullptr);
+                priors["pairsAloneFocalMm"] = solve.ok ? json(r4(focalMmOf(solve.camera))) : json(nullptr);
+                priors["shootPhotos"] = shoot.size();
+                priors["kept"] = take;
+                if (hasYaw) priors["fromView"] = r4(c.fromPrior);
+                if (take) {
+                    solve.ok = true;
+                    solve.camera = c.camera;
+                    solve.rms = c.rms;
+                    solve.errors = c.errors;
+                    solve.focalSolved = !o.focalMm;
+                    solve.bad.assign(solve.errors.size(), false);
+                    solve.why.clear();
+                }
+                priors["note"] = take ? "kept: the camera with the shoot's priors (its view's angle, level, the shoot's focal and "
+                                        "distance, a portrait lens when the pairs cannot tell the focal)"
+                                      : "the pairs alone fit clearly better: kept their camera";
+            } else {
+                priors["why"] = s.why;
+            }
+            info["priors"] = priors;
+            info["linedUp"] = solve.ok;
+        }
         // The pairs' names a landmark gave, and those the mesh's shape found only roughly.
         json unsure = json::array();
         for (const json& pair : pairs) {
@@ -2788,6 +2897,81 @@ struct AgentTools::Impl {
         }
         const RefImage image = loadImage(p.image, 3);
         return imageResult(photoOverlayPng(image, *scalp, p, kPhotoShown), info);
+    }
+
+    ToolResult alignPhotos(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr scalp = scalpOf(g);
+        const ScalpLandmarks marks = landmarksOf(g);
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        const json& list = a["photos"];
+        if (!list.is_array() || list.empty() || list.size() > 16) throw ToolError("photos: 1 to 16 entries {photo, view, pairs}");
+        std::vector<std::size_t> which;
+        std::vector<ShootView> views;
+        std::vector<MarkerLists> lists;
+        for (std::size_t i = 0; i < list.size(); ++i) {
+            const json& e = list[i];
+            if (!e.is_object()) throw ToolError("photos[" + std::to_string(i) + "] is {\"photo\", \"view\", \"pairs\"}");
+            AgentPhoto& p = photoNamed(photos, e.value("photo", std::string()));
+            const std::size_t index = static_cast<std::size_t>(&p - photos.data());
+            if (std::find(which.begin(), which.end(), index) != which.end()) throw ToolError("photo '" + p.name + "' is listed twice");
+            MarkerLists l = e.contains("pairs") ? pairsOf(e["pairs"], p, *scalp, marks, MarkerLists{}, "photos[" + std::to_string(i) + "].pairs")
+                                                : p.state.landmarks;
+            if (l.pairCount() < 3) throw ToolError("photo '" + p.name + "' needs 3 pairs or more (give its pairs)");
+            ShootView v;
+            v.pairs = correspondencesOf(l);
+            v.width = p.width;
+            v.height = p.height;
+            const std::string view = e.value("view", std::string());
+            double yaw = 0.0;
+            bool level = true;
+            if (!view.empty()) {
+                if (!viewYaw(view, yaw, &level)) throw ToolError("photos[" + std::to_string(i) + "].view: unknown view '" + view + "'");
+                v.yawDegrees = yaw;
+                v.level = level;
+            } else {
+                v.level = false;
+            }
+            which.push_back(index);
+            views.push_back(v);
+            lists.push_back(l);
+        }
+        ShootOptions o = shootFrame(g);
+        if (a.contains("focal_mm")) o.focalMm = num(a, "focal_mm", 100.0);
+        o.priorWeight = num(a, "prior_weight", 1.0);
+        if (o.priorWeight < 0.0 || o.priorWeight > 20.0) throw ToolError("prior_weight is 0 (pairs alone) to 20");
+        const ShootSolve s = solveShoot(views, o);
+        if (!s.ok) throw ToolError("the photos could not be lined up together: " + s.why);
+        json per = json::array();
+        ToolResult r;
+        for (std::size_t k = 0; k < which.size(); ++k) {
+            AgentPhoto& p = photos[which[k]];
+            const ShootCamera& c = s.cameras[k];
+            p.state.landmarks = lists[k];
+            p.camera = c.camera;
+            json errors = json::array();
+            for (const double e : c.errors) errors.push_back(r4(e));
+            json entry = {{"photo", p.name}, {"pairs", lists[k].pairCount()}, {"rmsPixels", r4(c.rms)}, {"errorsPixels", errors},
+                          {"yaw", r4(c.yaw)}, {"pitch", r4(c.pitch)}, {"roll", r4(c.roll)}, {"distance", r4(c.distance)},
+                          {"camera", cameraInfo(c.camera)}};
+            if (views[k].yawDegrees) entry["fromView"] = r4(c.fromPrior);
+            if (c.fights) entry["fights"] = "its pairs disagree with the rest of the shoot: check them (or another person's head)";
+            per.push_back(entry);
+        }
+        g.commitPhotos("align photos", photosToJson(photos));
+        for (std::size_t k = 0; k < which.size() && k < 6; ++k) {
+            const AgentPhoto& p = photos[which[k]];
+            r.content.push_back({{"type", "image"}, {"data", base64Encode(photoOverlayPng(loadImage(p.image, 3), *scalp, p, 384))},
+                                 {"mimeType", "image/png"}});
+        }
+        json info = {{"groom", g.name()}, {"focal_mm", r4(s.focalMm)}, {"focalSolved", !a.contains("focal_mm")}, {"rmsPixels", r4(s.rms)},
+                     {"focalNote", s.focalNote},
+                     {"photos", per}, {"priorWeight", o.priorWeight},
+                     {"hint", "The images: each photo with the mesh's outline through its camera and its pairs (green: the photo's, red: "
+                              "the mesh's), in the order given. One focal for the shoot; each camera near its view's angle, level, at "
+                              "about the shoot's distance (soft: prior_weight 0 lets the pairs alone decide)."}};
+        r.content.push_back({{"type", "text"}, {"text", info.dump(-1, ' ', false, json::error_handler_t::replace)}});
+        return r;
     }
 
     ToolResult photoEdit(const json& a) {
@@ -2922,6 +3106,10 @@ struct AgentTools::Impl {
                            {"clumped", look.clumped}, {"clumpSize", r4(look.clumpSize)}, {"clumpStrength", r4(look.clumpStrength)},
                            {"flyawayFraction", r4(look.flyawayFraction)}, {"frizzFraction", r4(look.frizzFraction)},
                            {"coverage", r4(look.coverage)}};
+            if (!look.curly && look.curlFrequency > 0.0f) {
+                out["curlNote"] = "a curl was measured but under the share that counts as curly hair (curly false): if the photos "
+                                  "show curls, add a Curl node (add_node) with the measured radius and frequency";
+            }
             if (flag(a, "apply_look", false)) {
                 out["lookApplied"] = applyPhotoLook(g, look);
             } else {
@@ -4072,7 +4260,10 @@ struct AgentTools::Impl {
         add("align_photo", "Line a photo up",
             "Solves the photo's camera from pairs of a photo pixel and the same feature's point on the mesh (camera_solve: 4 pairs "
             "with the focal length kept; 6 or more spread in depth can solve it too, focalSolved says whether they did). One undo "
-            "step. Points: [x, y, z], or a landmark's name (mesh_landmarks' named facial landmarks: nose_tip, left_earlobe...). "
+            "step. A second solve with what a photo shoot is like (the view's angle, level, the shoot's focal and distance from the "
+            "photos lined up already, a portrait lens when the pairs cannot tell the focal) is kept unless its pairs fit clearly "
+            "worse: a lone profile cannot tilt 30 degrees (priors in the answer). Several photos: align_photos solves them "
+            "together. Points: [x, y, z], or a landmark's name (mesh_landmarks' named facial landmarks: nose_tip, left_earlobe...). "
             "view: the side the photo was taken from (a start for the solve: profiles and backs line up far better with it). "
             "refine: then tighten the camera so the mesh's outline lies on the photo's where neither is hair (jaw, chin, neck, "
             "ears; the pairs kept in the fit), reported before and after. Answers with the reprojection error (pixels; each "
@@ -4084,9 +4275,28 @@ struct AgentTools::Impl {
                           {"keep_focal", prop("boolean", "Keep the focal length (default: solved with 6 pairs or more when they can tell it).")},
                           {"focal_mm", prop("number", "The focal length to start from or keep (36 mm film back; default 50 or the camera's).")},
                           {"view", enumProp(viewCameraNames(), "The side the photo shows (the character's left and right): the solve's start.")},
-                          {"refine", prop("boolean", "Tighten the camera with the outline where it is not hair (default false).")}},
+                          {"refine", prop("boolean", "Tighten the camera with the outline where it is not hair (default false).")},
+                          {"like", prop("string", "The shoot: \"auto\" (default: the photos lined up already lend their focal and "
+                                                  "distance), a lined-up photo's name, or \"none\".")},
+                          {"prior_weight", prop("number", "How much the shoot's priors count against the pairs (default 1; 0: pairs alone).")}},
                          {"pairs"}),
             &Impl::alignPhoto);
+        add("align_photos", "Line photos up together",
+            "Solves several photos of one shoot together: one focal length for all (solved from every photo's pairs, leaning to a "
+            "portrait lens when they cannot tell, or focal_mm), each camera near its view's angle round the head (front 0, "
+            "three-quarters 45, sides 90, three-quarter backs 135, back 180), level, all at about the same distance: soft priors "
+            "the pairs can overrule (prior_weight). Each photo's pairs as align_photo takes them (names of mesh_landmarks' facial "
+            "landmarks too), or its stored ones. One undo step. Answers each photo's error, its angles (yaw, pitch, roll in "
+            "degrees), how far it is from its view, the shared focal, the photos whose pairs fight the rest, and each overlay.",
+            objectSchema({{"groom", groom},
+                          {"photos", {{"type", "array"}, {"items", {{"type", "object"}}},
+                                      {"description", "[{\"photo\": name, \"view\": front | back | left | right | top | "
+                                                      "three_quarter_front_left | ..., \"pairs\": [{\"pixel\": [u, v], \"point\": "
+                                                      "[x, y, z] or a landmark}]}, ...]"}}},
+                          {"focal_mm", prop("number", "The shoot's focal length on a 36 mm film back, when known (kept).")},
+                          {"prior_weight", prop("number", "How much the priors count against the pairs (default 1; 0: pairs alone).")}},
+                         {"photos"}),
+            &Impl::alignPhotos);
         add("photo_edit", "Edit a photo's marks",
             "Edits a reference photo, one undo step: add_flow (an arrow along the hair, root end first: points, directed), "
             "erase_flow (points, radius), clear_flow, add_mask (a touch-up of the hair mask: points, radius, include true for "
