@@ -23,16 +23,23 @@
 //    evidence along a short line through the root agrees with best. The 180 degree ambiguity: both
 //    ways are grown; the one with more evidence, leaning toward gravity, wins, then neighbours vote.
 //    A guide stops where the photos that see it say it left the hair, at the shell, or its length.
+//    Then it is lifted off the scalp toward the hair's thickness the silhouettes show over it
+//    (ReferenceGuideOptions::volume), so voluminous hair is not combed flat.
 // 4. Symmetry (world X or the scalp's topology, scalp_mirror.h): every photo also judges each
 //    point's mirror image, so one three-quarter view covers both sides; the guides come in
 //    mirrored pairs (one grown, the other its mirror, as Mirror Group makes them).
-// 5. The look: the masked pixels' color (white-balanced by the hair's highlights) as a hair
-//    appearance color (hair_color.h), its base color and the nearest melanin and redness, the
-//    color at the roots and at the tips.
+// 5. The look: the masked pixels' color (white-balanced by the hair's highlights; a dim photo
+//    brightened, a well exposed one as it is) as a hair appearance color (hair_color.h), its base
+//    color and the nearest melanin and redness (melaninOfAppearance: the highlight's share fitted,
+//    a soft light's dark brown stays dark), the color at the roots and at the tips.
 // 6. The measured look (reference_look.cpp): clumps (the brightness's period and swing across the
-//    flow), curls (the fine direction's swing along it), flyaways (thin ridges past the outline) and
-//    frizz (ridges crossing the flow), tips, and where the skin shows (thinning), each turned into
+//    flow), curls or waves (the fine direction's swing along it, in every view), flyaways (thin
+//    ridges past the outline) and frizz (ridges crossing the flow), tips, and where the skin shows (thinning), each turned into
 //    the graph value it suggests (calibrated on a synthetic look sweep). Rough: a starting point.
+//
+// 7. Checks: compareToPhoto, a groom against a lined-up photo (its silhouette's IoU, reach round the
+//    head, hairline, color); photoHairCover, where photos show hair on a whole head (the hairline).
+//    Tests: a known groom photographed from four sides and grown back (test_reference_guides.cpp).
 //
 // Validation, pictures and the numbers: tools/research/reference_guides (build/probe/fromref).
 
@@ -240,6 +247,9 @@ struct ReferenceGuideOptions {
     int inflate = -1;                   // single-view depth bound: -1 when there is one view, 0 off, 1 on
     float inflateFactor = 1.0f;         // depth allowed per unit the silhouette reaches past the scalp
     float surfacePrior = 0.15f;         // weight of "lie along the surface" (one view decides depth by it)
+    float volume = 0.75f;               // guides lifted off the scalp to this share of the hair's thickness the
+                                        // silhouettes show over each spot (the shell's, at most half the length;
+                                        // rising from the root); 0: as grown (lying where the flow took them)
     float continuityPrior = 0.1f;     // weight of "keep going the same way"
     float gravityPrior = 0.15f;        // weight of "flow down along the surface" (where the views say little)
     float orientationWeight = 1.0f;     // how much the photos' strand directions count (0: priors and silhouettes only)
@@ -255,7 +265,7 @@ struct ReferenceGuideOptions {
     bool keepFields = false;            // return the orientation fields (diagnostics)
     LookBalance lookBalance = LookBalance::Auto;  // the look: how the light's color is taken out
     float lookQuantile = 0.65f;         // the look: which share of the hair's pixels is darker than its color (the lit side above 0.5)
-    bool lookExposure = true;           // the look: the photo's white point taken as white (a dim photo brightened)
+    bool lookExposure = true;           // the look: a dim photo brightened (its white point lifted to a well exposed photo's)
 };
 
 struct ReferenceGuide {
@@ -278,7 +288,8 @@ struct ReferenceLookFit {
     std::array<float, 3> tipAppearance{0, 0, 0};   // their last third
     std::array<float, 3> whiteBalance{1, 1, 1};    // what the colors above were multiplied by (light and exposure out)
     float exposure = 1.0f;                         // the exposure part of it
-    // Curls (measureCurl over the views): curly when a clear share of the flow swings with a period;
+    // Curls (measureCurl over the views): curly when a clear share of the flow swings with a period
+    // (or a smaller share swings widely: waves, curls seen in places);
     // then a Curl node's frequency (turns per unit of length) and radius, in scene units.
     bool curly = false;
     float curlShare = 0.0f, curlAmplitudeDeg = 0.0f;
@@ -363,6 +374,58 @@ private:
     int nx_ = 0, ny_ = 0, nz_ = 0;
     std::vector<std::uint8_t> voxels_;
 };
+
+// ---- How a groom compares with a photo ----------------------------------------------------------
+
+// The melanin and redness (HairColor's) whose appearance (hairAppearanceColor) is nearest a hair's
+// color seen in a photo (linear, white balanced), its highlight fitted up to the even dome's; the
+// RMS error in log RGB.
+float melaninOfAppearance(const std::array<float, 3>& appearance, float& melanin, float& redness);
+
+// How much each point of a whole head shows hair in the lined-up photos (the share of the photos
+// that see it from the front, not hidden behind the head, whose hair mask covers it), -1 where none
+// sees it: where the hair meets the face, ears and neck. `scalp` is where hair may grow (the masks
+// are learnt from it: a first guess at the hair region), the head an occluder.
+std::vector<float> photoHairCover(const ScalpMesh& scalp, const ScalpMesh& head, const std::vector<ReferenceView>& views,
+                                  const ReferenceGuideOptions& options = {});
+
+class StrandSet;
+
+// A groom's hair against a lined-up photo's (compare_to_photo): the strands' silhouette through the
+// photo's camera (each strand a line a couple of pixels wide, hidden behind the scalp, the gaps
+// between neighbours closed) against the photo's hair mask (previewReferenceView's, at the photo's
+// size), and the hair's colors.
+struct PhotoComparison {
+    int width = 0, height = 0;
+    std::vector<std::uint8_t> photoHair, groomHair;  // the two masks, photo pixels (1 hair)
+    int photoPixels = 0, groomPixels = 0, both = 0;
+    double iou = 0.0;
+    double missedShare = 0.0;  // of the photo's hair, the share the groom does not cover
+    double extraShare = 0.0;   // of the groom's hair, the share outside the photo's
+    // Round the head in the picture (its middle projected): how far the photo's hair reaches past
+    // the groom's (missing, > 0) and the groom's past the photo's (extra, > 0), scene units at the
+    // head's distance, the mean over that part's directions. top: the 90 degrees up; left and right
+    // of the picture; lower: the rest.
+    struct Region {
+        std::string name;
+        double missing = 0.0, extra = 0.0;
+    };
+    std::vector<Region> regions;
+    // The hairline: down each column of the head's middle third, where the hair from the top ends on
+    // the head (the face, an ear, the neck; each mask's small holes closed), the groom's below the
+    // photo's when > 0, the median, scene units; hairlineFound false when too few columns show it.
+    // (Pieces of the photo's hair not over the scalp, a dark patch of backdrop, are left out.)
+    bool hairlineFound = false;
+    double hairlineOffset = 0.0;
+    double unitsPerPixel = 0.0;  // at the head's distance
+    // The hair's color: the photo's as the look reads it (linear: inside its hair by two pixels, the
+    // lookQuantile per channel, white balanced by the border, a dim photo brightened) and the groom's
+    // strands' appearance (linear, their mean), each's nearest melanin and redness.
+    std::array<float, 3> photoColor{0, 0, 0}, groomColor{0, 0, 0};
+    float photoMelanin = 0.0f, photoRedness = 0.0f, groomMelanin = 0.0f, groomRedness = 0.0f;
+};
+PhotoComparison compareToPhoto(const ScalpMesh& scalp, const StrandSet& strands, const ReferenceView& view,
+                               const ReferenceGuideOptions& options = {});
 
 const char* referenceSymmetryName(ReferenceSymmetry s);
 ReferenceSymmetry referenceSymmetryFromName(const std::string& name);  // none, x, topology, auto; throws

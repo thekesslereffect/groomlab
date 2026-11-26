@@ -285,6 +285,15 @@ def everything_else(c, root):
     grown, _ = c.call("guides_from_photos", dict(f, guide_count=80, apply_look=True))
     assert grown["guides"] > 5 and "unseenShare" in grown, grown
     assert "lookApplied" in grown or "look" not in grown, grown
+    # The groom against its photo: the silhouettes' overlap, where the hair differs, its color.
+    compared, result = c.call("compare_to_photo", f)
+    shot = compared["photos"][0]
+    assert shot["photo"] == "front" and 0.0 <= shot["iou"] <= 1.0, compared
+    assert set(shot["regions"]) == {"top", "right", "lower", "left"}, shot
+    assert 0.0 <= shot["color"]["photo"]["melanin"] <= 1.0 and 0.0 <= shot["color"]["groom"]["melanin"] <= 1.0, shot
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 1
+    one, _ = c.call("compare_to_photo", dict(f, photo="front"))
+    assert len(one["photos"]) == 1, one
 
     # A root tube drawn round the crown, cut into cells, then split a level down.
     drawn, _ = c.call("root_tube", dict(g, op="draw", center="crown", radius=3, length=12))
@@ -359,7 +368,7 @@ def main():
                        "set_tube", "add_script_node", "save_node", "undo", "evaluate", "render_preview", "save_groom", "export",
                        "redo", "history", "scalp_landmarks", "brush_stroke", "select_guides", "guide_op", "paint_map",
                        "measure_guides", "add_photo", "photo_view", "mesh_landmarks", "align_photo", "photo_edit",
-                       "guides_from_photos", "root_tube", "tube_levels", "tube_shape", "check_expression", "import_animation",
+                       "guides_from_photos", "compare_to_photo", "root_tube", "tube_levels", "tube_shape", "check_expression", "import_animation",
                        "animate_scalp", "simulate", "sim_cache", "export_cards", "export_game", "stats"]:
             assert wanted in names, wanted
         assert c.request("tools/call", {"name": "no_such_tool", "arguments": {}})["error"]["code"] == -32602

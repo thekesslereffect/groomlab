@@ -101,6 +101,10 @@ struct PointLabel {
 std::vector<std::uint8_t> meshCandidatesPng(const ScalpMesh& scalp, const RefCamera& camera,
                                             const std::vector<MeshCandidate>& candidates, int maxSize,
                                             const std::vector<PointLabel>& labels = {});
+// compare_to_photo's picture: the photo dimmed, the hair the groom misses tinted green, the groom's
+// hair outside the photo's tinted magenta, both outlines (the photo's green, the groom's magenta).
+std::vector<std::uint8_t> comparisonPng(const RefImage& image, const PhotoComparison& c, int maxSize);
+
 // The mesh's outline and wireframe over the photo through the photo's camera, each landmark pair's
 // photo point (green) and its mesh point through the camera (red) joined by a line: how well it
 // lines up.

@@ -19,6 +19,8 @@
 #include "groomlab/parallel.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_mirror.h"
+#include "groomlab/strand_set.h"
+#include "groomlab/export_view.h"
 
 namespace groomlab {
 
@@ -163,9 +165,16 @@ constexpr float kFlyawayGain = 0.111f, kFlyawayFloor = 0.5f, kFlyawayContrast = 
 constexpr float kFrizzGain = 0.94f, kFrizzFloor = 0.05f;
 // Curls: a clear share of the flow swinging with a period, by more than this.
 constexpr float kCurlShare = 0.22f, kCurlAmplitude = 7.5f;
-// Wavy: a smaller share swinging, as widely. Not curly enough for a Curl node, but guides along each
-// wave wander inside the hair and never reach its ends: they follow the coarse flow too.
+// ... or a smaller share swinging widely: waves, or curls a photo resolves only in places (a small
+// photo, curls in shadow; straight hair's flow swings a degree or two, its noise without a period).
+// Curly too (a Curl node puts them back); guides along each wave would wander inside the hair and
+// never reach its ends: they follow the coarse flow.
 constexpr float kWavyShare = 0.12f, kWavyAmplitude = 15.0f;
+// A photo's exposure: what its brightest half percent (balanced) reaches in a well exposed photo
+// (skin's highlights, a light backdrop; linear). A photo short of it is brightened to it, never
+// darkened: a mid-gray studio backdrop's photo is not taken for underexposed (its dark hair then
+// read a medium brown).
+constexpr float kPhotoWhite = 0.5f;
 
 float median(std::vector<float> values) {
     if (values.empty()) return 0.0f;
@@ -433,7 +442,8 @@ void keepConnected(std::vector<std::uint8_t>& set, const std::vector<std::uint8_
 // `notHair`: never hair. False (nothing changed) when too little hair shows past the scalp to learn
 // from (short hair, fur on a body).
 bool hairByColor(const RefImage& rgb, RefImage& mask, const RefImage& subject, const std::vector<std::uint8_t>& scalpCover,
-                 const std::array<float, 2>& up, const std::vector<std::uint8_t>& seedsIn, const std::vector<std::uint8_t>& notHair) {
+                 const std::array<float, 2>& up, const std::vector<std::uint8_t>& seedsIn, const std::vector<std::uint8_t>& notHair,
+                 const std::vector<std::uint8_t>& occluded) {
     const int w = rgb.width, h = rgb.height;
     const std::size_t pixels = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
     // The scalp's projection along the photo's up: its center and extent.
@@ -469,7 +479,8 @@ bool hairByColor(const RefImage& rgb, RefImage& mask, const RefImage& subject, c
     std::size_t seedCount = 0, silCount = 0;
     for (std::size_t i = 0; i < pixels; ++i) {
         silCount += sil[i];
-        seeds[i] = (sil[i] && !scalpCover[i] && fromScalp[i] > 2.0f && height(i) > mid) ? 1 : 0;
+        // (not where an occluder shows: a whole head's face above the scalp's middle is skin)
+        seeds[i] = (sil[i] && !scalpCover[i] && (occluded.empty() || !occluded[i]) && fromScalp[i] > 2.0f && height(i) > mid) ? 1 : 0;
         seedCount += seeds[i];
         if (seedsIn[i] && !notHair[i]) seeds[i] = sil[i] = 1;
     }
@@ -520,6 +531,10 @@ bool hairByColor(const RefImage& rgb, RefImage& mask, const RefImage& subject, c
             bg[i] = sil[i] && !fg[i] && out[i] > 3.0f ? 1 : 0;
         }
     }
+    // (colors that cannot tell the hair from the rest, the seeds' own hair lost: no use)
+    std::size_t kept = 0;
+    for (std::size_t i = 0; i < pixels; ++i) kept += seeds[i] && hair[i];
+    if (2 * kept < seedCount) return false;
     for (std::size_t i = 0; i < pixels; ++i) mask.pixels[i] = hair[i] ? 1.0f : 0.0f;
     return true;
 }
@@ -814,8 +829,15 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
         pv.depth.assign(pixels, kInf);
         pv.scalpCover.assign(pixels, 0);
         rasterize(scalp, projectMesh(scalp, pv.camera), pv.width, pv.height, pv.depth, &pv.scalpCover);
-        for (const auto& occluder : options.occluders)
-            if (occluder) rasterize(*occluder, projectMesh(*occluder, pv.camera), pv.width, pv.height, pv.depth, nullptr);
+        // Where an occluder shows in front of the scalp (a whole head's face): no hair seeds there.
+        std::vector<std::uint8_t> occluded;
+        if (!options.occluders.empty()) {
+            const std::vector<float> scalpOnly = pv.depth;
+            for (const auto& occluder : options.occluders)
+                if (occluder) rasterize(*occluder, projectMesh(*occluder, pv.camera), pv.width, pv.height, pv.depth, nullptr);
+            occluded.assign(pixels, 0);
+            for (std::size_t i = 0; i < pixels; ++i) occluded[i] = pv.depth[i] < kInf && pv.depth[i] < scalpOnly[i] - 1e-6f ? 1 : 0;
+        }
         pv.scalpDistance = distanceTransform(pv.scalpCover, pv.width, pv.height);
         pv.depthEps = 0.01f * scalpSize;
         float scalpDepth = 0.0f;
@@ -905,7 +927,7 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
                     if (x >= 0 && y >= 0 && x < pv.width && y < pv.height) seedPixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(pv.width) + static_cast<std::size_t>(x)] = 1;
                 }
                 const RefImage subject = pv.mask;
-                byColor = hairByColor(pv.rgb, pv.mask, subject, pv.scalpCover, up, seedPixels, sureBackdrop);
+                byColor = hairByColor(pv.rgb, pv.mask, subject, pv.scalpCover, up, seedPixels, sureBackdrop, occluded);
             }
             if (!byColor) pv.mask = refineMask(pv.rgb, pv.mask, seeds, sureBackdrop, likelyHair);
             touchUp();
@@ -1669,6 +1691,69 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign, float maxLe
     return g;
 }
 
+std::vector<Vec3f> smoothed(std::vector<Vec3f> pts, int iterations);
+
+// The hair's thickness over a spot of the scalp (its outward normal `n`): in each view that sees the
+// spot near its outline (the normal across the view), how far out along the normal the hair mask
+// reaches (the silhouette's rim past the scalp there); the median over those views. Negative: no
+// view shows it in profile.
+float hairThickness(const Context& ctx, const Vec3f& x, const Vec3f& n, float reach) {
+    std::vector<float> seen;
+    for (const PreparedView& v : ctx.views) {
+        const Vec3f toEye = (v.camera.eye() - x).normalized();
+        if (std::abs(n.dot(toEye)) > 0.4f) continue;  // (facing the view or away: no rim there)
+        float u = 0, vv = 0, z = 0;
+        if (!v.camera.project(x, u, vv, &z) || !v.inFrame(u, vv)) continue;
+        float t = 0.0f;
+        for (float s = ctx.step; s <= reach; s += 0.5f * ctx.step) {
+            const Vec3f q = x + n * s;
+            if (!v.camera.project(q, u, vv, &z) || !v.inFrame(u, vv)) break;
+            if (v.hullMask.sample(u, vv) < 0.5f && !v.hidden(u, vv, z)) break;
+            t = s;
+        }
+        seen.push_back(t);
+    }
+    return seen.empty() ? -1.0f : median(seen);
+}
+
+// A guide lifted to fill the hair's thickness the silhouettes show: each point at least `share` of
+// the thickness over its spot from the scalp (at most half the length out), rising from the root no
+// steeper than the guide runs, the lift blended along the guide (no jumps).
+std::vector<Vec3f> volumized(const Context& ctx, const std::vector<Vec3f>& path, float share) {
+    if (share <= 0.0f || path.size() < 3) return path;
+    const float reach = 0.5f * ctx.maxLength;
+    std::vector<float> lift(path.size(), 0.0f);
+    std::vector<Vec3f> up(path.size());
+    float along = 0.0f, last = 0.0f, known = -1.0f;
+    for (std::size_t i = 0; i < path.size(); ++i) {
+        if (i > 0) along += (path[i] - path[i - 1]).length();
+        const SurfacePoint sp = ctx.scalp.closestPoint(path[i]);
+        if (sp.root.face < 0) continue;
+        Vec3f dir = path[i] - sp.position;
+        const float height = dir.length();
+        dir = height > 1e-6f ? dir / height : sp.normal.normalized();
+        if (dir.dot(sp.normal) < 0.0f) dir = sp.normal.normalized();
+        up[i] = dir;
+        float thickness = hairThickness(ctx, sp.position, sp.normal.normalized(), reach);
+        if (thickness < 0.0f) thickness = known;  // (no view in profile here: the last spot's)
+        else known = thickness;
+        if (thickness < 0.0f) continue;
+        float target = std::min(share * thickness, 0.7f * along);
+        target = std::min(target, last + 0.7f * (i > 0 ? (path[i] - path[i - 1]).length() : 0.0f) + 1e-6f);
+        last = std::max(height, target);
+        lift[i] = std::max(0.0f, target - height);
+    }
+    // Blended along the guide, then put on.
+    for (int pass = 0; pass < 2; ++pass) {
+        std::vector<float> next = lift;
+        for (std::size_t i = 1; i + 1 < lift.size(); ++i) next[i] = 0.25f * lift[i - 1] + 0.5f * lift[i] + 0.25f * lift[i + 1];
+        lift.swap(next);
+    }
+    std::vector<Vec3f> out = path;
+    for (std::size_t i = 1; i < path.size(); ++i) out[i] = path[i] + up[i] * lift[i];
+    return out;
+}
+
 // The polyline's first `length` units.
 std::vector<Vec3f> truncated(const std::vector<Vec3f>& pts, float length) {
     std::vector<Vec3f> out;
@@ -1698,22 +1783,29 @@ std::vector<Vec3f> smoothed(std::vector<Vec3f> pts, int iterations) {
 }
 
 // The melanin and redness whose appearance is nearest `appearance` (log RGB); the RMS error.
+// The appearance's highlight (kAppearanceSheen, measured under an even white dome) is fitted too, up
+// to the dome's: a photo's soft or frontal light shows dark hair less of it, so its dark brown is
+// darker and redder than any appearance with the whole highlight (it would read a medium brown).
 float nearestMelanin(const std::array<float, 3>& appearance, float& melanin, float& redness) {
     double best = 1e30;
+    constexpr int kSheenSteps = 12;
     for (int mi = 0; mi <= 50; ++mi)
         for (int ri = 0; ri <= 20; ++ri) {
             const float m = static_cast<float>(mi) / 50.0f, r = static_cast<float>(ri) / 20.0f;
             const auto a = hairAppearanceColor(melaninColor(m, r));
-            double err = 0.0;
-            for (int c = 0; c < 3; ++c) {
-                const double d = pm::log(std::max(a[static_cast<std::size_t>(c)], 1e-4f)) -
-                                 pm::log(std::max(appearance[static_cast<std::size_t>(c)], 1e-4f));
-                err += d * d;
-            }
-            if (err < best) {
-                best = err;
-                melanin = m;
-                redness = r;
+            for (int si = kSheenSteps; si >= 0; --si) {
+                const float sheen = kAppearanceSheen * static_cast<float>(si) / kSheenSteps;
+                double err = 0.0;
+                for (int c = 0; c < 3; ++c) {
+                    const double d = pm::log(std::max(a[static_cast<std::size_t>(c)] - kAppearanceSheen + sheen, 1e-4f)) -
+                                     pm::log(std::max(appearance[static_cast<std::size_t>(c)], 1e-4f));
+                    err += d * d;
+                }
+                if (err < best - 1e-12) {
+                    best = err;
+                    melanin = m;
+                    redness = r;
+                }
             }
         }
     return static_cast<float>(std::sqrt(best / 3.0));
@@ -1797,8 +1889,8 @@ ReferenceLookFit fitLook(const std::vector<PreparedView>& views, const std::vect
     }
     const float gray = (light[0] + light[1] + light[2]) / 3.0f;
     for (int c = 0; c < 3; ++c) fit.whiteBalance[static_cast<std::size_t>(c)] = gray / std::max(light[c], 1e-4f);
-    // The exposure: the photo's white point (its brightest 0.5%, balanced) taken as white, when the
-    // photo does not reach it (a dim or underexposed shot); never darker.
+    // The exposure: the photo's white point (its brightest 0.5%, balanced) lifted to kPhotoWhite when
+    // the photo does not reach it (a dim or underexposed shot); never darker.
     if (options.lookExposure) {
         std::vector<float> lum;
         for (const PreparedView& v : views) {
@@ -1816,7 +1908,7 @@ ReferenceLookFit fitLook(const std::vector<PreparedView>& views, const std::vect
         if (!lum.empty()) {
             const std::size_t at = static_cast<std::size_t>(0.995 * static_cast<double>(lum.size() - 1));
             std::nth_element(lum.begin(), lum.begin() + static_cast<std::ptrdiff_t>(at), lum.end());
-            fit.exposure = std::clamp(1.0f / std::max(lum[at], 1e-4f), 1.0f, 4.0f);
+            fit.exposure = std::clamp(kPhotoWhite / std::max(lum[at], 1e-4f), 1.0f, 4.0f);
         }
     }
     for (int c = 0; c < 3; ++c) fit.whiteBalance[static_cast<std::size_t>(c)] *= fit.exposure;
@@ -1991,6 +2083,10 @@ std::vector<float> scalpCoverage(const ScalpMesh& scalp, const std::vector<Prepa
 
 }  // namespace
 
+float melaninOfAppearance(const std::array<float, 3>& appearance, float& melanin, float& redness) {
+    return nearestMelanin(appearance, melanin, redness);
+}
+
 ReferenceShell::ReferenceShell(const ScalpMesh& scalp, const std::vector<ReferenceView>& views, const ReferenceGuideOptions& options,
                                float maxLength) {
     const float size = scalpDiagonal(scalp);
@@ -2073,11 +2169,14 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
     // node puts the curls back), not along each curl.
     {
         std::vector<float> shares, amplitudes, wavelengths;
+        std::vector<std::pair<float, int>> swings;  // a view's swing, its streamlines
+        bool wavy = false;
         for (const PreparedView& v : prepared) {
             if (v.curl.streamlines < 5) continue;
             shares.push_back(v.curl.periodicShare);
             if (v.curl.wavelengthPx > 0.0f && v.scalpDepth > 0.0f) {
                 amplitudes.push_back(v.curl.amplitude);
+                swings.push_back({v.curl.amplitude, v.curl.streamlines});
                 wavelengths.push_back(v.curl.wavelengthPx * v.scalpDepth / static_cast<float>(v.camera.focalPx));
             }
         }
@@ -2086,14 +2185,30 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
             result.look.curlAmplitudeDeg = amplitudes.empty() ? 0.0f : median(amplitudes) * 180.0f / kPi;
             // (Short fur lies flat: what swings in it is not curls.)
             const float longest = options.maxLength > 0 ? options.maxLength : ctx.maxLength;
-            result.look.curly = result.look.curlShare > kCurlShare && result.look.curlAmplitudeDeg > kCurlAmplitude && longest >= size / 7.0f;
+            // (Judged by the views' lower quartile swing, each view weighing its streamlines: curls
+            // swing in every view that shows much hair; straight hair's strands crossing each other
+            // swing in one now and then.)
+            float swing = 0.0f;
+            if (!swings.empty()) {
+                std::sort(swings.begin(), swings.end());
+                int total = 0, below = 0;
+                for (const auto& s : swings) total += s.second;
+                for (const auto& s : swings) {
+                    below += s.second;
+                    swing = s.first * 180.0f / kPi;
+                    if (4 * below > total) break;
+                }
+            }
+            const bool curls = result.look.curlShare > kCurlShare && swing > kCurlAmplitude;
+            const bool waves = result.look.curlShare > kWavyShare && swing > kWavyAmplitude;
+            result.look.curly = (curls || waves) && longest >= size / 7.0f;
+            wavy = waves;
             if (!wavelengths.empty()) {
                 const float wavelength = median(wavelengths);
                 result.look.curlFrequency = 1.0f / std::max(wavelength, 1e-6f);
                 result.look.curlRadius = kCurlRadiusGain * wavelength * pm::tan(std::min(median(amplitudes), 1.2f)) / (2.0f * kPi);
             }
         }
-        const bool wavy = result.look.curlShare > kWavyShare && result.look.curlAmplitudeDeg > kWavyAmplitude;
         const bool coarse = options.curlFlow > 0 || (options.curlFlow < 0 && (result.look.curly || wavy));
         if (coarse)
             for (PreparedView& v : prepared)
@@ -2265,7 +2380,7 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         }
         ReferenceGuide guide;
         guide.root = roots[i].root;
-        std::vector<Vec3f> path = smoothed(g.points, 3);
+        std::vector<Vec3f> path = volumized(ctx, smoothed(g.points, 3), options.volume);
         // A guide that reached the given maximum never showed its tip (hidden under the hair above
         // it): hair is mostly shorter than the longest, so it is trimmed (calibrated on the synthetic
         // heads: such guides came out 1.15x too long).
@@ -2343,6 +2458,286 @@ ReferenceViewPreview previewReferenceView(const ScalpMesh& scalp, const Referenc
             if (!pv.field->sample(u, v, du, dv, conf) || conf < 0.08f) continue;
             out.flowLines.push_back({x - du * half, y - dv * half, x + du * half, y + dv * half});
         }
+    return out;
+}
+
+// ---- Where the photos show hair on a head --------------------------------------------------------
+
+std::vector<float> photoHairCover(const ScalpMesh& scalp, const ScalpMesh& head, const std::vector<ReferenceView>& views,
+                                  const ReferenceGuideOptions& options) {
+    if (scalp.triangleCount() == 0 || head.triangleCount() == 0) throw std::invalid_argument("photoHairCover: an empty mesh");
+    ReferenceGuideOptions o = options;
+    o.occluders.clear();
+    o.occluders.push_back(std::make_shared<ScalpMesh>(head));
+    const std::vector<PreparedView> prepared = prepareViews(scalp, views, o, scalpDiagonal(scalp));
+    const std::vector<Vec3f>& normals = head.vertexNormals();
+    std::vector<float> hair(head.pointCount(), 0.0f), seen(head.pointCount(), 0.0f);
+    for (const PreparedView& pv : prepared) {
+        if (pv.mask.empty() || pv.depth.empty()) continue;
+        const Vec3f eye = pv.camera.eye();
+        for (std::size_t i = 0; i < head.pointCount(); ++i) {
+            const Vec3f& p = head.points()[i];
+            const Vec3f toEye = (eye - p).normalized();
+            // Seen from the front: an edge-on point's pixel is the hair standing past the head.
+            const float facing = i < normals.size() ? normals[i].normalized().dot(toEye) : 1.0f;
+            if (facing < 0.35f) continue;
+            float u = 0, v = 0, z = 0;
+            if (!pv.camera.project(p, u, v, &z) || !pv.inFrame(u, v) || pv.hidden(u, v, z)) continue;
+            seen[i] += facing;
+            hair[i] += facing * (pv.mask.sample(u, v) >= 0.5f ? 1.0f : 0.0f);
+        }
+    }
+    std::vector<float> out(head.pointCount(), -1.0f);
+    for (std::size_t i = 0; i < out.size(); ++i)
+        if (seen[i] > 0.0f) out[i] = hair[i] / seen[i];
+    return out;
+}
+
+// ---- How a groom compares with a photo ----------------------------------------------------------
+
+PhotoComparison compareToPhoto(const ScalpMesh& scalp, const StrandSet& strands, const ReferenceView& view,
+                               const ReferenceGuideOptions& options) {
+    if (scalp.triangleCount() == 0) throw std::invalid_argument("compareToPhoto: the scalp has no triangles");
+    PhotoComparison out;
+    const int w = view.image.width, h = view.image.height;
+    if (w <= 0 || h <= 0) throw std::invalid_argument("compareToPhoto: the photo is empty");
+    out.width = w;
+    out.height = h;
+    const RefCamera camera = view.camera.width > 0.0 && std::abs(view.camera.width - w) > 0.5 ? view.camera.scaled(w / view.camera.width) : view.camera;
+    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+    // The photo's hair, at its size.
+    const ReferenceViewPreview preview = previewReferenceView(scalp, view, options, 1e9f);
+    out.photoHair.assign(n, 0);
+    if (!preview.mask.empty() && preview.crop[2] > 0 && preview.crop[3] > 0) {
+        const auto& c = preview.crop;
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                const float mu = (static_cast<float>(x) + 0.5f - static_cast<float>(c[0])) / static_cast<float>(c[2]) * static_cast<float>(preview.mask.width);
+                const float mv = (static_cast<float>(y) + 0.5f - static_cast<float>(c[1])) / static_cast<float>(c[3]) * static_cast<float>(preview.mask.height);
+                if (mu < 0.0f || mv < 0.0f || mu >= static_cast<float>(preview.mask.width) || mv >= static_cast<float>(preview.mask.height)) continue;
+                if (preview.mask.sample(mu, mv) >= 0.5f) out.photoHair[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = 1;
+            }
+    }
+    // The groom's: the strands through the camera, behind the scalp hidden.
+    std::vector<float> depth(n, kInf);
+    rasterize(scalp, projectMesh(scalp, camera), w, h, depth, nullptr);
+    // The photo's hair that is the groom's: its pieces over the scalp (a dark patch of backdrop
+    // in a corner is not).
+    {
+        std::vector<int> label(n, -1);
+        std::vector<std::size_t> stack, piece;
+        for (std::size_t s = 0; s < n; ++s) {
+            if (!out.photoHair[s] || label[s] >= 0) continue;
+            bool overScalp = false;
+            piece.clear();
+            stack.push_back(s);
+            label[s] = 1;
+            while (!stack.empty()) {
+                const std::size_t i = stack.back();
+                stack.pop_back();
+                piece.push_back(i);
+                overScalp = overScalp || depth[i] < kInf;
+                const int x = static_cast<int>(i % static_cast<std::size_t>(w)), y = static_cast<int>(i / static_cast<std::size_t>(w));
+                const int nx[4] = {x - 1, x + 1, x, x}, ny[4] = {y, y, y - 1, y + 1};
+                for (int k = 0; k < 4; ++k) {
+                    if (nx[k] < 0 || ny[k] < 0 || nx[k] >= w || ny[k] >= h) continue;
+                    const std::size_t j = static_cast<std::size_t>(ny[k]) * static_cast<std::size_t>(w) + static_cast<std::size_t>(nx[k]);
+                    if (out.photoHair[j] && label[j] < 0) {
+                        label[j] = 1;
+                        stack.push_back(j);
+                    }
+                }
+            }
+            if (!overScalp)
+                for (std::size_t i : piece) out.photoHair[i] = 0;
+        }
+    }
+    // Where an occluder shows in front of the scalp (a whole head's face, a beard on it): neither
+    // mask counts there (the hair a groom grows is the scalp's).
+    std::vector<std::uint8_t> occluded;
+    if (!options.occluders.empty()) {
+        const std::vector<float> scalpOnly = depth;
+        for (const auto& occluder : options.occluders)
+            if (occluder) rasterize(*occluder, projectMesh(*occluder, camera), w, h, depth, nullptr);
+        occluded.assign(n, 0);
+        for (std::size_t i = 0; i < n; ++i) occluded[i] = depth[i] < kInf && depth[i] < scalpOnly[i] - 1e-6f ? 1 : 0;
+        for (std::size_t i = 0; i < n; ++i)
+            if (occluded[i]) out.photoHair[i] = 0;
+    }
+    std::vector<std::uint8_t> drawn(n, 0);
+    const float radius = std::max(1.0f, 0.003f * static_cast<float>(w));
+    for (std::size_t s = 0; s < strands.strandCount(); ++s) {
+        const Vec3f* p = strands.strandPoints(s);
+        const std::size_t count = strands.strandPointCount(s);
+        for (std::size_t i = 1; i < count; ++i) {
+            float u0 = 0, v0 = 0, z0 = 0, u1 = 0, v1 = 0, z1 = 0;
+            if (!camera.project(p[i - 1], u0, v0, &z0) || !camera.project(p[i], u1, v1, &z1)) continue;
+            const float len = std::max(std::abs(u1 - u0), std::abs(v1 - v0));
+            const int steps = std::max(1, static_cast<int>(std::ceil(len)));
+            for (int k = 0; k <= steps; ++k) {
+                const float t = static_cast<float>(k) / static_cast<float>(steps);
+                const float u = u0 + (u1 - u0) * t, v = v0 + (v1 - v0) * t, z = z0 + (z1 - z0) * t;
+                const int r = static_cast<int>(std::ceil(radius));
+                for (int dy = -r; dy <= r; ++dy)
+                    for (int dx = -r; dx <= r; ++dx) {
+                        if (static_cast<float>(dx * dx + dy * dy) > radius * radius + 0.25f) continue;
+                        const int x = static_cast<int>(u) + dx, y = static_cast<int>(v) + dy;
+                        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                        const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
+                        if (z > depth[at] + 0.002f * z) continue;  // (behind the head)
+                        drawn[at] = 1;
+                    }
+            }
+        }
+    }
+    // The gaps between strands closed (a silhouette, as the photo's mask is one).
+    const int close = std::max(1, w / 128);
+    {
+        RefImage m;
+        m.width = w;
+        m.height = h;
+        m.channels = 1;
+        m.pixels.resize(n);
+        for (std::size_t i = 0; i < n; ++i) m.pixels[i] = drawn[i] ? 1.0f : 0.0f;
+        const RefImage closed = shrunk(grown(m, close), close);
+        out.groomHair.assign(n, 0);
+        for (std::size_t i = 0; i < n; ++i) out.groomHair[i] = (closed.pixels[i] >= 0.5f || drawn[i]) && (occluded.empty() || !occluded[i]) ? 1 : 0;
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        out.photoPixels += out.photoHair[i];
+        out.groomPixels += out.groomHair[i];
+        out.both += out.photoHair[i] & out.groomHair[i];
+    }
+    const int any = out.photoPixels + out.groomPixels - out.both;
+    out.iou = any > 0 ? static_cast<double>(out.both) / any : 0.0;
+    out.missedShare = out.photoPixels ? 1.0 - static_cast<double>(out.both) / out.photoPixels : 0.0;
+    out.extraShare = out.groomPixels ? 1.0 - static_cast<double>(out.both) / out.groomPixels : 0.0;
+    // Round the head: each direction's farthest hair pixel from the head's middle, the photo's and the groom's.
+    Vec3f lo, hi;
+    lo = hi = scalp.points().front();
+    for (const Vec3f& q : scalp.points()) lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)}, hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)};
+    const Vec3f middle = (lo + hi) * 0.5f;
+    float cu = 0.5f * static_cast<float>(w), cv = 0.5f * static_cast<float>(h), cz = 1.0f;
+    camera.project(middle, cu, cv, &cz);
+    out.unitsPerPixel = cz / camera.focalPx;
+    constexpr int kBins = 72;
+    std::vector<float> reachPhoto(kBins, -1.0f), reachGroom(kBins, -1.0f);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
+            if (!out.photoHair[at] && !out.groomHair[at]) continue;
+            const float dx = static_cast<float>(x) + 0.5f - cu, dy = cv - (static_cast<float>(y) + 0.5f);
+            const float angle = std::atan2(dx, dy);  // 0 up, positive toward the picture's right
+            const int bin = std::clamp(static_cast<int>((angle + kPi) / (2.0f * kPi) * kBins), 0, kBins - 1);
+            const float r = std::sqrt(dx * dx + dy * dy);
+            if (out.photoHair[at]) reachPhoto[static_cast<std::size_t>(bin)] = std::max(reachPhoto[static_cast<std::size_t>(bin)], r);
+            if (out.groomHair[at]) reachGroom[static_cast<std::size_t>(bin)] = std::max(reachGroom[static_cast<std::size_t>(bin)], r);
+        }
+    const char* names[4] = {"top", "right", "lower", "left"};
+    for (int region = 0; region < 4; ++region) {
+        PhotoComparison::Region rg;
+        rg.name = names[region];
+        int counted = 0;
+        for (int b = 0; b < kBins; ++b) {
+            const float angle = (static_cast<float>(b) + 0.5f) / kBins * 2.0f * kPi - kPi;  // (0 up)
+            const float a = std::fmod(angle + 2.0f * kPi + 0.25f * kPi, 2.0f * kPi);           // 0..2pi from up-left
+            if (static_cast<int>(a / (0.5f * kPi)) != region) continue;
+            const float p = reachPhoto[static_cast<std::size_t>(b)], g = reachGroom[static_cast<std::size_t>(b)];
+            if (p < 0.0f && g < 0.0f) continue;
+            const float d = (std::max(p, 0.0f) - std::max(g, 0.0f)) * static_cast<float>(out.unitsPerPixel);
+            if (d > 0.0f) rg.missing += d;
+            else rg.extra -= d;
+            ++counted;
+        }
+        if (counted) rg.missing /= counted, rg.extra /= counted;
+        out.regions.push_back(rg);
+    }
+    // The hairline: down each column of the head's middle third, where the hair from the top ends
+    // on the head (the face, an ear, the neck below it, not the backdrop), each mask's small holes
+    // closed (curls); the median of the groom's against the photo's.
+    {
+        const int holes = std::max(1, w / 150);
+        auto closedMask = [&](const std::vector<std::uint8_t>& m) {
+            RefImage im;
+            im.width = w;
+            im.height = h;
+            im.channels = 1;
+            im.pixels.resize(n);
+            for (std::size_t i = 0; i < n; ++i) im.pixels[i] = m[i] ? 1.0f : 0.0f;
+            return shrunk(grown(im, holes), holes);
+        };
+        const RefImage photoClosed = closedMask(out.photoHair), groomClosed = closedMask(out.groomHair);
+        int x0 = w, x1 = -1;
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                if (depth[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] < kInf) x0 = std::min(x0, x), x1 = std::max(x1, x);
+        auto hairEnd = [&](const RefImage& m, int x) {
+            int y = 0;
+            while (y < h && m.pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] < 0.5f) ++y;
+            if (y >= h || static_cast<float>(y) > cv) return -1;  // (no hair above the head's middle)
+            while (y < h && m.pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] >= 0.5f) ++y;
+            if (y >= h || depth[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] >= kInf) return -1;  // (off the head)
+            return y;
+        };
+        std::vector<float> offsets;
+        if (x1 > x0)
+            for (int x = x0 + (x1 - x0) / 3; x <= x1 - (x1 - x0) / 3; ++x) {
+                const int p = hairEnd(photoClosed, x), g = hairEnd(groomClosed, x);
+                if (p >= 0 && g >= 0) offsets.push_back(static_cast<float>(g - p));
+            }
+        if (offsets.size() >= 3) {
+            out.hairlineFound = true;
+            out.hairlineOffset = median(offsets) * out.unitsPerPixel;
+        }
+    }
+    // The colors: the photo's hair as the look reads it (inside the mask by two pixels, its
+    // lookQuantile per channel, balanced by the backdrop's color and a dim photo brightened), the
+    // strands' appearance.
+    if (view.image.channels >= 3 && out.photoPixels > 0) {
+        const std::size_t channels = static_cast<std::size_t>(view.image.channels);
+        const std::array<float, 3> border = borderColor(view.image);
+        float balance[3];
+        const float grey = std::max(1e-3f, (srgbToLinear01(border[0]) + srgbToLinear01(border[1]) + srgbToLinear01(border[2])) / 3.0f);
+        for (int c = 0; c < 3; ++c) balance[c] = grey / std::max(1e-3f, srgbToLinear01(border[static_cast<std::size_t>(c)]));
+        std::vector<float> lum;
+        lum.reserve(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            float l = 0.0f;
+            const float k[3] = {0.2126f, 0.7152f, 0.0722f};
+            for (int c = 0; c < 3; ++c) l += k[c] * balance[c] * srgbToLinear01(view.image.pixels[i * channels + static_cast<std::size_t>(c)]);
+            lum.push_back(l);
+        }
+        float exposure = 1.0f;
+        if (options.lookExposure && !lum.empty()) {
+            const std::size_t at = static_cast<std::size_t>(0.995 * static_cast<double>(lum.size() - 1));
+            std::nth_element(lum.begin(), lum.begin() + static_cast<std::ptrdiff_t>(at), lum.end());
+            exposure = std::clamp(kPhotoWhite / std::max(lum[at], 1e-4f), 1.0f, 4.0f);
+        }
+        auto hair = [&](int x, int y) { return x >= 0 && y >= 0 && x < w && y < h && out.photoHair[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)]; };
+        std::vector<float> ch[3];
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                if (!hair(x, y) || !hair(x - 2, y) || !hair(x + 2, y) || !hair(x, y - 2) || !hair(x, y + 2)) continue;
+                const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
+                for (int c = 0; c < 3; ++c) ch[c].push_back(srgbToLinear01(view.image.pixels[i * channels + static_cast<std::size_t>(c)]) * balance[c] * exposure);
+            }
+        if (!ch[0].empty()) {
+            for (int c = 0; c < 3; ++c) {
+                const std::size_t at = static_cast<std::size_t>(options.lookQuantile * static_cast<double>(ch[c].size() - 1));
+                std::nth_element(ch[c].begin(), ch[c].begin() + static_cast<std::ptrdiff_t>(at), ch[c].end());
+                out.photoColor[static_cast<std::size_t>(c)] = std::clamp(ch[c][at], 1e-4f, 1.0f);
+            }
+            nearestMelanin(out.photoColor, out.photoMelanin, out.photoRedness);
+        }
+    }
+    if (strands.strandCount() > 0) {
+        const std::vector<std::array<float, 3>> colors = strandAppearanceColors(strands);
+        std::array<double, 3> sum{0, 0, 0};
+        for (const auto& c : colors)
+            for (int k = 0; k < 3; ++k) sum[static_cast<std::size_t>(k)] += c[static_cast<std::size_t>(k)];
+        for (int k = 0; k < 3; ++k) out.groomColor[static_cast<std::size_t>(k)] = static_cast<float>(sum[static_cast<std::size_t>(k)] / std::max<std::size_t>(1, colors.size()));
+        nearestMelanin(out.groomColor, out.groomMelanin, out.groomRedness);
+    }
     return out;
 }
 

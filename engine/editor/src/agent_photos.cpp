@@ -437,6 +437,30 @@ std::vector<std::uint8_t> meshCandidatesPng(const ScalpMesh& scalp, const RefCam
     return c.png();
 }
 
+std::vector<std::uint8_t> comparisonPng(const RefImage& image, const PhotoComparison& c, int maxSize) {
+    const float k = fitScale(image.width, image.height, maxSize);
+    Canvas canvas = Canvas::ofImage(image, k);
+    const Rgb green{0.2f, 1.0f, 0.35f}, magenta{1.0f, 0.25f, 0.85f};
+    auto at = [&](const std::vector<std::uint8_t>& m, int x, int y) {
+        return x >= 0 && y >= 0 && x < c.width && y < c.height && m[static_cast<std::size_t>(y) * static_cast<std::size_t>(c.width) + static_cast<std::size_t>(x)];
+    };
+    for (int y = 0; y < canvas.height(); ++y)
+        for (int x = 0; x < canvas.width(); ++x) {
+            const int px = std::min(c.width - 1, static_cast<int>((static_cast<float>(x) + 0.5f) / k));
+            const int py = std::min(c.height - 1, static_cast<int>((static_cast<float>(y) + 0.5f) / k));
+            const bool p = at(c.photoHair, px, py), g = at(c.groomHair, px, py);
+            canvas.set(x, y, {0.0f, 0.0f, 0.0f}, 0.35f);
+            if (p && !g) canvas.set(x, y, green, 0.45f);
+            if (g && !p) canvas.set(x, y, magenta, 0.45f);
+            const auto edge = [&](const std::vector<std::uint8_t>& m) {
+                return at(m, px, py) && (!at(m, px - 1, py) || !at(m, px + 1, py) || !at(m, px, py - 1) || !at(m, px, py + 1));
+            };
+            if (edge(c.photoHair)) canvas.set(x, y, green);
+            if (edge(c.groomHair)) canvas.set(x, y, magenta);
+        }
+    return canvas.png();
+}
+
 std::vector<std::uint8_t> photoOverlayPng(const RefImage& image, const ScalpMesh& scalp, const AgentPhoto& photo, int maxSize) {
     const float k = fitScale(image.width, image.height, maxSize);
     Canvas c = Canvas::ofImage(image, k);

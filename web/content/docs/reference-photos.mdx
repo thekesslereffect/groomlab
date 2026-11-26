@@ -185,9 +185,13 @@ stray from the hair, draw guide lines there and Generate again. Generate again r
 Maya undo step each time. While it works, the window shows a wait cursor, greys
 out its buttons and says what it is doing (Measured Look's Apply too).
 
+The guides fill the hair's volume: each is lifted off the scalp toward the thickness the photos'
+outlines show over it, so voluminous hair is not combed flat.
+
 **Measured Look** shows what the photos measure against what your graph has: the hair color (and
-lighter or darker tips), clumps (how far apart and how tight), curls, flyaways, frizz, and where the
-hair thins. Uncheck what you don't want and click **Apply**: the values are set in one undo step, and
+lighter or darker tips), clumps (how far apart and how tight), curls (or waves: a Curl node with
+their size), flyaways, frizz, and where the hair thins. The color is read as a melanin: dark brown
+in a softly lit studio photo comes out dark brown. Uncheck what you don't want and click **Apply**: the values are set in one undo step, and
 a Clump, Curl, frizz Noise or Flyaway node the graph lacks is added where it usually goes. Thinning
 becomes a vertex map (refDensity) on Scatter's density.
 
@@ -205,7 +209,7 @@ Generate, saved with the groom; the measured look is Maya's for now).
 What works so far: long hair and longer fur, one to three views, symmetry that covers the side a
 photo doesn't show, and guide lines that settle which way hair runs and how long it is.
 
-What doesn't yet: tight curls in three or more views, very short fur (too fine to read in the
+What doesn't yet: ringlets too tight for the photo's size, very short fur (too fine to read in the
 photo), and photos lit by colored light (the fitted color takes the light's tint).
 
 ```python

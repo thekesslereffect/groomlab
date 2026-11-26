@@ -3,24 +3,30 @@
 // from known silhouettes, the grower on a known field, and a small end-to-end case drawn from
 // known guides.
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "groomlab/color.h"
+#include "groomlab/hair_color.h"
 #include "groomlab/reference_guides.h"
+#include "groomlab/strand_set.h"
 
 namespace groomlab {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 
-ScalpMesh sphere(float radius, int rings = 24, int segments = 48) {
+// A ball, or its cap down to `thetaMax` from the top (+Y).
+ScalpMesh sphere(float radius, int rings = 24, int segments = 48, float thetaMax = kPi) {
     std::vector<Vec3f> points;
     std::vector<ScalpMesh::Triangle> tris;
     for (int r = 0; r <= rings; ++r) {
-        const float theta = kPi * static_cast<float>(r) / static_cast<float>(rings);
+        const float theta = thetaMax * static_cast<float>(r) / static_cast<float>(rings);
         for (int s = 0; s < segments; ++s) {
             const float phi = 2.0f * kPi * static_cast<float>(s) / static_cast<float>(segments);
             points.push_back(Vec3f(std::sin(theta) * std::sin(phi), std::cos(theta), std::sin(theta) * std::cos(phi)) * radius);
@@ -102,6 +108,243 @@ TEST(ReferenceGuides, OrientationFieldFindsTheStripesDirection) {
         EXPECT_GT(conf, 0.3f) << degrees;
         EXPECT_LT(angleBetween(f.angle[48 * 96 + 48], a), 3.0f) << degrees;
     }
+}
+
+// Hair hanging down a picture in locks, each strand a dark line on a light backdrop; each lock
+// swinging side to side by `amplitude` pixels every `wavelength` (0: straight), its own phase.
+RefImage lockedStrands(int size, float wavelength, float amplitude, std::uint32_t seed = 7) {
+    RefImage im = blank(size, size, 1, 0.75f);
+    std::uint32_t state = seed;
+    auto random = [&]() {
+        state = state * 1664525u + 1013904223u;
+        return static_cast<float>(state >> 8) / static_cast<float>(1u << 24);
+    };
+    const int lockWidth = 12;
+    for (int lock = 0; lock * lockWidth < size; ++lock) {
+        const float phase = 2.0f * kPi * random();
+        for (int s = 0; s < 5; ++s) {
+            const float x0 = static_cast<float>(lock * lockWidth) + 2.0f + 2.0f * static_cast<float>(s) + 0.6f * random();
+            const float shade = 0.1f + 0.15f * random();
+            for (float y = 0.0f; y < static_cast<float>(size); y += 0.25f) {
+                const float x = x0 + (wavelength > 0.0f ? amplitude * std::sin(2.0f * kPi * y / wavelength + phase) : 0.0f) + 0.3f * (random() - 0.5f);
+                const int xi = static_cast<int>(std::floor(x)), yi = static_cast<int>(y);
+                if (xi < 0 || xi >= size || yi >= size) continue;
+                im.pixels[static_cast<std::size_t>(yi * size + xi)] = shade;
+            }
+        }
+    }
+    return im;
+}
+
+TEST(ReferenceLook, CurlsAreTheFlowSwingingWithAPeriod) {
+    // Locks swinging every 24-48 pixels read as curls of that period, swinging widely (what
+    // guidesFromReference calls curly: kCurlShare 0.22 of the flow, over kCurlAmplitude 7.5 degrees);
+    // straight locks' flow hardly swings at all.
+    const int size = 256;
+    auto measure = [&](float wavelength, float amplitude) {
+        const RefImage im = lockedStrands(size, wavelength, amplitude);
+        const OrientationField fine = orientationField(im, RefImage{});
+        const OrientationField coarse = coarseField(fine, RefImage{}, 0.04f * static_cast<float>(size));
+        return measureCurl(fine, coarse, RefImage{});
+    };
+    const CurlEstimate straight = measure(0.0f, 0.0f);
+    EXPECT_GT(straight.streamlines, 500);
+    EXPECT_LT(straight.amplitude * 180.0f / kPi, 3.0f);
+    for (const auto& [wavelength, amplitude] : {std::pair{24.0f, 2.0f}, std::pair{32.0f, 4.0f}, std::pair{48.0f, 4.0f}}) {
+        const CurlEstimate c = measure(wavelength, amplitude);
+        EXPECT_GT(c.periodicShare, 0.3f) << wavelength;
+        EXPECT_GT(c.amplitude * 180.0f / kPi, 10.0f) << wavelength;
+        EXPECT_NEAR(c.wavelengthPx, wavelength, 0.15f * wavelength) << wavelength;
+    }
+}
+
+TEST(ReferenceLook, MelaninOfAppearanceIsHairColorsInverse) {
+    // Every melanin and redness back from its appearance (HairColor's model) ...
+    for (float m : {0.1f, 0.3f, 0.5f, 0.6f, 0.8f})
+        for (float r : {0.0f, 0.3f, 0.7f}) {
+            float melanin = -1.0f, redness = -1.0f;
+            const float error = melaninOfAppearance(hairAppearanceColor(melaninColor(m, r)), melanin, redness);
+            EXPECT_LT(error, 0.02f) << m << " " << r;
+            EXPECT_NEAR(melanin, m, 0.021f) << m << " " << r;
+            if (m <= 0.6f) EXPECT_NEAR(redness, r, 0.11f) << m << " " << r;  // (darker: redness hardly shows)
+        }
+    // ... and a dark brown photographed under softer light than the even dome (less of its highlight)
+    // as dark as it is, not a lighter brown's.
+    const std::array<float, 3> dome = hairAppearanceColor(melaninColor(0.6f, 0.0f));
+    std::array<float, 3> soft{};
+    for (std::size_t c = 0; c < 3; ++c) soft[c] = dome[c] - 0.6f * kAppearanceSheen;
+    float melanin = 0.0f, redness = 0.0f;
+    melaninOfAppearance(soft, melanin, redness);
+    EXPECT_NEAR(melanin, 0.6f, 0.04f);
+}
+
+// The synthetic round trip: a known groom on a ball's cap (the ball a whole head's stand-in, a neck
+// under it) photographed from four sides on a light backdrop. Strands from roots over the cap, lifted
+// off it (volume), along it away from the top, then hanging down past the ball's middle (short over
+// the face: a fringe); curling round their way with `curlWavelength` and `curlRadius` (0: straight).
+struct SyntheticShoot {
+    ScalpMesh cap;
+    std::shared_ptr<ScalpMesh> head;
+    std::vector<ReferenceView> views;
+};
+
+SyntheticShoot syntheticShoot(float melanin, float curlWavelength = 0.0f, float curlRadius = 0.0f) {
+    // (the cap the ball's own top 9 rings of 24: the same triangles)
+    const float capTheta = kPi * 9.0f / 24.0f;
+    SyntheticShoot shoot{sphere(1.0f, 9, 48, capTheta), std::make_shared<ScalpMesh>(sphere(1.0f, 24, 48)), {}};
+    std::vector<std::vector<Vec3f>> truth;
+    std::uint32_t state = 11;
+    auto random = [&]() {
+        state = state * 1664525u + 1013904223u;
+        return static_cast<float>(state >> 8) / static_cast<float>(1u << 24);
+    };
+    for (int i = 0; i < 6000; ++i) {
+        const float theta0 = std::acos(1.0f - random() * (1.0f - std::cos(capTheta - 0.05f))), phi = 2.0f * kPi * random();
+        const float phase = 2.0f * kPi * random();
+        std::vector<Vec3f> s;
+        float theta = theta0, y = 0.0f;
+        bool hanging = false;
+        const float length = std::cos(phi) > 0.4f ? 0.55f : 1.2f;
+        for (float t = 0.0f; t <= length; t += 0.01f) {
+            const float radius = 1.0f + std::min(0.2f, 0.8f * t);
+            Vec3f p, across, out;
+            if (!hanging) {
+                out = Vec3f(std::sin(theta) * std::sin(phi), std::cos(theta), std::sin(theta) * std::cos(phi));
+                p = out * radius;
+                across = Vec3f(std::cos(phi), 0.0f, -std::sin(phi));
+                theta += 0.01f / radius;
+                if (theta > 0.5f * kPi) {
+                    hanging = true;
+                    y = p.y;
+                }
+            } else {
+                y -= 0.01f;
+                out = Vec3f(std::sin(phi), 0.0f, std::cos(phi));
+                p = Vec3f(out.x * radius, y, out.z * radius);
+                across = Vec3f(std::cos(phi), 0.0f, -std::sin(phi));
+            }
+            if (curlWavelength > 0.0f) {
+                const float a = 2.0f * kPi * t / curlWavelength + phase;
+                p = p + (across * std::cos(a) + out * std::sin(a)) * (curlRadius * std::min(1.0f, t / 0.1f));
+            }
+            s.push_back(p);
+        }
+        truth.push_back(s);
+    }
+    const std::array<float, 3> hairColor = hairAppearanceColor(melaninColor(melanin, 0.1f));
+    const int size = 512;  // drawn at twice the photos' size, then halved (smooth edges, as a photo's)
+    for (const Vec3f& dir : {Vec3f(0, 0.25f, 1), Vec3f(1, 0.25f, 0), Vec3f(0, 0.25f, -1), Vec3f(-1, 0.25f, 0)}) {
+        ReferenceView v;
+        v.camera = camera(dir, 5.0f, size);
+        v.image = blank(size, size, 3, 0.75f);
+        std::vector<float> depth(static_cast<std::size_t>(size) * size, 1e9f);
+        const Vec3f eye = v.camera.eye();
+        // The ball and the neck (not an occluder: as a photo's neck and shoulders): skin, lit from
+        // the camera's side.
+        for (int y = 0; y < size; ++y)
+            for (int x = 0; x < size; ++x) {
+                const float du = static_cast<float>(x) + 0.5f - 0.5f * size, dv = static_cast<float>(y) + 0.5f - 0.5f * size;
+                const Vec3f ray = (v.camera.axis(0) * du - v.camera.axis(1) * dv - v.camera.axis(2) * static_cast<float>(v.camera.focalPx)).normalized();
+                float t = 1e9f;
+                Vec3f n;
+                const float b = eye.dot(ray), c = eye.dot(eye) - 1.0f, disc = b * b - c;
+                if (disc >= 0.0f) {
+                    t = -b - std::sqrt(disc);
+                    n = (eye + ray * t).normalized();
+                }
+                const float a2 = ray.x * ray.x + ray.z * ray.z, b2 = eye.x * ray.x + eye.z * ray.z, c2 = eye.x * eye.x + eye.z * eye.z - 0.25f;
+                const float disc2 = b2 * b2 - a2 * c2;
+                if (disc2 >= 0.0f && a2 > 1e-9f) {
+                    const float tc = (-b2 - std::sqrt(disc2)) / a2;
+                    const Vec3f q = eye + ray * tc;
+                    if (q.y < -0.45f && tc < t) {
+                        t = tc;
+                        n = Vec3f(q.x, 0.0f, q.z).normalized();
+                    }
+                }
+                if (t >= 1e9f) continue;
+                float hu = 0, hv = 0, hz = 0;
+                v.camera.project(eye + ray * t, hu, hv, &hz);
+                const float lit = 0.35f + 0.65f * std::max(0.0f, -n.dot(ray));
+                const float skin[3] = {0.85f, 0.62f, 0.5f};
+                for (int k = 0; k < 3; ++k) v.image.pixels[static_cast<std::size_t>((y * size + x) * 3 + k)] = skin[k] * lit;
+                depth[static_cast<std::size_t>(y * size + x)] = hz;
+            }
+        // The strands, each its own shade of the hair's color, two pixels wide, hidden behind the ball.
+        state = 5;
+        for (const auto& s : truth) {
+            const float shade = 0.6f + 0.8f * random();
+            for (std::size_t k = 1; k < s.size(); ++k)
+                for (int f = 0; f < 2; ++f) {
+                    const Vec3f p = s[k - 1] + (s[k] - s[k - 1]) * (static_cast<float>(f) / 2.0f);
+                    float u = 0, vv = 0, z = 0;
+                    if (!v.camera.project(p, u, vv, &z)) continue;
+                    for (int j = 0; j < 2; ++j) {
+                        const int x = static_cast<int>(u) + j, y = static_cast<int>(vv);
+                        if (x < 0 || y < 0 || x >= size || y >= size || z > depth[static_cast<std::size_t>(y * size + x)] + 0.01f) continue;
+                        for (int c = 0; c < 3; ++c)
+                            v.image.pixels[static_cast<std::size_t>((y * size + x) * 3 + c)] = linearToSrgb01(hairColor[static_cast<std::size_t>(c)] * shade);
+                    }
+                }
+        }
+        v.image = v.image.resized(size / 2, size / 2);
+        v.camera = camera(dir, 5.0f, size / 2);
+        for (float& p : v.image.pixels) p = std::round(p * 255.0f) / 255.0f;  // (8 bits, as a photo)
+        shoot.views.push_back(v);
+    }
+    return shoot;
+}
+
+// Grown back from its photos, the known groom's guides (a lock of strands round each) match each
+// photo's hair through its camera, and the look reads the hair's color.
+TEST(ReferenceGuidesEndToEnd, AKnownGroomGrowsBackFromItsPhotos) {
+    const SyntheticShoot shoot = syntheticShoot(0.6f);
+    ReferenceGuideOptions options;
+    options.symmetry = ReferenceSymmetry::None;
+    options.occluders.push_back(shoot.head);
+    options.guideCount = 200;
+    const ReferenceGuidesResult r = guidesFromReference(shoot.cap, shoot.views, options);
+    ASSERT_GT(r.guides.size(), 100u);
+    ASSERT_TRUE(r.look.ok);
+    EXPECT_NEAR(r.look.melanin, 0.6f, 0.08f);
+    EXPECT_FALSE(r.look.curly) << r.look.curlShare << " " << r.look.curlAmplitudeDeg;
+    StrandSet strands;
+    StrandId id = 1;
+    std::uint32_t state = 3;
+    auto random = [&]() {
+        state = state * 1664525u + 1013904223u;
+        return static_cast<float>(state >> 8) / static_cast<float>(1u << 24);
+    };
+    for (const ReferenceGuide& g : r.guides)
+        for (int k = 0; k < 12; ++k) {
+            const Vec3f shift(0.12f * (random() - 0.5f), 0.12f * (random() - 0.5f), 0.12f * (random() - 0.5f));
+            std::vector<Vec3f> pts;
+            for (std::size_t i = 0; i < g.points.size(); ++i) pts.push_back(g.points[i] + shift * (static_cast<float>(i) / static_cast<float>(g.points.size())));
+            strands.addStrand(id++, pts);
+        }
+    double sum = 0.0;
+    for (const ReferenceView& v : shoot.views) {
+        const PhotoComparison c = compareToPhoto(shoot.cap, strands, v, options);
+        EXPECT_GT(c.photoPixels, 2000);
+        EXPECT_GT(c.iou, 0.7) << c.missedShare << " " << c.extraShare;
+        EXPECT_NEAR(c.photoMelanin, 0.6f, 0.08f);
+        sum += c.iou;
+    }
+    EXPECT_GT(sum / static_cast<double>(shoot.views.size()), 0.74);
+}
+
+// The same groom curling: its photos read as curly, with about the curls' period.
+TEST(ReferenceGuidesEndToEnd, CurlyHairReadsAsCurly) {
+    const float wavelength = 0.25f;
+    const SyntheticShoot shoot = syntheticShoot(0.3f, wavelength, 0.04f);
+    ReferenceGuideOptions options;
+    options.symmetry = ReferenceSymmetry::None;
+    options.occluders.push_back(shoot.head);
+    options.guideCount = 100;
+    const ReferenceGuidesResult r = guidesFromReference(shoot.cap, shoot.views, options);
+    ASSERT_TRUE(r.look.ok);
+    EXPECT_TRUE(r.look.curly) << r.look.curlShare << " " << r.look.curlAmplitudeDeg;
+    EXPECT_NEAR(r.look.curlFrequency, 1.0f / wavelength, 0.3f / wavelength);
 }
 
 TEST(ReferenceLook, ClumpsAreTheBrightnessPeriodAcrossTheFlow) {
