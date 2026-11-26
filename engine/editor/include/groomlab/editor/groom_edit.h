@@ -53,6 +53,9 @@ struct GroomEdit {
     std::optional<std::pair<Subdivision, Subdivision>> subdivision;
     // Show Tubes' nodes before and after (a rename, a removal: the graph's edit).
     std::optional<std::pair<std::string, std::string>> braidTubes;
+    // The groom's reference photos before and after (groom_file.h "referencePhotos" text: the
+    // agent tools' photo edits, agent_photos.h), with `side`.
+    std::optional<std::pair<std::string, std::string>> referencePhotos;
     // A whole-graph step that only moved things (`whole` too): undone and redone without
     // evaluating.
     bool layout = false;

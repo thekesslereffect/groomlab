@@ -32,6 +32,11 @@ public:
     GroomFile toFile() override;
 
     GroomScene& scene() { return *scene_; }
+    // The scene made again from the groom as it is, its caches replaced where given (agent::ToolError
+    // for a cache that cannot be read: the groom left as it was).
+    void reopen(const agent::AnimationInputs& inputs);
+    // The Simulate nodes' bakes the groom names (saved with it).
+    std::map<std::string, SimCacheRef> bakes;
 
 private:
     std::unique_ptr<GroomScene> scene_;
@@ -49,6 +54,11 @@ public:
     void close(const std::string& name) override;
     std::shared_ptr<const ScalpMesh> readMesh(const std::string& path, const std::string& object) override;
     agent::ExportReport exportCurves(agent::AgentGroom& groom, const agent::ExportRequest& request) override;
+    void setAnimation(agent::AgentGroom& groom, const agent::AnimationInputs& inputs) override;
+    void writeMeshCache(const std::string& path, const std::string& name, const std::vector<std::shared_ptr<const ScalpMesh>>& frames,
+                        double startSeconds, double secondsPerFrame) override;
+    std::size_t bakeSimulation(agent::AgentGroom& groom, const std::string& node, const std::string& path, int first, int last) override;
+    void loadSimulationCache(agent::AgentGroom& groom, const std::string& node, const std::string& path, const std::string& object) override;
 
 private:
     agent::AgentFolders folders_;

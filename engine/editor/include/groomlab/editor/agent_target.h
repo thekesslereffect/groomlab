@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -106,6 +107,9 @@ public:
     // EditorHost: the edit's texts put back on the session, the graph first ("" or why it would
     // not load: then nothing changed).
     std::string apply(const GroomEdit& edit, bool after) override;
+    // A reference photos edit (the groom's referencePhotos text from `before` to `after`): one
+    // undo step named `label`.
+    void commitPhotos(const std::string& label, const std::string& after);
     // An edit applied and recorded as one undo step (the oldest past kMaxUndo dropped). Throws
     // ToolError (nothing changed) when the host cannot apply it.
     void commit(GroomEdit edit);
@@ -117,14 +121,27 @@ public:
     virtual AgentStrokeHost& strokeHost();
 
     std::string path;                // the .groom file it was opened from or last saved to ("" none)
+    std::string referencePhotos;     // the reference photos (groom_file.h "referencePhotos": agent_photos.h)
+    // How previews show the tube hierarchy (display.h): the Lock view's group and the Mixed view.
+    std::string tubeViewGroup, mixedView;
     std::string mesh;                // what it was made on (a new groom)
     double frame = 1.0;              // the frame it is evaluated at
     std::vector<GuideId> selection;  // the guides select_guides picked
+
+protected:
+    // The session was replaced (caches opened again): the stroke host made on the old one goes.
+    void dropStrokeHost() { strokes_.reset(); }
 
 private:
     std::string name_;
     EditHistory history_;
     std::unique_ptr<AgentStrokeHost> strokes_;
+};
+
+// What a groom's animated inputs come from (groom_file.h caches): set where given.
+struct AnimationInputs {
+    std::optional<CacheRef> scalpCache;  // the scalp over time (the same vertices); empty file: none
+    std::optional<CacheRef> guideCache;  // guide poses over time, by guide ID; empty file: none
 };
 
 // What export writes.
@@ -165,6 +182,20 @@ public:
     virtual std::shared_ptr<const ScalpMesh> readMesh(const std::string& path, const std::string& object) = 0;
     // The groom's strands written as curves over frames (export). Throws ToolError.
     virtual ExportReport exportCurves(AgentGroom& groom, const ExportRequest& request) = 0;
+    // ---- Animation and simulation (Alembic: the CLI's; others refuse, ToolError) ----
+    // The groom's animated inputs replaced (its caches opened again; its edits and history kept).
+    virtual void setAnimation(AgentGroom& groom, const AnimationInputs& inputs);
+    // An animated mesh written as a scalp cache: `frames` (the same topology) `secondsPerFrame`
+    // apart from `startSeconds`.
+    virtual void writeMeshCache(const std::string& path, const std::string& name,
+                                const std::vector<std::shared_ptr<const ScalpMesh>>& frames, double startSeconds,
+                                double secondsPerFrame);
+    // Simulate node `node`'s frames first..last written to `path` (simulated first) and read back as
+    // its bake (saved with the groom). Returns the frames written.
+    virtual std::size_t bakeSimulation(AgentGroom& groom, const std::string& node, const std::string& path, int first, int last);
+    // A simulation cache read as node `node`'s bake (made with its settings as they are now).
+    virtual void loadSimulationCache(AgentGroom& groom, const std::string& node, const std::string& path, const std::string& object);
+
     // A picture of the groom (render_preview): the CPU preview by default. Throws
     // std::invalid_argument for options it cannot draw.
     virtual PreviewImage preview(AgentGroom& groom, const ScalpMesh* scalp, const StrandSet* strands, const PreviewOptions& options);

@@ -53,7 +53,11 @@ const char* kInstructions =
     "and a preset (list_presets), look at it with render_preview, then refine: get_graph, "
     "describe_node, set_params, add_node. Groom guides by hand with brush_stroke (paths between "
     "scalp_landmarks such as crown and nape), select_guides, guide_op and paint_map, and check the "
-    "result with measure_guides and render_preview (guides, compare). Read get_docs for how a "
+    "result with measure_guides and render_preview (guides, compare, turntable, looks). Reference "
+    "photos: add_photo, mesh_landmarks, align_photo, guides_from_photos. Root tubes: root_tube, "
+    "tube_levels, tube_shape. Expressions: check_expression, then set_params. Simulation: "
+    "animate_scalp or import_animation, simulate, sim_cache. Games: export_cards, export_game. "
+    "Read get_docs for how a "
     "feature works. Every change is one step of undo, redo and history. Save with save_groom; "
     "export curves with export. Paths are relative to the server's root folder.";
 

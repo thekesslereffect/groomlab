@@ -18,7 +18,15 @@
 #include <set>
 #include <sstream>
 
+#include "groomlab/card_files.h"
+#include "groomlab/display.h"
+#include "groomlab/editor/agent_expressions.h"
 #include "groomlab/editor/agent_grooming.h"
+#include "groomlab/editor/agent_photos.h"
+#include "groomlab/editor/game_exports.h"
+#include "groomlab/root_subdivision.h"
+#include "groomlab/root_tubes.h"
+#include "groomlab/usd_writer.h"
 #include "groomlab/editor/guide_edits.h"
 #include "groomlab/editor/map_edits.h"
 #include "groomlab/flow.h"
@@ -48,6 +56,8 @@ constexpr std::size_t kMaxScriptBytes = 64u << 10;
 constexpr std::size_t kMaxExportFrames = 1000;
 constexpr std::size_t kMaxPreviewGuides = 20000;
 constexpr std::size_t kMaxStrokePoints = 4000;
+constexpr int kPhotoShown = 768;  // a photo's picture at most this many pixels across (default)
+constexpr int kMaxSimFrames = 1000;    // frames one simulate or sim_cache call steps
 // A stroke's radius when none is given, and a placed guide's length (where no guides are near to
 // copy): shares of the scalp's size.
 constexpr double kDefaultRadius = 0.12;
@@ -155,7 +165,24 @@ json tubeEditProperties() {
             {"twist", numberOrList("Turn of the section about the guide in radians (absolute). One number or a list root to tip.")},
             {"scaleWidth", prop("number", "Multiplies every width (after width), the taper kept.")},
             {"smooth", enumProp({"width", "aspect", "twist", "all"}, "Smooths those lists along the guide.")},
-            {"passes", prop("integer", "Smoothing passes (default 3).")}};
+            {"passes", prop("integer", "Smoothing passes (default 3).")},
+            {"midShape", prop("string", "A second shape the section blends to along the tube (\"\" none).")},
+            {"tipShape", prop("string", "The shape at the tip (\"\" none).")},
+            {"rootHold", prop("number", "0-1: how far the root's shape holds before blending.")},
+            {"midHold", prop("number", "0-1: how far the mid shape holds.")},
+            {"tipHold", prop("number", "0-1: how far the tip's shape holds.")},
+            {"midAt", prop("number", "0-1: where along the tube the mid shape sits (0.5).")}};
+}
+
+// render_preview's camera: a photo's, or one placed by eye and target.
+json cameraProperties() {
+    const json point = {{"type", json::array({"array", "string"})}, {"items", {{"type", "number"}}},
+                        {"description", "[x, y, z] or a landmark's name."}};
+    return {{"photo", prop("string", "Through a reference photo's lined-up camera (its shape), to compare with the photo.")},
+            {"eye", point}, {"target", point},
+            {"focal_mm", prop("number", "The focal length on a 36 mm film back (default 50).")},
+            {"width", prop("integer", "The image's width in pixels (default 768).")},
+            {"height", prop("integer", "The image's height in pixels (default 768).")}};
 }
 
 // A point or a landmark's name.
@@ -1072,6 +1099,14 @@ struct AgentTools::Impl {
                                         (ps.contains("max") ? ps["max"].dump() : "inf") + "], not " + value.dump());
                     }
                 }
+                // An expression is compiled first: its errors (with their place) come back now.
+                const bool exprParam = (value.is_object() && value.contains("expression") && value["expression"].is_string()) ||
+                                       (kind == "string" && param == "expression" && value.is_string());
+                if (exprParam) {
+                    const std::string text = value.is_object() ? value["expression"].get<std::string>() : value.get<std::string>();
+                    const ExpressionCheck check = checkExpression(text, {}, nullptr, nullptr, 0);
+                    if (!check.ok) throw ToolError(node + "." + param + ": the expression does not compile: " + check.error);
+                }
                 values[param] = value;
                 set.push_back(param);
             }
@@ -1380,6 +1415,14 @@ struct AgentTools::Impl {
                 o.guides.push_back(guide.points);
             }
         }
+        if (flag(a, "tubes", false) && guides) {
+            const double k = g.session().groomScale();
+            std::size_t drawn = 0;
+            for (const HierarchyGuide* guide : activeTubeGuides(*guides, "", "freeze", g.tubeViewGroup, g.mixedView)) {
+                if (++drawn > kMaxPreviewGuides / 4) break;
+                appendTubeWire(o.tubeLines, *guide, k > 0.0 ? static_cast<float>(k) : 1.0f, 6, 2);
+            }
+        }
         errors = view.errors;
         try {
             return target.preview(g, scalp.get(), strands.get(), o);
@@ -1399,12 +1442,51 @@ struct AgentTools::Impl {
                 o.views.push_back(v.get<std::string>());
             }
         }
+        if (a.contains("turntable")) {
+            if (a.contains("views")) throw ToolError("give views or turntable, not both");
+            const int n = static_cast<int>(num(a, "turntable", 8));
+            if (n < 2 || n > 12) throw ToolError("turntable takes 2 to 12 frames");
+            o.views.clear();
+            for (int i = 0; i < n; ++i) o.views.push_back("turn:" + json(360.0 * i / n).dump());
+        }
+        o.look = str(a, "look", "studio");
+        if (a.contains("camera")) {
+            const json& c = a["camera"];
+            checkArguments(objectSchema(cameraProperties()), c);
+            if (c.contains("photo")) {
+                std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+                const AgentPhoto& p = photoNamed(photos, c["photo"].get<std::string>());
+                if (!p.camera) throw ToolError("the photo '" + p.name + "' is not lined up yet (align_photo)");
+                o.camera = *p.camera;
+            } else {
+                if (!c.contains("eye") || !c.contains("target")) throw ToolError("camera takes a photo, or eye and target");
+                const ScalpLandmarks marks = landmarksOf(g);
+                const Vec3f eye = pointOrLandmark(c["eye"], marks, "camera.eye"), at = pointOrLandmark(c["target"], marks, "camera.target");
+                const int w = static_cast<int>(c.value("width", 768.0)), h = static_cast<int>(c.value("height", 768.0));
+                if (w < 16 || h < 16 || w > 8192 || h > 8192) throw ToolError("camera width and height are 16 to 8192 pixels");
+                const Vec3f z = (eye - at);
+                if (z.length() < 1e-6f) throw ToolError("the camera's eye and target are the same point");
+                const Vec3f back = z.normalized();
+                Vec3f up = marks.frame.up;
+                if (std::abs(up.dot(back)) > 0.99f) up = marks.frame.front;
+                const Vec3f x = up.cross(back).normalized(), y = back.cross(x);
+                RefCamera cam;
+                cam.width = w;
+                cam.height = h;
+                cam.focalPx = focalMmToPixels(c.value("focal_mm", 50.0), w);
+                auto part = [](const Vec3f& v, int r) { return static_cast<double>(r == 0 ? v.x : r == 1 ? v.y : v.z); };
+                for (int r = 0; r < 3; ++r) cam.pose.rotation[static_cast<std::size_t>(r)] = {part(x, r), part(y, r), part(back, r)};
+                cam.pose.position = {eye.x, eye.y, eye.z};
+                o.camera = cam;
+            }
+        }
         o.size = static_cast<int>(num(a, "size", 512));
         o.maxStrands = static_cast<std::size_t>(std::clamp(num(a, "max_strands", 50000.0), 100.0, 300000.0));
         o.zUp = g.upAxis() == "Z";
         const bool compare = flag(a, "compare", false);
         if (compare && !g.history().canUndo()) throw ToolError("compare needs an edit to compare with: this groom has none to undo");
-        json info = {{"groom", g.name()}, {"views", o.views}};
+        json info = {{"groom", g.name()}, {"views", o.camera ? json::array({"camera"}) : json(o.views)}, {"look", o.look}};
+        if (o.camera) info["camera"] = cameraInfo(*o.camera);
         ToolResult r;
         // Before the last edit: the step taken back for the picture, then done again.
         if (compare) {
@@ -1432,6 +1514,7 @@ struct AgentTools::Impl {
         info["strands"] = image.strandsTotal;
         info["strandsDrawn"] = image.strandsDrawn;
         if (flag(a, "guides", false)) info["guidesDrawn"] = "orange lines, yellow roots";
+        if (flag(a, "tubes", false)) info["tubesDrawn"] = "cyan wires" + std::string(g.mixedView.empty() ? "" : " (tube_levels view " + g.mixedView + ")");
         if (image.stride > 1) {
             info["note"] = "drew 1 in " + std::to_string(image.stride) + " strands (max_strands " + std::to_string(o.maxStrands) +
                            "): the preview looks thinner than the groom";
@@ -2091,6 +2174,952 @@ struct AgentTools::Impl {
                                      "(0 standing out, 90 lying flat)."}});
     }
 
+    // ---- reference photos ----
+    static ToolResult imageResult(const std::vector<std::uint8_t>& png, const json& info) {
+        ToolResult r;
+        r.content.push_back({{"type", "image"}, {"data", base64Encode(png)}, {"mimeType", "image/png"}});
+        r.content.push_back({{"type", "text"}, {"text", info.dump(-1, ' ', false, json::error_handler_t::replace)}});
+        return r;
+    }
+
+    static RefImage loadImage(const std::string& path, int channels) {
+        try {
+            return loadRefImage(path, channels);
+        } catch (const std::exception& e) {
+            throw ToolError("cannot read the image '" + path + "': " + e.what());
+        }
+    }
+
+    // A grid step that gives about ten lines across the photo: 10, 20, 25, 50, 100, 200, 250, 500...
+    static int gridStepFor(int width, int height) {
+        const double raw = std::max(width, height) / 10.0;
+        double base = 1.0;
+        while (base * 10.0 <= raw) base *= 10.0;
+        for (const double m : {1.0, 2.0, 2.5, 5.0, 10.0}) {
+            if (base * m >= raw) return std::max(10, static_cast<int>(base * m));
+        }
+        return static_cast<int>(base * 10.0);
+    }
+
+    // The photo named (or the only one; or by its number, 1 on).
+    static AgentPhoto& photoNamed(std::vector<AgentPhoto>& photos, const std::string& name) {
+        if (photos.empty()) throw ToolError("the groom has no photos: add one with add_photo");
+        if (name.empty()) {
+            if (photos.size() == 1) return photos.front();
+            throw ToolError("the groom has several photos: say which with \"photo\"");
+        }
+        for (AgentPhoto& p : photos) {
+            if (p.name == name) return p;
+        }
+        std::string names;
+        for (const AgentPhoto& p : photos) names += (names.empty() ? "" : ", ") + p.name;
+        throw ToolError("no photo '" + name + "' (photos: " + names + ")");
+    }
+
+    static json cameraInfo(const RefCamera& c) {
+        const Vec3f look = -c.axis(2);
+        return {{"eye", vec(c.eye())}, {"looking", vec(look)}, {"focal_mm", r4(focalPixelsToMm(c.focalPx, c.width))},
+                {"width", c.width}, {"height", c.height}};
+    }
+
+    ToolResult addPhoto(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const std::string path = files().resolve(str(a, "path"));
+        const RefImage image = loadImage(path, 3);
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        std::string name = str(a, "name", fs::u8path(path).stem().u8string());
+        checkName(name, "a photo's name");
+        auto taken = [&](const std::string& n) {
+            return std::any_of(photos.begin(), photos.end(), [&](const AgentPhoto& p) { return p.name == n; });
+        };
+        if (taken(name)) {
+            if (a.contains("name")) throw ToolError("a photo named '" + name + "' is there already");
+            const std::string base = name;
+            for (int i = 2; taken(name); ++i) name = base + "_" + std::to_string(i);
+        }
+        AgentPhoto p;
+        p.name = name;
+        p.image = path;
+        p.width = image.width;
+        p.height = image.height;
+        photos.push_back(p);
+        g.commitPhotos("add photo " + name, photosToJson(photos));
+        const int step = gridStepFor(p.width, p.height);
+        return imageResult(photoGridPng(image, p, step, kPhotoShown),
+                           {{"groom", g.name()}, {"photo", name}, {"width", p.width}, {"height", p.height}, {"grid", step},
+                            {"hint", "Line it up: mesh_landmarks shows numbered points of the mesh (from a side like the photo's), "
+                                     "then align_photo pairs photo pixels (read off the grid) with those points: 6 or more pairs "
+                                     "solve the focal length too, 4 keep it."}});
+    }
+
+    ToolResult photoView(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        const AgentPhoto& p = photoNamed(photos, str(a, "photo"));
+        const RefImage image = loadImage(p.image, 3);
+        const int step = a.contains("grid") ? static_cast<int>(num(a, "grid", 50)) : gridStepFor(p.width, p.height);
+        if (step < 8) throw ToolError("grid must be 8 pixels or more");
+        const int size = static_cast<int>(std::clamp(num(a, "size", kPhotoShown), 128.0, 1536.0));
+        std::optional<ReferenceViewPreview> preview;
+        json info = {{"groom", g.name()}, {"photo", p.name}, {"width", p.width}, {"height", p.height}, {"grid", step},
+                     {"linedUp", p.camera.has_value()}, {"landmarks", p.state.landmarks.summary("none")},
+                     {"flowArrows", p.state.strokes.size()}, {"maskTouchUps", p.state.maskStrokes.size()}};
+        if (flag(a, "analysis", false)) {
+            if (!p.camera) throw ToolError("analysis needs the photo lined up first (align_photo)");
+            ReferenceView view;
+            view.camera = *p.camera;
+            view.image = image;
+            if (!p.mask.empty()) view.mask = loadImage(p.mask, 1);
+            view.hints = p.state.strokes;
+            view.maskStrokes = p.state.maskStrokes;
+            preview = previewReferenceView(*scalpOf(g), view, ReferenceGuideOptions{});
+            info["analysis"] = "pink: the hair mask guides_from_photos reads; cyan: the strands' flow it reads";
+        }
+        int shownW = 0, shownH = 0;
+        const auto png = photoGridPng(image, p, step, size, preview ? &*preview : nullptr, &shownW, &shownH);
+        info["shown"] = {shownW, shownH};
+        info["note"] = "the grid's labels are the photo's own pixels (x right, y down from the top-left), whatever the size shown";
+        return imageResult(png, info);
+    }
+
+    ToolResult meshLandmarks(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr scalp = scalpOf(g);
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        const std::string view = str(a, "view", "front");
+        int width = 768, height = 768;
+        const AgentPhoto* photo = nullptr;
+        if (a.contains("photo") || view == "photo") photo = &photoNamed(photos, str(a, "photo"));
+        if (photo) {
+            width = photo->width;
+            height = photo->height;
+        }
+        RefCamera camera;
+        if (view == "photo") {
+            if (!photo->camera) throw ToolError("view photo needs the photo lined up (align_photo); pick a side instead");
+            camera = *photo->camera;
+        } else {
+            camera = viewCamera(*scalp, g.upAxis(), view, width, height, num(a, "focal_mm", 50.0));
+        }
+        const int count = static_cast<int>(std::clamp(num(a, "count", 24.0), 4.0, 80.0));
+        const std::vector<MeshCandidate> found = meshCandidates(*scalp, camera, count);
+        json points = json::array();
+        for (std::size_t i = 0; i < found.size(); ++i) {
+            points.push_back({{"n", i + 1}, {"p", vec(found[i].point)}, {"normal", vec(found[i].normal)},
+                              {"pixel", {std::round(found[i].u), std::round(found[i].v)}}});
+        }
+        const int size = static_cast<int>(std::clamp(num(a, "size", kPhotoShown), 128.0, 1536.0));
+        return imageResult(meshCandidatesPng(*scalp, camera, found, size),
+                           {{"groom", g.name()}, {"view", view}, {"camera", cameraInfo(camera)}, {"points", points},
+                            {"hint", "Find the same features on the photo (photo_view's grid gives their pixels) and pair them in "
+                                     "align_photo: {\"pixel\": [u, v], \"point\": p}. Pick points spread over the photo, not on a line; "
+                                     "pixel is where this camera sees each point (not the photo)."}});
+    }
+
+    ToolResult alignPhoto(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr scalp = scalpOf(g);
+        const ScalpLandmarks marks = landmarksOf(g);
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        AgentPhoto& p = photoNamed(photos, str(a, "photo"));
+        MarkerLists lists = flag(a, "append", false) ? p.state.landmarks : MarkerLists{};
+        if (lists.pendingCount() > 0) throw ToolError("the photo has a landmark without its partner: clear_landmarks with photo_edit first");
+        const json& pairs = a["pairs"];
+        if (pairs.empty() || pairs.size() > 200) throw ToolError("give 1 to 200 pairs");
+        for (std::size_t i = 0; i < pairs.size(); ++i) {
+            const json& pair = pairs[i];
+            const std::string where = "pairs[" + std::to_string(i) + "]";
+            if (!pair.is_object() || !pair.contains("pixel") || !pair.contains("point")) {
+                throw ToolError(where + " must be {\"pixel\": [u, v], \"point\": [x, y, z] or a landmark}");
+            }
+            const json& px = pair["pixel"];
+            if (!px.is_array() || px.size() != 2 || !px[0].is_number() || !px[1].is_number()) throw ToolError(where + ".pixel must be [u, v]");
+            const float u = px[0].get<float>(), v = px[1].get<float>();
+            if (u < 0.0f || v < 0.0f || u > static_cast<float>(p.width) || v > static_cast<float>(p.height)) {
+                throw ToolError(where + ".pixel lies outside the photo (" + std::to_string(p.width) + " x " + std::to_string(p.height) + ")");
+            }
+            MarkerPoint mesh;
+            const SurfacePoint at = scalp->closestPoint(pointOrLandmark(pair["point"], marks, (where + ".point").c_str()));
+            mesh.root = at.root;
+            mesh.point = at.position;
+            lists.add(kLandmarkPhoto, ReferencePhotoEditor::photoPoint(u, v));
+            lists.add(kLandmarkMesh, mesh);
+        }
+        double focal = p.camera && p.camera->focalPx > 0.0 ? p.camera->focalPx : focalMmToPixels(50.0, p.width);
+        if (a.contains("focal_mm")) focal = focalMmToPixels(num(a, "focal_mm", 50.0), p.width);
+        const bool keep = flag(a, "keep_focal", false);
+        const ReferenceLandmarkSolve solve =
+            solveReferenceLandmarks(lists, p.width, p.height, focal, keep, p.camera ? &p.camera->pose : nullptr, true);
+        p.state.landmarks = lists;
+        if (solve.ok) p.camera = solve.camera;
+        g.commitPhotos("align photo " + p.name, photosToJson(photos));
+        json info = {{"groom", g.name()}, {"photo", p.name}, {"pairs", solve.pairs}, {"linedUp", solve.ok}};
+        if (!solve.ok) {
+            info["why"] = solve.why;
+        } else {
+            info["rmsPixels"] = r4(solve.rms);
+            info["errorsPixels"] = json::array();
+            for (const double e : solve.errors) info["errorsPixels"].push_back(r4(e));
+            json bad = json::array();
+            for (std::size_t i = 0; i < solve.bad.size(); ++i) {
+                if (solve.bad[i]) bad.push_back(i + 1);
+            }
+            if (!bad.empty()) info["badPairs"] = bad;
+            info["focalSolved"] = solve.focalSolved;
+            info["camera"] = cameraInfo(solve.camera);
+            info["hint"] = std::string("The image: the mesh's outline (cyan) over the photo, each pair's photo point (green ring) "
+                                       "joined to its mesh point through the camera (red). ") +
+                           (bad.empty() ? "Under about 1% of the photo's width is lined up." : "Fix or drop the pairs listed in badPairs first.");
+        }
+        const RefImage image = loadImage(p.image, 3);
+        return imageResult(photoOverlayPng(image, *scalp, p, kPhotoShown), info);
+    }
+
+    ToolResult photoEdit(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        AgentPhoto& p = photoNamed(photos, str(a, "photo"));
+        const std::string op = str(a, "op");
+        auto pixels = [&]() {
+            if (!a.contains("points")) throw ToolError(op + " needs \"points\": [[u, v], ...] in the photo's pixels");
+            std::vector<std::array<float, 2>> out;
+            for (const json& q : a["points"]) {
+                if (!q.is_array() || q.size() != 2 || !q[0].is_number() || !q[1].is_number()) throw ToolError("points are [u, v] pixels");
+                out.push_back({q[0].get<float>(), q[1].get<float>()});
+            }
+            return out;
+        };
+        const std::string name = p.name;
+        ReferencePhotoEditor editor(p.state);
+        json info = {{"groom", g.name()}, {"photo", name}, {"op", op}};
+        if (op == "add_flow") {
+            editor.addStroke(pixels(), flag(a, "directed", true));
+        } else if (op == "erase_flow") {
+            info["erased"] = editor.eraseStrokes(pixels(), static_cast<float>(num(a, "radius", 10.0)));
+        } else if (op == "clear_flow") {
+            editor.clearStrokes();
+        } else if (op == "add_mask") {
+            editor.addMaskStroke(pixels(), static_cast<float>(num(a, "radius", 8.0)), flag(a, "include", true));
+        } else if (op == "clear_mask") {
+            editor.clearMaskStrokes();
+        } else if (op == "remove_landmark") {
+            const int index = static_cast<int>(num(a, "index", 0));
+            if (index < 1 || static_cast<std::size_t>(index) > editor.landmarks().count(kLandmarkPhoto)) {
+                throw ToolError("index is a landmark pair's number, 1 to " + std::to_string(editor.landmarks().count(kLandmarkPhoto)));
+            }
+            editor.removeLandmark(kLandmarkPhoto, static_cast<std::size_t>(index - 1));
+        } else if (op == "clear_landmarks") {
+            editor.clearLandmarks();
+        } else if (op == "set_mask") {
+            if (!a.contains("path")) throw ToolError("set_mask needs \"path\": a mask image (white hair, black backdrop), or \"\" for none");
+            p.mask = str(a, "path").empty() ? std::string() : files().resolve(str(a, "path"));
+            if (!p.mask.empty()) loadImage(p.mask, 1);
+        } else if (op == "remove_photo") {
+            photos.erase(std::find_if(photos.begin(), photos.end(), [&](const AgentPhoto& x) { return x.name == name; }));
+            g.commitPhotos("remove photo " + name, photosToJson(photos));
+            info["photos"] = photos.size();
+            return textResult(info);
+        }
+        if (op != "set_mask") p.state = editor.state();
+        g.commitPhotos(op + " on " + name, photosToJson(photos));
+        const RefImage image = loadImage(p.image, 3);
+        info["flowArrows"] = p.state.strokes.size();
+        info["maskTouchUps"] = p.state.maskStrokes.size();
+        info["landmarks"] = p.state.landmarks.summary("none");
+        return imageResult(photoGridPng(image, p, gridStepFor(p.width, p.height), kPhotoShown), info);
+    }
+
+    ToolResult guidesFromPhotos(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr scalp = scalpOf(g);
+        const std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        std::vector<ReferenceView> views;
+        json used = json::array();
+        for (const AgentPhoto& p : photos) {
+            if (!p.camera) continue;
+            ReferenceView view;
+            view.camera = *p.camera;
+            view.image = loadImage(p.image, 3);
+            if (!p.mask.empty()) view.mask = loadImage(p.mask, 1);
+            view.hints = p.state.strokes;
+            view.maskStrokes = p.state.maskStrokes;
+            views.push_back(std::move(view));
+            used.push_back(p.name);
+        }
+        if (views.empty()) throw ToolError(photos.empty() ? "the groom has no photos: add_photo, then align_photo"
+                                                           : "no photo is lined up yet: align_photo first");
+        ReferenceGuideOptions options;
+        options.guideCount = static_cast<int>(std::clamp(num(a, "guide_count", 300.0), 10.0, 5000.0));
+        options.maxLength = static_cast<float>(num(a, "max_length", 0.0));
+        options.symmetry = referenceSymmetryFromName(str(a, "symmetry", "auto"));
+        options.up = upOf(g);
+        const ReferenceGuidesResult result = guidesFromReference(*scalp, views, options);
+        const std::string groupName = str(a, "group", "fromReference");
+        checkName(groupName, "a group's name");
+        std::size_t added = 0;
+        edit(g, "guides from photos", [&](std::string&, std::string& hierarchy) {
+            GuideHierarchy h = hierarchyOf(g);
+            const GroupId old = h.findGroup(groupName);
+            if (old != kNoGroup) h.removeGroup(old);
+            const GroupId group = h.addGroup(groupName);
+            for (const ReferenceGuide& rg : result.guides) {
+                if (rg.points.size() < 2) continue;
+                h.addGuide(group, rg.points);
+                ++added;
+            }
+            h.evaluate(scalp.get());
+            hierarchy = h.toJson();
+        });
+        json out = {{"group", groupName}, {"guides", added}, {"photos", used}, {"symmetry", referenceSymmetryName(result.symmetry)},
+                    {"rootsTried", result.rootsTried}, {"rootsBald", result.rootsBald}, {"rootsUnseen", result.rootsUnseen},
+                    {"rootsShort", result.rootsShort}, {"maxLength", r4(result.maxLength)}, {"seconds", r4(result.seconds)}};
+        const ReferenceLookFit& look = result.look;
+        if (look.ok) {
+            out["look"] = {{"melanin", r4(look.melanin)}, {"redness", r4(look.redness)}, {"baseColor", {r4(look.baseColor[0]), r4(look.baseColor[1]), r4(look.baseColor[2])}},
+                           {"curly", look.curly}, {"curlFrequency", r4(look.curlFrequency)}, {"curlRadius", r4(look.curlRadius)},
+                           {"clumped", look.clumped}, {"clumpSize", r4(look.clumpSize)}, {"clumpStrength", r4(look.clumpStrength)},
+                           {"flyawayFraction", r4(look.flyawayFraction)}, {"frizzFraction", r4(look.frizzFraction)},
+                           {"coverage", r4(look.coverage)}};
+            out["lookHint"] = "What the photos suggest for HairColor (melanin, redness), Curl (frequency, radius), Clump (size, "
+                              "strength) and Flyaway: set them with set_params if they fit.";
+        }
+        return textResult(withSummary(g, out));
+    }
+
+    // ---- roots and tubes ----
+    // A closed outline on the scalp: the points given, or a circle of `radius` round `center`.
+    std::vector<Vec3f> rootOutline(const json& a, const ScalpMesh& scalp, const ScalpLandmarks& marks) {
+        std::vector<Vec3f> outline;
+        if (a.contains("outline")) {
+            for (const json& p : a["outline"]) outline.push_back(scalp.closestPoint(pointOrLandmark(p, marks, "outline")).position);
+            return outline;
+        }
+        if (!a.contains("center")) throw ToolError("give the root: \"outline\" (points round it on the scalp) or \"center\" and \"radius\"");
+        const SurfacePoint c = scalp.closestPoint(pointOrLandmark(a["center"], marks, "center"));
+        const float radius = static_cast<float>(num(a, "radius", 0.04 * marks.size));
+        if (!(radius > 0.0f)) throw ToolError("radius must be positive");
+        const int sides = static_cast<int>(std::clamp(num(a, "sides", 8.0), 3.0, 64.0));
+        const Vec3f n = c.normal.normalized();
+        Vec3f t = std::abs(n.dot(marks.frame.up)) < 0.9f ? marks.frame.up : marks.frame.front;
+        t = (t - n * t.dot(n)).normalized();
+        const Vec3f b = n.cross(t);
+        for (int i = 0; i < sides; ++i) {
+            const float angle = 6.2831853f * static_cast<float>(i) / static_cast<float>(sides);
+            outline.push_back(scalp.closestPoint(c.position + (t * std::cos(angle) + b * std::sin(angle)) * radius).position);
+        }
+        return outline;
+    }
+
+    std::vector<GuideId> givenGuides(const json& a, AgentGroom& g) {
+        if (!a.contains("guides")) return g.selection;
+        std::vector<GuideId> out;
+        for (const json& id : a["guides"]) {
+            if (!id.is_number_integer()) throw ToolError("guides are guide ids");
+            out.push_back(id.get<GuideId>());
+        }
+        return out;
+    }
+
+    // The scalp with the vertex maps on it (the subdivision density reads its color set).
+    MeshPtr mappedScalp(AgentGroom& g, const MeshPtr& scalp) {
+        std::vector<std::string> errors;
+        const MeshPtr mapped = withVertexMaps(scalp, g.session().scalpMaps(), {}, nullptr, &errors);
+        return mapped ? mapped : scalp;
+    }
+
+    ToolResult rootTube(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr scalp = scalpOf(g);
+        const ScalpLandmarks marks = landmarksOf(g);
+        const std::string op = str(a, "op");
+        json out = {{"op", op}};
+        if (op == "list") {
+            const GuideHierarchy h = authored(g);
+            json roots = json::array();
+            for (const GuideId id : rootTubesOf(h)) {
+                const HierarchyGuide* guide = h.guide(id);
+                const ScalpPointNormal c = rootTubeCenter(h, *scalp, id);
+                const GuideGroup* gr = guide ? h.group(guide->group) : nullptr;
+                roots.push_back({{"id", id}, {"group", gr ? gr->name : std::string()}, {"center", vec(c.point)},
+                                 {"cvs", rootTubeOutline(h, *scalp, id).size()}, {"points", guide ? guide->points.size() : 0}});
+            }
+            out["roots"] = roots;
+            out["subdivisionMap"] = kSubdivisionDensityMap;
+            return textResult(out);
+        }
+        RootTubeOptions options;
+        options.length = static_cast<float>(num(a, "length", 0.3 * marks.size));
+        options.segments = static_cast<int>(std::clamp(num(a, "segments", 12.0), 1.0, 200.0));
+        options.taper = static_cast<float>(num(a, "taper", 0.5));
+        options.density = static_cast<float>(num(a, "density", 1.0));
+        options.group = str(a, "group");
+        RootSubdivisionOptions cut;
+        cut.sizeAtZero = static_cast<float>(num(a, "size_at_zero", cut.sizeAtZero));
+        cut.sizeAtOne = static_cast<float>(num(a, "size_at_one", cut.sizeAtOne));
+        cut.multiplier = static_cast<float>(num(a, "multiplier", cut.multiplier));
+        if (a.contains("seed")) cut.seed = static_cast<std::uint64_t>(std::max(0.0, num(a, "seed", 0.0)));
+        cut.force = flag(a, "force", false);
+        const std::vector<GuideId> guides = givenGuides(a, g);
+        std::string label = "root tube " + op;
+        std::vector<GuideId> made;
+        edit(g, label, [&](std::string&, std::string& hierarchy) {
+            GuideHierarchy h = hierarchyOf(g);
+            h.evaluate(scalp.get());
+            if (op == "draw") {
+                std::vector<Vec3f> path;
+                if (a.contains("path")) {
+                    for (const json& p : a["path"]) path.push_back(pointOrLandmark(p, marks, "path"));
+                }
+                made.push_back(makeRootTube(h, *scalp, rootOutline(a, *scalp, marks), path, options));
+            } else if (op == "edit_outline") {
+                if (guides.size() != 1) throw ToolError("edit_outline takes one root tube (guides: [id])");
+                editRootTube(h, *scalp, guides.front(), rootOutline(a, *scalp, marks));
+                made.push_back(guides.front());
+            } else if (op == "duplicate") {
+                if (!a.contains("to")) throw ToolError("duplicate needs \"to\": where the copy goes (a point or landmark)");
+                const std::vector<GuideId> roots = rootTubesOf(h, guides);
+                if (roots.empty()) throw ToolError("no root tube given or selected (root_tube list lists them)");
+                const Vec3f to = scalp->closestPoint(pointOrLandmark(a["to"], marks, "to")).position;
+                const Vec3f start = rootTubeCenter(h, *scalp, roots.front()).point;
+                for (const GuideId id : roots) made.push_back(duplicateRootTube(h, *scalp, id, to, roots.size() > 1 ? &start : nullptr));
+            } else if (op == "delete") {
+                const std::vector<GuideId> roots = rootTubesOf(h, guides);
+                if (roots.empty()) throw ToolError("no root tube given or selected");
+                out["removed"] = deleteRootTubes(h, *scalp, roots);
+            } else if (op == "subdivide" || op == "apply_density") {
+                const MeshPtr mapped = mappedScalp(g, scalp);
+                const SubdivisionResult r = op == "subdivide" ? subdivideRootTubes(h, *mapped, guides, cut)
+                                                              : applySubdivisionDensity(h, *mapped, guides, cut);
+                made = r.cells;
+                out["removed"] = r.removed;
+                out["kept"] = r.kept;
+                out["cellLevel"] = r.cellLevel;
+            } else {
+                throw ToolError("op is list, draw, edit_outline, duplicate, delete, subdivide or apply_density");
+            }
+            h.evaluate(scalp.get());
+            hierarchy = h.toJson();
+        });
+        out["guides"] = made;
+        if (op == "subdivide") {
+            out["densityHint"] = std::string("Paint where the cells are smaller with paint_map {\"map\": \"") + kSubdivisionDensityMap +
+                                 "\", \"initial\": 0.5} (1 smallest, 0 largest), then root_tube apply_density.";
+        }
+        keepSelected(g);
+        return textResult(withSummary(g, out));
+    }
+
+    ToolResult tubeLevelsTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr scalp = scalpOf(g);
+        const std::string op = str(a, "op", "list");
+        const std::vector<GuideId> guides = givenGuides(a, g);
+        const std::string picked = str(a, "group");
+        json out = {{"op", op}};
+        auto describe = [&](const GuideHierarchy& h) {
+            const TubeLevels levels = tubeLevels(h, guides, picked);
+            json list = json::array();
+            for (std::size_t i = 0; i < levels.levels.size(); ++i) {
+                const GroupId gr = h.findGroup(levels.levels[i]);
+                list.push_back({{"level", i + 1}, {"group", levels.levels[i]}, {"tubes", gr == kNoGroup ? 0 : h.guidesInGroup(gr).size()}});
+            }
+            out["base"] = levels.base;
+            out["levels"] = list;
+            return levels;
+        };
+        if (op == "list") {
+            describe(authored(g));
+        } else if (op == "add" || op == "remove") {
+            std::size_t count = 0;
+            edit(g, op == "add" ? "add tube level" : "remove tube level", [&](std::string&, std::string& hierarchy) {
+                GuideHierarchy h = hierarchyOf(g);
+                h.evaluate(scalp.get());
+                if (op == "add") {
+                    count = addTubeLevel(h, scalp.get(), guides, picked);
+                } else {
+                    const TubeLevels levels = tubeLevels(h, guides, picked);
+                    count = removeTubeLevel(h, scalp.get(), levels.base, a.contains("guides") ? guides : std::vector<GuideId>{});
+                }
+                h.evaluate(scalp.get());
+                hierarchy = h.toJson();
+            });
+            out[op == "add" ? "split" : "removed"] = count;
+            describe(authored(g));
+        } else if (op == "view") {
+            const TubeLevels levels = describe(authored(g));
+            const int level = static_cast<int>(num(a, "level", 0));
+            if (level < 0 || level > static_cast<int>(levels.levels.size())) {
+                throw ToolError("level is 1 to " + std::to_string(levels.levels.size()) + " (0: every level)");
+            }
+            g.mixedView = level > 0 ? levels.base + ":" + std::to_string(level) + (flag(a, "mixed", true) ? "" : ":solo") : std::string();
+            g.tubeViewGroup = str(a, "pin");
+            out["mixedView"] = g.mixedView;
+            out["pinned"] = g.tubeViewGroup;
+            out["note"] = "render_preview with tubes: true draws the tubes as this view shows them (not saved with the groom).";
+            return textResult(out);
+        } else {
+            throw ToolError("op is list, add, remove or view");
+        }
+        return textResult(op == "list" ? out : withSummary(g, out));
+    }
+
+    ToolResult tubeShapeTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr scalp = scalpOf(g);
+        const std::string op = str(a, "op", "list");
+        if (op == "list") {
+            const GuideHierarchy h = authored(g);
+            json library = json::array();
+            for (const auto& [name, shape] : h.tubeShapes()) {
+                if (!isOwnedTubeShape(name)) library.push_back(name);
+            }
+            return textResult({{"builtin", tubeShapeNames()}, {"library", library},
+                               {"hint", "set_tube or guide_op edit_tubes give guides a shape by name (shape, midShape, tipShape)."}});
+        }
+        TubeShapeOp shape;
+        shape.op = op;
+        shape.name = str(a, "name");
+        shape.to = str(a, "to");
+        if (a.contains("points")) {
+            std::vector<SectionPoint> pts;
+            for (const json& q : a["points"]) {
+                if (!q.is_array() || q.size() != 2 || !q[0].is_number() || !q[1].is_number()) throw ToolError("points are [u, v] pairs");
+                pts.push_back({q[0].get<float>(), q[1].get<float>()});
+            }
+            shape.points = pts;
+        }
+        if (a.contains("smooth")) shape.smooth = flag(a, "smooth", true);
+        if (flag(a, "give", false)) shape.give = givenGuides(a, g);
+        shape.profile = str(a, "profile", "shape");
+        std::size_t count = 0;
+        edit(g, tubeShapeLabel(shape), [&](std::string&, std::string& hierarchy) {
+            GuideHierarchy h = hierarchyOf(g);
+            h.evaluate(scalp.get());
+            count = editTubeShape(h, shape);
+            h.evaluate(scalp.get());
+            hierarchy = h.toJson();
+        });
+        return textResult(withSummary(g, {{"op", op}, {"shape", op == "rename" ? shape.to : shape.name}, {"guides", count}}));
+    }
+
+    // ---- expressions ----
+    ToolResult checkExpressionTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        std::vector<std::pair<std::string, float>> constants;
+        if (a.contains("variables")) {
+            try {
+                constants = parseExpressionVariables(a["variables"].dump());
+            } catch (const std::exception& e) {
+                throw ToolError(std::string("variables: ") + e.what());
+            }
+        }
+        const std::string type = str(a, "type", "any");
+        const ExpressionType want = type == "number" ? ExpressionType::Number : type == "vector" ? ExpressionType::Vector : ExpressionType::Any;
+        ViewRequest request;
+        request.viewNode = str(a, "node");
+        request.time = frameToSeconds(g.frame, g.framesPerSecond());
+        const ViewResult& view = g.view(request);
+        const StrandsPtr strands = view.strands;
+        const MeshPtr scalp = view.scalp ? view.scalp : g.session().scalp();
+        const std::size_t samples = static_cast<std::size_t>(std::clamp(num(a, "samples", 2000.0), 10.0, 100000.0));
+        const ExpressionCheck c = checkExpression(str(a, "expression"), constants, strands.get(), scalp.get(), samples, want);
+        json out = {{"ok", c.ok}};
+        if (!c.ok) {
+            out["error"] = c.error;
+            out["hint"] = "Fix the expression where the error says (positions count from 0, lines and columns from 1) and check again.";
+        } else {
+            out["type"] = c.vector ? "vector" : "number";
+            out["perPoint"] = c.perPoint;
+            out["readsTime"] = c.readsTime;
+            out["variables"] = c.variables;
+            out["channels"] = c.channels;
+            if (!c.missingChannels.empty()) out["missingChannels"] = c.missingChannels;
+            out["maps"] = c.maps;
+            if (!c.error.empty()) out["warning"] = c.error;
+            out["sampledOver"] = c.sampledOver;
+            out["samples"] = c.samples;
+            if (c.samples > 0) {
+                out["values"] = {{"min", r4(c.min)}, {"mean", r4(c.mean)}, {"max", r4(c.max)}, {"histogram", c.histogram}};
+                if (c.vector) out["valuesAre"] = "the vectors' lengths";
+                json ex = json::array();
+                for (const auto& [where, value] : c.examples) ex.push_back({where, r4(value)});
+                out["examples"] = ex;
+            }
+            out["hint"] = "Set it on a mappable param with set_params: {\"param\": {\"expression\": \"<text>\", \"min\": lo, "
+                          "\"max\": hi}} (the value 0-1 maps onto min..max), or on an Expression node's expression param.";
+        }
+        json available = json::object();
+        for (const auto& [name, about] : expressionVariables()) available[name] = about;
+        if (strands) {
+            json channels = json::array();
+            for (const std::string& n : strands->strandChannelNames()) channels.push_back(n);
+            for (const std::string& n : strands->pointChannelNames()) channels.push_back(n + " (per point)");
+            out["strandChannels"] = channels;
+        }
+        out["available"] = available;
+        return textResult(out);
+    }
+
+    // ---- simulation ----
+    ToolResult importAnimation(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        AnimationInputs inputs;
+        auto cache = [&](const char* fileKey, const char* objectKey) -> std::optional<CacheRef> {
+            if (!a.contains(fileKey)) return std::nullopt;
+            CacheRef ref;
+            const std::string file = str(a, fileKey);
+            if (!file.empty()) {
+                ref.file = files().resolve(file);
+                if (!hasExtension(ref.file, ".abc")) throw ToolError(std::string(fileKey) + " is an Alembic (.abc) file");
+            }
+            ref.object = str(a, objectKey);
+            return ref;
+        };
+        inputs.scalpCache = cache("scalp_cache", "scalp_object");
+        inputs.guideCache = cache("guide_cache", "guide_object");
+        json out = json::object();
+        if (inputs.scalpCache || inputs.guideCache) {
+            target.setAnimation(g, inputs);
+            if (inputs.scalpCache) out["scalpCache"] = inputs.scalpCache->file.empty() ? "none" : files().shown(inputs.scalpCache->file);
+            if (inputs.guideCache) out["guideCache"] = inputs.guideCache->file.empty() ? "none" : files().shown(inputs.guideCache->file);
+        }
+        if (a.contains("colliders")) {
+            json made = json::array();
+            for (const json& c : a["colliders"]) {
+                if (!c.is_object() || !c.contains("name") || !c.contains("path")) throw ToolError("colliders are {\"name\", \"path\", \"object\"}");
+                const std::string name = c["name"].get<std::string>();
+                checkName(name, "a collider's name");
+                const std::string path = files().resolve(c["path"].get<std::string>());
+                g.session().setMesh(name, target.readMesh(path, c.value("object", std::string())));
+                made.push_back(name);
+            }
+            out["colliders"] = made;
+            out["colliderHint"] = "A Collide (or Simulate) node reads a collider through a ColliderMesh node naming it.";
+        }
+        if (out.empty()) throw ToolError("give scalp_cache, guide_cache or colliders");
+        out["note"] = "Animation inputs are the groom's scene, not an edit: undo does not take them back.";
+        return textResult(withSummary(g, out));
+    }
+
+    ToolResult animateScalp(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const ScalpLandmarks marks = landmarksOf(g);
+        const GroomFile file = g.toFile();
+        const MeshPtr base = file.data.scalp;
+        if (!base) throw ToolError("the groom has no scalp");
+        struct Key {
+            double frame;
+            Vec3f translate, rotate;
+        };
+        std::vector<Key> keys;
+        for (const json& k : a["keys"]) {
+            if (!k.is_object() || !k.contains("frame") || !k["frame"].is_number()) throw ToolError("keys are {\"frame\", \"translate\", \"rotate_degrees\"}");
+            Key key{k["frame"].get<double>(), Vec3f(0, 0, 0), Vec3f(0, 0, 0)};
+            if (k.contains("translate")) key.translate = toPoint(k["translate"], "translate");
+            if (k.contains("rotate_degrees")) key.rotate = toPoint(k["rotate_degrees"], "rotate_degrees");
+            keys.push_back(key);
+        }
+        if (keys.size() < 2) throw ToolError("give 2 keys or more");
+        std::sort(keys.begin(), keys.end(), [](const Key& x, const Key& y) { return x.frame < y.frame; });
+        const int first = static_cast<int>(std::floor(num(a, "first", keys.front().frame)));
+        const int last = static_cast<int>(std::ceil(num(a, "last", keys.back().frame)));
+        if (last <= first || last - first > 1000) throw ToolError("the frames run first to last, 2 to 1001 of them");
+        const Vec3f pivot = a.contains("pivot") ? pointOrLandmark(a["pivot"], marks, "pivot") : marks.middle;
+        auto valueAt = [&](double f) {
+            if (f <= keys.front().frame) return std::make_pair(keys.front().translate, keys.front().rotate);
+            if (f >= keys.back().frame) return std::make_pair(keys.back().translate, keys.back().rotate);
+            std::size_t i = 1;
+            while (keys[i].frame < f) ++i;
+            const Key& k0 = keys[i - 1];
+            const Key& k1 = keys[i];
+            double t = (f - k0.frame) / std::max(1e-9, k1.frame - k0.frame);
+            t = t * t * (3.0 - 2.0 * t);  // (eased: no jolt at the keys)
+            const float s = static_cast<float>(t);
+            return std::make_pair(k0.translate + (k1.translate - k0.translate) * s, k0.rotate + (k1.rotate - k0.rotate) * s);
+        };
+        std::vector<std::shared_ptr<const ScalpMesh>> frames;
+        for (int f = first; f <= last; ++f) {
+            const auto [move, turn] = valueAt(f);
+            const CameraMat3 r = rotationFromEulerXYZDegrees({turn.x, turn.y, turn.z});
+            std::vector<Vec3f> points = base->points();
+            for (Vec3f& p : points) {
+                const Vec3f d = p - pivot;
+                const Vec3f q(static_cast<float>(r[0][0] * d.x + r[0][1] * d.y + r[0][2] * d.z),
+                              static_cast<float>(r[1][0] * d.x + r[1][1] * d.y + r[1][2] * d.z),
+                              static_cast<float>(r[2][0] * d.x + r[2][1] * d.y + r[2][2] * d.z));
+                p = pivot + q + move;
+            }
+            frames.push_back(std::make_shared<ScalpMesh>(base->withPoints(std::move(points))));
+        }
+        const std::string path = files().resolveForWrite(str(a, "path", "anim/" + g.name() + "_scalp.abc"));
+        if (!hasExtension(path, ".abc")) throw ToolError("path is an Alembic (.abc) file");
+        const double fps = g.framesPerSecond();
+        target.writeMeshCache(path, "scalp", frames, frameToSeconds(first, fps), 1.0 / fps);
+        AnimationInputs inputs;
+        inputs.scalpCache = CacheRef{path, {}};
+        target.setAnimation(g, inputs);
+        return textResult(withSummary(g, {{"path", files().shown(path)}, {"frames", frames.size()}, {"first", first}, {"last", last},
+                                          {"pivot", vec(pivot)},
+                                          {"note", "the scalp cache is the groom's animated scalp now (saved with it); simulate steps "
+                                                   "through its frames. Not an undo step."}}));
+    }
+
+    json simulationStats(AgentGroom& g, const std::string& node, int frame) {
+        json s = {{"node", node}};
+        for (const SimStatus& st : g.session().simulationStatus()) {
+            if (st.node != node) continue;
+            s["startFrame"] = st.startFrame;
+            s["framesCached"] = st.frames;
+            s["stepMs"] = r4(st.stepMs);
+            s["baked"] = st.baked;
+            if (st.baked) s["bakedFrames"] = {st.bakedFirst, st.bakedLast};
+            if (st.bakeStale) s["bakeStale"] = true;
+        }
+        const GuidesPtr sim = g.session().simulatedFrame(node, frame);
+        const std::shared_ptr<const GuideHierarchy> groomed = g.session().authoredHierarchy();
+        if (!sim || !groomed) return s;
+        const MeshPtr scalp = g.session().scalp();
+        Vec3f lo, hi;
+        lo = hi = scalp && !scalp->points().empty() ? scalp->points().front() : Vec3f(0, 0, 0);
+        if (scalp) {
+            for (const Vec3f& p : scalp->points()) {
+                lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+                hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+            }
+        }
+        const float tolerance = 0.002f * (hi - lo).length();
+        double stretchSum = 0.0, tipSum = 0.0;
+        float stretchMax = 0.0f, tipMax = 0.0f;
+        std::size_t guides = 0, points = 0, under = 0;
+        for (const Guide& guide : sim->guides()) {
+            const HierarchyGuide* rest = groomed->guide(guide.id);
+            if (!rest || guide.points.size() < 2 || rest->points.size() < 2) continue;
+            float lengthSim = 0.0f, lengthRest = 0.0f;
+            for (std::size_t i = 1; i < guide.points.size(); ++i) lengthSim += (guide.points[i] - guide.points[i - 1]).length();
+            for (std::size_t i = 1; i < rest->points.size(); ++i) lengthRest += (rest->points[i] - rest->points[i - 1]).length();
+            if (lengthRest > 0.0f) {
+                const float stretch = std::abs(lengthSim / lengthRest - 1.0f);
+                stretchSum += stretch;
+                stretchMax = std::max(stretchMax, stretch);
+            }
+            const float tip = (guide.points.back() - rest->points.back()).length();
+            tipSum += tip;
+            tipMax = std::max(tipMax, tip);
+            if (scalp) {
+                for (std::size_t i = 1; i < guide.points.size(); ++i) {
+                    const SurfacePoint sp = scalp->closestPoint(guide.points[i]);
+                    ++points;
+                    if ((guide.points[i] - sp.position).dot(sp.normal) < -tolerance) ++under;
+                }
+            }
+            ++guides;
+        }
+        if (guides == 0) return s;
+        s["guides"] = guides;
+        s["stretch"] = {{"mean", r4(stretchSum / static_cast<double>(guides))}, {"max", r4(stretchMax)}};
+        s["tipMoveFromGroom"] = {{"mean", r4(tipSum / static_cast<double>(guides))}, {"max", r4(tipMax)}};
+        s["pointsUnderScalp"] = under;
+        s["pointsChecked"] = points;
+        return s;
+    }
+
+    ToolResult simulateTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        GroomSession& s = g.session();
+        const std::string preset = str(a, "preset");
+        if (flag(a, "add", false)) {
+            if (!s.simulateNodes().empty()) throw ToolError("the graph has a Simulate node already (" + s.simulateNodes().front() + ")");
+            edit(g, "add Simulate", [&](std::string& graph, std::string&) {
+                GraphEdit e(graph);
+                const std::string before = firstNodeOfType(graph, "Interpolate");
+                if (before.empty()) throw ToolError("the graph has no Interpolate node to simulate the guides before");
+                const std::string made = e.addNode("Simulate", "simulate", preset.empty() ? std::string() : simulatePresetParamsJson(preset),
+                                                   std::nullopt, std::nullopt, fitSize(g));
+                // Into Interpolate's guides input: between it and what feeds it guides.
+                std::string input;
+                for (const json& i : json::parse(e.nodeSpecJson(before)).value("inputs", json::array())) {
+                    if (input.empty() && !i.value("param", false) && i.value("type", std::string()) == "Guides") input = i.value("name", std::string());
+                }
+                if (input.empty()) throw ToolError("Interpolate has no guides input to simulate");
+                std::string from, output;
+                for (const json& c : connectionsOf(e)) {
+                    if (c.value("to", std::string()) == before && c.value("input", std::string()) == input) {
+                        from = c.value("from", std::string());
+                        output = c.value("output", std::string());
+                    }
+                }
+                if (from.empty()) throw ToolError("nothing feeds Interpolate's guides: add guides first");
+                e.connect(from, made, firstInput(e, made), output);
+                e.connect(made, before, input);
+                graph = e.toJson();
+            });
+        } else if (!preset.empty()) {
+            const json params = json::parse(simulatePresetParamsJson(preset));
+            const std::vector<std::string> nodes = s.simulateNodes();
+            if (nodes.empty()) throw ToolError("no Simulate node to set the preset on (simulate with add: true makes one)");
+            edit(g, "simulate preset " + preset, [&](std::string& graph, std::string&) {
+                json doc = json::parse(graph);
+                for (json& n : doc["nodes"]) {
+                    if (std::find(nodes.begin(), nodes.end(), n.value("name", std::string())) == nodes.end()) continue;
+                    for (const auto& [k, v] : params.items()) n["params"][k] = v;
+                }
+                graph = doc.dump();
+            });
+        }
+        const std::vector<std::string> nodes = s.simulateNodes();
+        if (nodes.empty()) {
+            throw ToolError("the graph has no Simulate node: call simulate with add: true (it goes before Interpolate), or add_node "
+                            "Simulate before interpolate");
+        }
+        json out = {{"nodes", nodes}};
+        if (a.contains("to_frame")) {
+            const int to = static_cast<int>(num(a, "to_frame", 1));
+            int start = to;
+            for (const SimStatus& st : s.simulationStatus()) start = std::min(start, st.startFrame);
+            if (to - start > kMaxSimFrames) throw ToolError("at most " + std::to_string(kMaxSimFrames) + " frames in one call");
+            const SimRun run = s.simulateTo(to);
+            out["framesStepped"] = run.frames;
+            out["ms"] = static_cast<long long>(run.milliseconds + 0.5);
+            if (!run.errors.empty()) out["errors"] = run.errors;
+            g.frame = to;
+            out["frame"] = to;
+            out = withSummary(g, out);
+            json stats = json::array();
+            for (const std::string& node : nodes) stats.push_back(simulationStats(g, node, to));
+            out["simulation"] = stats;
+            out["hint"] = "render_preview at this frame shows it (frame); sim_cache write bakes the frames to a file.";
+            return textResult(out);
+        }
+        return textResult(withSummary(g, out));
+    }
+
+    ToolResult simCache(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const std::vector<std::string> nodes = g.session().simulateNodes();
+        std::string node = str(a, "node");
+        if (node.empty()) {
+            if (nodes.empty()) throw ToolError("the graph has no Simulate node");
+            node = nodes.front();
+        }
+        const std::string op = str(a, "op");
+        const std::string path = op == "write" ? files().resolveForWrite(str(a, "path", "caches/" + g.name() + "_" + node + "_sim.abc"))
+                                               : files().resolve(str(a, "path"));
+        if (!hasExtension(path, ".abc")) throw ToolError("a simulation cache is an Alembic (.abc) file");
+        json out = {{"node", node}, {"path", files().shown(path)}};
+        if (op == "write") {
+            int first = 1;
+            for (const SimStatus& st : g.session().simulationStatus()) {
+                if (st.node == node) first = st.startFrame;
+            }
+            first = static_cast<int>(num(a, "first", first));
+            const int last = static_cast<int>(num(a, "last", g.frame));
+            if (last < first || last - first > kMaxSimFrames) throw ToolError("frames first to last, at most " + std::to_string(kMaxSimFrames));
+            out["frames"] = target.bakeSimulation(g, node, path, first, last);
+            out["note"] = "baked: the groom reads these frames from the file (saved with it) until the node's settings change";
+        } else if (op == "read") {
+            target.loadSimulationCache(g, node, path, str(a, "object"));
+        } else {
+            throw ToolError("op is write or read");
+        }
+        return textResult(withSummary(g, out));
+    }
+
+    // ---- games and stats ----
+    // The groom's cards as a game export evaluates them, baked.
+    CardBake bakeCardsOf(AgentGroom& g, int resolution, float occlusion) {
+        ViewRequest request;
+        request.density = 1.0f;
+        request.time = frameToSeconds(g.frame, g.framesPerSecond());
+        request.wantCards = true;
+        request.cardDensity = 1.0f;
+        request.gameExport = true;
+        const ViewResult& view = g.view(request);
+        if (!view.errors.empty()) throw ToolError(view.errors.front());
+        if (!view.cardStrands || !view.cards) throw ToolError("the groom has no cards: add a Cards node (list_nodes \"cards\")");
+        return bakeCardsInMemory(view.cardStrands, view.scalp ? view.scalp : g.session().scalp(), resolution, occlusion);
+    }
+
+    ToolResult exportCards(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const std::string path = files().resolveForWrite(str(a, "path"));
+        const bool binary = hasExtension(path, ".glb");
+        if (!binary && !hasExtension(path, ".gltf")) throw ToolError("cards export to .glb or .gltf");
+        const int resolution = gameExportResolution(static_cast<int>(num(a, "resolution", 0)));
+        const float occlusion = static_cast<float>(num(a, "occlusion", 1.0));
+        const CardBake bake = bakeCardsOf(g, resolution, occlusion);
+        GltfCardsOptions o;
+        o.path = path;
+        o.name = fs::u8path(path).stem().u8string();
+        o.binary = binary;
+        o.resolution = resolution;
+        o.occlusion = occlusion;
+        o.cap = flag(a, "cap", true);
+        o.scale = static_cast<float>(usdMetersPerUnit(g.units()));
+        o.zUp = g.upAxis() == "Z";
+        GltfCardsSource source;
+        source.bake = [&](const std::string&, int, float) { return bake; };
+        source.capGroom = [&](MeshPtr* scalp, std::string* whyNot) -> StrandsPtr {
+            if (!bake.scalp || !bake.scalp->hasUVs()) {
+                *whyNot = "the scalp has no uvs";
+                return nullptr;
+            }
+            ViewRequest request;
+            request.density = 1.0f;
+            request.time = frameToSeconds(g.frame, g.framesPerSecond());
+            request.gameExport = true;
+            const ViewResult& view = g.view(request);
+            *scalp = view.scalp ? view.scalp : bake.scalp;
+            return view.placed();
+        };
+        const GltfCardsExport done = writeGltfCards(o, g.session().hairLook(), source);
+        json written = json::array();
+        for (const std::string& f : done.files) written.push_back(files().shown(f));
+        return textResult({{"groom", g.name()}, {"files", written}, {"cards", done.cards}, {"meshes", done.meshes},
+                           {"warnings", done.warnings}});
+    }
+
+    ToolResult exportGame(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const bool unity = str(a, "engine", "unreal") == "unity";
+        GameExportOptions o;
+        o.directory = files().resolve(str(a, "folder", "game/" + g.name()));
+        std::error_code ec;
+        fs::create_directories(fs::u8path(o.directory), ec);
+        o.name = str(a, "name", g.name());
+        checkName(o.name, "the export's name");
+        o.nameGiven = true;
+        o.resolution = gameExportResolution(static_cast<int>(num(a, "resolution", 0)));
+        o.occlusion = static_cast<float>(num(a, "occlusion", 1.0));
+        const CardBake bake = bakeCardsOf(g, o.resolution, o.occlusion);
+        ScalpTextures cap;
+        bool withCap = bake.scalp && bake.scalp->hasUVs() && bake.strands;
+        std::string whyNot = withCap ? std::string() : std::string("no hair cap: the scalp has no uvs");
+        if (withCap) {
+            try {
+                ScalpBakeSettings settings;
+                settings.size = o.resolution > 0 ? o.resolution : 2048;
+                cap = bakeScalpTextures(*bake.strands, *bake.scalp, settings);
+            } catch (const std::exception& e) {
+                whyNot = std::string("no scalp maps (") + e.what() + ")";
+                withCap = false;
+            }
+        }
+        const EngineCardsExport done = writeEngineCards(bake, g.session().stats(), g.session().hairLook(), withCap ? &cap : nullptr,
+                                                        withCap ? bake.scalp.get() : nullptr, whyNot, unity, o);
+        json written = json::array();
+        for (const std::string& f : done.files()) written.push_back(files().shown(f));
+        return textResult({{"groom", g.name()}, {"engine", unity ? "unity" : "unreal"}, {"files", written}, {"manifest", files().shown(done.manifest)},
+                           {"warnings", done.warnings}});
+    }
+
+    ToolResult statsTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        json out = summary(g, 1.0f, {}, true);
+        out["groom"] = g.name();
+        out["stats"] = json::parse(g.session().stats().toJson(), nullptr, false);
+        return textResult(out);
+    }
+
     // ---- The table ---------------------------------------------------------------------------------
     void add(const char* name, const char* title, const std::string& description, json schema,
              ToolResult (Impl::*run)(const json&)) {
@@ -2201,7 +3230,11 @@ struct AgentTools::Impl {
         add("set_params", "Set params",
             "Sets several params of one node at once, checked against its spec (kind, range, choices). Numbers, booleans, "
             "strings, [x, y, z] vectors and colors, ramps as [[position, value], ...]; a mappable param also takes a map object "
-            "such as {\"vertexMap\": \"density\"}. Answers with the groom's summary after the change.",
+            "such as {\"vertexMap\": \"density\"}, or an expression (SeExpr, as XGen's; check it first with check_expression): "
+            "{\"expression\": \"0.5 + 0.5 * noise($P * 4)\", \"min\": 0, \"max\": 2} (its 0-1 value mapped onto min..max). "
+            "Examples to adapt: \"smoothstep($y, 5, 12)\" more toward the top; \"1 - $t\" fading root to tip (per point); "
+            "\"$rand > 0.9 ? 1 : 0.4\" a few strands apart; \"map('density')\" a painted map. Answers with the groom's "
+            "summary after the change.",
             objectSchema({{"groom", groom}, {"node", prop("string", "The node's name (get_graph).")},
                           {"params", prop("object", "{\"param\": value, ...}")}},
                          {"node", "params"}),
@@ -2444,7 +3477,8 @@ struct AgentTools::Impl {
                           {"node", prop("string", "Evaluate up to this node instead of the output.")}}),
             &Impl::evaluate);
         add("render_preview", "Render a preview",
-            "Draws the groom as a PNG image you can look at: the scalp shaded and the strands as lines in the hair's color (and "
+            "Draws the groom as a PNG image you can look at (a turntable, a look, a photo's camera to compare with it): the scalp "
+            "shaded and the strands as lines in the hair's color (and "
             "instances with a built-in mesh: beads, cuffs, hair ties), from one or several views in a grid. A simple CPU preview (no lighting model or shadows), not a render: use it to check "
             "shape, length, direction and color. Big grooms are thinned to max_strands.",
             objectSchema({{"groom", groom}, {"views", views},
@@ -2455,6 +3489,12 @@ struct AgentTools::Impl {
                           {"guides", prop("boolean", "Draw the guides over the hair (orange, roots yellow; hidden only behind the scalp).")},
                           {"compare", prop("boolean", "Two images: the groom before the last change (what undo would take back), "
                                                       "then now.")},
+                          {"look", enumProp(previewLookNames(), "studio (default: a key light), flat (colors unshaded: color and "
+                                                                "coverage), rim (lit from behind: outline, flyaways), clay (one gray: "
+                                                                "the shape alone).")},
+                          {"turntable", prop("integer", "Instead of views: 2-12 frames round the groom (a contact sheet).")},
+                          {"camera", objectSchema(cameraProperties())},
+                          {"tubes", prop("boolean", "Draw the guides' tubes as cyan wires (as tube_levels view shows them).")},
                           {"save_to", prop("string", "Also write the PNG to this file inside the server's folder.")}}),
             &Impl::renderPreviewTool);
         add("measure_guides", "Measure guides",
@@ -2465,6 +3505,217 @@ struct AgentTools::Impl {
                           {"level", prop("integer", "Only this level's groups (0 primary).")},
                           {"selection", prop("boolean", "The selection (select_guides) as one set instead.")}}),
             &Impl::measureGuidesTool);
+
+        // ---- reference photos ----
+        const json photoName = prop("string", "The photo's name (default: the only one).");
+        const json pixelPoints = {{"type", "array"}, {"items", {{"type", "array"}}},
+                                  {"description", "Points in the photo's pixels, [[u, v], ...] (x right, y down from the top-left)."}};
+        add("add_photo", "Add a reference photo",
+            "Adds a photo (PNG, JPEG... inside the server's folder) to the groom as a reference, one undo step, and shows it under a "
+            "labelled pixel grid. Then line it up with the mesh (mesh_landmarks, align_photo) and grow guides from it "
+            "(guides_from_photos). Kept in the .groom as the app's Reference window keeps photos.",
+            objectSchema({{"groom", groom}, {"path", prop("string", "The image file.")},
+                          {"name", prop("string", "Its name (default: the file's).")}},
+                         {"path"}),
+            &Impl::addPhoto);
+        add("photo_view", "Look at a photo",
+            "Shows a reference photo under a pixel grid labelled in its own pixels (read features' coordinates off it), with its "
+            "landmarks numbered, flow arrows and mask touch-ups. analysis (a lined-up photo): the hair mask and strand flow "
+            "guides_from_photos would read, tinted over it.",
+            objectSchema({{"groom", groom}, {"photo", photoName},
+                          {"grid", prop("integer", "Grid spacing in photo pixels (default: about 10 lines across).")},
+                          {"size", prop("integer", "The picture's larger side in pixels (default 768).")},
+                          {"analysis", prop("boolean", "Show the hair mask and flow it reads.")}}),
+            &Impl::photoView);
+        add("mesh_landmarks", "Numbered mesh points",
+            "Renders the scalp mesh from a side (front, back, left, right, top, three_quarter; or photo: through the photo's "
+            "camera) with numbered points you can find on a photo too (its outline's extremes, the nearest point, then spread "
+            "out), and gives each point's 3D position. Pair them with the photo's pixels in align_photo. Give the photo to render "
+            "at its size.",
+            objectSchema({{"groom", groom}, {"photo", photoName},
+                          {"view", enumProp({"front", "back", "left", "right", "top", "three_quarter", "photo"}, "The side (default front).")},
+                          {"count", prop("integer", "How many points (4-80, default 24).")},
+                          {"focal_mm", prop("number", "The view's focal length on a 36 mm film back (default 50).")},
+                          {"size", prop("integer", "The picture's larger side (default 768).")}}),
+            &Impl::meshLandmarks);
+        add("align_photo", "Line a photo up",
+            "Solves the photo's camera from pairs of a photo pixel and the same feature's point on the mesh (camera_solve: 4 pairs "
+            "with the focal length kept, 6 or more not all on a plane solve it too). One undo step. Answers with the reprojection "
+            "error (pixels; each pair's, and pairs that disagree) and a picture of the mesh's outline over the photo through the "
+            "solved camera.",
+            objectSchema({{"groom", groom}, {"photo", photoName},
+                          {"pairs", {{"type", "array"}, {"items", {{"type", "object"}}},
+                                     {"description", "[{\"pixel\": [u, v], \"point\": [x, y, z] or a landmark's name}, ...]."}}},
+                          {"append", prop("boolean", "Add to the photo's pairs (default: replace them).")},
+                          {"keep_focal", prop("boolean", "Keep the focal length (default: solved with 6 pairs or more).")},
+                          {"focal_mm", prop("number", "The focal length to start from or keep (36 mm film back; default 50 or the camera's).")}},
+                         {"pairs"}),
+            &Impl::alignPhoto);
+        add("photo_edit", "Edit a photo's marks",
+            "Edits a reference photo, one undo step: add_flow (an arrow along the hair, root end first: points, directed), "
+            "erase_flow (points, radius), clear_flow, add_mask (a touch-up of the hair mask: points, radius, include true for "
+            "hair, false for backdrop), clear_mask, set_mask (path: a mask image, white hair), remove_landmark (index), "
+            "clear_landmarks, remove_photo. Shows the photo after.",
+            objectSchema({{"groom", groom}, {"photo", photoName},
+                          {"op", enumProp({"add_flow", "erase_flow", "clear_flow", "add_mask", "clear_mask", "set_mask", "remove_landmark",
+                                           "clear_landmarks", "remove_photo"},
+                                          "The edit.")},
+                          {"points", pixelPoints}, {"directed", prop("boolean", "add_flow: its first point is the root end (default true).")},
+                          {"radius", prop("number", "add_mask: half its width; erase_flow: how near (pixels).")},
+                          {"include", prop("boolean", "add_mask: hair (default) or backdrop.")},
+                          {"index", prop("integer", "remove_landmark: the pair's number (1 on).")},
+                          {"path", prop("string", "set_mask: the mask image (\"\" none).")}},
+                         {"op"}),
+            &Impl::photoEdit);
+        add("guides_from_photos", "Guides from photos",
+            "Grows guides from the lined-up photos (reference_guides: the hair's silhouette and strand flow in each photo, their "
+            "flow arrows and mask touch-ups), into one group (default fromReference, replaced each time). One undo step. Answers "
+            "with the guides made, the roots that were bald or unseen, and the look the photos suggest (melanin, curls, clumps).",
+            objectSchema({{"groom", groom}, {"guide_count", prop("integer", "Roots tried, spread over the scalp (default 300).")},
+                          {"max_length", prop("number", "The longest guide (scene units; default 0: what the photos show).")},
+                          {"symmetry", enumProp({"auto", "none", "x", "topology"}, "Mirror what one side shows (default auto).")},
+                          {"group", prop("string", "The guide group (default fromReference).")}}),
+            &Impl::guidesFromPhotos);
+
+        // ---- roots and tubes ----
+        const json point3OrName = pointOrName("[x, y, z] or a landmark's name.");
+        const json pointList = {{"type", "array"}, {"items", {{"type", json::array({"array", "string"})}}},
+                                {"description", "World points (or landmarks), in order."}};
+        const json guideIds = {{"type", "array"}, {"items", {{"type", "integer"}}}, {"description", "Guide ids (default: the selection)."}};
+        add("root_tube", "Root tubes",
+            "The Tube tool's root-first tubes, one undo step each: draw (a root's outline on the scalp, or a center, radius and "
+            "sides; the tube grows along path, or straight off the scalp for length, its tip taper times the root's width), "
+            "edit_outline (a root tube's new outline), duplicate (the guides' root tubes copied to \"to\"), delete, subdivide (cut "
+            "each root into Voronoi cells, smaller where the tubeSubdivisionDensity map is high: paint it with paint_map), "
+            "apply_density (cut again where the density map changed), list. Interpolate's fillTubes fills each tube with the "
+            "strands rooted in it (the tube_locks preset).",
+            objectSchema({{"groom", groom},
+                          {"op", enumProp({"list", "draw", "edit_outline", "duplicate", "delete", "subdivide", "apply_density"}, "What to do.")},
+                          {"outline", pointList}, {"center", point3OrName},
+                          {"radius", prop("number", "draw with center: the root's radius (default 0.04 x the scalp's size).")},
+                          {"sides", prop("integer", "draw with center: the outline's points (3-64, default 8).")},
+                          {"path", pointList},
+                          {"length", prop("number", "draw without a path: the tube's length (default 0.3 x the scalp's size).")},
+                          {"segments", prop("integer", "draw without a path: its spans (default 12).")},
+                          {"taper", prop("number", "The tip's width, a share of the root's (default 0.5).")},
+                          {"density", prop("number", "A drawn path's points, times this (default 1).")},
+                          {"group", prop("string", "The group new roots go into (default rootTubes).")},
+                          {"guides", guideIds}, {"to", point3OrName},
+                          {"size_at_zero", prop("number", "subdivide: a cell's size where the density is 0, a share of the root's (0.5).")},
+                          {"size_at_one", prop("number", "subdivide: ... where it is 1 (0.12).")},
+                          {"multiplier", prop("number", "subdivide: more cells overall (2: about twice as many).")},
+                          {"seed", prop("integer", "subdivide: where the cells fall.")},
+                          {"force", prop("boolean", "apply_density: cut again all over.")}},
+                         {"op"}),
+            &Impl::rootTube);
+        add("tube_levels", "Tube levels",
+            "The tube hierarchy: each level splits the tubes above in two (add), or takes the deepest split back (remove), one undo "
+            "step; list shows the levels; view sets how render_preview's tubes show them (level: that level, mixed: with the "
+            "unsplit tubes above; pin: a group whose tubes alone draw).",
+            objectSchema({{"groom", groom}, {"op", enumProp({"list", "add", "remove", "view"}, "What to do (default list).")},
+                          {"group", prop("string", "The base group (default: the guides' or the first top group).")},
+                          {"guides", guideIds}, {"level", prop("integer", "view: the level shown (0: all).")},
+                          {"mixed", prop("boolean", "view: with the tubes above it (default true).")},
+                          {"pin", prop("string", "view: a group whose tubes alone draw (\"\" none).")}}),
+            &Impl::tubeLevelsTool);
+        add("tube_shape", "Tube shapes",
+            "The groom's tube shape library, one undo step: add (a cross-section from points [[u, v], ...] round it, -1..1; "
+            "give: the guides take it at once as their shape, midShape or tipShape), set (new points or smooth), rename (to), "
+            "remove; list shows the built-in and library shapes. set_tube and guide_op edit_tubes give guides a shape by name, "
+            "and hold or blend shapes along a tube (rootHold, midShape, midHold, tipShape, tipHold).",
+            objectSchema({{"groom", groom}, {"op", enumProp({"list", "add", "set", "rename", "remove"}, "What to do (default list).")},
+                          {"name", prop("string", "The shape.")}, {"to", prop("string", "rename: its new name.")},
+                          {"points", {{"type", "array"}, {"items", {{"type", "array"}}}, {"description", "The outline, [[u, v], ...]."}}},
+                          {"smooth", prop("boolean", "A smooth curve through the points (default) or straight edges.")},
+                          {"give", prop("boolean", "add: the guides (ids or the selection) take it.")},
+                          {"guides", guideIds},
+                          {"profile", enumProp({"shape", "midShape", "tipShape"}, "give: as which of their shapes (default shape).")}}),
+            &Impl::tubeShapeTool);
+
+        // ---- expressions ----
+        add("check_expression", "Check an expression",
+            "Compiles an expression (GroomLab's SeExpr, as XGen's) as a param would, says what it reads (variables, strand "
+            "channels, maps) and samples its values over the groom's strands at a node (or the scalp): min, mean, max, a "
+            "10-bin histogram and a few examples; errors come back with their place. Then set it with set_params "
+            "({\"expression\": ..., \"min\", \"max\"}). Examples to adapt: \"0.5 + 0.5 * sin($u * 6.2832)\" stripes round the scalp; "
+            "\"smoothstep($y, 5, 12)\" more toward the top; \"$t ^ 2\" growing toward the tips (per point); \"noise($P * 0.3)\" "
+            "patches; \"$clumpId % 2\" every other clump; \"$length > 10 ? 1 : 0.2\".",
+            objectSchema({{"groom", groom}, {"expression", prop("string", "The expression.")},
+                          {"node", prop("string", "Sample the strands this node gives (default the output).")},
+                          {"variables", prop("object", "Its own constants, as an Expression node's: {\"amount\": 0.5, \"center\": [0, 1, 0]}.")},
+                          {"type", enumProp({"any", "number", "vector"}, "What it must give (default any).")},
+                          {"samples", prop("integer", "Strands sampled (default 2000).")}},
+                         {"expression"}),
+            &Impl::checkExpressionTool);
+
+        // ---- simulation ----
+        add("import_animation", "Import animation",
+            "Gives the groom animated inputs from Alembic files inside the server's folder: scalp_cache (the scalp over time: the "
+            "same vertices as the groom's), guide_cache (guide poses by guide ID), and static colliders (meshes: .obj or .abc, "
+            "read by name through ColliderMesh nodes). The scene's inputs, not edits: undo does not take them back. An empty "
+            "scalp_cache or guide_cache removes it.",
+            objectSchema({{"groom", groom}, {"scalp_cache", prop("string", "The scalp cache (.abc).")},
+                          {"scalp_object", prop("string", "Its mesh's name in the file (default the first).")},
+                          {"guide_cache", prop("string", "A guide cache (.abc curves with a strandId per guide).")},
+                          {"guide_object", prop("string", "Its curves' name in the file.")},
+                          {"colliders", {{"type", "array"}, {"items", {{"type", "object"}}},
+                                         {"description", "[{\"name\", \"path\", \"object\"}, ...]."}}}}),
+            &Impl::importAnimation);
+        add("animate_scalp", "Animate the scalp",
+            "Moves the scalp by keyframes (translate, rotate_degrees XYZ about a pivot; eased between keys), writes it as an "
+            "Alembic scalp cache and makes it the groom's animated scalp: a head turn or shake to try a simulation on. Not an "
+            "undo step.",
+            objectSchema({{"groom", groom},
+                          {"keys", {{"type", "array"}, {"items", {{"type", "object"}}},
+                                    {"description", "[{\"frame\": 1, \"translate\": [x, y, z], \"rotate_degrees\": [x, y, z]}, ...] (2 or more)."}}},
+                          {"pivot", point3OrName}, {"first", prop("integer", "The first frame (default the first key's).")},
+                          {"last", prop("integer", "The last frame (default the last key's).")},
+                          {"path", prop("string", "The cache file (default anim/<groom>_scalp.abc).")}},
+                         {"keys"}),
+            &Impl::animateScalp);
+        add("simulate", "Simulate",
+            "Hair dynamics on the guides (a Simulate node before Interpolate): add: true inserts one (one undo step), preset "
+            "(default, fur) sets its motion params; to_frame steps every Simulate node from its start frame to that frame through "
+            "the scalp's animation (at most 1000 frames a call). Answers with the time taken and, per node, the guides' stretch "
+            "against their groomed length, how far the tips moved from the groom, and points under the scalp. Configure the node "
+            "with describe_node / set_params (gravity, stiffness, damping, collisions).",
+            objectSchema({{"groom", groom}, {"add", prop("boolean", "Insert a Simulate node before Interpolate.")},
+                          {"preset", enumProp({"default", "fur"}, "Set the motion params to a preset.")},
+                          {"to_frame", prop("integer", "Simulate up to this frame.")}}),
+            &Impl::simulateTool);
+        add("sim_cache", "Simulation cache",
+            "write: simulates a Simulate node's frames first..last and bakes them to an Alembic guide cache the groom then reads "
+            "(saved with it: renders and the farm read the bake); read: takes a cache file as the node's bake.",
+            objectSchema({{"groom", groom}, {"op", enumProp({"write", "read"}, "What to do.")},
+                          {"node", prop("string", "The Simulate node (default the first).")},
+                          {"path", prop("string", "The cache file (.abc; write's default caches/<groom>_<node>_sim.abc).")},
+                          {"first", prop("integer", "write: the first frame (default the node's start).")},
+                          {"last", prop("integer", "write: the last frame (default the groom's frame).")},
+                          {"object", prop("string", "read: the curves' name in the file.")}},
+                         {"op"}),
+            &Impl::simCache);
+
+        // ---- games and stats ----
+        add("export_cards", "Export hair cards (glTF)",
+            "Bakes the groom's hair cards (a Cards node in the graph) and writes them as glTF 2.0 (.glb, or .gltf with its .bin and "
+            "PNG maps), with the hair cap (the groom baked onto its scalp) and their materials.",
+            objectSchema({{"groom", groom}, {"path", prop("string", "The .glb or .gltf file.")},
+                          {"resolution", prop("integer", "The maps' size (default the Cards node's).")},
+                          {"occlusion", prop("number", "The cards' ambient occlusion (default 1).")},
+                          {"cap", prop("boolean", "Also the hair cap (default true).")}},
+                         {"path"}),
+            &Impl::exportCards);
+        add("export_game", "Export for a game engine",
+            "Bakes the groom's hair cards and writes them for Unreal (TGA maps in Unreal's layout, centimeters) or Unity (PNG maps, "
+            "meters): the maps, the hair cap's, a manifest and the meshes as FBX, into a folder.",
+            objectSchema({{"groom", groom}, {"engine", enumProp({"unreal", "unity"}, "The engine (default unreal).")},
+                          {"folder", prop("string", "The folder (default game/<groom>).")}, {"name", prop("string", "The files' base name.")},
+                          {"resolution", prop("integer", "The maps' size.")}, {"occlusion", prop("number", "Ambient occlusion (1).")}}),
+            &Impl::exportGame);
+        add("stats", "Groom statistics",
+            "Everything the last evaluation knows: strands, points, guides, cards, instances, memory, each node's time and "
+            "notes, simulations: GroomLab's stats as JSON.",
+            objectSchema({{"groom", groom}}), &Impl::statsTool);
 
         add("save_groom", "Save a groom file",
             "Saves the groom as a .groom file (graph, guides, scalp) that Maya, the app, Blender, groomlab-cli and the render "

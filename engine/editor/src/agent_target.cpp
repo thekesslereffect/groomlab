@@ -138,6 +138,7 @@ AgentGroom::~AgentGroom() = default;
 
 std::string AgentGroom::apply(const GroomEdit& edit, bool after) {
     GroomSession& s = session();
+    if (edit.referencePhotos) referencePhotos = after ? edit.referencePhotos->second : edit.referencePhotos->first;
     if (edit.whole) {
         try {
             s.setGraphJson((after ? edit.graphAfter : edit.graphBefore).dump());
@@ -159,6 +160,15 @@ std::string AgentGroom::apply(const GroomEdit& edit, bool after) {
     graph = StrokeEdit::Text{};
     rest.apply(s, after);
     return {};
+}
+
+void AgentGroom::commitPhotos(const std::string& label, const std::string& after) {
+    if (after == referencePhotos) return;
+    GroomEdit step;
+    step.side = true;
+    step.label = label;
+    step.referencePhotos = std::make_pair(referencePhotos, after);
+    commit(std::move(step));
 }
 
 void AgentGroom::commit(GroomEdit edit) {
@@ -196,6 +206,20 @@ AgentGroom& AgentTarget::groom(const std::string& name) {
     }
     if (AgentGroom* g = find(name)) return *g;
     throw ToolError("no groom named '" + name + "'" + (names.empty() ? std::string(" (none is open)") : " (open: " + names + ")"));
+}
+
+void AgentTarget::setAnimation(AgentGroom&, const AnimationInputs&) { throw ToolError("this host reads no animation caches"); }
+
+void AgentTarget::writeMeshCache(const std::string&, const std::string&, const std::vector<std::shared_ptr<const ScalpMesh>>&, double, double) {
+    throw ToolError("this host writes no mesh caches");
+}
+
+std::size_t AgentTarget::bakeSimulation(AgentGroom&, const std::string&, const std::string&, int, int) {
+    throw ToolError("this host writes no simulation caches");
+}
+
+void AgentTarget::loadSimulationCache(AgentGroom&, const std::string&, const std::string&, const std::string&) {
+    throw ToolError("this host reads no simulation caches");
 }
 
 PreviewImage AgentTarget::preview(AgentGroom&, const ScalpMesh* scalp, const StrandSet* strands, const PreviewOptions& options) {
