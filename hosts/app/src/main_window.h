@@ -917,6 +917,7 @@ private:
     QCheckBox* coverageDensity_ = nullptr;
     QCheckBox* clumpLod_ = nullptr;
     QCheckBox* scalp_ = nullptr;
+    QCheckBox* onTop_ = nullptr;  // the guides, parts and flow over the hair (the guides display's On top)
     QCheckBox* lookdev_ = nullptr;
     QCheckBox* gpuPreview_ = nullptr;
     // Display options: the strand colors, the guides, the map on the scalp, the cards.

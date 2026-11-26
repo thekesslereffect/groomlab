@@ -425,6 +425,17 @@ TEST(AppLists, TheGuidesDisplayIsOneRowOfWhatShowsThenTheLook) {
     EXPECT_EQ(window.displaySettings().guideSmoothing, 1) << "off: straight";
     smoothed->click();
     EXPECT_GE(window.displaySettings().guideSmoothing, 4) << "on: smooth";
+    // On top: the guides, parts and flow over the hair, or depth tested (the renderer's).
+    auto* onTop = popup->findChild<QToolButton*>(QStringLiteral("display_overlaysOnTop"));
+    ASSERT_TRUE(onTop) << "the guides' On top";
+    Viewport* view = window.findChild<Viewport*>();
+    ASSERT_TRUE(view);
+    EXPECT_TRUE(onTop->isChecked());
+    EXPECT_TRUE(view->renderer().overlaysOnTop());
+    onTop->click();
+    EXPECT_FALSE(view->renderer().overlaysOnTop()) << "off: depth tested";
+    onTop->click();
+    EXPECT_TRUE(view->renderer().overlaysOnTop());
     // The tubes' look under it.
     for (const char* look : {"tubeShadedPill", "tubeWireframePill", "tubeColorsPill", "tubeLevelColorsPill"}) {
         EXPECT_TRUE(popup->findChild<QToolButton*>(QLatin1String(look))) << look;

@@ -84,6 +84,10 @@ public:
     void setHairLook(const HairLook& look) { look_ = look; }
     void setBackground(const QColor& color) { background_ = color; }
     void setShowScalp(bool show);
+    // The guides, parts, flow and guide dots over the hair (on, Maya's On top) or depth tested,
+    // pulled toward the camera by the hair's depth (off: hidden behind the head and the hair).
+    void setOverlaysOnTop(bool on) { overlaysOnTop_ = on; }
+    bool overlaysOnTop() const { return overlaysOnTop_; }
     bool showScalp() const { return showScalp_; }
     // The hair shown (the Groom Tools' strands eye): off, the frame's hair items (isHairItem: the
     // strands in every form, the instances, the scales, the cards, the strand meshes) are not
@@ -209,9 +213,14 @@ private:
     // LinesColored: other lines.
     enum class Kind {
         LinesLit, Lines, LinesColored, StrandLines, StrandLinesColored, Overlay, OverlayColored, Triangles, TrianglesColored,
-        Surface, SurfaceColored, Dots, DotsTested, MapTextured, Count
+        Surface, SurfaceColored, Dots, DotsTested, MapTextured,
+        WideLines,  // overlay lines wider than a pixel: a quad a segment (wide_lines.vert)
+        WideLinesTested,  // ... depth tested (the overlays not on top: drawn as WideLines' items)
+        Count
     };
     struct GpuItem;
+    // Overlay lines wider than a pixel as quads into the item's own streams (Kind::WideLines).
+    static void expandWideLines(GpuItem& item, const DisplayGeometry& g, float width);
     struct Pipeline;
     // The pipelines for one render pass (the host's target, or the lookdev HDR pass).
     struct PipelineSet {
@@ -219,6 +228,9 @@ private:
         // The strand lines' (LinesLit, StrandLines, StrandLinesColored) without depth writes: the
         // level of detail's blended fragments, drawn after everything (null for the other kinds).
         std::array<std::unique_ptr<Pipeline>, static_cast<std::size_t>(Kind::Count)> noDepthWrite;
+        // The strand lines' and the surfaces' depth alone, no color (the lookdev view's hair and
+        // head for the overlays when they are not on top; null for the other kinds).
+        std::array<std::unique_ptr<Pipeline>, static_cast<std::size_t>(Kind::Count)> depthOnly;
         QVector<quint32> format;
         int sampleCount = 0;
         bool ready() const { return pipelines[0] != nullptr; }
@@ -236,7 +248,10 @@ private:
     void fillUniforms(QRhiResourceUpdateBatch* batch, QRhiBuffer* uniforms, const GpuItem& item, const QMatrix4x4& mvp,
                       const QVector3D& eye, const QSize& size, bool hdr, float pixelScale, float lod = 0.0f, float pass = 0.0f,
                       float density = -1.0f);
-    void draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr);
+    // `tested`: an overlay drawn depth tested (testedKind: the overlays not on top); `depthOnly`:
+    // the item's depth alone (PipelineSet::depthOnly).
+    void draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr, bool tested = false,
+              bool depthOnly = false);
     // An item's streams and `indices` (its own when null) set for a draw; false when it lacks one.
     bool setInputs(QRhiCommandBuffer* cb, const GpuItem& item, QRhiBuffer* indices = nullptr);
     // The level of detail for this frame (the line path): the selection, its indices, the classes'
@@ -248,13 +263,26 @@ private:
     // the blended fragments (after everything else).
     void drawLod(QRhiCommandBuffer* cb, bool blended);
     Kind kindOf(const DisplayGeometry& geometry, bool overlay) const;
-    static bool isOverlay(Kind kind) { return kind == Kind::Overlay || kind == Kind::OverlayColored || kind == Kind::Dots; }
+    static bool isOverlay(Kind kind) {
+        return kind == Kind::Overlay || kind == Kind::OverlayColored || kind == Kind::Dots || kind == Kind::WideLines;
+    }
+    // An overlay's kind drawn depth tested (the overlays not on top): the same streams.
+    static Kind testedKind(Kind kind) {
+        switch (kind) {
+            case Kind::Overlay: return Kind::Lines;
+            case Kind::OverlayColored: return Kind::LinesColored;
+            case Kind::WideLines: return Kind::WideLinesTested;
+            case Kind::Dots: return Kind::DotsTested;
+            default: return kind;
+        }
+    }
     void setDots(const GuideDots& dots, float pointSize);
 
     void updateSurfaces();  // the lookdev path's surface list: the scalp (when shown), the props
     std::vector<std::unique_ptr<GpuItem>> items_;  // one per DisplayItemId, then the scalp
     std::unique_ptr<GpuItem> scalp_;
     std::unique_ptr<GpuItem> dots_;  // the guide points, camera-facing diamonds (dots.vert)
+    float dotsSize_ = -1.0f;         // the size they were made at (the guides' Width changes it alone)
     std::unique_ptr<GpuItem> tool_;  // the tools' overlay
     std::uint64_t toolVersion_ = 0;
     std::unique_ptr<GpuItem> rootFills_, rootLines_, rootDots_;  // the root mode's (setRootOverlay)
@@ -284,6 +312,7 @@ private:
     std::unique_ptr<LodDraw> lod_;
     LodStats lodStats_;
     bool showScalp_ = true;
+    bool overlaysOnTop_ = true;
     bool hairShown_ = true;
     // The strands last handed (setHairStrands), held while the hair is hidden.
     StrandsPtr hairStrands_;

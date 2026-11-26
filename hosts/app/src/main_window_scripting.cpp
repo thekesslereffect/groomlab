@@ -835,6 +835,11 @@ bool MainWindow::setDisplayText(const QString& text) {
         redisplay();
     } else if (name == QStringLiteral("guidepoints")) {
         guidePoints_->setCurrentIndex(std::clamp(value.toInt(&ok), 0, 2));
+    } else if (name == QStringLiteral("ontop")) {
+        onTop_->setChecked(flag());
+    } else if (name == QStringLiteral("guidewidth")) {
+        guideWidth_->setValue(std::clamp(value.toDouble(&ok), 1.0, 16.0));
+        applyDisplayOptions();  // (setValue is silent: the slider's own drag applies it)
     } else if (name == QStringLiteral("braidtubes")) {
         // Show Tubes: the nodes named ("a|b"; "*": every node with the button, Braids and nodes
         // giving guides; "": none), as their headers' buttons set them.
