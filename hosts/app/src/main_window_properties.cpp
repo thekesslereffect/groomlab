@@ -813,7 +813,7 @@ void MainWindow::fillGuideDisplay() {
     });
     look->addWidget(smoothed);
     mirror(look, tr("On top"), "display_overlaysOnTop", onTop_,
-           tr("Guides, parts and flow draw over the hair (off: hidden behind it, in the line display; the lookdev view keeps them on top)"));
+           tr("Guides, parts and flow draw over the hair (off: hidden behind the hair and the head)"));
     rows->addWidget(lookRow);
 }
 

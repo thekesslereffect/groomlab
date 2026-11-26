@@ -899,7 +899,7 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
     const QShader mapVert = loadShader("map.vert"), mapFrag = loadShader("map.frag");
 
     // A kind's pipeline (`depthWrite` false: the strand lines' blended pass, depth tested alone).
-    auto make = [&](Kind kind, bool depthWrite) {
+    auto make = [&](Kind kind, bool depthWrite, bool colorOff = false) {
         auto p = std::make_unique<Pipeline>();
         p->layout.reset(rhi->newShaderResourceBindings());
         if (kind == Kind::MapTextured) {
@@ -1013,7 +1013,11 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
                 break;
         }
         ps->setVertexInputLayout(layout);
-        if (blended) {
+        if (colorOff) {
+            QRhiGraphicsPipeline::TargetBlend none;
+            none.colorWrite = {};  // (the depth alone)
+            ps->setTargetBlends({none});
+        } else if (blended) {
             QRhiGraphicsPipeline::TargetBlend blend;
             blend.enable = true;
             blend.srcColor = QRhiGraphicsPipeline::SrcAlpha;
@@ -1039,6 +1043,7 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
         set.pipelines[k] = make(kind, true);
         const bool strandLines = kind == Kind::LinesLit || kind == Kind::StrandLines || kind == Kind::StrandLinesColored;
         set.noDepthWrite[k] = strandLines ? make(kind, false) : nullptr;
+        set.depthOnly[k] = strandLines || kind == Kind::Surface ? make(kind, true, true) : nullptr;
     }
     lod_->release();  // (its bindings reference the old layouts: made again)
     // The items' bindings reference the old layouts: made again on upload.
@@ -1309,8 +1314,10 @@ void GroomRenderer::fillUniforms(QRhiResourceUpdateBatch* batch, QRhiBuffer* uni
     batch->updateDynamicBuffer(uniforms, 0, sizeof(Uniforms), &u);
 }
 
-void GroomRenderer::draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr, bool tested) {
-    const Pipeline* p = set.pipelines[static_cast<std::size_t>(tested ? testedKind(item.kind) : item.kind)].get();
+void GroomRenderer::draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr, bool tested,
+                         bool depthOnly) {
+    const std::size_t k = static_cast<std::size_t>(tested ? testedKind(item.kind) : item.kind);
+    const Pipeline* p = (depthOnly ? set.depthOnly[k] : set.pipelines[k]).get();
     if (!p || !p->pipeline || !item.positions || !item.indices || item.indexCount == 0) return;
     QRhiShaderResourceBindings* bindings = hdr ? item.bindingsHdr.get() : item.bindings.get();
     if (!bindings) return;
@@ -1592,12 +1599,15 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     };
     // The scalp and the props are the lookdev path's own surfaces: the line path alone draws
     // these copies.
-    prepare(*scalp_, !showScalp_ || lookdev);
+    // (The lookdev view with the overlays not on top: the strand lines and the scalp as well, their
+    // depth drawn under the overlays.)
+    const bool depthUnder = lookdev && !overlaysOnTop_;
+    prepare(*scalp_, !showScalp_ || (lookdev && !depthUnder));
     for (auto& item : propItems_) prepare(*item, lookdev);
     // (The hair hidden: none of its items; the guides, their dots and the overlays as ever.)
     const bool hair = hairShown_;
     auto hidden = [&](std::size_t i) { return !hair && isHairItem(static_cast<DisplayItemId>(i)); };
-    for (std::size_t i = 0; i < items_.size(); ++i) prepare(*items_[i], (lookdev && i == strandsIndex) || hidden(i));
+    for (std::size_t i = 0; i < items_.size(); ++i) prepare(*items_[i], (lookdev && i == strandsIndex && !depthUnder) || hidden(i));
     // The other grooms' strands: lines in both paths. The flat shader encodes its color to sRGB for
     // the window; the lookdev's HDR scene is linear, then exposed and tone mapped
     // (LightingSetup::exposure): their color goes in divided by the exposure and decoded from sRGB,
@@ -1674,6 +1684,13 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
         lookdev_.composite(cb, passViewport_);
         ++drawCalls_;
         if (photo) drawPhoto(cb);  // (in front: behind takes the line path)
+        if (depthUnder) {
+            // The overlays not on top: the hair's and the head's depth first (no color), so they
+            // hide where the hair and the head are in front of them.
+            if (showScalp_ && scalp_->shown) draw(cb, *scalp_, main_, false, false, true);
+            const GpuItem& strands = *items_[strandsIndex];
+            if (hair && strands.shown) draw(cb, strands, main_, false, false, true);
+        }
         drawOverlays(cb);
         cb->endPass();
         return;

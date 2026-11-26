@@ -228,6 +228,9 @@ private:
         // The strand lines' (LinesLit, StrandLines, StrandLinesColored) without depth writes: the
         // level of detail's blended fragments, drawn after everything (null for the other kinds).
         std::array<std::unique_ptr<Pipeline>, static_cast<std::size_t>(Kind::Count)> noDepthWrite;
+        // The strand lines' and the surfaces' depth alone, no color (the lookdev view's hair and
+        // head for the overlays when they are not on top; null for the other kinds).
+        std::array<std::unique_ptr<Pipeline>, static_cast<std::size_t>(Kind::Count)> depthOnly;
         QVector<quint32> format;
         int sampleCount = 0;
         bool ready() const { return pipelines[0] != nullptr; }
@@ -245,8 +248,10 @@ private:
     void fillUniforms(QRhiResourceUpdateBatch* batch, QRhiBuffer* uniforms, const GpuItem& item, const QMatrix4x4& mvp,
                       const QVector3D& eye, const QSize& size, bool hdr, float pixelScale, float lod = 0.0f, float pass = 0.0f,
                       float density = -1.0f);
-    // `tested`: an overlay drawn depth tested (testedKind: the overlays not on top).
-    void draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr, bool tested = false);
+    // `tested`: an overlay drawn depth tested (testedKind: the overlays not on top); `depthOnly`:
+    // the item's depth alone (PipelineSet::depthOnly).
+    void draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr, bool tested = false,
+              bool depthOnly = false);
     // An item's streams and `indices` (its own when null) set for a draw; false when it lacks one.
     bool setInputs(QRhiCommandBuffer* cb, const GpuItem& item, QRhiBuffer* indices = nullptr);
     // The level of detail for this frame (the line path): the selection, its indices, the classes'
