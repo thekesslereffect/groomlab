@@ -510,6 +510,9 @@ public:
     // timestamps). Null when the device gives no pixels.
     QImage renderOffscreen(const QSize& size, int frames, double* msPerFrame = nullptr, QString* api = nullptr,
                            int* surfaceDraws = nullptr, double* firstFrameMs = nullptr, double* gpuMsPerFrame = nullptr);
+    // The lookdev render (the hair's Arnold look, the viewport's lights and camera) offscreen, the
+    // lookdev path on whatever the viewport shows: `frames` frames accumulated, `samples` a pixel.
+    QImage renderLookdev(const QSize& size, int frames, int samples, QString* api = nullptr);
 
     // ---- GroomLab > Add, Simulate, Import, Utilities, Export (main_window_output.cpp) ----------
     // Each runs on the open groom (a message and false without one, or when refused), the graph
@@ -814,6 +817,7 @@ private:
     void undo();
     void redo();
     void rootsFollowHistory();  // the Tube card's root mode after an undo or redo
+    void feedOffscreen(GroomRenderer& renderer);  // an offscreen renderer given what the viewport's has
     void guidesEdited();  // a stroke committed or the guides panel edited: shown, undoable
     void graphEdited();   // the graph view or a param panel edited the graph: shown, undoable
     // The offscreen view the headless benchmarks draw into (made on first use at `size`, fed

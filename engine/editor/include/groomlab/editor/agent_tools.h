@@ -40,6 +40,11 @@ public:
 
     AgentTarget& target();
 
+    // render_frame's arguments checked into a request (ToolError: what is wrong, said for the agent)
+    // and its answer: for a host whose own glue renders (agent_link.h beginHostRender).
+    RenderRequest renderRequest(const nlohmann::json& arguments);
+    ToolResult renderResult(const RenderRequest& request, const RenderedFrame& frame);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

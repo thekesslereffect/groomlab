@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QBuffer>
+#include <QElapsedTimer>
 #include <QHostAddress>
 #include <QImage>
 #include <QStandardPaths>
@@ -105,6 +106,27 @@ public:
     agent::ExportReport exportCurves(agent::AgentGroom&, const agent::ExportRequest&) override {
         throw ToolError("in the app, export the curves with File > Export (Alembic, USD, V-Ray); save_groom writes a .groom file");
     }
+    // The lookdev render: the hair's Arnold look under the viewport's lights, through its camera.
+    std::vector<agent::RendererInfo> renderers() override {
+        return {{"lookdev", "the app's lookdev render (the hair's Arnold look, the viewport's lights and camera), offscreen on the GPU"}};
+    }
+    agent::RenderedFrame render(agent::AgentGroom&, const agent::RenderRequest& r) override {
+        if (!r.camera.empty()) throw ToolError("the app renders through its viewport's camera: leave \"camera\" out");
+        if (r.frame) throw ToolError("the app renders the frame shown: set the time in the app, or leave \"frame\" out");
+        // Frames accumulated (the lookdev's refinement) by quality, 4 samples a pixel.
+        const int frames = r.samples > 0 ? std::min(r.samples, 256) : r.quality == "final" ? 64 : r.quality == "preview" ? 16 : 4;
+        QElapsedTimer clock;
+        clock.start();
+        QString api;
+        const QImage image = window_.renderLookdev(QSize(r.width, r.height), frames, 4, &api).convertToFormat(QImage::Format_RGB888);
+        if (image.isNull()) throw ToolError("the GPU gave no pixels for the lookdev render");
+        agent::RenderedFrame out;
+        out.image = pngOf(image);
+        out.seconds = static_cast<double>(clock.elapsed()) / 1000.0;
+        out.info = {{"frames", frames}, {"api", api.toStdString()}};
+        return out;
+    }
+
     // The viewport as the artist sees it: the window's scene rendered offscreen at the view's shape.
     std::optional<agent::PreviewImage> viewportImage(agent::AgentGroom&, int size) override {
         QSize shape(16, 9);
@@ -113,6 +135,10 @@ public:
         const QSize at(std::max(16, static_cast<int>(shape.width() * k)), std::max(16, static_cast<int>(shape.height() * k)));
         const QImage image = window_.renderOffscreen(at, 1).convertToFormat(QImage::Format_RGB888);
         if (image.isNull()) return std::nullopt;
+        return pngOf(image);
+    }
+
+    static agent::PreviewImage pngOf(const QImage& image) {
         std::vector<std::uint8_t> rgb(static_cast<std::size_t>(image.width()) * static_cast<std::size_t>(image.height()) * 3);
         for (int y = 0; y < image.height(); ++y) {
             std::memcpy(rgb.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width()) * 3, image.constScanLine(y),

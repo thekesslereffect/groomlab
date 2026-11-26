@@ -1262,6 +1262,7 @@ def create_groom(context, scalp, preset="", guide_count=0, guide_points=8, guide
     r = evaluate(scalp, rt, "preview")
     if hierarchy:
         tools.keep_state(scalp)
+        note_undo_depth(scalp, rt)
     scene.render.use_lock_interface = True  # renders write the full-density hair from their handler
     shading.use_render_settings(scene)
     return r
@@ -1333,7 +1334,17 @@ def load_groom(context, path, scalp=None, index=0):
         from . import tools
         tools.keep_state(scalp)
         tools.refresh_info(scalp, scene)
+        note_undo_depth(scalp, rt)
     return scalp, info, r
+
+
+def note_undo_depth(scalp, rt):
+    """Where the groom's own history stands, kept on the scalp (tools.sync_undo): a new or opened
+    groom's, so Blender's undo back to this step takes its first edits back too (else -1: none)."""
+    try:
+        scalp.groomlab_tools.undo_depth = int(_call("undo_state", session=rt.session).get("undoDepth", 0))
+    except (HelperError, AttributeError, RuntimeError):
+        pass
 
 
 def _restore_extra_scalps(scene, scalp, rt):

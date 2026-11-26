@@ -7,6 +7,8 @@ Makes a fresh profile folder (BLENDER_USER_RESOURCES, _CONFIG, _SCRIPTS, _EXTENS
 the user's own Blender settings and extensions are never touched), installs the GroomLab extension
 from the build's zip the way a user does (blender --command extension install-file), then runs the
 test with `blender --background --factory-startup --python-exit-code 1 --python <test.py>`.
+A test named gui_*.py runs in a Blender with its window (no --background: it drives itself from
+timers and quits with its exit code), stopped after GUI_TIMEOUT seconds.
 The test enables the add-on itself (bl_ext.user_default.groomlab). Exit code: the test's.
 """
 
@@ -15,6 +17,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+GUI_TIMEOUT = 600
 
 
 def main():
@@ -42,9 +46,16 @@ def main():
         if not os.path.isfile(installed):
             print("the extension is not where Blender installs it: %s" % installed)
             return 1
-        run = subprocess.run([blender, "--background", "--factory-startup", "--python-exit-code", "1",
-                              "--python", test], env=env, creationflags=flags, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT)
+        gui = os.path.basename(test).startswith("gui_")
+        command = [blender] + ([] if gui else ["--background"]) + ["--factory-startup", "--python-exit-code", "1",
+                                                                  "--python", test]
+        try:
+            run = subprocess.run(command, env=env, creationflags=flags, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 timeout=GUI_TIMEOUT if gui else None)
+        except subprocess.TimeoutExpired as e:
+            sys.stdout.write((e.stdout or b"").decode("utf-8", "replace"))
+            print("%s did not finish in %d s" % (name, GUI_TIMEOUT))
+            return 1
         sys.stdout.write(run.stdout.decode("utf-8", "replace"))
         sys.stdout.flush()
         return run.returncode

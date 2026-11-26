@@ -187,6 +187,26 @@ class AgentLinkTest(unittest.TestCase):
         self.assertTrue(refused["result"]["isError"])
         self.assertIn("Create Groom", json.dumps(refused))
 
+        # A frame from Cycles: the image at the size asked for, the scene's settings as they were
+        # (no camera or light of its own left behind).
+        tools_now = {t["name"]: t for t in request("tools/list", {})["result"]["tools"]}
+        self.assertEqual(tools_now["render_frame"]["inputSchema"]["properties"]["renderer"]["enum"], ["cycles", "eevee"])
+        scene = bpy.context.scene
+        engine, size, objects = scene.render.engine, (scene.render.resolution_x, scene.render.resolution_y), len(bpy.data.objects)
+        rendered = request("tools/call", {"name": "render_frame", "arguments": {"renderer": "cycles", "width": 96, "height": 72,
+                                                                                "samples": 4}})
+        self.assertFalse(rendered["result"]["isError"], json.dumps(rendered)[:1500])
+        self.assertEqual(rendered["result"]["content"][0]["type"], "image")
+        if os.environ.get("GROOMLAB_KEEP_AGENT_RENDER"):
+            import base64
+            with open(os.environ["GROOMLAB_KEEP_AGENT_RENDER"], "wb") as f:
+                f.write(base64.b64decode(rendered["result"]["content"][0]["data"]))
+        info = text_of(rendered)
+        self.assertEqual((info["renderer"], info["width"], info["height"], info["samples"]), ("cycles", 96, 72, 4))
+        self.assertEqual((scene.render.engine, (scene.render.resolution_x, scene.render.resolution_y), len(bpy.data.objects)),
+                         (engine, size, objects))
+        self.assertTrue(request("tools/call", {"name": "render_frame", "arguments": {"camera": "nope"}})["result"]["isError"])
+
         # groomlab-cli mcp --live blender finds this Blender through the file and forwards to it.
         if bu.CLI and os.path.isfile(bu.CLI):
             proc = subprocess.Popen([bu.CLI, "mcp", "--live", "blender"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,

@@ -188,6 +188,8 @@ class _Link(object):
                 process.client()
                 self._start_helper()
             by_name, scalps, active = _grooms()
+            if _is_render(line):
+                return self._render(line, by_name, scalps, active)
             r = process.call("agent_request", line=line, grooms=by_name, groom=active)
         except HelperError as e:
             return json.dumps({"id": None, "error": {"code": -32603, "message": "Blender: %s" % e.message}})
@@ -199,6 +201,23 @@ class _Link(object):
         if tool:
             groom._redraw()
         return r["reply"]
+
+    def _render(self, line, by_name, scalps, active):
+        """render_frame: checked by the helper, rendered here by Blender's engine, answered by the helper."""
+        begun = process.call("agent_render_begin", line=line, grooms=by_name, groom=active)
+        if "reply" in begun:
+            return begun["reply"]
+        request = begun["render"]
+        scalp = scalps.get(request.get("session"))
+        done = {"png": "", "seconds": 0.0, "info": {}, "error": ""}
+        if scalp is None:
+            done["error"] = "no groom '%s' in Blender's scene" % request.get("groom")
+        else:
+            try:
+                done.update(render_frame(scalp, request))
+            except (RuntimeError, ValueError, OSError) as e:
+                done["error"] = str(e)
+        return process.call("agent_render_end", begun=begun, **done)["reply"]
 
     def _show(self, scalp, ch, tool):
         """A groom the agent changed: its graph, photos, strands and lists followed, one undo step."""
@@ -212,6 +231,136 @@ class _Link(object):
         except Exception as e:  # noqa: BLE001 - the edit stands; the display catches up on its next refresh
             print("GroomLab: %s did not show the agent's edit: %s" % (scalp.name, e))
         _push_undo("Agent: %s" % (tool or "edit"))
+
+
+def _is_render(line):
+    import json
+    try:
+        request = json.loads(line)
+    except ValueError:
+        return False
+    params = request.get("params") if isinstance(request, dict) else None
+    return (isinstance(params, dict) and request.get("method") == "tools/call" and params.get("name") == "render_frame")
+
+
+ENGINES = {"cycles": "CYCLES", "eevee": "BLENDER_EEVEE"}
+SAMPLES = {"cycles": {"draft": 16, "preview": 64, "final": 256}, "eevee": {"draft": 16, "preview": 32, "final": 64}}
+
+
+def _framing_camera(scalp, scene, aspect):
+    """A camera looking at the groom from the front (-Y), the scalp's bounds filling the frame."""
+    from mathutils import Vector
+    corners = [scalp.matrix_world @ Vector(c) for c in scalp.bound_box]
+    lo = Vector([min(c[i] for c in corners) for i in range(3)])
+    hi = Vector([max(c[i] for c in corners) for i in range(3)])
+    middle, radius = (lo + hi) * 0.5, max((hi - lo).length * 0.5, 1e-4)
+    radius *= 1.6  # (the hair reaches past the scalp)
+    data = bpy.data.cameras.new("GroomLabAgentCamera")
+    data.lens = 50.0
+    data.clip_end = max(1000.0, radius * 100.0)
+    data.clip_start = radius * 0.01
+    cam = bpy.data.objects.new("GroomLabAgentCamera", data)
+    scene.collection.objects.link(cam)
+    import math
+    fov = 2.0 * math.atan(data.sensor_width * 0.5 / data.lens)
+    if aspect < 1.0:
+        fov *= aspect
+    distance = radius / math.tan(fov * 0.5)
+    cam.location = middle + Vector((0.0, -distance, 0.0))
+    cam.rotation_euler = (math.pi * 0.5, 0.0, 0.0)
+    return cam
+
+
+def render_frame(scalp, request):
+    """A frame of the scene the groom is in, by Cycles or EEVEE, as a PNG: {"png", "seconds", "info"}.
+    The camera named, else the scene's, else one framing the groom from the front; with no light in
+    the scene a sun for the render; the scene's render settings put back after."""
+    import tempfile
+    import time
+    scene = groom.scene_of(scalp)
+    renderer = request.get("renderer")
+    if renderer not in ENGINES:
+        raise ValueError("Blender renders with %s" % ", ".join(sorted(ENGINES)))
+    r = scene.render
+    keep = {"engine": r.engine, "resolution_x": r.resolution_x, "resolution_y": r.resolution_y,
+            "resolution_percentage": r.resolution_percentage, "filepath": r.filepath}
+    image_keep = {"file_format": r.image_settings.file_format, "color_mode": r.image_settings.color_mode}
+    camera_keep, frame_keep = scene.camera, scene.frame_current
+    samples = int(request.get("samples") or SAMPLES[renderer][request.get("quality") or "draft"])
+    samples_keep = None
+    made = []
+    started = time.time()
+    try:
+        r.engine = ENGINES[renderer]
+        r.resolution_x, r.resolution_y, r.resolution_percentage = int(request["width"]), int(request["height"]), 100
+        r.image_settings.file_format = "PNG"
+        r.image_settings.color_mode = "RGB"
+        if renderer == "cycles":
+            samples_keep = scene.cycles.samples
+            scene.cycles.samples = samples
+        else:
+            samples_keep = scene.eevee.taa_render_samples
+            scene.eevee.taa_render_samples = samples
+        name = request.get("camera") or ""
+        if name:
+            cam = bpy.data.objects.get(name)
+            if cam is None or cam.type != "CAMERA":
+                raise ValueError("no camera '%s' in Blender's scene" % name)
+            scene.camera = cam
+        elif scene.camera is None:
+            scene.camera = _framing_camera(scalp, scene, float(request["width"]) / float(request["height"]))
+            made.append(scene.camera)
+        if not any(o.type == "LIGHT" and not o.hide_render for o in scene.objects):
+            data = bpy.data.lights.new("GroomLabAgentLight", "SUN")
+            data.energy = 3.0
+            light = bpy.data.objects.new("GroomLabAgentLight", data)
+            light.rotation_euler = (0.8, 0.0, -0.5)
+            scene.collection.objects.link(light)
+            made.append(light)
+        if request.get("frame") is not None:
+            scene.frame_set(int(round(float(request["frame"]))))
+            groom.flush()  # (the groom evaluated at that frame)
+        # (beside the .blend, as GroomLab's renders go: <folder>/groomlab/<name>/renders; untitled: the temp folder)
+        folder = groom.asset_folder("renders") or tempfile.gettempdir()
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "agent_%s_%s.png" % (renderer, time.strftime("%Y%m%d_%H%M%S")))
+        r.filepath = path
+        _run_render()
+        if not os.path.isfile(path):
+            raise RuntimeError("%s wrote no image" % renderer)
+        return {"png": path.replace("\\", "/"), "seconds": time.time() - started,
+                "info": {"samples": samples, "camera": scene.camera.name if scene.camera else ""}}
+    finally:
+        for key, value in keep.items():
+            setattr(r, key, value)
+        for key, value in image_keep.items():
+            setattr(r.image_settings, key, value)
+        if samples_keep is not None:
+            if renderer == "cycles":
+                scene.cycles.samples = samples_keep
+            else:
+                scene.eevee.taa_render_samples = samples_keep
+        scene.camera = camera_keep
+        if scene.frame_current != frame_keep:
+            scene.frame_set(frame_keep)
+        for obj in made:
+            data = obj.data
+            bpy.data.objects.remove(obj)
+            if isinstance(data, bpy.types.Camera):
+                bpy.data.cameras.remove(data)
+            elif isinstance(data, bpy.types.Light):
+                bpy.data.lights.remove(data)
+
+
+def _run_render():
+    """bpy.ops.render.render(write_still), from the timer too (a window given where none is current)."""
+    wm = bpy.context.window_manager
+    window = getattr(bpy.context, "window", None) or (wm.windows[0] if wm and wm.windows else None)
+    if window is None or bpy.app.background:
+        bpy.ops.render.render(write_still=True)
+        return
+    with bpy.context.temp_override(window=window, screen=window.screen):
+        bpy.ops.render.render(write_still=True)
 
 
 def _tick():

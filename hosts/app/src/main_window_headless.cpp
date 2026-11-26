@@ -401,10 +401,35 @@ double MainWindow::benchmarkOrbit(const QSize& size, int frames) {
     return fps;
 }
 
+QImage MainWindow::renderLookdev(const QSize& size, int frames, int samples, QString* api) {
+    GroomRenderer renderer;
+    feedOffscreen(renderer);
+    renderer.setLookdev(true);
+    const OffscreenResult result = groomlab::app::renderOffscreen(renderer, viewport_->camera(), size, std::max(1, frames), nullptr,
+                                                                  std::max(1, samples));
+    if (api) *api = result.api;
+    if (document_) viewport_->setFrame(document_->updateDisplay(settings_));
+    return result.image;
+}
+
 QImage MainWindow::renderOffscreen(const QSize& size, int frames, double* msPerFrame, QString* api, int* surfaceDraws, double* firstFrameMs,
                                    double* gpuMsPerFrame) {
     // A renderer of its own on an offscreen device, fed what the viewport's has.
     GroomRenderer renderer;
+    feedOffscreen(renderer);
+    OrbitCamera camera = viewport_->camera();
+    const OffscreenResult result = groomlab::app::renderOffscreen(renderer, camera, size, frames);
+    if (msPerFrame) *msPerFrame = result.msPerFrame;
+    if (firstFrameMs) *firstFrameMs = result.firstFrameMs;
+    if (gpuMsPerFrame) *gpuMsPerFrame = result.gpuMsPerFrame;
+    if (api) *api = result.api;
+    // The viewport's builder frame is stale now (invalidated above): it draws fresh next time.
+    if (document_) viewport_->setFrame(document_->updateDisplay(settings_));
+    if (surfaceDraws) *surfaceDraws = renderer.lookdevRenderer().lastSurfaceDraws();
+    return result.image;
+}
+
+void MainWindow::feedOffscreen(GroomRenderer& renderer) {
     GroomRenderer& shown = viewport_->renderer();
     if (document_) {
         document_->display().invalidateAll();
@@ -426,16 +451,6 @@ QImage MainWindow::renderOffscreen(const QSize& size, int frames, double* msPerF
     renderer.setProps(props);
     renderer.setClumpLod(settings_.clumpLod, settings_.clumpLodError);
     renderer.setPhoto(shown.photo());  // a reference photo looked through
-    OrbitCamera camera = viewport_->camera();
-    const OffscreenResult result = groomlab::app::renderOffscreen(renderer, camera, size, frames);
-    if (msPerFrame) *msPerFrame = result.msPerFrame;
-    if (firstFrameMs) *firstFrameMs = result.firstFrameMs;
-    if (gpuMsPerFrame) *gpuMsPerFrame = result.gpuMsPerFrame;
-    if (api) *api = result.api;
-    // The viewport's builder frame is stale now (invalidated above): it draws fresh next time.
-    if (document_) viewport_->setFrame(document_->updateDisplay(settings_));
-    if (surfaceDraws) *surfaceDraws = renderer.lookdevRenderer().lastSurfaceDraws();
-    return result.image;
 }
 
 }  // namespace groomlab::app

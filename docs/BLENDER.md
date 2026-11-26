@@ -710,6 +710,8 @@ way (a new groom, reading a mesh file, exporting curves, a collider by name) wit
 |---|---|---|
 | `agent_start` | `port` (the add-on's), `pid` (Blender's), `folders` {`root`, `presets`?, `meshes`?, `docs`?}, `token` (a helper started again keeps the add-on's), `groom` | `{"token", "file", "root"}`: the discovery file written (`<GROOMLAB_AGENT_LINK_DIR or Documents/GroomLab/agent_link>/blender-<pid>.json`); presets and meshes default to the helper's shipped folders |
 | `agent_stop` | | `{"stopped"}`: the file removed (also when the helper ends) |
+| `agent_render_begin` | as `agent_request`, its line a `render_frame` call | `{"render": {groom, session, renderer (cycles, eevee), width, height, quality, samples, frame, camera}, "id"}` (agent_link.h `beginHostRender`: the token, the groom and the arguments checked), or `{"reply"}`: refused, answered. The add-on renders it (`agent_link.render_frame`: the engine, resolution and samples set, the camera named or the scene's or one framing the groom from the front, a sun when the scene has no light, the settings put back) |
+| `agent_render_end` | `begun` (agent_render_begin's answer), `png` (the file written), `seconds`, `info`, `error` | `{"reply"}`: the answer line, the PNG's image in it (`finishHostRender`) |
 | `agent_request` | `line` (the request line as the client sent it), `grooms` {name: session} (the scene's), `groom` (the active one's name: the tools' default) | `{"reply"` (the answer line), `"tool"` (the tool called, or null), `"changed"` [{`session`, `groom`, `undo` (undo_state), `graphChanged`, `scalpChanged`, `photosChanged`}]`}`: the sessions the call changed, for the add-on to show and give an undo step |
 
 ## 4. Install layout
@@ -803,8 +805,16 @@ extension zip installed by `blender --command extension install-file` into a thr
   scalp, the hair written), undoes the comb as the agent and the place through Blender's undo
   (`sync_undo`), reads the history, redoes; a Curl node added reaches the groom's graph and is
   undone; new_groom refused with where to do it; `groomlab-cli mcp --live blender` finds Blender
-  and lists its grooms; the badge shows while connected and its Stop turns the link off, its file
+  and lists its grooms; render_frame in Cycles at the size asked for (the scene's settings and
+  objects as they were); the badge shows while connected and its Stop turns the link off, its file
   gone.
+- `blender.gui_agent_undo` (labels blender, gui): the same in a Blender with its window
+  (`tests/hosts/blender/gui_addon_agent_undo.py`; run_blender_test.py runs a `gui_` test without
+  `--background`, driving itself from timers): the link's own timer answers `groomlab-cli mcp
+  --live blender`, which places and combs; Blender's Edit > Undo then takes the comb back and the
+  guides (the undo steps pushed from the timer), Redo brings both again. A new or opened groom
+  notes its depth at once (`groom.note_undo_depth`), so undoing to before its first edit takes
+  that edit back too.
 - `blender.addon`: a groom on the test head (the hair in Blender bit for bit the helper's
   evaluation; the saved `.groom` evaluated by groomlab-cli hash for hash); guides sculpted by script
   (moved: an incremental evaluation; drawn: the next ID written back and the root placed on the

@@ -167,6 +167,31 @@ struct ExportReport {
     std::string format;  // alembic, usd or vrscene
 };
 
+// A renderer a host offers render_frame (Maya's Arnold, the app's lookdev, Blender's Cycles...).
+struct RendererInfo {
+    std::string name;   // what render_frame's "renderer" names: arnold, cycles, lookdev...
+    std::string label;  // what the agent reads about it
+};
+
+// A frame render_frame asks the host for.
+struct RenderRequest {
+    std::string groom;  // the groom's name (resolved)
+    std::string renderer;
+    int width = 640, height = 480;
+    std::string quality = "draft";  // draft, preview or final: the host's samples for each
+    int samples = 0;                // its own count instead (0: the quality's)
+    std::optional<double> frame;    // none: the frame shown
+    std::string camera;             // the host's camera by name ("" the host's own pick)
+};
+
+// What the host rendered.
+struct RenderedFrame {
+    PreviewImage image;  // a PNG
+    double seconds = 0.0;
+    std::string file;    // where the host wrote it ("" in memory only)
+    nlohmann::json info = nlohmann::json::object();  // what the host says besides (camera, samples, notes)
+};
+
 // The grooms an agent works on, and what needs the host's own readers and writers.
 class AgentTarget {
 public:
@@ -214,6 +239,13 @@ public:
     // A picture of the groom (render_preview): the CPU preview by default. Throws
     // std::invalid_argument for options it cannot draw.
     virtual PreviewImage preview(AgentGroom& groom, const ScalpMesh* scalp, const StrandSet* strands, const PreviewOptions& options);
+
+    // ---- Renders (render_frame: listed only where a host has renderers) ----
+    // The host's renderers (default none: the CLI's previews are all it draws).
+    virtual std::vector<RendererInfo> renderers() { return {}; }
+    // A frame rendered (ToolError when the renderer is not installed or the render fails). A host
+    // whose glue renders (Maya's, Blender's: agent_link.h beginHostRender) never gets here.
+    virtual RenderedFrame render(AgentGroom& groom, const RenderRequest& request);
 };
 
 }  // namespace groomlab::agent

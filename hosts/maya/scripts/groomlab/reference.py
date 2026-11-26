@@ -1023,36 +1023,78 @@ def photos_from_file(groom, photos, directory="", copy=True):
             cmds.warning("GroomLab: the reference photo %s is missing (%s): not made" % (name or image, image))
             continue
         camera = _camera(import_reference(image, name=name or None, groom=groom, copy=copy))
-        width, height = int(photo.get("width") or 0), int(photo.get("height") or 0)
-        if width > 0 and height > 0:
-            cmds.setAttr(camera + ".glRefWidth", width)
-            cmds.setAttr(camera + ".glRefHeight", height)
-        solved = photo.get("camera")
-        if isinstance(solved, dict) and solved.get("rotation") and solved.get("position"):
-            r, p = solved["rotation"], solved["position"]
-            matrix = [r[0][0], r[1][0], r[2][0], 0.0, r[0][1], r[1][1], r[2][1], 0.0,
-                      r[0][2], r[1][2], r[2][2], 0.0, p[0], p[1], p[2], 1.0]
-            cmds.setAttr(camera + ".rotateOrder", 0)
-            cmds.xform(camera, worldSpace=True, matrix=matrix)
-            if solved.get("focal_px"):
-                shape = _shape(camera)
-                cmds.setAttr(shape + ".focalLength", float(solved["focal_px"]) * cmds.getAttr(shape + ".horizontalFilmAperture")
-                             * 25.4 / cmds.getAttr(camera + ".glRefWidth"))
-        if photo.get("state"):
-            state = photo["state"]
-            from_reference.store_photo_state(groom, camera, json.dumps(state) if not isinstance(state, str) else state)
-        mask = found(photo.get("mask"))
-        if mask and os.path.isfile(mask):
-            from_reference.set_view_mask(groom, camera, mask)
-        display = photo.get("display") or {}
-        if "opacity" in display:
-            set_reference_opacity(camera, display["opacity"])
-        if display.get("depth") in ("front", "behind"):
-            set_reference_depth(camera, display["depth"])
-        if "visible" in display:
-            set_reference_visible(camera, bool(display["visible"]))
-        _apply_depth(camera)
-        if display.get("locked"):
-            lock_reference(camera, True)
+        _apply_photo(groom, camera, photo, found)
         made.append(camera)
     return made
+
+
+def _apply_photo(groom, camera, photo, found):
+    """A reference camera set as a .groom's photo says: its size, solved camera, landmark pairs and
+    the groom's strokes and touch-ups for it, mask and display (`found`: a stored path resolved)."""
+    from groomlab import from_reference
+    width, height = int(photo.get("width") or 0), int(photo.get("height") or 0)
+    if width > 0 and height > 0:
+        cmds.setAttr(camera + ".glRefWidth", width)
+        cmds.setAttr(camera + ".glRefHeight", height)
+    solved = photo.get("camera")
+    if isinstance(solved, dict) and solved.get("rotation") and solved.get("position"):
+        r, p = solved["rotation"], solved["position"]
+        matrix = [r[0][0], r[1][0], r[2][0], 0.0, r[0][1], r[1][1], r[2][1], 0.0,
+                  r[0][2], r[1][2], r[2][2], 0.0, p[0], p[1], p[2], 1.0]
+        was_locked = is_locked(camera)
+        if was_locked:
+            lock_reference(camera, False)
+        cmds.setAttr(camera + ".rotateOrder", 0)
+        cmds.xform(camera, worldSpace=True, matrix=matrix)
+        if solved.get("focal_px"):
+            shape = _shape(camera)
+            cmds.setAttr(shape + ".focalLength", float(solved["focal_px"]) * cmds.getAttr(shape + ".horizontalFilmAperture")
+                         * 25.4 / cmds.getAttr(camera + ".glRefWidth"))
+        if was_locked:
+            lock_reference(camera, True)
+    if photo.get("state"):
+        state = photo["state"]
+        from_reference.store_photo_state(groom, camera, json.dumps(state) if not isinstance(state, str) else state)
+    mask = found(photo.get("mask"))
+    if mask and os.path.isfile(mask):
+        from_reference.set_view_mask(groom, camera, mask)
+    display = photo.get("display") or {}
+    if "opacity" in display:
+        set_reference_opacity(camera, display["opacity"])
+    if display.get("depth") in ("front", "behind"):
+        set_reference_depth(camera, display["depth"])
+    if "visible" in display:
+        set_reference_visible(camera, bool(display["visible"]))
+    _apply_depth(camera)
+    if "locked" in display and bool(display["locked"]) != is_locked(camera):
+        lock_reference(camera, bool(display["locked"]))
+
+
+def apply_photos(groom, photos, before=()):
+    """The scene's reference cameras made to match `photos` (a .groom's referencePhotos list, as
+    photos_for_file gives them; the agent link's photo edits): a photo with no camera of its name
+    made (photos_from_file, its file copied into the references folder), each camera there set as
+    its photo says, and the cameras of the photos in `before` that `photos` no longer has removed.
+    Inside the caller's undo chunk: Maya undoes it with the step. Returns {"made", "updated",
+    "removed"} (camera names)."""
+    out = {"made": [], "updated": [], "removed": []}
+    keep = {p.get("name") for p in photos or [] if isinstance(p, dict)}
+    by_name = {_short(c): _camera(c) for c in list_references()}
+    for photo in before or []:
+        name = photo.get("name") if isinstance(photo, dict) else None
+        if name and name not in keep and name in by_name:
+            remove_reference(by_name.pop(name))
+            out["removed"].append(name)
+    fresh = []
+    for photo in photos or []:
+        if not isinstance(photo, dict) or not photo.get("image"):
+            continue
+        camera = by_name.get(photo.get("name") or "")
+        if camera is None:
+            fresh.append(photo)
+            continue
+        _apply_photo(groom, camera, photo, lambda stored: os.path.normpath(os.path.expandvars(str(stored or ""))).replace("\\", "/")
+                     if stored else "")
+        out["updated"].append(_short(camera))
+    out["made"] = [_short(c) for c in photos_from_file(groom, fresh)]
+    return out

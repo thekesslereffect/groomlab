@@ -242,6 +242,10 @@ void AgentTarget::loadSimulationCache(AgentGroom&, const std::string&, const std
 
 std::optional<PreviewImage> AgentTarget::viewportImage(AgentGroom&, int) { return std::nullopt; }
 
+RenderedFrame AgentTarget::render(AgentGroom&, const RenderRequest& request) {
+    throw ToolError("this host does not render '" + request.renderer + "' itself");
+}
+
 PreviewImage AgentTarget::preview(AgentGroom&, const ScalpMesh* scalp, const StrandSet* strands, const PreviewOptions& options) {
     return renderPreview(scalp, strands, options);
 }

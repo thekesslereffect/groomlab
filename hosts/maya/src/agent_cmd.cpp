@@ -52,6 +52,14 @@ using agent::ToolError;
 
 AgentCmd* gCurrent = nullptr;
 
+// Photo edits the requests made (a groom's referencePhotos before the first, after the last), for
+// the glue to make the scene's reference cameras follow (-takePhotos): Maya keeps the photos on
+// them, as its Photos window does, so they are saved with the scene and undone with the chunk.
+std::map<std::string, std::pair<std::string, std::string>>& pendingPhotos() {
+    static std::map<std::string, std::pair<std::string, std::string>> pending;
+    return pending;
+}
+
 double mayaFps() { return MTime(1.0, MTime::kSeconds).as(MTime::uiUnit()); }
 
 std::string mayaUnits() {
@@ -139,7 +147,12 @@ public:
     std::string apply(const GroomEdit& edit, bool after) override {
         AgentCmd* cmd = AgentCmd::current();
         if (!cmd) return "no groomLabAgent command is running to record the edit";
-        if (edit.referencePhotos) referencePhotos = after ? edit.referencePhotos->second : edit.referencePhotos->first;
+        if (edit.referencePhotos) {
+            const std::string now = after ? edit.referencePhotos->second : edit.referencePhotos->first;
+            auto [entry, made] = pendingPhotos().try_emplace(name(), referencePhotos, now);
+            if (!made) entry->second.second = now;
+            referencePhotos = now;
+        }
         MFnDagNode fn(node_.object());
         struct Set {
             MPlug plug;
@@ -261,6 +274,14 @@ public:
         throw ToolError("in Maya, export the curves with GroomLab > Export (Alembic, USD, V-Ray); save_groom writes a .groom file");
     }
 
+    // Maya's renderers GroomLab drives (the glue renders them: agent_render.py).
+    std::vector<agent::RendererInfo> renderers() override {
+        return {{"arnold", "Arnold through MtoA and GroomLab's translator (kick, in the background)"},
+                {"hardware2", "Maya's Hardware 2.0 (the viewport's look, quick; Maya's UI only)"},
+                {"vray", "V-Ray Standalone, where it is installed"},
+                {"renderman", "RenderMan's prman through GroomLab's procedural, where it is installed"}};
+    }
+
     // The active viewport as the artist sees it, read back after a refresh.
     std::optional<agent::PreviewImage> viewportImage(AgentGroom&, int size) override {
         if (MGlobal::mayaState() != MGlobal::kInteractive) return std::nullopt;
@@ -356,6 +377,10 @@ MSyntax AgentCmd::newSyntax() {
     syntax.addFlag("-sts", "-status");
     syntax.addFlag("-rq", "-request", MSyntax::kString);
     syntax.addFlag("-gn", "-groomName");
+    syntax.addFlag("-ph", "-photos", MSyntax::kString);
+    syntax.addFlag("-tp", "-takePhotos");
+    syntax.addFlag("-rb", "-renderBegin", MSyntax::kString);
+    syntax.addFlag("-re", "-renderEnd", MSyntax::kString);
     syntax.enableQuery(false);
     syntax.enableEdit(false);
     return syntax;
@@ -426,9 +451,45 @@ MStatus AgentCmd::doIt(const MArgList& args) {
             setResult(activeGroomName().c_str());
             return MS::kSuccess;
         }
+        if (db.isFlagSet("-tp")) {
+            json out = json::object();
+            for (const auto& [groom, photos] : pendingPhotos()) {
+                const json before = json::parse(photos.first.empty() ? std::string("[]") : photos.first, nullptr, false);
+                const json after = json::parse(photos.second.empty() ? std::string("[]") : photos.second, nullptr, false);
+                out[groom] = {{"before", before.is_array() ? before : json::array()}, {"after", after.is_array() ? after : json::array()}};
+            }
+            pendingPhotos().clear();
+            setResult(out.dump().c_str());
+            return MS::kSuccess;
+        }
+        if (db.isFlagSet("-rb") || db.isFlagSet("-re")) {
+            if (l.token.empty()) return fail(kName, "the agent link is off (groomLabAgent -start)");
+            if (db.isFlagSet("-rb")) {
+                setResult(agent::beginHostRender(tools(), l.token, flagString(db, "-rb").asChar()).dump().c_str());
+                return MS::kSuccess;
+            }
+            const json done = json::parse(flagString(db, "-re").asChar(), nullptr, false);
+            if (!done.is_object()) return fail(kName, "-renderEnd is a JSON object");
+            setResult(agent::finishHostRender(tools(), done.value("begun", json::object()), done.value("png", std::string()),
+                                              done.value("seconds", 0.0), done.value("info", json::object()),
+                                              done.value("error", std::string()))
+                          .c_str());
+            return MS::kSuccess;
+        }
         if (db.isFlagSet("-rq")) {
             if (l.token.empty()) return fail(kName, "the agent link is off (groomLabAgent -start)");
             const std::string line = flagString(db, "-rq").asChar();
+            // The photos as the scene's reference cameras have them now (the glue's: Maya's Photos
+            // window edits them too), by groom.
+            if (db.isFlagSet("-ph")) {
+                const json photos = json::parse(flagString(db, "-ph").asChar(), nullptr, false);
+                if (!photos.is_object()) return fail(kName, "-photos is a JSON object {groom: photos}");
+                for (AgentGroom* g : tools().target().grooms()) {
+                    const auto it = photos.find(g->name());
+                    if (it == photos.end()) continue;
+                    g->referencePhotos = it->is_array() && !it->empty() ? it->dump() : std::string();
+                }
+            }
             gCurrent = this;
             std::string answer;
             try {
@@ -441,7 +502,7 @@ MStatus AgentCmd::doIt(const MArgList& args) {
             setResult(answer.c_str());
             return MS::kSuccess;
         }
-        return fail(kName, "give -start, -stop, -status, -groomName or -request");
+        return fail(kName, "give -start, -stop, -status, -groomName, -request, -takePhotos, -renderBegin or -renderEnd");
     });
 }
 

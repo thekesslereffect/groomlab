@@ -3121,6 +3121,50 @@ struct AgentTools::Impl {
     }
 
     // ---- The table ---------------------------------------------------------------------------------
+    // ---- render_frame ----
+    RenderRequest renderRequestOf(const json& a) {
+        const std::vector<RendererInfo> offered = target.renderers();
+        if (offered.empty()) throw ToolError("this server renders only previews (render_preview): render_frame runs live in a host");
+        RenderRequest r;
+        r.groom = target.groom(str(a, "groom")).name();
+        r.renderer = str(a, "renderer", offered.front().name);
+        const bool known = std::any_of(offered.begin(), offered.end(), [&](const RendererInfo& i) { return i.name == r.renderer; });
+        if (!known) {
+            std::string names;
+            for (const RendererInfo& i : offered) names += (names.empty() ? "" : ", ") + i.name;
+            throw ToolError("renderer '" + r.renderer + "' is not one of this host's: " + names);
+        }
+        const double w = num(a, "width", 640.0), h = num(a, "height", 480.0);
+        if (w < 16 || w > 2048 || h < 16 || h > 2048) throw ToolError("width and height are 16 to 2048 pixels");
+        r.width = static_cast<int>(w);
+        r.height = static_cast<int>(h);
+        r.quality = str(a, "quality", "draft");
+        if (r.quality != "draft" && r.quality != "preview" && r.quality != "final") throw ToolError("quality is draft, preview or final");
+        const double samples = num(a, "samples", 0.0);
+        if (samples < 0 || samples > 1024) throw ToolError("samples is 1 to 1024 (0: the quality's)");
+        r.samples = static_cast<int>(samples);
+        if (a.contains("frame") && a["frame"].is_number()) r.frame = a["frame"].get<double>();
+        r.camera = str(a, "camera");
+        return r;
+    }
+
+    ToolResult renderResultOf(const RenderRequest& r, const RenderedFrame& f) {
+        if (f.image.png.empty()) throw ToolError("the " + r.renderer + " render gave no image");
+        json info = {{"groom", r.groom}, {"renderer", r.renderer}, {"width", f.image.width}, {"height", f.image.height},
+                     {"quality", r.quality}, {"seconds", std::round(f.seconds * 100.0) / 100.0}};
+        if (r.samples > 0) info["samples"] = r.samples;
+        if (r.frame) info["frame"] = *r.frame;
+        if (!f.file.empty()) info["file"] = files().insideRoot(f.file) ? files().shown(f.file) : f.file;
+        for (const auto& [k, v] : f.info.items()) info[k] = v;
+        return imageResult(f.image.png, info);
+    }
+
+    ToolResult renderFrameTool(const json& a) {
+        const RenderRequest r = renderRequestOf(a);
+        AgentGroom& g = target.groom(r.groom);
+        return renderResultOf(r, target.render(g, r));
+    }
+
     void add(const char* name, const char* title, const std::string& description, json schema,
              ToolResult (Impl::*run)(const json&)) {
         tools.push_back({name, title, description, std::move(schema), [run](Impl& self, const json& a) { return (self.*run)(a); }});
@@ -3499,6 +3543,30 @@ struct AgentTools::Impl {
                                                        "instead of the CPU preview (the other options aside from size are not read).")},
                           {"save_to", prop("string", "Also write the PNG to this file inside the server's folder.")}}),
             &Impl::renderPreviewTool);
+        // The host's own renderers, where it has any (live in Maya, the app, Blender).
+        if (const std::vector<RendererInfo> offered = target.renderers(); !offered.empty()) {
+            std::vector<std::string> names;
+            std::string which;
+            for (const RendererInfo& i : offered) {
+                names.push_back(i.name);
+                which += (which.empty() ? "" : "; ") + i.name + ": " + i.label;
+            }
+            add("render_frame", "Render a frame",
+                "Renders the groom with one of this host's own renderers and gives back the image: the look the artist renders "
+                "(its shading, lights and shadows), unlike render_preview's quick CPU drawing. Renderers here: " + which +
+                    ". It takes seconds to minutes: iterate at the defaults (640x480, draft) and render final only to check. A "
+                    "renderer that is not installed says so.",
+                objectSchema({{"groom", groom}, {"renderer", enumProp(names, "The renderer (default the first listed).")},
+                              {"width", prop("integer", "Pixels across, 16-2048 (default 640).")},
+                              {"height", prop("integer", "Pixels down, 16-2048 (default 480).")},
+                              {"quality", enumProp({"draft", "preview", "final"},
+                                                   "How many samples the renderer takes (default draft: fast and noisy).")},
+                              {"samples", prop("integer", "The renderer's samples instead of the quality's (1-1024).")},
+                              {"frame", prop("number", "Render this frame (default the frame shown).")},
+                              {"camera", prop("string", "The host's camera by name (default its render or studio camera, else the "
+                                                        "view's).")}}),
+                &Impl::renderFrameTool);
+        }
         add("measure_guides", "Measure guides",
             "Numbers that describe the guides, per group (or the selection): count, length min/mean/max, the mean root-to-tip "
             "direction (and in words: \"down, back\"), straightness (1 straight), curl (degrees turned root to tip), how far "
@@ -3749,6 +3817,16 @@ AgentTools::AgentTools(AgentTarget& target) : impl_(std::make_unique<Impl>(targe
 AgentTools::~AgentTools() = default;
 
 AgentTarget& AgentTools::target() { return impl_->target; }
+
+RenderRequest AgentTools::renderRequest(const json& arguments) {
+    const Impl::Tool* tool = impl_->find("render_frame");
+    if (!tool) throw ToolError("this server renders only previews (render_preview)");
+    return impl_->renderRequestOf(checkArguments(tool->schema, arguments.is_object() ? arguments : json::object()));
+}
+
+ToolResult AgentTools::renderResult(const RenderRequest& request, const RenderedFrame& frame) {
+    return impl_->renderResultOf(request, frame);
+}
 
 json AgentTools::list() const {
     json out = json::array();

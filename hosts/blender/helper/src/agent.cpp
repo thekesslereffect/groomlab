@@ -161,6 +161,18 @@ public:
     std::shared_ptr<const ScalpMesh> readMesh(const std::string&, const std::string&) override {
         throw ToolError("in Blender, meshes are Blender objects: import the mesh into the scene, then Create Groom on it");
     }
+    // Blender's own engines: the add-on renders them (agent_render_begin / agent_render_end).
+    std::vector<agent::RendererInfo> renderers() override {
+        return {{"cycles", "Blender's Cycles (path traced: the hair's Principled Hair look, the scene's lights and world)"},
+                {"eevee", "Blender's EEVEE (real time on the GPU, quicker and less exact)"}};
+    }
+    // The session a groom of the request is (the add-on renders its scalp's scene).
+    int sessionOf(const std::string& name) const {
+        for (const auto& g : grooms_) {
+            if (g->name() == name) return g->sessionOf().id;
+        }
+        return 0;
+    }
     agent::ExportReport exportCurves(agent::AgentGroom&, const agent::ExportRequest&) override {
         throw ToolError("in Blender, export the curves with GroomLab > Export (Alembic, USD, V-Ray); save_groom writes a .groom file");
     }
@@ -199,7 +211,10 @@ struct AgentLink {
     std::string token, file;
 };
 
-bool isAgentCommand(const std::string& cmd) { return cmd == "agent_start" || cmd == "agent_stop" || cmd == "agent_request"; }
+bool isAgentCommand(const std::string& cmd) {
+    return cmd == "agent_start" || cmd == "agent_stop" || cmd == "agent_request" || cmd == "agent_render_begin" ||
+           cmd == "agent_render_end";
+}
 
 void AgentLinkDeleter::operator()(AgentLink* link) const {
     if (link && !link->file.empty()) agent::removeLinkInfo(link->file);
@@ -251,9 +266,14 @@ json runAgentCommand(const std::string& cmd, const json& args, std::map<int, std
         link.reset();
         return {{"stopped", was}};
     }
-    // agent_request
     if (!link || link->token.empty()) fail("bad_request", "the agent link is off (agent_start)");
     AgentLink& l = *link;
+    if (cmd == "agent_render_end") {
+        const json begun = args.value("begun", json::object());
+        return {{"reply", agent::finishHostRender(*l.tools, begun, optString(args, "png", ""), optNumber(args, "seconds", 0.0),
+                                                  args.value("info", json::object()), optString(args, "error", ""))}};
+    }
+    // agent_request, agent_render_begin
     const std::string line = needString(args, "line");
     std::vector<std::pair<std::string, Session*>> grooms;
     if (args.contains("grooms") && args["grooms"].is_object()) {
@@ -265,6 +285,11 @@ json runAgentCommand(const std::string& cmd, const json& args, std::map<int, std
         }
     }
     l.target.setGrooms(grooms, optString(args, "groom", ""));
+    if (cmd == "agent_render_begin") {
+        json begun = agent::beginHostRender(*l.tools, l.token, line);
+        if (begun.contains("render")) begun["render"]["session"] = l.target.sessionOf(begun["render"].value("groom", std::string()));
+        return begun;
+    }
     std::vector<Before> was;
     for (const auto& [name, s] : grooms) was.push_back(before(*s));
     const std::string reply = agent::answerLinkRequest(*l.tools, l.token, line);
