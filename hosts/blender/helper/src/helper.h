@@ -11,6 +11,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "agent.h"
+
 namespace groomlab::helper {
 
 // The protocol's version: a client checks it in hello's answer. A new command or field keeps it;
@@ -53,6 +55,7 @@ private:
     Session& session(const nlohmann::json& args);
 
     std::map<int, std::unique_ptr<Session>> sessions_;
+    AgentLinkPtr agent_;  // the agent link while the add-on has it on (agent.h)
     int nextSession_ = 1;
     bool done_ = false;
 };

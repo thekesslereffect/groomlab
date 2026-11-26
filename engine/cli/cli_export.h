@@ -2,7 +2,7 @@
 #pragma once
 
 // Writing a groom's strands to Alembic, USD or a V-Ray scene frame by frame: what `groomlab-cli eval` does, and
-// the MCP server's export tool (mcp_tools.cpp) with it, so the two write the same files.
+// the MCP server's export tool (engine/editor agent_tools.cpp, through mcp_groom.h) with it, so the two write the same files.
 
 #include <cstddef>
 #include <ostream>

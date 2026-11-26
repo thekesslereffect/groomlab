@@ -7,12 +7,19 @@ Starts `groomlab-cli mcp --root <work folder>`, then: initialize, tools/list (ev
 schema), the discovery tools, new_groom on the Nika sample, apply_preset, add_node, set_params,
 sample_scalp, add_guides, set_tube, add_script_node with an error and then fixed, evaluate (no
 errors), render_preview (a real PNG with something drawn, the same twice), save_groom and open_groom
-(the same strands), export USD, save_node, a path outside the root refused, undo. Standard library
-only.
+(the same strands), export USD, save_node, a path outside the root refused, undo. Then a groom by
+hand: scalp_landmarks, guides placed along the scalp, combed from the crown to the nape, cut,
+density painted, measure_guides, previews from two cameras (guides drawn, before and after), undo,
+redo and history, saved and opened again. Then everything else an artist does: a photo rendered from
+a known camera added, lined up (the solved camera checked against the truth) and guides grown from
+it; a root tube drawn, subdivided and split a level down; an expression checked and set; a head turn
+written as an animated scalp and simulated, the frames baked; a turntable in another look; hair cards
+exported for glTF and Unreal. Standard library only.
 """
 
 import base64
 import json
+import math
 import os
 import shutil
 import struct
@@ -101,6 +108,202 @@ def png_pixels(data):
     return width, height, rows
 
 
+def image_of(result, index=0):
+    images = [x for x in result["content"] if x["type"] == "image"]
+    return png_pixels(base64.b64decode(images[index]["data"]))
+
+
+def groom_by_hand(c):
+    """A groom made the way an artist grooms: landmarks, strokes, painting, and checks in numbers and pictures."""
+    g = {"groom": "head"}
+    c.call("new_groom", {"name": "head", "mesh": "nika"})
+    marks, _ = c.call("scalp_landmarks", g)
+    lm = marks["landmarks"]
+    for name in ["top", "crown", "front_hairline", "nape", "left_temple", "right_temple", "left_ear", "right_ear"]:
+        assert name in lm, name
+    assert marks["upAxis"] == "Y", marks
+    assert lm["top"]["p"][1] >= lm["crown"]["p"][1] > lm["nape"]["p"][1], lm
+    assert lm["crown"]["p"][2] < lm["top"]["p"][2] < lm["front_hairline"]["p"][2], lm  # front is +Z
+    assert lm["left_temple"]["p"][0] > 0 > lm["right_temple"]["p"][0], lm  # the character's left: +X
+
+    # Guides placed along the scalp: front to back over the top, then ear to ear.
+    placed, _ = c.call("brush_stroke", dict(g, mode="place", **{"from": "front_hairline", "via": ["top", "crown"], "to": "nape",
+                                                               "length": 14, "spacing": 2.5, "match_neighbors": False}))
+    across, _ = c.call("brush_stroke", dict(g, mode="place", **{"from": "left_ear", "via": ["crown"], "to": "right_ear",
+                                                               "length": 14, "spacing": 2.5}))
+    assert placed["changed"]["guidesAdded"] >= 8 and across["changed"]["guidesAdded"] >= 8, (placed, across)
+    count = placed["changed"]["guidesAdded"] + across["changed"]["guidesAdded"]
+    standing, _ = c.call("measure_guides", g)
+    assert standing["groups"][0]["count"] == count, standing
+
+    # Combed from the crown to the nape, off the scalp to reach along the guides: they lean back, lengths kept.
+    combed, _ = c.call("brush_stroke", dict(g, mode="comb", **{"from": "crown", "to": "nape", "offset": 3, "radius": 6}))
+    ch = combed["changed"]
+    assert ch["guidesTouched"] > 0 and ch["maxMove"] > 1, combed
+    assert abs(ch["meanLengthAfter"] - ch["meanLengthBefore"]) < 0.1, combed
+    leaning, _ = c.call("measure_guides", g)
+    assert leaning["groups"][0]["direction"][2] < standing["groups"][0]["direction"][2], (standing, leaning)  # more to -Z
+
+    # Cut where a band over the back crosses them: shorter.
+    cut, _ = c.call("brush_stroke", dict(g, mode="cut", **{"from": "left_ear", "via": ["back"], "to": "right_ear", "offset": 6,
+                                                          "radius": 4}))
+    assert cut["changed"]["guidesTouched"] > 0 and cut["changed"]["meanLengthAfter"] < cut["changed"]["meanLengthBefore"], cut
+
+    # Density painted away along the nape: fewer strands, the map's values say so.
+    dense, _ = c.call("paint_map", dict(g, **{"for": "scatter.density", "fill": 1}))
+    thin, _ = c.call("paint_map", dict(g, **{"for": "scatter.density", "from": "left_ear", "via": ["nape"], "to": "right_ear",
+                                            "value": 0, "radius": 4}))
+    assert thin["values"]["min"] == 0 and thin["values"]["max"] == 1 and thin["verticesPainted"] > 0, thin
+    assert thin["summary"]["strands"] < dense["summary"]["strands"], (dense, thin)
+
+    # Selected about the crown: the selection measured on its own.
+    picked, _ = c.call("select_guides", dict(g, center="crown", radius=5))
+    assert picked["selected"] > 0, picked
+    crown, _ = c.call("measure_guides", dict(g, selection=True))
+    assert crown["groups"][0]["count"] == picked["selected"], crown
+
+    # Looked at from two cameras with the guides drawn; then before and after the last change.
+    info, result = c.call("render_preview", dict(g, views=["back", "left"], size=256, guides=True))
+    width, height, rows = image_of(result)
+    assert (width, height) == (256, 128), (width, height)
+    orange = sum(1 for row in rows for i in range(0, len(row), 3) if row[i] > 200 and 90 < row[i + 1] < 220 and row[i + 2] < 90)
+    assert orange > 50, "the guides are drawn (%d orange pixels)" % orange
+    info, result = c.call("render_preview", dict(g, views=["back"], size=128, compare=True))
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 2 and "before" in info["images"][0], info
+    assert image_of(result, 0)[2] != image_of(result, 1)[2], "the density stroke shows"
+
+    # Undo, redo and the history.
+    history, _ = c.call("history", g)
+    titles = [s["title"] for s in history["steps"]]
+    paint = "paint map " + thin["map"]
+    assert titles == ["place stroke", "place stroke", "comb stroke", "cut stroke", paint, paint], titles
+    undone, _ = c.call("undo", dict(g, steps=2))
+    assert undone["undone"] == [paint, paint] and undone["summary"]["strands"] == cut["summary"]["strands"], undone
+    redone, _ = c.call("redo", dict(g, steps=2))
+    assert redone["redone"] == [paint, paint] and redone["summary"]["strands"] == thin["summary"]["strands"], (redone, thin)
+    c.call("redo", g, expect_error=True)
+
+    # Saved and opened again: the same guides and strands.
+    c.call("save_groom", dict(g, path="out/head.groom"))
+    again, _ = c.call("open_groom", {"path": "out/head.groom", "name": "head2"})
+    assert again["summary"]["strands"] == thin["summary"]["strands"], again
+    reread, _ = c.call("measure_guides", {"groom": "head2"})
+    final, _ = c.call("measure_guides", g)
+    assert reread["groups"][0]["count"] == final["groups"][0]["count"], (reread, final)
+    assert abs(reread["groups"][0]["length"]["mean"] - final["groups"][0]["length"]["mean"]) < 1e-3, (reread, final)
+
+
+def vsub(a, b):
+    return [a[i] - b[i] for i in range(3)]
+
+
+def vdot(a, b):
+    return sum(a[i] * b[i] for i in range(3))
+
+
+def vcross(a, b):
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+
+def vnorm(a):
+    length = math.sqrt(vdot(a, a))
+    return [x / length for x in a]
+
+
+def everything_else(c, root):
+    """Photos, roots and tubes, expressions, simulation, looks and game exports."""
+    # A photo of a groom from a known camera: render_preview through it, saved as the photo.
+    c.call("new_groom", {"name": "model", "mesh": "nika"})
+    spots, _ = c.call("sample_scalp", {"groom": "model", "count": 60, "min_up": 0.2})
+    c.call("add_guides", {"groom": "model", "guides": [{"root": p["p"], "length": 16, "droop": 0.85} for p in spots["points"]]})
+    eye, target, focal_mm, width, height = [10.0, 8.0, 75.0], [0.0, 2.0, 0.0], 50.0, 480, 480
+    shot, _ = c.call("render_preview", {"groom": "model", "size": width, "save_to": "photos/front.png",
+                                        "camera": {"eye": eye, "target": target, "focal_mm": focal_mm, "width": width, "height": height}})
+    assert shot["width"] == width and shot["height"] == height, shot
+    back = vnorm(vsub(eye, target))
+    right = vnorm(vcross([0, 1, 0], back))
+    up = vcross(back, right)
+    focal_px = focal_mm / 36.0 * width
+
+    def project(p):
+        d = vsub(p, eye)
+        depth = -vdot(d, back)
+        return [width / 2 + focal_px * vdot(d, right) / depth, height / 2 - focal_px * vdot(d, up) / depth]
+
+    g = {"groom": "art"}
+    c.call("new_groom", {"name": "art", "mesh": "nika"})
+    added, result = c.call("add_photo", dict(g, path="photos/front.png"))
+    assert added["width"] == width and image_of(result)[0] == width, added
+    seen, result = c.call("mesh_landmarks", dict(g, view="front", photo="front", count=16))
+    assert len(seen["points"]) == 16 and image_of(result)[0] == width, seen
+    # The pairs an agent reads off the two pictures: here the truth's projection of each point.
+    pairs = [{"pixel": project(p["p"]), "point": p["p"]} for p in seen["points"]]
+    pairs = [q for q in pairs if 0 < q["pixel"][0] < width and 0 < q["pixel"][1] < height][:10]
+    assert len(pairs) >= 6, pairs
+    aligned, result = c.call("align_photo", dict(g, pairs=pairs))
+    assert aligned["linedUp"] and aligned["rmsPixels"] < 0.5, aligned
+    assert max(abs(aligned["camera"]["eye"][i] - eye[i]) for i in range(3)) < 0.1, (aligned, eye)
+    assert abs(aligned["camera"]["focal_mm"] - focal_mm) < 0.5, aligned
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 1
+    c.call("photo_edit", dict(g, op="add_flow", points=[[240, 120], [250, 300]]))
+    viewed, result = c.call("photo_view", dict(g, analysis=True))
+    assert viewed["linedUp"] and viewed["flowArrows"] == 1, viewed
+    grown, _ = c.call("guides_from_photos", dict(g, guide_count=120))
+    assert grown["guides"] > 20 and grown["group"] == "fromReference", grown
+    compared, result = c.call("render_preview", dict(g, camera={"photo": "front"}, size=240))
+    assert compared["width"] == 240 and compared["height"] == 240, compared
+
+    # A root tube drawn round the crown, cut into cells, then split a level down.
+    drawn, _ = c.call("root_tube", dict(g, op="draw", center="crown", radius=3, length=12))
+    cells, _ = c.call("root_tube", dict(g, op="subdivide", guides=drawn["guides"]))
+    assert len(cells["guides"]) >= 3, cells
+    split, _ = c.call("tube_levels", dict(g, op="add", group="rootTubes"))
+    assert split["split"] > 0 and len(split["levels"]) >= 2, split
+    c.call("tube_levels", dict(g, op="view", group="rootTubes", level=len(split["levels"])))
+    info, result = c.call("render_preview", dict(g, views=["top"], tubes=True, size=128, look="clay"))
+    assert "tubesDrawn" in info and info["look"] == "clay", info
+
+    # An expression checked, then set on a mappable param.
+    checked, _ = c.call("check_expression", dict(g, expression="smoothstep($y, 5, 12)"))
+    assert checked["ok"] and checked["variables"] == ["y"] and checked["values"]["max"] <= 1.0, checked
+    failed, _ = c.call("check_expression", dict(g, expression="1 - $t ^"))
+    assert not failed["ok"] and "position" in failed["error"], failed
+    graph, _ = c.call("get_graph", g)
+    width_node = next(n["name"] for n in graph["nodes"] if n["type"] == "Width")
+    c.call("set_params", dict(g, node=width_node, params={"width": {"expression": "1 - $t", "min": 0.001, "max": 0.01}}))
+
+    # A head turn as an animated scalp, the guides simulated through it and baked.
+    turned, _ = c.call("animate_scalp", dict(g, keys=[{"frame": 1}, {"frame": 5, "rotate_degrees": [0, 45, 0]},
+                                                      {"frame": 9, "rotate_degrees": [0, -20, 0]}]))
+    assert turned["frames"] == 9 and os.path.isfile(os.path.join(root, turned["path"])), turned
+    sim, _ = c.call("simulate", dict(g, add=True, to_frame=6))
+    assert sim["framesStepped"] == 6 and sim["summary"]["errors"] == [], sim
+    stats = sim["simulation"][0]
+    assert stats["guides"] > 0 and stats["stretch"]["max"] < 0.2 and stats["tipMoveFromGroom"]["max"] > 0, stats
+    baked, _ = c.call("sim_cache", dict(g, op="write", last=6))
+    assert baked["frames"] == 6 and os.path.isfile(os.path.join(root, baked["path"])), baked
+
+    # A turntable in another look; the cards and the game export.
+    sheet, result = c.call("render_preview", dict(g, turntable=8, size=256, look="rim"))
+    assert len(sheet["views"]) == 8 and sheet["columns"] == 4 and image_of(result)[:2] == (256, 128), sheet
+    c.call("add_node", {"groom": "model", "type": "Cards"})
+    cards, _ = c.call("export_cards", {"groom": "model", "path": "out/model.glb", "resolution": 256})
+    assert cards["cards"] > 0 and os.path.isfile(os.path.join(root, "out", "model.glb")), cards
+    game, _ = c.call("export_game", {"groom": "model", "engine": "unreal", "resolution": 256})
+    assert any(f.endswith("_cards.fbx") for f in game["files"]), game
+    numbers, _ = c.call("stats", {"groom": "model"})
+    assert numbers["stats"]["strands"] == numbers["strands"] > 0 and "cards" in numbers["stats"]["times"], numbers
+
+    # Saved and opened again: the photo lined up, the bake named.
+    c.call("save_groom", dict(g, path="out/art.groom"))
+    with open(os.path.join(root, "out", "art.groom"), encoding="utf-8") as f:
+        text = json.load(f)
+    assert text["referencePhotos"][0]["camera"] and text["simCaches"], list(text)
+    c.call("open_groom", {"path": "out/art.groom", "name": "art2"})
+    again, _ = c.call("photo_view", {"groom": "art2"})
+    assert again["linedUp"] and again["flowArrows"] == 1, again
+
+
 def main():
     exe, root = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
     shutil.rmtree(root, ignore_errors=True)
@@ -120,7 +323,11 @@ def main():
             assert t["description"] and t["inputSchema"]["type"] == "object" and isinstance(t["inputSchema"]["properties"], dict), t
         for wanted in ["list_nodes", "describe_node", "list_presets", "list_sample_meshes", "get_docs", "new_groom", "open_groom",
                        "apply_preset", "get_graph", "add_node", "remove_node", "connect", "disconnect", "set_params", "add_guides",
-                       "set_tube", "add_script_node", "save_node", "undo", "evaluate", "render_preview", "save_groom", "export"]:
+                       "set_tube", "add_script_node", "save_node", "undo", "evaluate", "render_preview", "save_groom", "export",
+                       "redo", "history", "scalp_landmarks", "brush_stroke", "select_guides", "guide_op", "paint_map",
+                       "measure_guides", "add_photo", "photo_view", "mesh_landmarks", "align_photo", "photo_edit",
+                       "guides_from_photos", "root_tube", "tube_levels", "tube_shape", "check_expression", "import_animation",
+                       "animate_scalp", "simulate", "sim_cache", "export_cards", "export_game", "stats"]:
             assert wanted in names, wanted
         assert c.request("tools/call", {"name": "no_such_tool", "arguments": {}})["error"]["code"] == -32602
         assert c.request("no/such/method")["error"]["code"] == -32601
@@ -232,6 +439,9 @@ def main():
         assert bird["summary"]["strands"] == 0, bird
         drawn, _ = c.call("add_guides", {"groom": "nika2", "group": "feathers", "guides": guides[:2]})
         assert drawn["summary"]["strands"] == 2 * (1 + 140), drawn
+
+        groom_by_hand(c)
+        everything_else(c, root)
     finally:
         code = c.close()
     assert code == 0, "the server exited with %d" % code

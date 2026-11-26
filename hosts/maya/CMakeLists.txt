@@ -70,6 +70,7 @@ endif()
 
 maya_add_plugin(GroomLab
     src/active_groom.cpp
+    src/agent_cmd.cpp
     src/asset_files.cpp
     src/brush_tool.cpp
     src/convert_cmd.cpp

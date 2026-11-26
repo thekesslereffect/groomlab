@@ -1290,7 +1290,11 @@ class ToolPalette(QtWidgets.QWidget):
         self.more_menu = QtWidgets.QMenu(more)
         widgets.fill_menu(self.more_menu, header["more"]["items"], definitions.binder(self.ACTIONS, self),
                           generators=self.generators())
+        self.more_menu.aboutToShow.connect(self.sync_more_menu)
         more.setMenu(self.more_menu)
+        # While an AI agent is connected through the agent link: a badge saying so, with Stop.
+        self.agent_badge = self.make_agent_badge()
+        top.addWidget(self.agent_badge)
         self.header_buttons = [self.visible, self.guides_eye, self.guides_display, graph, find, more]
         for b in self.header_buttons:
             top.addWidget(b)
@@ -1836,6 +1840,7 @@ class ToolPalette(QtWidgets.QWidget):
     # menu's: menu.ACTIONS): method names, or functions of the palette.
     ACTIONS = {
         "groom.create": "create_groom",
+        "agent.link": "toggle_agent_link",
         "sample.nika": lambda self: self.add_sample("nika"),
         "sample.manny": lambda self: self.add_sample("manny"),
         "sample.wolf": lambda self: self.add_sample("wolf"),
@@ -2587,6 +2592,67 @@ class ToolPalette(QtWidgets.QWidget):
             self.status.setText("The sample wasn't added: %s" % messages.error("Add Sample Mesh", e))
             return
         self.status.setText("Added %s: now Create Groom from Selection." % part)
+
+    # ---- The agent link (groomlab.agent_link) ----
+    def make_agent_badge(self):
+        """The header's badge while an agent is connected: a pill naming it and a Stop glyph."""
+        badge = QtWidgets.QWidget()
+        badge.setObjectName("agentBadge")
+        row = QtWidgets.QHBoxLayout(badge)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.px(2))
+        pill = widgets.chip("Agent", "An AI agent is grooming through the agent link: each of its tool calls is one undo "
+                                     "step named Agent: <tool>", name="agentBadgePill")
+        pill.setEnabled(False)
+        stop = widgets.glyph_button("delete", "Stop the agent link: the agent is disconnected and its link file removed",
+                                    self.stop_agent_link)
+        stop.setObjectName("agentStop")
+        row.addWidget(pill)
+        row.addWidget(stop)
+        badge.setVisible(False)
+        from groomlab import agent_link
+        agent_link.add_listener(self.agent_link_changed)
+        return badge
+
+    def agent_link_changed(self):
+        from groomlab import agent_link
+        if not widgets.alive(self.agent_badge):
+            agent_link.remove_listener(self.agent_link_changed)
+            return
+        self.agent_badge.setVisible(agent_link.running() and agent_link.clients() > 0)
+        self.sync_more_menu()
+
+    def agent_link_action(self):
+        """More's Agent Link item (found in the menu as it stands)."""
+        label = definitions.action("agent.link")["label"]
+        for action in self.more_menu.actions():
+            if action.text().split("	")[0] == label:
+                return action
+        return None
+
+    def sync_more_menu(self):
+        from groomlab import agent_link
+        action = self.agent_link_action()
+        if action is not None:
+            action.setChecked(agent_link.running())
+
+    def toggle_agent_link(self, on=None):
+        from groomlab import agent_link
+        on = (not agent_link.running()) if on is None else bool(on)
+        try:
+            if on:
+                path = agent_link.start()
+                self.status.setText("Agent link on: an agent's groomlab-cli mcp --live finds this Maya (%s)." % path)
+            else:
+                agent_link.stop()
+                self.status.setText("Agent link off.")
+        except Exception as e:  # noqa: BLE001 (a menu item never ends in a bare traceback)
+            from groomlab.ui import messages
+            self.status.setText("The agent link didn't start: %s" % messages.error("Agent Link", e))
+        self.agent_link_changed()
+
+    def stop_agent_link(self):
+        self.toggle_agent_link(False)
 
     def create_groom(self):
         from groomlab.ui import menu

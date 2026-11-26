@@ -98,6 +98,45 @@ palette), then use it from Copilot's agent mode:
 Any other app that supports MCP servers over stdio works the same way: the command is
 `groomlab-cli`, and the arguments are `mcp --root <folder>`.
 
+## Live: the groom open in Maya, the app or Blender
+
+With **Agent Link** on, the agent works on the grooms you have open, as you watch: in Maya the
+scene's grooms, in the app the open groom, in Blender the scene's grooms. Every change it makes is
+one step of that program's undo, and you can take it back with Ctrl+Z like your own.
+
+1. Turn on **... > Agent Link** in the Groom Tools (in Blender, in the GroomLab window or the
+   sidebar's GroomLab tab). It is off by default and stays off until you turn it on in each
+   session.
+2. Start the MCP server with `--live`, for example in Claude Code:
+
+   ```bash
+   claude mcp add --scope user groomlab-live -- "C:\Users\you\Documents\GroomLab\GroomLab\bin\groomlab-cli.exe" mcp --live
+   ```
+
+   or `"args": ["mcp", "--live"]` in Claude Desktop's config. `--live maya`, `--live app` or
+   `--live blender` picks one when several GroomLab programs run their link; without a name the
+   server takes the newest.
+
+While an agent is connected, the Groom Tools' header shows an **Agent** badge with a stop button;
+stopping disconnects it. The tools work on the current groom unless the agent names another, and a
+few leave their work to the program's own menus (making a groom, exporting curves). In each program:
+
+- **Maya**: each tool call is one undo step named `Agent: <tool>`; the agent's `undo`, `redo` and
+  `history` are Maya's undo queue. Files are read and written in the Maya project's folder, and
+  `render_preview` with `viewport: true` shows the viewport as you see it.
+- **The app**: each change is one step of Edit > Undo, the same history as yours, so the agent's
+  `undo` takes back your last step too. Files are read and written in the open groom's folder
+  (`Documents\GroomLab` for an unsaved one); `render_preview` with `viewport: true` shows the
+  viewport.
+- **Blender**: each change is one step of the groom's GroomLab history (Ctrl+Z in the Groom Tools)
+  and one Blender undo step named `Agent: <tool>`, so Edit > Undo takes it back as it takes back a
+  stroke. Files are read and written in the `.blend`'s folder (`Documents\GroomLab` while it is
+  unsaved). Photos the agent adds become cameras of the scene.
+
+With no program running its link, `--live` works on grooms of its own and says so. The link listens
+on 127.0.0.1 only, and every request carries a token from a file in `Documents\GroomLab\agent_link`
+that only your user can read; the file goes away when the link stops or the program quits.
+
 ## The tools
 
 The agent sees these tools, each with a description and a JSON Schema for its arguments. Grooms
@@ -114,9 +153,19 @@ groom answers with a short summary: strand and point counts, guides, bounds, and
 | `get_graph`, `add_node`, `remove_node`, `connect`, `disconnect`, `set_params` | Reading and editing the node graph. `add_node` with `after` inserts a node into the chain; `set_params` checks values against the param's kind, range and choices. |
 | `sample_scalp`, `add_guides`, `get_guides`, `set_tube` | Guide curves: points spread over the scalp, guides from point lists or grown from a root (length, droop), and their tubes (shape, width, aspect, twist) for tube locks. |
 | `add_script_node`, `save_node` | A [script node](/docs/custom-nodes#script-nodes) written from text. Errors come back with their line and column, and nothing changes until the script is valid. Saves script and compound nodes as `.glnode` files. |
-| `undo` | Steps back through a groom's changes (64 kept). |
+| `scalp_landmarks` | Named places on the scalp (top, crown, front hairline, nape, back, temples, ear sides) with the surface's normal, and the groom's directions (up, front, the character's left...). Approximate; strokes, painting and selection take the names as points. |
+| `brush_stroke` | One of the brushes run along a path, as an artist's stroke: comb, smooth, straighten, lift, length, cut, twist, attract, slide, erase, shape, clump, paint, freeze / unfreeze, place, draw, part, flow. The path is world points, or `from` / `via` / `to` (landmarks or points) along the scalp's surface; radius, strength, level or group, symmetry. The answer says what changed: guides touched, added and removed, how far points moved, lengths before and after. |
+| `select_guides`, `guide_op` | A selection by ids, a sphere around a point or landmark, a group or a level; and the Edit Guides menu's operations on it (delete, lock, freeze, mirror, move or duplicate to a group, resample...), Generate Children and tube edits. |
+| `paint_map` | A scalp map made, filled and painted along a path, for example density (`"for": "scatter.density"`: the map linked to the param, 0 where no hair grows) or a clump mask. |
+| `undo`, `redo`, `history` | Steps back and forward through a groom's changes (64 kept), and the list of them. Each tool call is one step. |
+| `add_photo`, `photo_view`, `mesh_landmarks`, `align_photo`, `photo_edit`, `guides_from_photos` | Reference photos, as the Reference window works with them: a photo added and shown under a pixel grid labelled in its own pixels, the mesh drawn from a side with numbered points and their 3D positions, the camera lined up from pairs of a photo pixel and a mesh point (the error in pixels and the mesh drawn over the photo), flow arrows and mask touch-ups, and guides grown from the lined-up photos with the look they suggest. |
+| `root_tube`, `tube_levels`, `tube_shape` | The Tube tool's root-first tubes: a root drawn on the scalp (an outline, or a center and radius), duplicated, deleted, subdivided into cells by a density map; the tube hierarchy's levels and views; the tube shape library. |
+| `check_expression` | An expression compiled as a param compiles it, what it reads, and its values over the strands (min, mean, max, a histogram), errors with their place. `set_params` takes `{"expression": ..., "min", "max"}`. |
+| `import_animation`, `animate_scalp`, `simulate`, `sim_cache` | An animated scalp, guide cache and colliders from Alembic, or a head turn written from keyframes; a Simulate node added and stepped (the guides' stretch, tip motion and points under the scalp), and the frames baked to a cache. |
+| `export_cards`, `export_game`, `stats` | Hair cards as glTF, or for Unreal or Unity (maps, hair cap, manifest, FBX); everything the last evaluation knows. |
+| `measure_guides` | Numbers that describe the guides per group or for the selection: count, lengths, the mean root-to-tip direction (also in words), straightness, curl, how far they lean from the scalp. |
 | `evaluate` | Counts, bounds, errors, notes and the slowest nodes' timings. |
-| `render_preview` | A PNG of the groom that the agent can look at: the scalp shaded and the strands drawn in the hair's color, from the front, side, back, three-quarter or top view, several in a grid. |
+| `render_preview` | A PNG of the groom that the agent can look at: the scalp shaded and the strands drawn in the hair's color, from the front, back, left, right, three-quarter or top view, several in a grid, or a turntable; in a look (studio, flat, rim, clay); through a camera or a lined-up photo's; the guides or tubes drawn over the hair, or two images, before and after the last change (`compare`). |
 | `save_groom`, `export` | A `.groom` file, or the strands as Alembic or USD curves over a frame range (as `groomlab-cli eval` writes them). |
 
 <Callout type="info" title="The preview is not a render">
@@ -141,6 +190,11 @@ A typical agent does something like this:
    the image and changes what it sees: `set_tube` for flatter locks, `set_params` on `clump`.
 5. `save_groom` with `{"path": "anime.groom"}`, which you then open in Maya or the app to keep
    grooming with brushes.
+
+To groom by hand, an agent places guides with `brush_stroke` (`{"mode": "place", "from": "front_hairline", "via": ["top", "crown"],
+"to": "nape", "length": 14}`), combs them (`{"mode": "comb", "from": "crown", "to": "nape", "offset": 3}`), checks the result
+with `measure_guides` and `render_preview` (`{"views": ["back", "left"], "guides": true}`), and paints density with
+`paint_map`.
 
 If a change goes wrong, the agent can call `undo`. If an argument is wrong, the tool's error says
 why (a param's range, the node names it has, a path outside the folder), and the agent tries again.
@@ -180,7 +234,8 @@ and the tip color; Width `width` and `profile`. `describe_node` gives every para
   `..` and links cannot leave it. This also applies to the files a groom names (caches, texture
   maps in params) and to `save_to`. GroomLab's own presets, nodes, sample meshes and docs are read
   where they are installed.
-- **No network.** The server talks only to the app that started it, over stdin and stdout.
+- **No network.** The server talks only to the app that started it, over stdin and stdout; with
+  `--live`, to a GroomLab host on the same computer (127.0.0.1) whose Agent Link you turned on.
 - **Limits.** Mesh files up to 512 MB, 5,000 guides per call, scripts up to 64 KB, previews up
   to 1024 pixels wide, exports up to 1,000 frames.
 - **Nothing is overwritten by surprise.** Changes stay in memory until `save_groom`, `save_node` or
@@ -198,8 +253,6 @@ JSON Schemas for GroomLab's file formats, for agents and tools that write them d
 
 ## Not yet
 
-- **A live bridge to Maya or the app.** The server works on grooms in its own memory. To continue
-  with brushes, open the saved `.groom` in Maya or the app.
 - **Painting maps.** A preset that reads painted maps (density, length) says which maps are missing.
   These maps can only be painted in GroomLab itself.
 - **Flow arrows, parts and sculpts.** These come from the brushes in Maya, the app and Blender.

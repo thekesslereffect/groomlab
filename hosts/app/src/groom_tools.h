@@ -202,6 +202,9 @@ public:
     bool editingLayer() const;  // a corrective or a Sculpt node is picked: the tools that can't edit it greyed
     QWidget* emptyState() const { return empty_; }
     QWidget* header() const { return header_; }  // pinned: not in the scroll area
+    // The header's Agent badge (an AI agent connected through the agent link) and its Stop.
+    void setAgentConnected(bool connected);
+    QWidget* agentBadge() const { return agentBadge_; }
     QWidget* topPart() const { return top_; }
     QWidget* work() const { return work_; }
     QTabBar* tabBar() const { return tabs_; }
@@ -227,6 +230,7 @@ signals:
     void guidesVisibilityToggled(bool visible);  // the guides' eye: every guide group (Properties > Guides)
     void graphRequested();
     void findRequested();          // the header's search: Find Command
+    void agentStopRequested();     // the Agent badge's Stop
     void groomPicked(int index);   // the picker's menu: another groom of the document
     void tabChanged(const QString& id);
     void toolStopRequested();  // a corrective picked greys the tool's tile: no tool (the camera)
@@ -269,6 +273,7 @@ private:
     QToolButton* guidesEye_ = nullptr;
     QToolButton* graph_ = nullptr;
     QToolButton* more_ = nullptr;
+    QWidget* agentBadge_ = nullptr;
     QMenu* moreMenu_ = nullptr;
     QLabel* status_ = nullptr;
     QTabBar* tabs_ = nullptr;

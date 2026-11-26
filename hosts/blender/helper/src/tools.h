@@ -75,6 +75,16 @@ void sideFileBefore(Session& s, const std::string& path);
 void dropSideFiles(Session& s);
 // undo_state's answer.
 nlohmann::json undoStateJson(Session& s);
+// One undo step of a stroke edit made elsewhere (the agent tools', agent.h): `edit` applied to the
+// session as stroke_end commits one (its texts, a texture map's tiles), and `apply` beside it as
+// commitStep keeps it (null: nothing else). Throws what the session's setters throw, nothing changed.
+void commitStroke(Session& s, StrokeEdit edit, std::function<void(bool after)> apply);
+// The session's undo stack: the steps done (oldest first; each one's label its `mode`), the labels
+// redo would bring back (the next one last); one step undone or redone (false: none to).
+const std::vector<StrokeEdit>& doneSteps(Session& s);
+const std::vector<std::string>& redoLabels(Session& s);
+bool undoSession(Session& s);
+bool redoSession(Session& s);
 // The corrective layer strokes sculpt into ("" the base groom: no shot sculpting), as Maya's
 // shotLayer and shotSculpt: strokes reshape the groom as shown and record into it at the
 // session's time (SessionStrokeHost::setShotSculpt). Dropped by an undo or edit that removes it.

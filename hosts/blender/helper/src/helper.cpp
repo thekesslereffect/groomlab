@@ -65,6 +65,7 @@
 #include "groomlab/sim_cache.h"
 #endif
 
+#include "agent.h"
 #include "arrange.h"
 #include "authoring.h"
 #include "host_space.h"
@@ -1336,6 +1337,8 @@ void feedSessionTime(Session& s) { feedTime(s); }
 PrototypeLookup sessionPrototypes(const Session& s) { return storedPrototypes(s); }
 void handSessionRestGuides(Session& s) { handRestGuides(s); }
 std::string sampleMeshesDir() { return shippedMeshesDir(); }
+GroomFile sessionGroomFile(const Session& s) { return currentFile(s); }
+std::string shippedPresetsFolder() { return shippedPresetDir(); }
 
 // ---- The helper ---------------------------------------------------------------------------------
 
@@ -2707,6 +2710,7 @@ json Helper::run(const std::string& cmd, const json& args) {
     if (cmd == "get_state") return getState(session(args), args);
     if (cmd == "set_state") return setState(session(args), args);
     if (cmd == "tool_catalog") return toolCatalogJson();
+    if (isAgentCommand(cmd)) return runAgentCommand(cmd, args, sessions_, agent_);
     if (isPipelineCommand(cmd)) return runPipelineCommand(cmd, args, blocks, [&]() -> Session& { return session(args); });
     if (isReferenceCommand(cmd)) return runReferenceCommand(cmd, args, [&]() -> Session& { return session(args); });
     if (isArrangeCommand(cmd)) return runArrangeCommand(cmd, args, [&]() -> Session& { return session(args); });

@@ -121,9 +121,11 @@ struct RenderStage;
 
 struct AppActions;
 
+class AppAgentLink;
 class MainWindow : public QMainWindow {
     Q_OBJECT
     friend struct AppActions;  // the shared UI definitions' bindings (app_actions.h) run the window's slots
+    friend class AppAgentLink;  // the agent link (agent_link.h): the open groom, refreshed after its edits
 public:
     MainWindow();
     ~MainWindow() override;
@@ -352,6 +354,12 @@ public:
     // Points the camera at a scene point from `distance` away (0: keeps the distance).
     void lookAt(const QVector3D& target, float distance);
     GroomDocument* document() { return document_.get(); }
+    Viewport* viewport() { return viewport_; }
+    // The agent link (agent_link.h; Groom Tools > More > Agent Link), made when first asked for.
+    AppAgentLink* agentLink();
+    bool setAgentLink(bool on);  // on or off; false (and a message) when it could not start
+    // What an agent changed shown: the graph, the guide groups, the root tool (as after an undo).
+    void agentEdited();
 
     // ---- The UI --------------------------------------------------------------------------------
     // "groom", "look", "cards" or "export" (the mode switcher); false for another word.
@@ -887,6 +895,7 @@ private:
     ParamPanel* graphParams_ = nullptr;  // the graph's selected node's (beside the graph)
     LookPanel* look_ = nullptr;
     GroomTools* groomTools_ = nullptr;  // the Groom Tools dock (the shell's)
+    AppAgentLink* agentLink_ = nullptr;  // (a child QObject: deleted with the window, its file removed)
     QLabel* help_ = nullptr;  // the Help pages' text
     QLineEdit* helpFilter_ = nullptr;  // the shortcut sheet's filter (shown on that page)
     QWidget* shortcutSheet_ = nullptr;  // the shortcut sheet: keycaps and actions in a grid

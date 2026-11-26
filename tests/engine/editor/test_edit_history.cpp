@@ -112,3 +112,22 @@ TEST(GroomEdit, TitleNamesTheParamOrTheLabel) {
     e.label = "color of primary";
     EXPECT_EQ(e.title(), "color of primary");
 }
+
+TEST(EditHistory, LimitDropsTheOldestStepsAndKeepsWhereItStands) {
+    EditHistory h;
+    for (int i = 0; i < 5; ++i) h.record(paramEdit("n", "p" + std::to_string(i), i, i + 1));
+    NumberHost host;
+    undoStep(h, host);  // p4 undone: 4 done, 1 to redo
+    h.limit(3);
+    EXPECT_EQ(h.size(), 3u);
+    EXPECT_EQ(h.undoIndex(), 2u);
+    EXPECT_EQ(h.step(0).title(), "n.p2");
+    EXPECT_EQ(h.undoText(), "Undo n.p3");
+    EXPECT_EQ(h.redoText(), "Redo n.p4");
+    h.limit(3);  // within the limit: nothing
+    EXPECT_EQ(h.size(), 3u);
+    h.limit(1);  // the step to redo kept, nothing left to undo
+    EXPECT_EQ(h.size(), 1u);
+    EXPECT_EQ(h.undoIndex(), 0u);
+    EXPECT_EQ(h.redoText(), "Redo n.p4");
+}

@@ -2302,6 +2302,30 @@ void GroomDocument::commitStroke(StrokeEdit edit) {
     dirty_ = true;
 }
 
+std::string GroomDocument::commitAgentEdit(GroomEdit edit) {
+    commitPreview();
+    // The graph's text: the document's graph takes it (a whole-graph step), as commitStroke does.
+    if (edit.stroke && edit.stroke->text(StrokeField::Graph).set) {
+        StrokeEdit stroke = *edit.stroke;
+        json after = json::parse(stroke.text(StrokeField::Graph).after, nullptr, false);
+        if (after.is_discarded() || !after.is_object()) return "the agent's graph is not a JSON object";
+        stroke.text(StrokeField::Graph) = StrokeEdit::Text{};
+        edit.whole = true;
+        edit.graphBefore = graph_;
+        edit.graphAfter = std::move(after);
+        edit.stroke = stroke.empty() ? nullptr : std::make_shared<const StrokeEdit>(std::move(stroke));
+    }
+    if (edit.label.empty()) edit.label = "agent edit";
+    const std::string error = apply(edit, true);
+    if (!error.empty()) {
+        apply(edit, false);
+        return error;
+    }
+    record(std::move(edit));
+    dirty_ = true;
+    return {};
+}
+
 std::string GroomDocument::editGuides(const std::string& label, const std::function<void(GuideHierarchy&)>& edit) {
     const HierarchyPtr authored = session().authoredHierarchy();
     GuideHierarchy h = authored ? *authored : GuideHierarchy{};
@@ -2442,6 +2466,7 @@ std::string GroomDocument::apply(const GroomEdit& edit, bool after) {
     if (!edit.whole) scope_ = openScope;
     applySide(edit, after);  // its files and group colors
     if (edit.braidTubes) braidTubes_ = after ? edit.braidTubes->second : edit.braidTubes->first;
+    if (edit.referencePhotos) referencePhotos_ = after ? edit.referencePhotos->second : edit.referencePhotos->first;
     return error;
 }
 

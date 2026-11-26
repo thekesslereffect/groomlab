@@ -339,10 +339,11 @@ TEST(AppUi, MenusFromOtherContainersTakeTheAppsGeneratorsAndFillers) {
     MainWindow window;
     const ui::Definitions& d = ui::Definitions::shipped();
     const ui::Bindings bindings = AppActions::bindings(window);
-    // The Groom Tools' More menu: Create Groom (the app's words) and the Theme submenu its filler makes.
+    // The Groom Tools' More menu: Create Groom (the app's words), the agent link and the Theme
+    // submenu its filler makes.
     QMenu more;
     ui::fillMenu(&more, d.get("palette/header/more"), bindings, AppActions::fillOptions(window));
-    EXPECT_EQ(shown(&more), (std::vector<std::string>{"New Groom on Mesh...", "-", "Theme"}));
+    EXPECT_EQ(shown(&more), (std::vector<std::string>{"New Groom on Mesh...", "Agent Link", "-", "Theme"}));
     const QMenu* themes = submenu(&more, QStringLiteral("Theme"));
     ASSERT_TRUE(themes);
     EXPECT_EQ(shown(themes).size(), static_cast<std::size_t>(theme::themeNames().size()) + 4);

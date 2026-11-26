@@ -415,6 +415,29 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     guidesDisplay_->setIconSize(QSize(10, 10));
     connect(guidesDisplay_, &QToolButton::clicked, this, [this] { guideDisplay_->showUnder(guidesDisplay_); });
     head->addWidget(guidesDisplay_);
+    // While an AI agent is connected through the agent link: a chip saying so and its Stop.
+    agentBadge_ = new QWidget(header_);
+    agentBadge_->setObjectName(QStringLiteral("agentBadge"));
+    {
+        auto* row = new QHBoxLayout(agentBadge_);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(2);
+        auto* pill = new QToolButton(agentBadge_);
+        pill->setObjectName(QStringLiteral("agentBadgePill"));
+        pill->setProperty("role", "chip");
+        pill->setText(tr("Agent"));
+        pill->setToolTip(tr("An AI agent is grooming through the agent link: each of its changes is one undo step"));
+        pill->setCheckable(true);
+        pill->setChecked(true);
+        pill->setAttribute(Qt::WA_TransparentForMouseEvents);
+        row->addWidget(pill);
+        auto* stop = glyphButton("close", tr("Stop the agent link: the agent is disconnected and its link file removed"), agentBadge_);
+        stop->setObjectName(QStringLiteral("agentStop"));
+        connect(stop, &QToolButton::clicked, this, &GroomTools::agentStopRequested);
+        row->addWidget(stop);
+    }
+    agentBadge_->setVisible(false);
+    head->addWidget(agentBadge_);
     graph_ = glyphButton("graph", withShortcut(qs(header.at("graph").value("tip", std::string())), "view.graph"), header_);
     graph_->setObjectName(QStringLiteral("openGraph"));
     connect(graph_, &QToolButton::clicked, this, &GroomTools::graphRequested);
@@ -684,6 +707,10 @@ QToolButton* GroomTools::makeTile(const std::string& id, const QString& text, co
     tiles_[id].push_back(b);
     allTiles_.push_back(b);
     return b;
+}
+
+void GroomTools::setAgentConnected(bool connected) {
+    if (agentBadge_) agentBadge_->setVisible(connected);
 }
 
 void GroomTools::setSession(BrushSession* session) {

@@ -31,6 +31,7 @@ BINDINGS = {
     "graph.open": ("groomlab.graph_open", {}),
     "commands.find": ("groomlab.find_command", {}),
     "groom.create": ("groomlab.add_groom", {}),
+    "agent.link": ("prop:groomlab_tools.agent_link", {}),  # (agent_link.py: on while checked, nothing saved)
     "file.import": ("groomlab.load_groom", {}),
     "file.reload": ("groomlab.reload_groom", {}),
     "file.save": ("groomlab.save_groom_linked", {}),

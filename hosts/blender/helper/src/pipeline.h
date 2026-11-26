@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/graph.h"
+#include "groomlab/groom_file.h"
 #include "groomlab/scales.h"
 #include "groomlab/scalp_mesh.h"
 
@@ -50,5 +51,9 @@ void feedSessionTime(Session& s);
 PrototypeLookup sessionPrototypes(const Session& s);
 void handSessionRestGuides(Session& s);
 std::string sampleMeshesDir();
+// The session's groom as a file now (what save_groom writes: maps, group colors), and the shipped
+// presets' folder (agent.h: the agent tools read both).
+GroomFile sessionGroomFile(const Session& s);
+std::string shippedPresetsFolder();
 
 }  // namespace groomlab::helper

@@ -696,6 +696,22 @@ on an image plane) and Select Camera are Maya's. A landmark pair with a side cle
 is written with a null there; the app reads each side's points in order, so such a pair's partners
 shift there until it is picked again.
 
+### Agent link (an AI agent's tools on the scene's grooms)
+
+The agent link (engine/editor `agent_link.h`, `agent_tools.h`; `hosts/blender/helper/src/agent.cpp`):
+the add-on listens on 127.0.0.1 (`agent_link.py`) and hands each request line to the helper, which
+answers it with the agent tools over the sessions the add-on names. Each groom is a session; its
+edits are steps of the session's undo stack (the tools' own, so `undo_state`, Ctrl+Z in the Groom
+Tools and Blender's undo through `tools.sync_undo` see them), its history read from that stack.
+Groom space (Y up, centimeters) is what the agent sees. The helper refuses what Blender does its own
+way (a new groom, reading a mesh file, exporting curves, a collider by name) with where to do it.
+
+| Command | Args | Result |
+|---|---|---|
+| `agent_start` | `port` (the add-on's), `pid` (Blender's), `folders` {`root`, `presets`?, `meshes`?, `docs`?}, `token` (a helper started again keeps the add-on's), `groom` | `{"token", "file", "root"}`: the discovery file written (`<GROOMLAB_AGENT_LINK_DIR or Documents/GroomLab/agent_link>/blender-<pid>.json`); presets and meshes default to the helper's shipped folders |
+| `agent_stop` | | `{"stopped"}`: the file removed (also when the helper ends) |
+| `agent_request` | `line` (the request line as the client sent it), `grooms` {name: session} (the scene's), `groom` (the active one's name: the tools' default) | `{"reply"` (the answer line), `"tool"` (the tool called, or null), `"changed"` [{`session`, `groom`, `undo` (undo_state), `graphChanged`, `scalpChanged`, `photosChanged`}]`}`: the sessions the call changed, for the add-on to show and give an undo step |
+
 ## 4. Install layout
 
 `cmake --install <build> --component Blender --prefix <dir>` lays out the whole Blender extension,
@@ -780,6 +796,15 @@ extension zip installed by `blender --command extension install-file` into a thr
 `tests/hosts/blender/run_blender_test.py`), never the user's own Blender:
 
 - `blender.extension` (quick): Blender's validator accepts the zip.
+- `blender.addon_agent`: the agent link. Turned on by its setting: the discovery file (host
+  blender, Blender's pid, the port); a socket client with the file's token (the timer's callback
+  run by the test: a background Blender runs no timers) lists the tools, is refused with a wrong
+  token, places and combs guides on the test head's groom (the helper's undo depth noted on the
+  scalp, the hair written), undoes the comb as the agent and the place through Blender's undo
+  (`sync_undo`), reads the history, redoes; a Curl node added reaches the groom's graph and is
+  undone; new_groom refused with where to do it; `groomlab-cli mcp --live blender` finds Blender
+  and lists its grooms; the badge shows while connected and its Stop turns the link off, its file
+  gone.
 - `blender.addon`: a groom on the test head (the hair in Blender bit for bit the helper's
   evaluation; the saved `.groom` evaluated by groomlab-cli hash for hash); guides sculpted by script
   (moved: an incremental evaluation; drawn: the next ID written back and the root placed on the
@@ -874,7 +899,7 @@ extension zip installed by `blender --command extension install-file` into a thr
 
 `hosts/blender/addon` (GPL-3.0-or-later; `groomlab/` is the extension's Python, `LICENSE`,
 `blender_manifest.toml.in`). A Blender 5.x extension (blender_version_min 5.0.0, tested on 5.2.2
-LTS), platforms windows-x64 for now, permissions files. Distributed from our site, not extensions.blender.org.
+LTS), platforms windows-x64 for now, permissions files and network (the updates; the agent link, off by default, on 127.0.0.1 only). Distributed from our site, not extensions.blender.org.
 
 | Module | What |
 |---|---|
@@ -886,6 +911,7 @@ LTS), platforms windows-x64 for now, permissions files. Distributed from our sit
 | `graph_tree.py`, `graph_editor.py` | the Graph Editor (B3c, section 7): the groom's graph as a node tree kept in step with the helper both ways; its operators, sidebar panels, menus, keys and node overlay |
 | `props.py`, `ops.py`, `ui.py` | properties (a groom's settings and its graph JSON on the scalp object, saved in the .blend), operators, the sidebar tab "GroomLab" (groom, presets, graph) |
 | `handlers.py` | `depsgraph_update_post` (guides or scalp edited: debounced, evaluated 0.04 s after the last change, or while changes keep coming (a slider drag, a stroke) every 1.5 x the last evaluation's own time, 0.06-0.3 s, from a timer; a Mesh update reads the scalp's faces and UVs again, the scalp object's geometry (a pose) its points alone), `frame_change_post`, `render_pre`/`render_complete`/`render_cancel`, `save_pre` (each groom kept as a `.groom` text in its scalp object), `load_post`, `undo_post`/`redo_post`, `exit_pre` |
+| `agent_link.py` | the agent link (section 3, "Agent link"): Groom Tools' More > Agent Link (`groomlab_tools.agent_link`, the link's state, not saved), a non-blocking socket on 127.0.0.1 polled from a `bpy.app.timers` timer on the main thread, each line answered by the helper (`agent_request`, the scene's grooms by scalp name, the active one), then each groom it changed shown (`follow_graph`, the photos' cameras, `after_edit`: its undo depth noted) with one Blender undo step `Agent: <tool>`; the helper started again gets the same token. The header's Agent badge and its Stop (`groomlab.agent_link_stop`) while an agent is connected; stopped when Blender quits |
 | `starter.py` | starter guides for a new groom: farthest-point picks among area-weighted samples (seeded), each along the normal bending toward the ground, as long as the preset's Scatter length |
 | `pipeline.py` | the pipeline's client (section 3, "Pipeline"): exports (FBX written from the meshes the helper answers), the scales, strands to mesh, Simulate Range and bakes with the scalp's frames, colliders, prototypes and other scalps from Blender objects, transfer and its markers, the sample meshes |
 | `tools.py`, `tool_props.py`, `tool_ops.py`, `display.py`, `palette.py`, `menu.py`, `icons.py`, `icons/` | the Groom Tools (B3b, section 8): settings, the modal tool and pie menu, Maya's viewport display, the palette, the top bar menu, Maya's icons |

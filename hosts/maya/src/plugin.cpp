@@ -14,6 +14,7 @@
 #include <iterator>
 #include <string>
 
+#include "agent_cmd.h"
 #include "brush_tool.h"
 #include "convert_cmd.h"
 #include "crash_log.h"
@@ -159,6 +160,9 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
                                                                    groomlab::maya::RootOutlinesDrawOverride::creator);
     CHECK_MSTATUS_AND_RETURN_IT(status);
 
+    status = plugin.registerCommand(groomlab::maya::AgentCmd::kName, groomlab::maya::AgentCmd::creator,
+                                    groomlab::maya::AgentCmd::newSyntax);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
     status = plugin.registerCommand(VersionCmd::kName, VersionCmd::creator);
     CHECK_MSTATUS_AND_RETURN_IT(status);
     status = plugin.registerCommand(DefaultGraphCmd::kName, DefaultGraphCmd::creator);
@@ -418,6 +422,8 @@ PLUGIN_EXPORT MStatus uninitializePlugin(MObject obj) {
     MGlobal::executeCommand("global int $groomLabPathsJob; if ($groomLabPathsJob >= 0) "
                             "{ scriptJob -kill $groomLabPathsJob -force; $groomLabPathsJob = -1; }");
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(DefaultGraphCmd::kName));
+    groomlab::maya::AgentCmd::shutdown();  // (the link's discovery file removed: no agent finds a gone Maya)
+    CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::AgentCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(VersionCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(MHWRender::MDrawRegistry::deregisterSubSceneOverrideCreator(
         GroomShape::kDrawDbClassification, GroomSubSceneOverride::kRegistrantId));

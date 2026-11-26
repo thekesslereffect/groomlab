@@ -30,4 +30,4 @@ show, plus fresh UUIDs for `layerManager` and `lightLinker1`), and recheck what 
 the extent `add_sample` sizes it by (`SAMPLES` in `hosts/maya/scripts/groomlab/groom.py`, `96.65` in
 `hosts/blender/helper/src/pipeline.cpp`: the meshes' largest extent in cm), the joint and control
 counts and control names in `tests/hosts/maya/test_grooming.py` and
-`tests/hosts/blender/test_addon_pipeline.py`, and the height in `engine/cli/mcp_tools.cpp`.
+`tests/hosts/blender/test_addon_pipeline.py`, and the height in `engine/editor/src/agent_tools.cpp`.
