@@ -84,6 +84,10 @@ public:
     void setHairLook(const HairLook& look) { look_ = look; }
     void setBackground(const QColor& color) { background_ = color; }
     void setShowScalp(bool show);
+    // The guides, parts, flow and guide dots over the hair (on, Maya's On top) or depth tested,
+    // pulled toward the camera by the hair's depth (off: hidden behind the head and the hair).
+    void setOverlaysOnTop(bool on) { overlaysOnTop_ = on; }
+    bool overlaysOnTop() const { return overlaysOnTop_; }
     bool showScalp() const { return showScalp_; }
     // The hair shown (the Groom Tools' strands eye): off, the frame's hair items (isHairItem: the
     // strands in every form, the instances, the scales, the cards, the strand meshes) are not
@@ -211,6 +215,7 @@ private:
         LinesLit, Lines, LinesColored, StrandLines, StrandLinesColored, Overlay, OverlayColored, Triangles, TrianglesColored,
         Surface, SurfaceColored, Dots, DotsTested, MapTextured,
         WideLines,  // overlay lines wider than a pixel: a quad a segment (wide_lines.vert)
+        WideLinesTested,  // ... depth tested (the overlays not on top: drawn as WideLines' items)
         Count
     };
     struct GpuItem;
@@ -240,7 +245,8 @@ private:
     void fillUniforms(QRhiResourceUpdateBatch* batch, QRhiBuffer* uniforms, const GpuItem& item, const QMatrix4x4& mvp,
                       const QVector3D& eye, const QSize& size, bool hdr, float pixelScale, float lod = 0.0f, float pass = 0.0f,
                       float density = -1.0f);
-    void draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr);
+    // `tested`: an overlay drawn depth tested (testedKind: the overlays not on top).
+    void draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr, bool tested = false);
     // An item's streams and `indices` (its own when null) set for a draw; false when it lacks one.
     bool setInputs(QRhiCommandBuffer* cb, const GpuItem& item, QRhiBuffer* indices = nullptr);
     // The level of detail for this frame (the line path): the selection, its indices, the classes'
@@ -252,7 +258,19 @@ private:
     // the blended fragments (after everything else).
     void drawLod(QRhiCommandBuffer* cb, bool blended);
     Kind kindOf(const DisplayGeometry& geometry, bool overlay) const;
-    static bool isOverlay(Kind kind) { return kind == Kind::Overlay || kind == Kind::OverlayColored || kind == Kind::Dots; }
+    static bool isOverlay(Kind kind) {
+        return kind == Kind::Overlay || kind == Kind::OverlayColored || kind == Kind::Dots || kind == Kind::WideLines;
+    }
+    // An overlay's kind drawn depth tested (the overlays not on top): the same streams.
+    static Kind testedKind(Kind kind) {
+        switch (kind) {
+            case Kind::Overlay: return Kind::Lines;
+            case Kind::OverlayColored: return Kind::LinesColored;
+            case Kind::WideLines: return Kind::WideLinesTested;
+            case Kind::Dots: return Kind::DotsTested;
+            default: return kind;
+        }
+    }
     void setDots(const GuideDots& dots, float pointSize);
 
     void updateSurfaces();  // the lookdev path's surface list: the scalp (when shown), the props
@@ -289,6 +307,7 @@ private:
     std::unique_ptr<LodDraw> lod_;
     LodStats lodStats_;
     bool showScalp_ = true;
+    bool overlaysOnTop_ = true;
     bool hairShown_ = true;
     // The strands last handed (setHairStrands), held while the hair is hidden.
     StrandsPtr hairStrands_;

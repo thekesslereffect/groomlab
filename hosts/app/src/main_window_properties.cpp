@@ -357,6 +357,8 @@ void MainWindow::buildProperties() {
     keep("instances", instances_);
     scalp_ = check(true);
     p->setControl("scalp", scalp_);
+    onTop_ = check(true);
+    keep("overlaysOnTop", onTop_);
     gpuPreview_ = check(gpu_.enabled());
     p->setControl("gpuPreview", gpuPreview_);
     // The strand colors (Maya's strandColorMode): solid or lit under the look, a color set of the
@@ -537,6 +539,10 @@ void MainWindow::buildProperties() {
     toggle(clumpLod_, &DisplaySettings::clumpLod, true);
     connect(lookdev_, &QCheckBox::toggled, this, [this](bool on) { setLookdev(on); });
     connect(gpuPreview_, &QCheckBox::toggled, this, [this](bool on) { setGpuPreview(on); });
+    connect(onTop_, &QCheckBox::toggled, this, [this](bool on) {
+        viewport_->renderer().setOverlaysOnTop(on);
+        viewport_->update();
+    });
     connect(scalp_, &QCheckBox::toggled, this, [this](bool on) {
         viewport_->renderer().setShowScalp(on);
         viewport_->renderer().invalidateAccumulation();
@@ -806,6 +812,8 @@ void MainWindow::fillGuideDisplay() {
         smoothed->setChecked(v > 1);
     });
     look->addWidget(smoothed);
+    mirror(look, tr("On top"), "display_overlaysOnTop", onTop_,
+           tr("Guides, parts and flow draw over the hair (off: hidden behind it, in the line display; the lookdev view keeps them on top)"));
     rows->addWidget(lookRow);
 }
 

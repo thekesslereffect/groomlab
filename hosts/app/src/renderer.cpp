@@ -992,6 +992,7 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
                 depthTest = kind == Kind::DotsTested;
                 break;
             case Kind::WideLines:
+            case Kind::WideLinesTested:
                 ps->setShaderStages({{QRhiShaderStage::Vertex, wideLinesVert}, {QRhiShaderStage::Fragment, flatFrag}});
                 layout.setBindings({{kStrideXYZ}, {kStrideXYZ}, {kStrideUV}, {kStrideRGBA}});
                 layout.setAttributes({{0, 0, QRhiVertexInputAttribute::Float3, 0},
@@ -999,7 +1000,7 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
                                       {2, 2, QRhiVertexInputAttribute::Float2, 0},
                                       {3, 3, QRhiVertexInputAttribute::Float4, 0}});
                 triangles = true;
-                depthTest = false;  // (over the hair, as the overlay lines)
+                depthTest = kind == Kind::WideLinesTested;  // (else over the hair, as the overlay lines)
                 break;
             case Kind::MapTextured:
                 ps->setShaderStages({{QRhiShaderStage::Vertex, mapVert}, {QRhiShaderStage::Fragment, mapFrag}});
@@ -1308,8 +1309,8 @@ void GroomRenderer::fillUniforms(QRhiResourceUpdateBatch* batch, QRhiBuffer* uni
     batch->updateDynamicBuffer(uniforms, 0, sizeof(Uniforms), &u);
 }
 
-void GroomRenderer::draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr) {
-    const Pipeline* p = set.pipelines[static_cast<std::size_t>(item.kind)].get();
+void GroomRenderer::draw(QRhiCommandBuffer* cb, const GpuItem& item, const PipelineSet& set, bool hdr, bool tested) {
+    const Pipeline* p = set.pipelines[static_cast<std::size_t>(tested ? testedKind(item.kind) : item.kind)].get();
     if (!p || !p->pipeline || !item.positions || !item.indices || item.indexCount == 0) return;
     QRhiShaderResourceBindings* bindings = hdr ? item.bindingsHdr.get() : item.bindings.get();
     if (!bindings) return;
@@ -1569,11 +1570,24 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
 
     QRhiResourceUpdateBatch* batch = rhi->nextResourceUpdateBatch();
     prepareMapTexture(rhi, batch);
+    // The view's matrix pulled toward the camera by the hair's depth at the camera's target (its
+    // depth in clip space less by that much), as Blender pulls its overlays: depth tested, they
+    // show over the hair round them and hide behind the head (the root mode's items; the overlays
+    // when not on top).
+    QMatrix4x4 pulled = mvp;
+    {
+        const QVector3D target = camera.target(), along = (target - eye).normalized();
+        const float pull = overlayPull_ > 0.0f ? overlayPull_ : 0.002f * std::max((target - eye).length(), 1e-3f);
+        const QVector3D closer = target - along * pull;
+        const float eps = std::clamp(mvp.map(target).z() - mvp.map(closer).z(), 1e-6f, 0.02f);
+        pulled.setRow(2, pulled.row(2) - eps * pulled.row(3));
+    }
     auto prepare = [&](GpuItem& item, bool skip) {
         item.fresh = false;
         if (!item.shown || skip) return;
         upload(rhi, batch, item);
-        writeUniforms(batch, item, mvp, eye, size, false, pixelScale);
+        const bool tested = !overlaysOnTop_ && (isOverlay(item.kind) || &item == dots_.get());
+        writeUniforms(batch, item, tested ? pulled : mvp, eye, size, false, pixelScale);
         if (lookdev) writeUniforms(batch, item, hdrMvp, eye, size, true, pixelScale);
     };
     // The scalp and the props are the lookdev path's own surfaces: the line path alone draws
@@ -1606,15 +1620,7 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     prepare(*dots_, false);
     prepare(*tool_, false);
     {
-        // The root mode's items: the view's matrix pulled toward the camera by the hair's depth at
-        // the camera's target (its depth in clip space less by that much), as Blender pulls its
-        // overlays: depth tested, they show over the hair round them and hide behind the head.
-        QMatrix4x4 pulled = mvp;
-        const QVector3D target = camera.target(), along = (target - eye).normalized();
-        const float pull = overlayPull_ > 0.0f ? overlayPull_ : 0.002f * std::max((target - eye).length(), 1e-3f);
-        const QVector3D closer = target - along * pull;
-        const float eps = std::clamp(mvp.map(target).z() - mvp.map(closer).z(), 1e-6f, 0.02f);
-        pulled.setRow(2, pulled.row(2) - eps * pulled.row(3));
+        // The root mode's items: depth tested with the view pulled toward the camera (`pulled`).
         for (GpuItem* item : {rootFills_.get(), rootLines_.get(), rootDots_.get()}) {
             item->fresh = false;
             if (!item->shown) continue;
@@ -1632,9 +1638,9 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     auto drawOverlays = [&](QRhiCommandBuffer* passCb) {
         for (std::size_t i = 0; i < items_.size(); ++i) {
             const GpuItem& item = *items_[i];
-            if (!hidden(i) && item.shown && isOverlay(item.kind)) draw(passCb, item, main_, false);  // (a Scatter's root dots: hair)
+            if (!hidden(i) && item.shown && isOverlay(item.kind)) draw(passCb, item, main_, false, !overlaysOnTop_);  // (a Scatter's root dots: hair)
         }
-        if (dots_->shown) draw(passCb, *dots_, main_, false);
+        if (dots_->shown) draw(passCb, *dots_, main_, false, !overlaysOnTop_);
         // The root mode's fills, edges and dots, under the brush's overlay.
         for (const GpuItem* item : {rootFills_.get(), rootLines_.get(), rootDots_.get()}) {
             if (item->shown) draw(passCb, *item, main_, false);
