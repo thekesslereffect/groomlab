@@ -17,9 +17,16 @@
 
 #include <nlohmann/json.hpp>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include "groomlab/editor/agent_canvas.h"
 #include "groomlab/editor/agent_expressions.h"
 #include "groomlab/editor/agent_grooming.h"
+#include "groomlab/editor/agent_link.h"
 #include "groomlab/editor/agent_photos.h"
 #include "groomlab/editor/agent_tools.h"
 #include "groomlab/groom_session.h"
@@ -605,4 +612,84 @@ TEST(AgentTools, PhotosRootsTubesExpressionsAndSimulation) {
     const json abc = call(tools, "animate_scalp", {{"keys", {{{"frame", 1}}, {{"frame", 4}, {"translate", {1, 0, 0}}}}}}, true);
     EXPECT_NE(abc.value("error", std::string()).find("mesh caches"), std::string::npos);
     EXPECT_TRUE(call(tools, "stats", json::object())["stats"].is_object());
+}
+
+// ---- M2: the agent link's protocol ----------------------------------------------------------------
+
+namespace {
+
+long long processAliveSelf() {
+#ifdef _WIN32
+    return static_cast<long long>(_getpid());
+#else
+    return static_cast<long long>(getpid());
+#endif
+}
+
+}  // namespace
+
+TEST(AgentLink, DiscoveryFilesComeAndGoWithTheirHosts) {
+    const fs::path dir = fs::temp_directory_path() / "groomlab_agent_link_test";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    LinkInfo info;
+    info.host = "maya";
+    info.pid = processAliveSelf();
+    info.port = 51234;
+    info.token = newLinkToken();
+    info.groom = "groomShape1";
+    info.started = linkClock();
+    EXPECT_EQ(info.token.size(), 32u);
+    EXPECT_NE(info.token, newLinkToken());
+    const std::string path = writeLinkInfo(info, dir.u8string());
+    EXPECT_TRUE(fs::exists(fs::u8path(path)));
+    // Another host's file, older; a dead process's and a file that is no link: left out, removed.
+    LinkInfo older = info;
+    older.host = "app";
+    older.started -= 100.0;
+    writeLinkInfo(older, dir.u8string());
+    LinkInfo dead = info;
+    dead.host = "blender";
+    dead.pid = 0;
+    const std::string deadPath = writeLinkInfo(dead, dir.u8string());
+    std::ofstream(dir / "junk.json") << "{\"not\": \"a link\"}";
+    std::vector<LinkInfo> live = liveLinks({}, dir.u8string());
+    ASSERT_EQ(live.size(), 2u);
+    EXPECT_EQ(live[0].host, "maya");  // newest first
+    EXPECT_EQ(live[0].token, info.token);
+    EXPECT_EQ(live[0].file, path);
+    EXPECT_FALSE(fs::exists(fs::u8path(deadPath)));
+    EXPECT_FALSE(fs::exists(dir / "junk.json"));
+    EXPECT_EQ(liveLinks("app", dir.u8string()).size(), 1u);
+    removeLinkInfo(path);
+    EXPECT_EQ(liveLinks("maya", dir.u8string()).size(), 0u);
+    EXPECT_THROW(LinkInfo::fromJson(json{{"host", "maya"}, {"pid", 1}, {"port", 0}, {"token", "t"}}), std::invalid_argument);
+}
+
+TEST(AgentLink, RequestsAreAnsweredOnlyWithTheToken) {
+    SessionTarget target;
+    AgentTools tools(target);
+    const std::string token = newLinkToken();
+    // Without the token, or with another: refused, nothing else said.
+    json answer = json::parse(answerLinkRequest(tools, token, linkRequestLine("wrong", 1, "tools/list", nullptr)));
+    EXPECT_EQ(answer["error"]["code"], kLinkBadToken);
+    EXPECT_FALSE(answer.contains("result"));
+    answer = json::parse(answerLinkRequest(tools, token, R"({"id": 2, "method": "tools/list"})"));
+    EXPECT_EQ(answer["error"]["code"], kLinkBadToken);
+    EXPECT_EQ(json::parse(answerLinkRequest(tools, token, "not json"))["error"]["code"], kLinkBadRequest);
+    // With it: the tools, a call (its result as AgentTools gives it), ping; an unknown method.
+    const json listed = linkResult(answerLinkRequest(tools, token, linkRequestLine(token, 3, "tools/list", nullptr)), 3);
+    EXPECT_EQ(listed["tools"].size(), tools.list().size());
+    const json made = linkResult(answerLinkRequest(tools, token, linkRequestLine(token, 4, "tools/call",
+                                                                                {{"name", "new_groom"}, {"arguments", {{"name", "b"}, {"mesh", "ball"}}}})),
+                                 4);
+    EXPECT_EQ(made["isError"], false);
+    EXPECT_EQ(made["content"][0]["type"], "text");
+    const json failed = linkResult(answerLinkRequest(tools, token, linkRequestLine(token, 5, "tools/call", {{"name", "undo"}})), 5);
+    EXPECT_EQ(failed["isError"], true);  // (a tool's error is a result, not a protocol error)
+    EXPECT_TRUE(linkResult(answerLinkRequest(tools, token, linkRequestLine(token, 6, "ping", nullptr)), 6).is_object());
+    EXPECT_THROW(linkResult(answerLinkRequest(tools, token, linkRequestLine(token, 7, "files/delete", nullptr)), 7), std::runtime_error);
+    EXPECT_THROW(linkResult(answerLinkRequest(tools, token, linkRequestLine(token, 8, "tools/call", {{"name", "nope"}})), 8),
+                 std::runtime_error);
+    EXPECT_THROW(linkResult(answerLinkRequest(tools, token, linkRequestLine(token, 9, "ping", nullptr)), 10), std::runtime_error);
 }

@@ -15,6 +15,7 @@ What moved or changed between the two, as the UI uses it:
                                        globalPos() became position() and globalPosition() in Qt 6)
     to_int(value)                      an enum or flags value as an int (PySide6's are Python enums)
     QtSvg()                            the QtSvg module (QSvgRenderer), imported when first needed
+    QtNetwork()                        the QtNetwork module (QTcpServer), imported when first needed
     shiboken                           shiboken2 or shiboken6 (isValid, delete, wrapInstance)
 """
 
@@ -67,6 +68,15 @@ else:
     QAction = QtWidgets.QAction
     QActionGroup = QtWidgets.QActionGroup
     QShortcut = QtWidgets.QShortcut
+
+
+def QtNetwork():
+    """The QtNetwork module of the binding (QTcpServer, QTcpSocket: the agent link's listener)."""
+    if QT6:
+        from PySide6 import QtNetwork as module
+    else:
+        from PySide2 import QtNetwork as module
+    return module
 
 
 def QtSvg():

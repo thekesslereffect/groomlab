@@ -276,6 +276,11 @@ if(_tool_python AND TARGET groomlab-cli AND TARGET groomlab_alembic)
         COMMAND "${_tool_python}" "${CMAKE_CURRENT_SOURCE_DIR}/engine/cli/test_mcp.py"
                 "$<TARGET_FILE:groomlab-cli>" "${CMAKE_CURRENT_BINARY_DIR}/mcp_session")
     set_tests_properties(cli.mcp_session PROPERTIES LABELS "quick;core" TIMEOUT 300)
+    # mcp --live forwarding to a host's agent link: a fake host answering the protocol.
+    add_test(NAME cli.mcp_live
+        COMMAND "${_tool_python}" "${CMAKE_CURRENT_SOURCE_DIR}/engine/cli/test_mcp_live.py"
+                "$<TARGET_FILE:groomlab-cli>" "${CMAKE_CURRENT_BINARY_DIR}/mcp_live")
+    set_tests_properties(cli.mcp_live PROPERTIES LABELS "quick;core" TIMEOUT 120)
 endif()
 
 # The C API library's parallel backend (engine/core/src/parallel_pool.cpp, the pool of the
@@ -633,6 +638,16 @@ if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
                 "${CMAKE_CURRENT_BINARY_DIR}/maya_card_atlas")
 endif()
 
+# The agent link's command (groomLabAgent): its file and token, the tools on the scene's grooms, their
+# edits as Maya undo steps.
+if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
+    add_test(NAME maya.agent_link
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_agent_link.py"
+                "$<TARGET_FILE:GroomLab>"
+                "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
+endif()
+
 # Root-first tubes in the Tube tool (issues 61, 62): tubes drawn root first (their regions, snapping,
 # editing the root) and the tube hierarchy's levels.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
@@ -858,7 +873,7 @@ endif()
 # The plugin's Python imports the build's groomlab_core module (as the
 # installed module's PYTHONPATH has it). COST starts the long suites first.
 set(GROOMLAB_MAYA_PYTHONPATH "$<$<TARGET_EXISTS:groomlab_core_py>:$<TARGET_FILE_DIR:groomlab_core_py>>")
-foreach(_maya_test maya.plugin maya.graph_editor maya.pipeline maya.groom_io maya.grooming maya.to_mesh maya.subdivision maya.hardening maya.updates maya.arnold maya.studio maya.studio_render maya.vray maya.prman maya.xgen_import maya.yeti_import maya.tube_mesh maya.card_atlas maya.root_tubes)
+foreach(_maya_test maya.plugin maya.graph_editor maya.pipeline maya.groom_io maya.grooming maya.to_mesh maya.subdivision maya.hardening maya.updates maya.arnold maya.studio maya.studio_render maya.vray maya.prman maya.xgen_import maya.yeti_import maya.tube_mesh maya.card_atlas maya.root_tubes maya.agent_link)
     if(TEST ${_maya_test})
         set(_app_dir "${CMAKE_CURRENT_BINARY_DIR}/maya_app_dirs/${_maya_test}")
         file(MAKE_DIRECTORY "${_app_dir}")
@@ -904,7 +919,7 @@ if(GROOMLAB_GUI_TESTS AND GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
         FIXTURES_REQUIRED maya_gui_trust
         # A prefs folder of its own: the user's prefs could auto-load an installed
         # GroomLab module, and the build's plugin would then be skipped.
-        ENVIRONMENT "MAYA_DEBUG_ENABLE_CRASH_REPORTING=0;MAYA_APP_DIR=${CMAKE_CURRENT_BINARY_DIR}/maya_app_dir;PYTHONPATH=${GROOMLAB_MAYA_PYTHONPATH};GROOMLAB_PLUGIN=$<TARGET_FILE:GroomLab>;GROOMLAB_SCRIPTS=${PROJECT_SOURCE_DIR}/hosts/maya/scripts;GROOMLAB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya;GROOMLAB_GUI_LOG=${CMAKE_CURRENT_BINARY_DIR}/gui.log")
+        ENVIRONMENT "MAYA_DEBUG_ENABLE_CRASH_REPORTING=0;MAYA_APP_DIR=${CMAKE_CURRENT_BINARY_DIR}/maya_app_dir;PYTHONPATH=${GROOMLAB_MAYA_PYTHONPATH};GROOMLAB_PLUGIN=$<TARGET_FILE:GroomLab>;GROOMLAB_SCRIPTS=${PROJECT_SOURCE_DIR}/hosts/maya/scripts;GROOMLAB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya;GROOMLAB_GUI_LOG=${CMAKE_CURRENT_BINARY_DIR}/gui.log;GROOMLAB_AGENT_LINK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gui_agent_link")
     # The drawing suites again on DirectX 11: fresh prefs give OpenGL, but many artists run
     # Viewport 2.0 on DirectX 11, where buffers behave differently (GPU-only vertex buffers
     # cannot be written there). MAYA_VP2_DEVICE_OVERRIDE picks the device without touching prefs.

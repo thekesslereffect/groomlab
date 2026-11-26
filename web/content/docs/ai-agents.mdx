@@ -98,6 +98,33 @@ palette), then use it from Copilot's agent mode:
 Any other app that supports MCP servers over stdio works the same way: the command is
 `groomlab-cli`, and the arguments are `mcp --root <folder>`.
 
+## Live: the groom open in Maya
+
+With **Agent Link** on, the agent works on the grooms of the scene open in Maya, as you watch:
+every change it makes is one step of Maya's undo, named `Agent: <tool>`, and you can take it back
+with Ctrl+Z like your own.
+
+1. In Maya, open the Groom Tools and turn on **... > Agent Link** (it is off by default and stays
+   off until you turn it on in each session).
+2. Start the MCP server with `--live`, for example in Claude Code:
+
+   ```bash
+   claude mcp add --scope user groomlab-live -- "C:\Users\you\Documents\GroomLab\GroomLab\bin\groomlab-cli.exe" mcp --live
+   ```
+
+   or `"args": ["mcp", "--live"]` in Claude Desktop's config. `--live maya` picks Maya when other
+   GroomLab hosts run their link too; without a name the server takes the newest.
+
+While an agent is connected, the Groom Tools' header shows an **Agent** badge with a stop button;
+stopping disconnects it. The tools work on the current groom unless the agent names another; files
+are read and written in the Maya project's folder. In Maya the agent's `undo`, `redo` and `history`
+are Maya's undo queue, `render_preview` with `viewport: true` shows the viewport as you see it, and
+a few tools leave their work to Maya's own menus (making a groom, exporting curves).
+
+With no host running its link, `--live` works on grooms of its own and says so. The link listens on
+127.0.0.1 only, and every request carries a token from a file in `Documents\GroomLab\agent_link`
+that only your user can read; the file goes away when the link stops or Maya quits.
+
 ## The tools
 
 The agent sees these tools, each with a description and a JSON Schema for its arguments. Grooms
@@ -195,7 +222,8 @@ and the tip color; Width `width` and `profile`. `describe_node` gives every para
   `..` and links cannot leave it. This also applies to the files a groom names (caches, texture
   maps in params) and to `save_to`. GroomLab's own presets, nodes, sample meshes and docs are read
   where they are installed.
-- **No network.** The server talks only to the app that started it, over stdin and stdout.
+- **No network.** The server talks only to the app that started it, over stdin and stdout; with
+  `--live`, to a GroomLab host on the same computer (127.0.0.1) whose Agent Link you turned on.
 - **Limits.** Mesh files up to 512 MB, 5,000 guides per call, scripts up to 64 KB, previews up
   to 1024 pixels wide, exports up to 1,000 frames.
 - **Nothing is overwritten by surprise.** Changes stay in memory until `save_groom`, `save_node` or
@@ -213,8 +241,7 @@ JSON Schemas for GroomLab's file formats, for agents and tools that write them d
 
 ## Not yet
 
-- **A live bridge to Maya or the app.** The server works on grooms in its own memory. To continue
-  with brushes, open the saved `.groom` in Maya or the app.
+- **A live link to the app and Blender.** `--live` reaches Maya today; the app and Blender follow.
 - **Painting maps.** A preset that reads painted maps (density, length) says which maps are missing.
   These maps can only be painted in GroomLab itself.
 - **Flow arrows, parts and sculpts.** These come from the brushes in Maya, the app and Blender.

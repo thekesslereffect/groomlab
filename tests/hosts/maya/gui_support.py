@@ -48,7 +48,8 @@ CLASSIC_GRAPH = {
 
 # The viewport's frame budget first, on a fresh session; then the graph editor's cases; quitting
 # with the panels open last (the session's quit is its final check).
-SUITES = ("viewport", "brush", "select", "roots", "reference", "graph_editor", "cached_playback", "updates", "render", "quit")
+SUITES = ("viewport", "brush", "select", "roots", "reference", "graph_editor", "cached_playback", "updates", "render", "agent",
+          "quit")
 # Suites that run only when GROOMLAB_GUI_SUITES names them (look-over tools, not checks): the
 # presets' contact sheets (gui_presets.py, ctest maya.preset_sheet), and the viewport benchmark
 # (gui_bench.py, ctest maya.viewport_bench), and the viewport's pictures before and after a display change

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/editor/agent_target.h"
 
+#include <algorithm>
 #include <filesystem>
 
 #include "groomlab/presets.h"
@@ -181,6 +182,23 @@ void AgentGroom::commit(GroomEdit edit) {
 std::string AgentGroom::undo() { return undoStep(history_, *this); }
 std::string AgentGroom::redo() { return redoStep(history_, *this); }
 
+SimRun AgentGroom::simulateTo(int toFrame) { return session().simulateTo(toFrame); }
+
+void AgentGroom::setCollider(const std::string& name, MeshPtr collider) { session().setMesh(name, std::move(collider)); }
+
+CardBake AgentGroom::bakeCards(int resolution, float occlusion) {
+    ViewRequest request;
+    request.density = 1.0f;
+    request.time = frame / std::max(framesPerSecond(), 1e-9);
+    request.wantCards = true;
+    request.cardDensity = 1.0f;
+    request.gameExport = true;
+    const ViewResult& view = this->view(request);
+    if (!view.errors.empty()) throw ToolError(view.errors.front());
+    if (!view.cardStrands || !view.cards) throw ToolError("the groom has no cards: add a Cards node (list_nodes \"cards\")");
+    return bakeCardsInMemory(view.cardStrands, view.scalp ? view.scalp : session().scalp(), resolution, occlusion);
+}
+
 AgentStrokeHost& AgentGroom::strokeHost() {
     if (!strokes_) strokes_ = std::make_unique<AgentStrokeHost>(*this);
     return *strokes_;
@@ -221,6 +239,8 @@ std::size_t AgentTarget::bakeSimulation(AgentGroom&, const std::string&, const s
 void AgentTarget::loadSimulationCache(AgentGroom&, const std::string&, const std::string&, const std::string&) {
     throw ToolError("this host reads no simulation caches");
 }
+
+std::optional<PreviewImage> AgentTarget::viewportImage(AgentGroom&, int) { return std::nullopt; }
 
 PreviewImage AgentTarget::preview(AgentGroom&, const ScalpMesh* scalp, const StrandSet* strands, const PreviewOptions& options) {
     return renderPreview(scalp, strands, options);

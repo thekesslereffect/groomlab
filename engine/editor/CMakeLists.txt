@@ -6,6 +6,7 @@ add_library(groomlab_editor STATIC
     src/agent_canvas.cpp
     src/agent_expressions.cpp
     src/agent_grooming.cpp
+    src/agent_link.cpp
     src/agent_photos.cpp
     src/agent_preview.cpp
     src/agent_target.cpp

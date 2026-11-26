@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "groomlab/card_files.h"
 #include "groomlab/editor/agent_preview.h"
 #include "groomlab/editor/groom_edit.h"
 #include "groomlab/groom_file.h"
@@ -119,6 +120,11 @@ public:
     std::string redo();
     // The host strokes run on (default: an AgentStrokeHost on session()).
     virtual AgentStrokeHost& strokeHost();
+    // What a host does its own way (defaults: the session's): Simulate Range to `frame`, a
+    // collider mesh by name, the Cards nodes' cards baked for a game export.
+    virtual SimRun simulateTo(int toFrame);
+    virtual void setCollider(const std::string& name, MeshPtr collider);
+    virtual CardBake bakeCards(int resolution, float occlusion);
 
     std::string path;                // the .groom file it was opened from or last saved to ("" none)
     std::string referencePhotos;     // the reference photos (groom_file.h "referencePhotos": agent_photos.h)
@@ -168,13 +174,16 @@ public:
 
     // The grooms open, by name.
     virtual std::vector<AgentGroom*> grooms() = 0;
-    // The groom named (ToolError for none); with `name` empty, the one groom open.
-    AgentGroom& groom(const std::string& name);
+    // The groom named (ToolError for none); with `name` empty, the one groom open (a host: the
+    // groom its tools work on).
+    virtual AgentGroom& groom(const std::string& name);
     AgentGroom* find(const std::string& name);
     // A groom from file data opened under `name` (new_groom, open_groom), replacing one of that
     // name. Throws ToolError where the target opens no grooms of its own, or what reading the
     // file's caches throws.
     virtual AgentGroom& open(const std::string& name, GroomFile file) = 0;
+    // Why this target opens no grooms of its own ("" it does): new_groom and open_groom say it first.
+    virtual std::string opensNoGrooms() const { return {}; }
     virtual void close(const std::string& name) = 0;
 
     // A scalp from a mesh file (.obj, .abc; `object`: the Alembic mesh's name, "" the first).
@@ -195,6 +204,10 @@ public:
     virtual std::size_t bakeSimulation(AgentGroom& groom, const std::string& node, const std::string& path, int first, int last);
     // A simulation cache read as node `node`'s bake (made with its settings as they are now).
     virtual void loadSimulationCache(AgentGroom& groom, const std::string& node, const std::string& path, const std::string& object);
+
+    // The host's own viewport as the artist sees it now (render_preview viewport), `size` pixels
+    // across at most; nullopt: the host has none (headless).
+    virtual std::optional<PreviewImage> viewportImage(AgentGroom& groom, int size);
 
     // A picture of the groom (render_preview): the CPU preview by default. Throws
     // std::invalid_argument for options it cannot draw.

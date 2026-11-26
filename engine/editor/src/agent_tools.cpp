@@ -857,6 +857,7 @@ struct AgentTools::Impl {
     }
 
     ToolResult newGroom(const json& a) {
+        if (const std::string why = target.opensNoGrooms(); !why.empty()) throw ToolError(why);
         const std::string name = str(a, "name");
         checkName(name, "a groom's name");
         if (target.find(name)) throw ToolError("a groom named '" + name + "' is open already: pick another name");
@@ -887,6 +888,7 @@ struct AgentTools::Impl {
     }
 
     ToolResult openGroom(const json& a) {
+        if (const std::string why = target.opensNoGrooms(); !why.empty()) throw ToolError(why);
         const std::string path = files().resolve(str(a, "path"));
         if (!hasExtension(path, ".groom")) throw ToolError("open_groom reads .groom files");
         std::string name = str(a, "name", fs::u8path(path).stem().u8string());
@@ -1483,6 +1485,15 @@ struct AgentTools::Impl {
         o.size = static_cast<int>(num(a, "size", 512));
         o.maxStrands = static_cast<std::size_t>(std::clamp(num(a, "max_strands", 50000.0), 100.0, 300000.0));
         o.zUp = g.upAxis() == "Z";
+        if (flag(a, "viewport", false)) {
+            const std::optional<PreviewImage> shot = target.viewportImage(g, o.size);
+            if (!shot) throw ToolError("viewport: this server has no viewport (it works headless); live in a host, its view as the artist sees it");
+            ToolResult r;
+            r.content.push_back({{"type", "image"}, {"data", base64Encode(shot->png)}, {"mimeType", "image/png"}});
+            r.content.push_back({{"type", "text"}, {"text", json{{"groom", g.name()}, {"viewport", true}, {"width", shot->width},
+                                                                 {"height", shot->height}}.dump()}});
+            return r;
+        }
         const bool compare = flag(a, "compare", false);
         if (compare && !g.history().canUndo()) throw ToolError("compare needs an edit to compare with: this groom has none to undo");
         json info = {{"groom", g.name()}, {"views", o.camera ? json::array({"camera"}) : json(o.views)}, {"look", o.look}};
@@ -2790,7 +2801,7 @@ struct AgentTools::Impl {
                 const std::string name = c["name"].get<std::string>();
                 checkName(name, "a collider's name");
                 const std::string path = files().resolve(c["path"].get<std::string>());
-                g.session().setMesh(name, target.readMesh(path, c.value("object", std::string())));
+                g.setCollider(name, target.readMesh(path, c.value("object", std::string())));
                 made.push_back(name);
             }
             out["colliders"] = made;
@@ -2977,7 +2988,7 @@ struct AgentTools::Impl {
             int start = to;
             for (const SimStatus& st : s.simulationStatus()) start = std::min(start, st.startFrame);
             if (to - start > kMaxSimFrames) throw ToolError("at most " + std::to_string(kMaxSimFrames) + " frames in one call");
-            const SimRun run = s.simulateTo(to);
+            const SimRun run = g.simulateTo(to);
             out["framesStepped"] = run.frames;
             out["ms"] = static_cast<long long>(run.milliseconds + 0.5);
             if (!run.errors.empty()) out["errors"] = run.errors;
@@ -3026,18 +3037,7 @@ struct AgentTools::Impl {
 
     // ---- games and stats ----
     // The groom's cards as a game export evaluates them, baked.
-    CardBake bakeCardsOf(AgentGroom& g, int resolution, float occlusion) {
-        ViewRequest request;
-        request.density = 1.0f;
-        request.time = frameToSeconds(g.frame, g.framesPerSecond());
-        request.wantCards = true;
-        request.cardDensity = 1.0f;
-        request.gameExport = true;
-        const ViewResult& view = g.view(request);
-        if (!view.errors.empty()) throw ToolError(view.errors.front());
-        if (!view.cardStrands || !view.cards) throw ToolError("the groom has no cards: add a Cards node (list_nodes \"cards\")");
-        return bakeCardsInMemory(view.cardStrands, view.scalp ? view.scalp : g.session().scalp(), resolution, occlusion);
-    }
+    CardBake bakeCardsOf(AgentGroom& g, int resolution, float occlusion) { return g.bakeCards(resolution, occlusion); }
 
     ToolResult exportCards(const json& a) {
         AgentGroom& g = target.groom(str(a, "groom"));
@@ -3495,6 +3495,8 @@ struct AgentTools::Impl {
                           {"turntable", prop("integer", "Instead of views: 2-12 frames round the groom (a contact sheet).")},
                           {"camera", objectSchema(cameraProperties())},
                           {"tubes", prop("boolean", "Draw the guides' tubes as cyan wires (as tube_levels view shows them).")},
+                          {"viewport", prop("boolean", "Live in a host (Maya...): its own viewport as the artist sees it now, "
+                                                       "instead of the CPU preview (the other options aside from size are not read).")},
                           {"save_to", prop("string", "Also write the PNG to this file inside the server's folder.")}}),
             &Impl::renderPreviewTool);
         add("measure_guides", "Measure guides",

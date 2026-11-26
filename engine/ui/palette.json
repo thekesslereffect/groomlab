@@ -13,7 +13,7 @@
       "visible": {"tip": "Show or hide the hair, the strands alone (Shift+click or right-click: every groom's)", "items": ["display.showAllHair", "display.hideAllHair"]},
       "guides": {"tip": "Show or hide the groom's guides, every guide group, with its part lines and flow arrows (Shift+click or right-click: every groom's)", "items": ["display.showAllGuides", "display.hideAllGuides"]},
       "graph": {"tip": "Graph Editor: the groom's look"},
-      "more": {"tip": "More: new groom, theme", "items": ["groom.create", "-", {"generator": "themeMenu"}]}
+      "more": {"tip": "More: new groom, the agent link, theme", "items": ["groom.create", "agent.link", "-", {"generator": "themeMenu"}]}
     },
     "empty": {
       "title": "Start a groom",
