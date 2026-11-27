@@ -254,6 +254,8 @@
     "corrective.rename": {"label": "Rename", "tip": "Rename the corrective (or double-click its name)"},
     "braid.sculptSections": {"label": "Sculpt Sections", "tip": "Brush the braid's sections: each section's curve becomes a guide the brushes shape (a Sculpt node keeps the strokes) and its hair follows it (a FollowGuides node after the Braid). The strokes stay when the braid above changes. Done Sculpting Sections (or Esc in the brush tool) goes back to the guides"},
     "braid.doneSculptSections": {"label": "Done Sculpting Sections", "tip": "Back to brushing the guides, the braid's path among them: the brushes leave the sections' Sculpt node, its strokes kept (Esc in the brush tool does it too). Sculpt Sections brushes them again"},
+    "sculpt.brush": {"label": "Sculpt", "tip": "Brush this node: the brushes shape the guides it hands on (a SculptStrands node's: its strands), each stroke kept in the node. Done Sculpting (or Esc in the brush tool) goes back to the guides"},
+    "sculpt.done": {"label": "Done Sculpting", "tip": "Back to brushing the guides: the brushes leave this node, its strokes kept (Esc in the brush tool does it too). Sculpt brushes it again"},
     "sculpt.clearEdits": {"label": "Clear Sculpt Edits", "tip": "Drop every stroke kept in this node: its guides as it is fed them (one undo step)"},
 
     "photo.import": {"label": "Import Photo...", "tip": "A photo as a camera: copied into the scene's groomlab/<scene>/references folder, aimed at the groom",

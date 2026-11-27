@@ -204,7 +204,15 @@ runs inside the photo's hair along the photo's own strand flow (points the head 
 camera don't count). It takes a root's place where the photos support it about as much as the guide
 grown there (with symmetry, a lock on the mirrored side competes as its mirror image); the other
 guides grow along the locks' flow. So the back falls down in waves and the hair at the hairline sweeps up
-and back as the photos show, not into a fringe. Each guide then carries the photos' fine wave along
+and back as the photos show, not into a fringe. An agent can ask for the other way round instead
+(`lock_join: "merge"`, which traces the locks on any hair): each photo's traced lines are treated as
+strokes the machine drew, each lifted onto the hair's surface and fitted to its line (a lock's lines
+in several photos fitted as one), cut to what its lines cover, the pieces that repeat a longer one
+dropped and the rest joined end to end in 3D where one carries on into the next (searching wider
+and allowing more of a turn pass by pass, a tenth of the head's radius and 20 degrees up to three
+tenths and 40 degrees; never folding back), each chain rooted on the scalp and kept only where all
+the photos score it well. On the test head it gives about what matching does (14 lock guides
+against 15, the same outlines), so matching stays the default. Each guide then carries the photos' fine wave along
 it (its size, length and phase where a photo shows it; the rest take their neighbours'), and with
 Apply each guide's strands clump onto it, with no Curl node over all of them. Long hair that hangs
 past the part of the photo first worked on (past the neck, down the back) is worked on wider, and
@@ -288,13 +296,39 @@ would: a few key locks drawn on the photos, the rest combed and filled in from t
   photo's camera onto the hair's outer surface the photos show, rooted on the scalp under its
   root end (a stroke drawn tip first is turned round: the end nearer the scalp is the root), and
   cut where it passes through the head or the photos show the hair end. A stroke on a side photo can be mirrored
-  to the other side. With `fill`, the rest of the hair region gets guides from the strokes (each
-  takes its nearest strokes' shapes), combed where no stroke is near.
+  to the other side. With `fill`, the rest of the hair region gets guides grown through the flow
+  the strokes make (below), combed where no stroke is near; `fill_mode blend` copies each root's
+  nearest strokes' shapes instead.
+- **Fitting the strokes in 3D** (`lift fit`, the default): that lift is only the start. Each guide is
+  then fitted so that, seen through each photo with a stroke for it, it lies on that stroke, while
+  its depth (which one photo cannot see) stays smooth like a stiff rod, out of the head, inside the
+  shell and toward the hair's outside as each photo sees it. Rays that only graze the shell no
+  longer make depth zig-zags or loops, and a start drawn out on the hair (a side lock seen where it
+  comes out from under other hair) is carried back along the lock onto the scalp instead of joined
+  to it by a straight spike. The same lock drawn on two photos (front and side, say) becomes one
+  guide fitted to both strokes, its depth then known from the photos: strokes are matched when one
+  guide fits both and stays where each photo could see it, or label them yourself by giving the
+  strokes the same `lock`. A stroke drawn over only part of a lock does not pull the rest of it.
+  The answer says, per guide, how far it lies off each of its strokes in pixels and which strokes
+  were fused into it; `lift shell` keeps the plain lift.
+- **Refitting guides** (`fit_guides`): strokes drawn later on any photo refit the guides lying along
+  them in place, keeping their ids (a stroke can name its guide with `guide`).
+- **Filling between guides** (`fill_guides`, and the fill of the two tools above): a smooth field of
+  hair directions is solved through the hair's shell that follows each guide root to tip, fades out
+  a little past each guide's tip and leans out of the scalp near it; new guides grow through it root
+  first from roots spread over the scalp, riding about as high as the guides near them, and end where
+  the field fades, where the photos show the hair end, or about their neighbours' length. The flow
+  between a few drawn locks stays coherent, the back ends where the photos show it end instead of at
+  one length, and nothing hangs below the hair. A part (`part`, or `comb.part`) is a seam the flow is
+  not blended across; leave it out when the hair has no clear part, since a seam leaves the scalp
+  bare along it. The new guides get the comb's wave on top (`wave`), then the lock look.
 - **The hair's shell** (`hair_shell`): the hair's outer surface round the head from every lined-up
   photo's hair mask, and how thick the hair is over each part of the head.
 - **Combing** (`comb_guides`): a haircut blocked in without strokes: a part, the front swept back
   (or out, or forward), the sides back over the ears, the back falling, each guide riding the hair's
-  shell with a wave across the flow.
+  shell with a wave across the flow. By default every third guide is combed so and all of them grow
+  through the field those make (as above), which keeps the flow from blending across the part and
+  ends the hair at the shell instead of hanging by the ears and nape; `mode comb` combs each one alone.
 - The lock look (`apply_look`): the guides as the clumps' centers, finer clumps inside them, the tips
   trimmed unevenly and no hair below the lowest guide roots.
 

@@ -270,6 +270,40 @@ struct ReferenceView {
 
 enum class ReferenceSymmetry { None, WorldX, Topology, Auto };
 
+// How the locks each view traces (lockPaths) become 3D centrelines:
+// - Match: a lock two views trace from the same seed root triangulated (where each point's ray
+//   crosses the other view's line), one seen once placed on the hair's surface.
+// - Merge (lift first, merge in 3D: HairGS's order of operations): each view's traced lines are
+//   strokes the machine drew. Each is lifted (LockMergeOptions::lift: along its rays at the hair's
+//   thickness over its root, as Match places a lock one view sees, or onto the photos' hull) and
+//   fitted (guide_fit.h fitStrokes: alone, or with the same lock's lines on other views where one
+//   guide fits them all), cut to the part its lines cover (the lift's join down to the scalp is not
+//   the lock's), pieces repeating a longer one dropped, the rest joined end to end in 3D
+//   (guide_merge.h, thresholds relaxing: LockMergeOptions), each chain rooted on the scalp
+//   (guide_rooting.h: the end nearer the scalp first, joined to it, out of the head) and kept when
+//   all the photos score it well (PhotoScorer). The kept chains then compete for roots as Match's.
+enum class LockJoin { Match, Merge };
+
+// LockJoin::Merge's thresholds, in head radii R (the scalp's fitted sphere) where lengths.
+struct LockMergeOptions {
+    // Where a line is lifted to before the fit: Surface, along each ray at the hair's thickness over
+    // the lock's root (Match's single-view placement); Shell, the first point of the hair's shell (the
+    // photos' hull) along it (liftStroke, as a drawn stroke). A hull from a few photos is far fatter
+    // than the hair where few photos carve it: the shell lift lands out on it.
+    enum class Lift { Surface, Shell };
+    Lift lift = Lift::Surface;
+    bool fit = true;               // the pieces fitted to their lines on every photo (false: the lift alone)
+    bool fuse = true;              // lines of one lock on several photos fitted as one piece (fitStrokes' association)
+    float distanceStart = 0.1f;    // R: the first merge level's search radius (about a lock's width)
+    float distanceEnd = 0.3f;      // R: the last level's (HairGS's 2 -> 4 mm is a strand segment; see guide_merge.h)
+    float angleStart = 20.0f;      // degrees: the first level's largest turn from piece to piece (HairGS's)
+    float angleEnd = 40.0f;        // the last level's (HairGS's)
+    int levels = 4;                // levels from start to end, log-linear
+    float duplicateDistance = 0.06f;  // R: a piece with most of its points this close along a longer one is that one again
+    float minPieceLength = 0.15f;  // R: shorter pieces (once cut to what their lines cover) are dropped before merging
+    float minScore = 0.45f;        // a chain's score against all the photos (PhotoScorer) at least, or it is dropped
+};
+
 // How the look fit takes the light's color out (ReferenceLookFit).
 enum class LookBalance { None, Gray, Highlights, Auto };
 
@@ -332,7 +366,9 @@ struct ReferenceGuideOptions {
     // as with the grown guides, each guide carrying the fine wave a view shows (lockPaths, see 3. above).
     // -1 on wavy hair (curly hair keeps lockCurls' tracing), 0 off, 1 on.
     int lockPaths = -1;
-    float waveGain = 1.2f;              // the fine wave's size on a guide from the swing the photo shows (larger
+    LockJoin lockJoin = LockJoin::Match;  // how the traced locks become 3D centrelines (see LockJoin)
+    LockMergeOptions lockMerge;
+    float waveGain = 1.2f;             // the fine wave's size on a guide from the swing the photo shows (larger
                                         // reads as frizz on the loose curls tried: IoU and flow fall)
     // Every guide rooted on the scalp at the end (guide_rooting.h: the end nearer the scalp the root,
     // a root off it joined to it or dropped, a pass through the head cut; the head the first
@@ -418,7 +454,29 @@ struct ReferenceGuidesResult {
         int detected = 0, matched = 0, triangulated = 0, singleView = 0;
     };
     std::vector<LockViewCounts> lockViews;
-    int lockGuides = 0;  // guides on lock centrelines (each in a root's place, where the views agree with it at
+    // LockJoin::Merge's steps (lockViews then: detected the view's lines, matched those fitted with
+    // another view's line of the same lock, triangulated the same, singleView the rest).
+    struct LockMergeCounts {
+        bool on = false;
+        int pieces = 0;        // lines traced, every view
+        int lifted = 0;        // lifted onto the shell and rooted (the rest: no scalp under them)
+        int fitted = 0;        // pieces after the fit (a group of lines of one lock is one)
+        int fused = 0;         // of those, fitted to lines on two photos or more
+        int tooShort = 0;      // dropped: too short once cut to what their lines cover
+        int duplicates = 0;    // dropped: repeating a longer piece
+        int merges = 0;        // joins
+        std::vector<int> mergesPerPass;
+        std::vector<float> passDistance, passAngle;  // each pass's thresholds (head radii, degrees)
+        int chains = 0;        // after joining
+        int rootDropped = 0;   // dropped by rooting (no scalp near either end, or too short once cut at the head)
+        int gatedOut = 0;      // dropped: the photos score them below minScore (or say they explain nothing)
+        int kept = 0;          // chains handed on to compete for roots (lockGuides of them took one)
+        float headRadius = 0.0f;
+        float pieceLength = 0.0f, chainLength = 0.0f;  // means, head radii
+        float meanScore = 0.0f;  // the kept chains' mean score
+    };
+    LockMergeCounts lockMerge;
+    int lockGuides = 0; // guides on lock centrelines (each in a root's place, where the views agree with it at
                          // least as well as with the guide grown there)
     // Scalp rooting (guide_rooting.h): of the lock centrelines placed (each a line the photos show,
     // rooted before it competes for a root: flipped ones ran tip first), and the last pass over every

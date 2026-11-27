@@ -96,6 +96,13 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                                   m->guidesEdited();
                               },
                               {}, nodeOn};
+    // A Sculpt node's panel: Sculpt (the brushes shape its guides, as its Correctives row does), and
+    // Done Sculpting in its place while they do: Esc in the brush tool's MainWindow::leaveSculptNode.
+    b["sculpt.brush"] = {run([m, selected] {
+                             if (m->document_) m->correctives_->setTargetNode(selected());
+                         }),
+                         {}, nodeOn};
+    b["sculpt.done"] = {run([m] { m->leaveSculptNode(); }), {}, nodeOn};
     b["node.bake"] = {run([m, selected] { askBakeNode(*m, selected()); }), {}, nodeOn};
     // A Braid's sections made guides to brush, its hair following them (graph_inserts.h insertBraidSculpt).
     b["braid.sculptSections"] = {run([m, selected] { m->sculptBraidSections(selected()); }), {}, nodeOn};
@@ -492,7 +499,11 @@ std::set<std::string> AppActions::nodeState(MainWindow& w, const std::string& no
     } catch (const std::exception&) {
     }
     s.insert("type." + type);  // (graph_ui.json's nodeActions: by the node's type)
-    if (type == "SculptGuides" || type == "SculptStrands") s.insert("node.sculpt");
+    if (type == "SculptGuides" || type == "SculptStrands") {
+        s.insert("node.sculpt");
+        // The brushes shape it: Done Sculpting in Sculpt's place.
+        if (w.document_->sculptTarget() == node) s.insert("node.sculpting");
+    }
     // A Braid whose sections the brushes shape (Sculpt Sections): Done Sculpting Sections in its place.
     if (type == "Braid" && !w.document_->sculptTarget().empty()) {
         try {

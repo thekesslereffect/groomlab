@@ -670,6 +670,53 @@ TEST(ReferenceGuidesEndToEnd, DeepWavesFallThroughTheirCrests) {
     EXPECT_GT(fall, plainFall + 0.1);
 }
 
+// The same deep waves from three photos (front, side, back), the traced locks lifted first and
+// merged in 3D (LockJoin::Merge): every line a piece, lifted and fitted; pieces joined; chains
+// rooted on the scalp, scored, and some taking roots' places. The guides still fall down the back,
+// rooted, about as long as the locks; each step's counts add up.
+TEST(ReferenceGuidesEndToEnd, TracedLocksMergedIn3D) {
+    SyntheticShoot shoot = sweptBackShoot(0.6f, 150, 0.45f, 0.1f);
+    shoot.views.resize(3);
+    ReferenceGuideOptions options;
+    options.symmetry = ReferenceSymmetry::None;
+    options.occluders.push_back(shoot.head);
+    options.guideCount = 80;
+    options.lockPaths = 1;
+    options.lockJoin = LockJoin::Merge;
+    const ReferenceGuidesResult r = guidesFromReference(shoot.cap, shoot.views, options);
+    const auto& m = r.lockMerge;
+    ASSERT_TRUE(m.on);
+    ASSERT_EQ(r.lockViews.size(), 3u);
+    int detected = 0;
+    for (const auto& c : r.lockViews) {
+        EXPECT_GT(c.detected, 0);
+        detected += c.detected;
+    }
+    EXPECT_EQ(detected, m.pieces);
+    EXPECT_GT(m.pieces, 20);
+    EXPECT_GT(m.lifted, m.pieces / 2);
+    EXPECT_LE(m.fitted, m.lifted);
+    EXPECT_EQ(m.chains + m.merges, m.fitted - m.tooShort - m.duplicates);
+    EXPECT_EQ(m.kept + m.gatedOut + m.rootDropped, m.chains);
+    EXPECT_FALSE(m.mergesPerPass.empty());
+    EXPECT_GT(m.kept, 5);
+    EXPECT_GE(r.lockGuides, 3);
+    EXPECT_GT(m.meanScore, options.lockMerge.minScore);
+    // (every guide on the scalp, root first: the cap is the ball's top, radius 1)
+    double truthLength = 0.0;
+    for (const auto& axis : shoot.lockAxes) truthLength += arcLength(axis);
+    truthLength /= static_cast<double>(shoot.lockAxes.size());
+    double length = 0.0;
+    for (const ReferenceGuide& g : r.guides) {
+        ASSERT_GE(g.points.size(), 2u);
+        EXPECT_LT(std::abs(g.points.front().length() - 1.0f), 0.05f);
+        length += arcLength(g.points);
+    }
+    length /= static_cast<double>(std::max<std::size_t>(1, r.guides.size()));
+    EXPECT_GT(length, 0.7 * truthLength);
+    EXPECT_LT(length, 1.3 * truthLength);
+}
+
 TEST(ReferenceLook, ClumpsAreTheBrightnessPeriodAcrossTheFlow) {
     // Vertical hair (the flow along v) in locks 14 pixels apart: brighter in the middle of each,
     // dark gaps between; fine strand-scale noise on top. Deeper gaps read as a larger swing.

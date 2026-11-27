@@ -326,7 +326,10 @@ void MainWindow::buildPanels() {
             viewport_->setToolMode(Viewport::ToolMode::Brush);
         }
         refreshTool();
-        if (params_) params_->refreshActions();  // (a Braid's Sculpt Sections, or Done Sculpting Sections)
+        // Both node panels' actions (a Sculpt node's Sculpt or Done Sculpting, a Braid's Sculpt
+        // Sections or Done Sculpting Sections) follow what the brushes shape.
+        if (params_) params_->refreshActions();
+        if (graphParams_) graphParams_->refreshActions();
     });
     connect(correctives_, &CorrectivesPanel::message, this, [this](const QString& text) { report(text); });
     connect(guidesPanel_, &GuidesPanel::displayChanged, this, [this] {

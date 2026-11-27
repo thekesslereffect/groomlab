@@ -950,6 +950,9 @@ class ParamPanel(QtWidgets.QScrollArea):
             "sim.clear": lambda: later(lambda: menu.clear_core_simulation(groom=editor.groom)),
             "node.bake": lambda: later(lambda: editor.bake_to_guides(name)),
             "sculpt.clearEdits": lambda: later(lambda: (editor.clear_sculpt_edits(name), editor.reload())),
+            # Sculpt / Done Sculpting: what Esc in the brush tool does (sculpts.leave), in the node's panel.
+            "sculpt.brush": lambda: later(lambda: editor.brush_sculpt_node(name)),
+            "sculpt.done": lambda: later(lambda: editor.done_sculpting(name)),
             "braid.sculptSections": lambda: later(lambda: editor.sculpt_braid_sections(name)),
             "braid.doneSculptSections": lambda: later(lambda: editor.done_sculpt_sections(name)),
             "compound.ungroup": lambda: later(lambda: editor.expand([name])),
@@ -959,13 +962,16 @@ class ParamPanel(QtWidgets.QScrollArea):
 
     def node_action_state(self, name):
         """The conditions graph_ui.json's nodeActions need for node `name`: "type.<its type>",
-        "node.library" for a node from the library, and "braid.sculpting" for a Braid whose sections
+        "node.library" for a node from the library, "node.sculpting" for the Sculpt node the brushes
+        shape (Done Sculpting in Sculpt's place), and "braid.sculpting" for a Braid whose sections
         the brushes shape (Sculpt Sections: Done Sculpting Sections in its place)."""
         model = self.editor.model
         node_type = model.node_type(name)
         state = {"type." + node_type}
         if model.library_info(name):
             state.add("node.library")
+        if node_type in ("SculptGuides", "SculptStrands") and self.editor.sculpt_target() == name:
+            state.add("node.sculpting")
         if node_type == "Braid":
             target = self.editor.sculpt_target()
             if target and model.braid_sculpt_node(name) == target:

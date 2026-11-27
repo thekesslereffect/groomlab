@@ -70,8 +70,9 @@ struct AppActions {
     static void wireGraphEditor(MainWindow& window);
     // The node menu's conditions for a node (Maya's NodeItem.menu_state: node.viewable,
     // node.sculpt, node.bakeable, node.mappable, node.script, node.compound, node.library,
-    // node.updateAvailable; braid.sculpting: a Braid whose sections the brushes shape) with the window's;
-    // the param menu's (param.linkable, param.mappable).
+    // node.updateAvailable; node.sculpting: the Sculpt node the brushes shape; braid.sculpting: a
+    // Braid whose sections the brushes shape) with the window's; the param menu's (param.linkable,
+    // param.mappable).
     static std::set<std::string> nodeState(MainWindow& window, const std::string& node);
     static std::set<std::string> paramState(MainWindow& window, const std::string& node, const std::string& param);
     // A param's right-click menu (graph_ui.json's paramMenu) for node.param, filled into `menu`.

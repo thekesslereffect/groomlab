@@ -3415,6 +3415,10 @@ class GraphEditor(QtWidgets.QWidget):
             if not (message & om.MNodeMessage.kAttributeSet):
                 return
             attr = plug.partialName(useLongNames=True)
+            if attr == "sculptNode":  # what the brushes shape: a Sculpt node's Sculpt or Done Sculpting
+                if widgets.alive(self):
+                    self.sculpt_target_soon()
+                return
             if attr not in self.WATCH and not attr.startswith("ctl_"):
                 return
             if not widgets.alive(self):  # the editor was deleted without closing
@@ -4411,12 +4415,57 @@ class GraphEditor(QtWidgets.QWidget):
         self.refresh_node_actions()
         self.report("brushing the guides again: done sculpting %s's sections (Sculpt Sections brushes them again)" % name)
 
+    def brush_sculpt_node(self, name):
+        """Sculpt on Sculpt node `name`'s panel: brushes shape its guides (a SculptStrands node's: its
+        strands), as selecting it does; the panel shows Done Sculpting in its place."""
+        self.target_sculpt(name)
+        self.follow_sculpt_target()
+
+    def done_sculpting(self, name=None):
+        """Done Sculpting on a Sculpt node's panel: what Esc in the brush tool does (sculpts.leave: the
+        guides brushed again, no undo step, said in the Script Editor); the panel shows Sculpt again.
+        The node left, or None."""
+        from groomlab import sculpts
+        if not self.groom:
+            return None
+        left = sculpts.leave(self.groom)
+        self.follow_sculpt_target()
+        if left:
+            self.report("brushing the guides again: done sculpting %s (Sculpt brushes it again)" % left)
+        return left
+
     def refresh_node_actions(self):
         """The shown node's panel again: its actions follow what the brushes shape (a Braid's Sculpt
         Sections, or Done Sculpting Sections while they shape its sections)."""
         name = getattr(self.params, "node", None)
         if name is not None and name in self.model.nodes:
             self.params.show_node(name)
+
+    SCULPT_ACTION_TYPES = ("SculptGuides", "SculptStrands", "Braid")  # whose actions follow the target
+
+    def follow_sculpt_target(self):
+        """The shown node's actions built again if what the brushes shape changed since they were built
+        (a Sculpt node's Sculpt or Done Sculpting, a Braid's Sculpt Sections or Done)."""
+        params = self.params
+        name = getattr(params, "node", None)
+        if name is None or name not in self.model.nodes or self.model.node_type(name) not in self.SCULPT_ACTION_TYPES:
+            return
+        if getattr(params, "shown_sculpt_target", None) != self.sculpt_target():
+            self.refresh_node_actions()
+
+    def sculpt_target_soon(self):
+        """What the brushes shape changed (the groom's sculptNode: a Correctives row, Esc in the brush
+        tool, a script): the shown node's actions follow once the change is done (not inside Maya's
+        callback)."""
+        if getattr(self, "_sculpt_target_pending", False):
+            return
+        self._sculpt_target_pending = True
+
+        def refresh():
+            self._sculpt_target_pending = False
+            if widgets.alive(self):
+                self.follow_sculpt_target()
+        QtCore.QTimer.singleShot(0, refresh)
 
     def clear_sculpt_edits(self, name):
         """Drop Sculpt node `name`'s strokes (one undo step)."""
@@ -6291,7 +6340,7 @@ def sculpt_target_changed(groom, text=None):
     editor on `groom` shows it in its panel (a Braid's Done Sculpting Sections goes) and says `text`."""
     if _window is None or not widgets.alive(_window) or not _same_node(_window.groom, groom):
         return
-    _window.refresh_node_actions()
+    _window.follow_sculpt_target()
     if text:
         _window.report(text)
 

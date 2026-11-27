@@ -59,7 +59,7 @@ const char* kInstructions =
     "scalp_landmarks such as crown and nape), select_guides, guide_op and paint_map, and check the "
     "result with measure_guides and render_preview (guides, compare, turntable, looks). Reference "
     "photos: add_photo, mesh_landmarks, align_photo, guides_from_photos; lock guides from strokes drawn on "
-    "them: guides_from_strokes, comb_guides, hair_shell, photo_project, reshape_guides. Root tubes: root_tube, "
+    "them: guides_from_strokes, fit_guides, comb_guides, hair_shell, photo_project, reshape_guides. Root tubes: root_tube, "
     "tube_levels, tube_shape. Expressions: check_expression, then set_params. Simulation: "
     "animate_scalp or import_animation, simulate, sim_cache. Games: export_cards, export_game. "
     "Read get_docs for how a "

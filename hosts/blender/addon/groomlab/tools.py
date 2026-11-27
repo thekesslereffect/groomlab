@@ -1159,6 +1159,21 @@ def sculpted_braid(scalp):
     return (target.get("braid") or "") if target.get("kind") == "node" else ""
 
 
+def sculpted_node(scalp):
+    """The Sculpt node the brushes shape now, or "": what a Sculpt node's panel shows Done Sculpting
+    (else Sculpt) by. As sculpt_target last read it (every change goes through it), read once when
+    never asked."""
+    if scalp is None:
+        return ""
+    if scalp.name not in _sculpt_targets:
+        try:
+            sculpt_target(scalp)
+        except HelperError:
+            return ""
+    target = _sculpt_targets.get(scalp.name) or {}
+    return (target.get("name") or "") if target.get("kind") == "node" else ""
+
+
 def sculpt_clear(scalp, node):
     """Drop Sculpt node `node`'s edits: its guides as it is fed them. One undo step."""
     return _corrective_edit(scalp, "sculpt_clear", node=node)

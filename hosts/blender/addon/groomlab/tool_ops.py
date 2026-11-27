@@ -235,7 +235,7 @@ class ToolSession(object):
                     leave_roots(context, scalp)  # (then the tool left, below)
                 except HelperError:
                     pass
-            if kind == "ESC" and self.leave_sculpt_node(context, scalp):
+            if kind == "ESC" and leave_sculpt_node(context, scalp):
                 return {"RUNNING_MODAL"}  # (again: leaves the tool)
             if kind == "ESC":
                 self.leave(context, clear_tool=True)
@@ -478,22 +478,6 @@ class ToolSession(object):
             pass
         self.cursor = over
 
-    def leave_sculpt_node(self, context, scalp):
-        """Esc while the brushes shape a Sculpt node (Sculpt Sections, Brush This Node's Guides): they
-        shape the guides again (pipeline.done_sculpt_sections), the tool kept. Whether they did."""
-        from . import pipeline
-        try:
-            left = pipeline.done_sculpt_sections(scalp)
-        except HelperError as e:
-            tools.status(context.scene, e.message)
-            return False
-        if not left["node"]:
-            return False
-        tools.status(context.scene, "Brushing the guides again" +
-                     (" (done sculpting %s's sections)" % left["braid"] if left["braid"] else ""))
-        display.redraw()
-        return True
-
     def leave(self, context, clear_tool=False):
         self.set_cursor(context, False)
         if self.stroking is not None:
@@ -507,6 +491,24 @@ class ToolSession(object):
             display.mark(active(context))  # the views without the tool (no paint view, no tube wires)
             finish_density_later(context)
         display.redraw()
+
+
+def leave_sculpt_node(context, scalp):
+    """Esc in the brush tool (and Done Sculpting on a Sculpt node's panel) while the brushes shape a
+    Sculpt node (Sculpt Sections, Brush This Node's Guides): they shape the guides again
+    (pipeline.done_sculpt_sections), the tool kept, no undo step. Whether they did."""
+    from . import pipeline
+    try:
+        left = pipeline.done_sculpt_sections(scalp)
+    except HelperError as e:
+        tools.status(context.scene, e.message)
+        return False
+    if not left["node"]:
+        return False
+    tools.status(context.scene, "Brushing the guides again" +
+                 (" (done sculpting %s's sections)" % left["braid"] if left["braid"] else ""))
+    display.redraw()
+    return True
 
 
 def step_level(context, delta):
