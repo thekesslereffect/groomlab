@@ -3153,17 +3153,31 @@ struct AgentTools::Impl {
             ReferenceGuideOptions analysisOptions;
             analysisOptions.up = upOf(g);
             if (hair.head) analysisOptions.occluders.push_back(hair.head);
+            orientationOptionsOf(a, analysisOptions);
             preview = previewReferenceView(*hair.scalp, view, analysisOptions);
-            info["analysis"] = "pink: the hair mask guides_from_photos reads; cyan: the strands' flow it reads (on wavy hair the "
-                               "locks' flow); yellow: the locks it traces (wavy hair: from their roots along the flow, root end "
-                               "first)";
+            info["analysis"] = "first image, pink: the hair mask guides_from_photos reads; cyan: the strands' flow it reads (on wavy "
+                               "hair the locks' flow); yellow: the locks it traces (wavy hair: from their roots along the flow, root "
+                               "end first). Second image: the orientation's confidence over the mask (dark blue unsure: strands "
+                               "crossing, curls, noise; green; yellow sure).";
+            info["orientation"] = orientationMethodName(analysisOptions.orientation.method);
             info["locks"] = preview->locks.size();
+            if (!preview->confidence.empty()) {
+                double sum = 0.0;
+                std::size_t n = 0;
+                for (std::size_t i = 0; i < preview->confidence.pixels.size(); ++i)
+                    if (preview->mask.pixels[i] >= 0.5f) sum += preview->confidence.pixels[i], ++n;
+                info["meanConfidence"] = r4(n ? sum / static_cast<double>(n) : 0.0);
+            }
         }
         int shownW = 0, shownH = 0;
         const auto png = photoGridPng(image, p, step, size, preview ? &*preview : nullptr, &shownW, &shownH);
         info["shown"] = {shownW, shownH};
         info["note"] = "the grid's labels are the photo's own pixels (x right, y down from the top-left), whatever the size shown";
-        return imageResult(png, info);
+        ToolResult r = imageResult(png, info);
+        if (preview && !preview->confidence.empty())
+            r.content.insert(r.content.begin() + 1,
+                             json{{"type", "image"}, {"data", base64Encode(confidencePng(image, *preview, size))}, {"mimeType", "image/png"}});
+        return r;
     }
 
     ToolResult meshLandmarks(const json& a) {
@@ -3665,7 +3679,32 @@ struct AgentTools::Impl {
         ToolResult r;
         json per = json::array();
         auto c3 = [](const std::array<float, 3>& c) { return json::array({r4(c[0]), r4(c[1]), r4(c[2])}); };
+        // The guides scored against these photos (score_guides' scorer), each photo's mean.
+        std::vector<GuideScore> guideScores;
+        {
+            std::vector<ReferenceView> scoreViews;
+            for (const AgentPhoto* p : which) {
+                ReferenceView view;
+                view.camera = *p->camera;
+                view.image = loadImage(p->image, 3);
+                if (!p->mask.empty()) view.mask = loadImage(p->mask, 1);
+                view.maskStrokes = p->state.maskStrokes;
+                scoreViews.push_back(std::move(view));
+            }
+            ReferenceGuideOptions so;
+            so.up = upOf(g);
+            if (hair.head) so.occluders.push_back(hair.head);
+            const GuideHierarchy stored = GuideHierarchy::fromJson(hierarchyText(g));
+            const HierarchyPtr live = g.session().hierarchy();
+            const GuideHierarchy& h = live ? *live : stored;
+            std::vector<std::vector<Vec3f>> pts;
+            for (const HierarchyGuide& guide : h.guides())
+                if (guide.points.size() >= 2) pts.push_back(guide.points);
+            if (!pts.empty()) guideScores = PhotoScorer(*hair.scalp, scoreViews, so).score(pts);
+        }
+        std::size_t photoIndex = 0;
         for (const AgentPhoto* p : which) {
+            const std::size_t pk = photoIndex++;
             ReferenceView view;
             view.camera = *p->camera;
             view.image = loadImage(p->image, 3);
@@ -3683,6 +3722,22 @@ struct AgentTools::Impl {
                                  {"groom", {{"linear", c3(c.groomColor)}, {"melanin", r4(c.groomMelanin)}, {"redness", r4(c.groomRedness)}}}}}};
             if (c.hairlineFound) e["hairlineOffset"] = r4(c.hairlineOffset);
             if (c.flowPixels > 0) e["flow"] = {{"agreement", r4(c.flowAgreement)}, {"aligned", r4(c.flowAligned)}};
+            {
+                double sc = 0.0, orient = 0.0, coarseErr = 0.0, fineErr = 0.0;
+                int scored = 0;
+                for (const GuideScore& gs : guideScores) {
+                    if (pk >= gs.photos.size() || gs.photos[pk].samples == 0) continue;
+                    const GuidePhotoScore& ps = gs.photos[pk];
+                    sc += ps.score;
+                    orient += 0.5 * (ps.coarse + ps.fine);
+                    coarseErr += ps.coarseError;
+                    fineErr += ps.fineError;
+                    ++scored;
+                }
+                if (scored > 0)
+                    e["guides"] = {{"score", r4(sc / scored)}, {"orientation", r4(orient / scored)}, {"coarseErrorDegrees", r4(coarseErr / scored)},
+                                   {"fineErrorDegrees", r4(fineErr / scored)}, {"seen", scored}};
+            }
             per.push_back(e);
             if (r.content.size() < 6) {
                 r.content.push_back({{"type", "image"}, {"data", base64Encode(comparisonPng(view.image, c, 512))}, {"mimeType", "image/png"}});
@@ -3697,8 +3752,10 @@ struct AgentTools::Impl {
                                "balanced) and the strands' appearance, each's nearest melanin; flow: the strands' directions against "
                                "the photo's where both show hair, lock by lock (agreement: the mean of cos 2x their angle, 1 alike, "
                                "0 unrelated; aligned: the share within 20 degrees): curls in step with the photo's raise it, an even "
-                               "frizz or straight strands over curls lower it. The images: green the hair the groom "
-                               "misses, magenta the groom's outside the photo's, each outline."}};
+                               "frizz or straight strands over curls lower it. guides: the guides scored against the photo "
+                               "(score_guides: the mean score, orientation 1 - the confidence-weighted angle error / 90 degrees "
+                               "against its coarse and fine flow, the mean errors in degrees; seen: the guides it sees). The "
+                               "images: green the hair the groom misses, magenta the groom's outside the photo's, each outline."}};
         r.content.push_back({{"type", "text"}, {"text", withSummary(g, info).dump(-1, ' ', false, json::error_handler_t::replace)}});
         return r;
     }
@@ -3788,6 +3845,7 @@ struct AgentTools::Impl {
             options.volume = static_cast<float>(volume);
         }
         options.up = upOf(g);
+        orientationOptionsOf(a, options);
         const HairScalp hair = hairScalpOf(g);
         if (hair.head) options.occluders.push_back(hair.head);
         const ReferenceGuidesResult result = guidesFromReference(*hair.scalp, views, options);
@@ -3838,6 +3896,19 @@ struct AgentTools::Impl {
                     {"rootsTried", result.rootsTried}, {"rootsBald", result.rootsBald}, {"rootsUnseen", result.rootsUnseen},
                     {"rootsShort", result.rootsShort}, {"maxLength", r4(result.maxLength)}, {"strandLength", r4(result.strandLength)},
                     {"seconds", r4(result.seconds)}};
+        out["orientation"] = {{"method", orientationMethodName(options.orientation.method)}, {"bilateralCoarse", options.orientation.bilateralCoarse}};
+        out["score"] = {{"mean", r4(result.score)},
+                        {"about", "the guides' mean score against the photos (score_guides: 1 - the angle error / 90 degrees against "
+                                  "each photo's coarse and fine flow, weighted by its confidence, times the share inside its hair "
+                                  "mask; points the head hides left out)"}};
+        out["rooting"] = rootingJson(result.rooting);
+        if (result.lockRooting.guides > 0) out["rooting"]["lockCentrelines"] = rootingJson(result.lockRooting);
+        out["rooting"]["about"] = "Scalp rooting: every guide starts on the scalp. lockCentrelines: the lock lines the photos show, "
+                                  "each turned so its end nearer the scalp is the root (flipped: it ran tip first), its first point "
+                                  "joined to the nearest scalp point (connected; dropped past maxRootGap: a lock hanging beside the "
+                                  "face whose both ends are far from the scalp), before it competes for a root. The last pass over "
+                                  "every guide: cut where it passed through the head (dropped when too short then). Thresholds in "
+                                  "scene units, scaled by the head's radius.";
         if (!result.lockViews.empty()) {
             // (each lined-up photo's locks, in the order the views were given)
             json perPhoto = json::array();
@@ -3851,8 +3922,8 @@ struct AgentTools::Impl {
                                           "(detected), those another photo traces from the same root (matched), of those the ones "
                                           "whose rays meet (triangulated: a 3D centreline), the rest placed from one photo on the "
                                           "hair's surface (singleView). lockGuides: lock centrelines that took a root's place where "
-                                          "the photos agree with them at least as well as with the guide grown there; the other "
-                                          "guides grow along the locks' flow. photo_view analysis shows the locks (yellow)."}};
+                                          "the other photos score them about as well as the guide grown there (score_guides' score); "
+                                          "the other guides grow along the locks' flow. photo_view analysis shows the locks (yellow)."}};
         }
         const ReferenceLookFit& look = result.look;
         LockLook locks;
@@ -3980,6 +4051,169 @@ struct AgentTools::Impl {
         }
         s.photos = s.shell->photoCount() > 0;
         return s;
+    }
+
+    // The orientation arguments (guides_from_photos, photo_view, score_guides): orientation (multiscale or
+    // variance) and bilateral_coarse.
+    static void orientationOptionsOf(const json& a, ReferenceGuideOptions& o) {
+        if (a.contains("orientation")) {
+            try {
+                o.orientation.method = orientationMethodFromName(str(a, "orientation"));
+            } catch (const std::invalid_argument& e) {
+                throw ToolError(e.what());
+            }
+        }
+        if (a.contains("bilateral_coarse")) o.orientation.bilateralCoarse = flag(a, "bilateral_coarse", false);
+    }
+
+    ToolResult scoreGuidesTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        std::set<std::string> wanted;
+        if (a.contains("photos")) {
+            if (!a["photos"].is_array()) throw ToolError("photos is a list of photo names");
+            for (const json& n : a["photos"]) wanted.insert(n.get<std::string>());
+        }
+        std::vector<ReferenceView> views;
+        std::vector<std::string> names;
+        for (const AgentPhoto& p : photosFromJson(g.referencePhotos)) {
+            if (!p.camera || (!wanted.empty() && !wanted.count(p.name))) continue;
+            ReferenceView view;
+            view.camera = *p.camera;
+            view.image = loadImage(p.image, 3);
+            if (!p.mask.empty()) view.mask = loadImage(p.mask, 1);
+            view.maskStrokes = p.state.maskStrokes;
+            views.push_back(std::move(view));
+            names.push_back(p.name);
+        }
+        for (const std::string& n : wanted)
+            if (std::find(names.begin(), names.end(), n) == names.end()) throw ToolError("no lined-up photo named '" + n + "'");
+        if (views.empty()) throw ToolError("no photo is lined up yet (align_photo)");
+        const GuideHierarchy stored = GuideHierarchy::fromJson(hierarchyText(g));
+        const HierarchyPtr live = g.session().hierarchy();
+        const GuideHierarchy& h = live ? *live : stored;
+        const std::string only = str(a, "group");
+        std::set<GuideId> ids;
+        if (a.contains("ids")) {
+            if (!a["ids"].is_array()) throw ToolError("ids is a list of guide ids");
+            for (const json& id : a["ids"]) ids.insert(id.get<GuideId>());
+        }
+        std::vector<GuideId> which;
+        std::vector<std::vector<Vec3f>> pts;
+        bool groupFound = only.empty();
+        for (const HierarchyGuide& guide : h.guides()) {
+            const GuideGroup* gr = h.group(guide.group);
+            if (gr && gr->name == only) groupFound = true;
+            if (!only.empty() && (!gr || gr->name != only)) continue;
+            if (!ids.empty() && !ids.count(guide.id)) continue;
+            if (guide.points.size() < 2) continue;
+            which.push_back(guide.id);
+            pts.push_back(guide.points);
+        }
+        if (!groupFound) throw ToolError("no group named '" + only + "'");
+        if (pts.empty()) throw ToolError("no guides to score (ids, group)");
+        const HairScalp hair = hairScalpOf(g);
+        ReferenceGuideOptions o;
+        o.up = upOf(g);
+        if (hair.head) o.occluders.push_back(hair.head);
+        orientationOptionsOf(a, o);
+        GuideScoreOptions so;
+        if (a.contains("coarse_share")) so.coarseShare = static_cast<float>(std::clamp(num(a, "coarse_share", 0.5), 0.0, 1.0));
+        const std::vector<GuideScore> scores = PhotoScorer(*hair.scalp, views, o, so).score(pts);
+        // The rooting check: what scalp rooting would do to each guide as it is.
+        GuideRootingOptions ro;
+        ro.up = upOf(g);
+        const GuideRootingCounts scale = guideRootingScale(*hair.scalp, ro);
+        GuideRootingCounts check = scale;
+        check.guides = static_cast<int>(pts.size());
+        std::vector<int> tipFirst;
+        for (std::size_t i = 0; i < pts.size(); ++i) {
+            const RootedGuide rg = rootGuide(pts[i], *hair.scalp, hair.head ? hair.head.get() : hair.scalp.get(), ro, scale);
+            addRooting(check, rg);
+            if (rg.flipped) tipFirst.push_back(static_cast<int>(which[i]));
+        }
+        auto photoJson = [&](const GuideScore& gs) {
+            json list = json::array();
+            for (std::size_t k = 0; k < gs.photos.size(); ++k) {
+                const GuidePhotoScore& ps = gs.photos[k];
+                if (ps.samples == 0) continue;
+                list.push_back({{"photo", names[k]}, {"score", r4(ps.score)}, {"coarse", r4(ps.coarse)}, {"fine", r4(ps.fine)},
+                                {"mask", r4(ps.mask)}, {"coarseErrorDegrees", r4(ps.coarseError)}, {"fineErrorDegrees", r4(ps.fineError)},
+                                {"confidence", r4(ps.confidence)}, {"samples", ps.samples}, {"hidden", ps.hidden}});
+            }
+            return list;
+        };
+        // Per photo, over the guides it sees.
+        json perPhoto = json::array();
+        for (std::size_t k = 0; k < views.size(); ++k) {
+            double sc = 0.0, coarse = 0.0, fine = 0.0, mask = 0.0, ce = 0.0, fe = 0.0;
+            int seen = 0;
+            for (const GuideScore& gs : scores) {
+                const GuidePhotoScore& ps = gs.photos[k];
+                if (ps.samples == 0) continue;
+                sc += ps.score, coarse += ps.coarse, fine += ps.fine, mask += ps.mask, ce += ps.coarseError, fe += ps.fineError;
+                ++seen;
+            }
+            json e = {{"photo", names[k]}, {"seen", seen}};
+            if (seen)
+                e.update({{"score", r4(sc / seen)}, {"coarse", r4(coarse / seen)}, {"fine", r4(fine / seen)}, {"mask", r4(mask / seen)},
+                          {"coarseErrorDegrees", r4(ce / seen)}, {"fineErrorDegrees", r4(fe / seen)}});
+            perPhoto.push_back(e);
+        }
+        double mean = 0.0;
+        for (const GuideScore& gs : scores) mean += gs.score;
+        mean /= static_cast<double>(scores.size());
+        std::vector<std::size_t> order(scores.size());
+        for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_sort(order.begin(), order.end(), [&](std::size_t x, std::size_t y) { return scores[x].score < scores[y].score; });
+        const std::size_t worstCount = static_cast<std::size_t>(std::clamp(num(a, "worst", 10.0), 0.0, 200.0));
+        json worst = json::array();
+        for (std::size_t q = 0; q < std::min(worstCount, order.size()); ++q) {
+            const std::size_t i = order[q];
+            worst.push_back({{"id", which[i]}, {"score", r4(scores[i].score)}, {"orientation", r4(scores[i].orientation)},
+                             {"mask", r4(scores[i].mask)}, {"views", scores[i].views}, {"photos", photoJson(scores[i])}});
+        }
+        const std::size_t limit = static_cast<std::size_t>(std::clamp(num(a, "limit", ids.empty() ? 0.0 : 200.0), 0.0, 2000.0));
+        json guides = json::array();
+        for (std::size_t i = 0; i < scores.size() && guides.size() < limit; ++i)
+            guides.push_back({{"id", which[i]}, {"score", r4(scores[i].score)}, {"orientation", r4(scores[i].orientation)},
+                              {"coarse", r4(scores[i].coarse)}, {"fine", r4(scores[i].fine)}, {"mask", r4(scores[i].mask)},
+                              {"views", scores[i].views}, {"photos", photoJson(scores[i])}});
+        json rooting = rootingJson(check);
+        rooting["tipFirst"] = check.flipped;
+        if (!tipFirst.empty()) rooting["tipFirstIds"] = tipFirst;
+        rooting["about"] = "what scalp rooting would do to the guides as they are: tipFirst (flipped) guides start farther from the "
+                           "scalp than they end; connected: their root is off the scalp (by more than snapGap); cut: they pass "
+                           "through the head; dropped: their root is farther off than maxRootGap or they would be too short once cut";
+        json out = {{"groom", g.name()}, {"guides", scores.size()}, {"photos", perPhoto}, {"mean", r4(mean)}, {"worst", worst},
+                    {"rooting", rooting}, {"orientation", orientationMethodName(o.orientation.method)}, {"coarseShare", r4(so.coarseShare)},
+                    {"about", "Each guide projected into each lined-up photo (every 2 working pixels; points the head hides from that "
+                              "camera and points out of its frame left out): mask the share inside the photo's hair mask; coarse and "
+                              "fine, inside it, 1 - the angle between the guide's projected direction and the photo's (sign free, "
+                              "0-90 degrees) / 90 degrees, each sample weighted by the photo's confidence there, against its coarse "
+                              "lock-scale flow and its fine strands (the mean errors in degrees too); score = (coarseShare x coarse + "
+                              "the rest x fine) x mask, 0-1. A guide's score: its photos' weighted by how much each sees of it. "
+                              "Occlusion by other hair is not modelled. worst: the lowest scores, with each photo's."}};
+        if (!guides.empty()) out["scores"] = guides;
+        return textResult(withSummary(g, out));
+    }
+
+    // What scalp rooting did (guide_rooting.h), for the answers.
+    static json rootingJson(const GuideRootingCounts& c) {
+        return {{"guides", c.guides}, {"flipped", c.flipped}, {"connected", c.connected}, {"snapped", c.snapped}, {"cut", c.cut},
+                {"pushed", c.pushed}, {"dropped", c.dropped}, {"droppedGap", c.droppedGap}, {"droppedShort", c.droppedShort},
+                {"thresholds", {{"headRadius", r4(c.headRadius)}, {"snapGap", r4(c.snapGap)},
+                                {"maxRootGap", c.maxGap > 1000.0f * c.headRadius ? json("none") : json(r4(c.maxGap))},
+                                {"pushDepth", r4(c.pushDepth)}, {"minLength", r4(c.minLength)}}}};
+    }
+    static void addRooting(GuideRootingCounts& c, const RootedGuide& g) {
+        c.flipped += g.flipped;
+        c.snapped += g.snapped;
+        c.connected += g.connected;
+        c.pushed += g.pushed;
+        c.cut += g.cut;
+        c.droppedGap += g.droppedGap;
+        c.droppedShort += g.droppedShort;
+        c.dropped = c.droppedGap + c.droppedShort;
     }
 
     static json frameJson(const HeadFrame& f) {
@@ -4289,6 +4523,11 @@ struct AgentTools::Impl {
         json strokeInfo = json::array();
         ToolResult r;
         std::size_t total = 0;
+        GuideRootingOptions strokeRootingOptions = StrokeLiftOptions{}.rooting;
+        strokeRootingOptions.headRadius = setup.frame.radius;
+        strokeRootingOptions.center = setup.frame.center;
+        strokeRootingOptions.up = setup.frame.up;
+        GuideRootingCounts strokeRooting = guideRootingScale(rootScalp, strokeRootingOptions);
         for (std::size_t si = 0; si < sets.size(); ++si) {
             const json& s = sets[si];
             AgentPhoto& photo = photoNamed(photos, str(s, "photo"));
@@ -4333,7 +4572,15 @@ struct AgentTools::Impl {
             std::vector<std::vector<Vec3f>> made;
             for (std::size_t k = 0; k < lines.size(); ++k) {
                 if (++total > 400) throw ToolError("at most 400 strokes a call");
-                const LiftedStroke lifted = liftStroke(*photo.camera, lines[k], shell, rootScalp);
+                const LiftedStroke lifted = liftStroke(*photo.camera, lines[k], shell, rootScalp, StrokeLiftOptions{}, &head);
+                addRooting(strokeRooting, lifted.rooting);
+                if (lifted.points.size() < 2) {
+                    strokeInfo.push_back({{"photo", photo.name}, {"stroke", k + 1},
+                                          {"dropped", lifted.rooting.droppedGap ? "no scalp under it"
+                                                                                : "too short once cut where it passes through the head"},
+                                          {"rootGap", r4(lifted.rooting.rootGap)}});
+                    continue;
+                }
                 std::vector<Vec3f> pts = clip ? clippedToPhotos(lifted.points, shell) : lifted.points;
                 // (the photos disagreeing with most of a drawn stroke say its depth is off, not that the hair ends: kept)
                 const bool clipKept = clip && guideLength(pts) < 0.5f * lifted.length;
@@ -4343,6 +4590,9 @@ struct AgentTools::Impl {
                           {"length", r4(guideLength(pts))}, {"root", vec(pts.front())}};
                 if (pts.size() < lifted.points.size()) e["clippedFrom"] = r4(lifted.length);
                 if (clipKept) e["clipIgnored"] = "the photos show most of it off the hair (its depth is likely off): kept whole";
+                if (lifted.rooting.flipped) e["flipped"] = "drawn tip first: turned round (its end nearer the scalp is the root)";
+                if (lifted.rooting.connected) e["rootGap"] = r4(lifted.rooting.rootGap);
+                if (lifted.rooting.cut) e["cutAtHead"] = true;
                 keys.push_back(pts);
                 made.push_back(pts);
                 if (mirrorOn) {
@@ -4386,10 +4636,24 @@ struct AgentTools::Impl {
                 shareSum += fg.keyShare;
                 if (fg.keyShare > 0.5f) ++fromKeys;
             }
-            fillInfo = {{"guides", filled.size()}, {"fromKeys", fromKeys},
+            GuideRootingOptions fro;
+            fro.headRadius = setup.frame.radius;
+            fro.up = setup.frame.up;
+            fillInfo["rooting"] = rootingJson(rootGuides(filled, rootScalp, &head, fro));
+            fillInfo.update({{"guides", filled.size()}, {"fromKeys", fromKeys},
                         {"meanKeyShare", r4(roots.empty() ? 0.0 : shareSum / static_cast<double>(roots.size()))},
-                        {"reach", r4(fo.reach > 0.0f ? fo.reach : 0.4f * setup.frame.radius)}};
+                        {"reach", r4(fo.reach > 0.0f ? fo.reach : 0.4f * setup.frame.radius)}});
             if (bare) fillInfo["rootsBare"] = bare;
+        }
+        {
+            // (the mirrored ones too: their roots snapped, kept out of the head)
+            const GuideRootingCounts kc = rootGuides(keys, rootScalp, &head, strokeRootingOptions);
+            strokeRooting.guides = static_cast<int>(total);
+            strokeRooting.cut += kc.cut;
+            strokeRooting.pushed += kc.pushed;
+            strokeRooting.droppedShort += kc.droppedShort;
+            strokeRooting.droppedGap += kc.droppedGap;
+            strokeRooting.dropped = strokeRooting.droppedGap + strokeRooting.droppedShort;
         }
         const std::string groupName = str(a, "group", "strokes"), fillName = str(a, "fill_group", "strokeFill");
         checkName(groupName, "a group's name");
@@ -4417,7 +4681,7 @@ struct AgentTools::Impl {
                 look = applyLockLook(g, graph, setup.frame.radius, hairlineOf(g, all));
             }
         });
-        json out = {{"group", groupName}, {"ids", ids}, {"strokes", strokeInfo},
+        json out = {{"group", groupName}, {"ids", ids}, {"strokes", strokeInfo}, {"rooting", rootingJson(strokeRooting)},
                     {"shell", {{"from", setup.photos ? "photos" : "volume"}, {"photos", setup.shell->photoCount()}}},
                     {"head", frameJson(setup.frame)}, {"units", g.units()}};
         if (fill) {
@@ -4427,9 +4691,11 @@ struct AgentTools::Impl {
         }
         if (!look.is_null()) out["lookApplied"] = look;
         out["about"] = "Each stroke's points lifted through its photo's camera onto the hair's shell (hitShare: the share whose ray met "
-                       "it; the rest took the point nearest it), the root on the scalp under its first point; clippedFrom: its length "
-                       "before the tail the photos show past the hair was cut; mirrored: a mirror guide was made too. The images: each "
-                       "photo with its strokes (red, the root a ring) and the guides made from them (yellow).";
+                       "it; the rest took the point nearest it), then rooted on the scalp (rooting: the end nearer the scalp is the "
+                       "root, flipped: a stroke drawn tip first turned round; its first point joined to the nearest scalp point; cut "
+                       "where it passed through the head; thresholds in scene units); clippedFrom: its length before the tail the "
+                       "photos show past the hair was cut; mirrored: a mirror guide was made too. The images: each photo with its "
+                       "strokes (red, the root a ring) and the guides made from them (yellow).";
         out["hint"] = "Check the guides with render_preview camera={\"photo\": ...} guides=true (and views front, right, back), then "
                       "compare_to_photo. reshape_guides fixes one in place; calling again replaces the groups.";
         r.content.push_back({{"type", "text"}, {"text", withSummary(g, out).dump(-1, ' ', false, json::error_handler_t::replace)}});
@@ -4465,6 +4731,11 @@ struct AgentTools::Impl {
             lengths[headRegion(setup.frame, roots[i] - setup.frame.center)].push_back(guideLength(pts));
             guides.push_back(std::move(pts));
         }
+        GuideRootingOptions cro;
+        cro.headRadius = setup.frame.radius;
+        cro.up = setup.frame.up;
+        const GuideRootingCounts combRooting =
+            rootGuides(guides, *setup.hair.scalp, setup.hair.head ? setup.hair.head.get() : setup.hair.scalp.get(), cro);
         const std::string groupName = str(a, "group", "combed");
         checkName(groupName, "a group's name");
         std::vector<GuideId> ids;
@@ -4483,7 +4754,7 @@ struct AgentTools::Impl {
             std::sort(l.begin(), l.end());
             byRegion[region] = {{"guides", l.size()}, {"medianLength", r4(l[l.size() / 2])}};
         }
-        json out = {{"group", groupName}, {"guides", ids.size()}, {"regions", byRegion},
+        json out = {{"group", groupName}, {"guides", ids.size()}, {"regions", byRegion}, {"rooting", rootingJson(combRooting)},
                     {"part", co.part.on ? json{{"point", vec(co.part.point)}, {"normal", vec(co.part.normal)}} : json("none")},
                     {"shell", {{"from", setup.photos ? "photos" : "volume"}, {"photos", setup.shell->photoCount()}}},
                     {"head", frameJson(setup.frame)}, {"units", g.units()}};
@@ -5809,7 +6080,9 @@ struct AgentTools::Impl {
                           {"region", {{"type", "array"}, {"items", {{"type", "number"}}},
                                       {"description", "Zoom: [x0, y0, x1, y1] of the photo's pixels, enlarged under a fine grid labelled "
                                                       "in the photo's pixels, to read a feature's pixel exactly."}}},
-                          {"analysis", prop("boolean", "Show the hair mask and flow it reads.")}}),
+                          {"analysis", prop("boolean", "Show the hair mask and flow it reads, and the flow's confidence (a second image).")},
+                          {"orientation", enumProp({"multiscale", "variance"}, "analysis: how the strand directions are read (as guides_from_photos).")},
+                          {"bilateral_coarse", prop("boolean", "analysis: the coarse flow blurred bilaterally (as guides_from_photos).")}}),
             &Impl::photoView);
         add("mesh_landmarks", "Numbered mesh points",
             "Renders the scalp mesh from a side (front, back, left, right, top, three_quarter; or photo: through the photo's "
@@ -5905,7 +6178,13 @@ struct AgentTools::Impl {
                                                          "roots (through the crests where the fine strands run across them), matched "
                                                          "across photos and triangulated (default: on wavy hair).")},
                           {"apply_look", prop("boolean", "Also set the look the photos suggest (HairColor melanin and redness, Clump, "
-                                                         "Curl, Flyaway; nodes added where missing): a second undo step.")}}),
+                                                         "Curl, Flyaway; nodes added where missing): a second undo step.")},
+                          {"orientation", enumProp({"multiscale", "variance"},
+                                                   "How the photos' strand directions are read: multiscale (Gabor filters over three "
+                                                   "octaves, default) or variance (a fine 180-filter Gabor bank whose confidence falls "
+                                                   "where strands cross or curl: 1 / circular variance squared).")},
+                          {"bilateral_coarse", prop("boolean", "Blur the coarse (lock-scale) flow bilaterally: neighbours weighted by how "
+                                                               "well they agree with it, so locks' flows do not bleed across a part (default false).")}}),
             &Impl::guidesFromPhotos);
         add("compare_to_photo", "Compare the groom with its photos",
             "Measures how the groom matches each lined-up photo (or the one named): its hair's silhouette through the photo's "
@@ -5914,6 +6193,21 @@ struct AgentTools::Impl {
             "the top ends on the face (the hairline), and the hair's color (the photo's and the groom's, each's nearest melanin). "
             "With a picture of both outlines a photo. Use it after guides_from_photos and each change to judge by numbers.",
             objectSchema({{"groom", groom}, {"photo", photoName}}), &Impl::compareToPhotoTool);
+        add("score_guides", "Score guides against the photos",
+            "Scores guides (ids, a group, or all) against the lined-up photos (or those named) by reprojection: each guide "
+            "projected through each photo's camera, the share of it inside the photo's hair mask and how well its direction "
+            "agrees with the photo's strand flow (coarse lock-scale and fine, sign free, weighted by the photo's confidence), "
+            "points the head hides left out. Answers each photo's mean, the mean score, the worst guides with each photo's "
+            "scores (fix or delete them), and a rooting check (guides that start tip first, off the scalp or pass through the "
+            "head). Read only.",
+            objectSchema({{"groom", groom}, {"ids", {{"type", "array"}, {"items", {{"type", "integer"}}}, {"description", "Only these guides."}}},
+                          {"group", prop("string", "Only this group's guides.")},
+                          {"photos", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Only these photos (default: every lined-up one)."}}},
+                          {"worst", prop("integer", "How many of the worst guides to list (default 10).")},
+                          {"limit", prop("integer", "List this many guides' own scores too (default: all of those given by ids, none otherwise).")},
+                          {"coarse_share", prop("number", "The coarse flow's share of the orientation score (0-1, default 0.5).")},
+                          {"orientation", enumProp({"multiscale", "variance"}, "How the photos' strand directions are read (default as guides_from_photos).")}}),
+            &Impl::scoreGuidesTool);
         {
             json p = {{"groom", groom},
                       {"sets", {{"type", "array"}, {"items", {{"type", "object"}}},

@@ -234,7 +234,7 @@ std::vector<Vec3f> resampledBySpacing(const std::vector<Vec3f>& points, float sp
 }
 
 LiftedStroke liftStroke(const RefCamera& camera, const std::vector<std::array<float, 2>>& pixels, const HairShell& shell, const ScalpMesh& scalp,
-                        const StrokeLiftOptions& o) {
+                        const StrokeLiftOptions& o, const ScalpMesh* head) {
     if (pixels.size() < 2) throw std::invalid_argument("liftStroke: a stroke needs 2 points or more");
     if (shell.empty()) throw std::invalid_argument("liftStroke: no shell");
     const float side = static_cast<float>(std::max(camera.width, camera.height));
@@ -257,13 +257,17 @@ LiftedStroke liftStroke(const RefCamera& camera, const std::vector<std::array<fl
     std::vector<Vec3f> pts;
     const HeadFrame& f = shell.frame();
     for (std::size_t i = 0; i < rays.size(); ++i) pts.push_back(eye + rays[i] * depth[i]);
-    // The root: the scalp under the first point (straight in toward the head's middle).
-    const Vec3f u0 = (pts.front() - f.center).normalized();
-    const Vec3f under = f.center + u0 * shell.head(u0);
-    const Vec3f root = scalp.closestPoint(under).position;
-    pts.insert(pts.begin(), root);
+    // The root: the end nearer the scalp, joined to it (guide_rooting.h), the head's radius the scale.
+    GuideRootingOptions ro = o.rooting;
+    if (!(ro.headRadius > 0.0f)) ro.headRadius = f.radius;
+    if (ro.radial) ro.center = f.center;
+    ro.up = f.up;
+    out.rooting = rootGuide(pts, scalp, head, ro, guideRootingScale(scalp, ro));
+    if (out.rooting.points.empty()) return out;
+    const Vec3f root = out.rooting.points.front();
     const float pointSpacing = o.pointSpacing > 0.0f ? o.pointSpacing : f.radius / 20.0f;
-    out.points = resampledBySpacing(pts, pointSpacing);
+    out.points = resampledBySpacing(out.rooting.points, pointSpacing);
+    out.rooting.points.clear();
     out.points.front() = root;
     out.length = guideLength(out.points);
     return out;

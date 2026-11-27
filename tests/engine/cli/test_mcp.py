@@ -249,6 +249,9 @@ def everything_else(c, root):
     c.call("photo_edit", dict(g, op="add_flow", points=[[240, 120], [250, 300]]))
     viewed, result = c.call("photo_view", dict(g, analysis=True))
     assert viewed["linedUp"] and viewed["flowArrows"] == 1 and viewed["locks"] >= 0, viewed
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 2 and 0.0 <= viewed["meanConfidence"] <= 1.0, viewed  # (the confidence too)
+    sure, _ = c.call("photo_view", dict(g, analysis=True, orientation="variance", bilateral_coarse=True))
+    assert sure["orientation"] == "variance" and 0.0 <= sure["meanConfidence"] <= 1.0, sure
     grown, _ = c.call("guides_from_photos", dict(g, guide_count=120))
     assert grown["guides"] > 20 and grown["group"] == "fromReference", grown
     compared, result = c.call("render_preview", dict(g, camera={"photo": "front"}, size=240))
@@ -285,6 +288,7 @@ def everything_else(c, root):
     assert region["linked"].endswith(".density") and 0.05 < region["scalpShare"] < 0.7, region
     grown, _ = c.call("guides_from_photos", dict(f, guide_count=80, apply_look=True))
     assert grown["guides"] > 5 and "unseenShare" in grown, grown
+    assert grown["rooting"]["guides"] > 0 and grown["rooting"]["flipped"] == 0 and 0.0 <= grown["score"]["mean"] <= 1.0, grown
     assert "lookApplied" in grown or "look" not in grown, grown
     # The groom against its photo: the silhouettes' overlap, where the hair differs, its color.
     compared, result = c.call("compare_to_photo", f)
@@ -295,6 +299,15 @@ def everything_else(c, root):
     assert len([x for x in result["content"] if x["type"] == "image"]) == 1
     one, _ = c.call("compare_to_photo", dict(f, photo="front"))
     assert len(one["photos"]) == 1, one
+    assert 0.0 <= shot["guides"]["score"] <= 1.0 and shot["guides"]["seen"] > 0, shot
+    # The guides scored against the photo (reprojection): each photo's mean, the worst, a rooting check.
+    scored, _ = c.call("score_guides", dict(f, group="fromReference", worst=3))
+    assert scored["guides"] > 5 and 0.0 <= scored["mean"] <= 1.0 and len(scored["worst"]) == 3, scored
+    assert scored["photos"][0]["photo"] == "front" and scored["rooting"]["tipFirst"] == 0, scored
+    worst = scored["worst"][0]
+    assert worst["score"] <= scored["mean"] and all(0.0 <= p["score"] <= 1.0 for p in worst["photos"]), worst
+    single, _ = c.call("score_guides", dict(f, ids=[worst["id"]], photos=["front"], coarse_share=1.0))
+    assert single["guides"] == 1 and single["scores"][0]["id"] == worst["id"] and single["coarseShare"] == 1.0, single
     # The groom beside its photo, its guides labelled, a map over the scalp, pairs suggested.
     beside, result = c.call("render_preview", dict(f, beside="front"))
     assert beside["beside"] == "front" and beside["width"] == 2 * width and image_of(result)[0] == 2 * width, beside
@@ -331,6 +344,8 @@ def everything_else(c, root):
     strokes = [[project(q) for q in gd["positions"]] for gd in listed["guides"][:2]]
     lifted, result = c.call("guides_from_strokes", dict(f, photo="front", strokes=strokes, mirror="x", fill=True, fill_count=40, apply_look=True))
     assert len(lifted["ids"]) == 4 and all(0.0 <= s["hitShare"] <= 1.0 for s in lifted["strokes"]), lifted
+    assert lifted["rooting"]["flipped"] == 0 and lifted["rooting"]["dropped"] == 0 and "rooting" in lifted["fill"], lifted
+    assert lifted["rooting"]["thresholds"]["maxRootGap"] == "none", lifted  # (a drawn stroke is never dropped for its gap)
     assert lifted["fill"]["guides"] > 10 and "subClump" in lifted["lookApplied"], lifted
     assert len([x for x in result["content"] if x["type"] == "image"]) == 1
     one = c.call("get_guides", dict(f, ids=[lifted["ids"][0]], with_points=True))[0]["guides"][0]
@@ -339,7 +354,7 @@ def everything_else(c, root):
     again = c.call("get_guides", dict(f, ids=[one["id"]]))[0]["guides"][0]
     assert reshaped["count"] == 1 and again["group"] == "strokes" and again["id"] == one["id"], (reshaped, again)
     combed, _ = c.call("comb_guides", dict(f, count=40, part="none", sweep={"front": "back", "sides": "down"}))
-    assert combed["guides"] > 10 and combed["shell"]["from"] == "photos", combed
+    assert combed["guides"] > 10 and combed["shell"]["from"] == "photos" and combed["rooting"]["flipped"] == 0, combed
     gone, _ = c.call("guide_op", dict(f, op="delete_guides", group="combed"))
     assert gone["count"] == combed["guides"], gone
 
@@ -418,7 +433,7 @@ def main():
                        "measure_guides", "add_photo", "photo_view", "mesh_landmarks", "align_photo", "photo_edit",
                        "guides_from_photos", "compare_to_photo", "checkpoint", "restore", "batch", "show_map", "suggest_pairs", "root_tube", "tube_levels", "tube_shape", "check_expression", "import_animation",
                        "animate_scalp", "simulate", "sim_cache", "export_cards", "export_game", "stats", "guides_from_strokes", "comb_guides",
-                       "hair_shell", "photo_project", "reshape_guides"]:
+                       "hair_shell", "photo_project", "reshape_guides", "score_guides"]:
             assert wanted in names, wanted
         assert c.request("tools/call", {"name": "no_such_tool", "arguments": {}})["error"]["code"] == -32602
         assert c.request("no/such/method")["error"]["code"] == -32601

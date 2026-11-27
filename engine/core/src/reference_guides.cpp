@@ -22,6 +22,7 @@
 #include "groomlab/scalp_mirror.h"
 #include "groomlab/strand_set.h"
 #include "groomlab/export_view.h"
+#include "groomlab/guide_rooting.h"
 
 namespace groomlab {
 
@@ -1125,9 +1126,14 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
                        scalpDepth > 0.0f ? scalpDepth / static_cast<float>(pv.camera.focalPx) : 0.0f);
         // The locks' flow past their curls, and the curls themselves.
         if (!view.field) {
-            pv.fine = !pv.rgb.empty() ? std::make_shared<OrientationField>(structureField(pv.rgb, std::max(1.5f, static_cast<float>(std::max(pv.width, pv.height)) / 250.0f)))
-                                      : pv.field;
-            pv.coarse = std::make_shared<OrientationField>(coarseField(*pv.field, pv.mask, 0.02f * static_cast<float>(std::max(pv.width, pv.height))));
+            // (the fine scale: the structure tensor follows each curl's strands; the variance bank is
+            // fine already, its confidence low where strands cross)
+            const bool fineIsField = options.orientation.method == OrientationMethod::Variance;
+            pv.fine = !pv.rgb.empty() && !fineIsField
+                          ? std::make_shared<OrientationField>(structureField(pv.rgb, std::max(1.5f, static_cast<float>(std::max(pv.width, pv.height)) / 250.0f)))
+                          : pv.field;
+            pv.coarse = std::make_shared<OrientationField>(coarseField(*pv.field, pv.mask, 0.02f * static_cast<float>(std::max(pv.width, pv.height)),
+                                                                       options.orientation.bilateralCoarse));
             pv.curl = measureCurl(*pv.field, *pv.coarse, pv.mask);
         }
         // The hair's rim past the scalp: at the mask's outline against the backdrop (not against an
@@ -2612,34 +2618,94 @@ ReferenceShell::ReferenceShell(const ScalpMesh& scalp, const std::vector<Referen
     ReferenceShellBuilder::build(*this, ctx);
 }
 
-// How well a path runs with the views' coarse flow (the locks' paths): where each view (but `skip`)
-// sees it in its hair, the mean of cos 2x the angle between its picture and the flow (1 along it, -1
-// across), each step a pixel or more; `count`: the steps that counted.
-float coarseAgreement(const std::vector<PreparedView>& views, const std::vector<Vec3f>& path, int skip, int* count) {
-    double sum = 0.0;
-    int n = 0;
+// A polyline against the prepared views (PhotoScorer, reference_guides.h): per view its samples a
+// step apart in the picture, those the head hides left out, the share in the hair mask and, inside
+// it, 1 - the pi-periodic angle error / 90 degrees against the coarse and fine fields, weighted by
+// their confidence. `skip`: a view left out (-1 none).
+static GuideScore scoreOnViews(const std::vector<PreparedView>& views, const std::vector<Vec3f>& path, const GuideScoreOptions& o, int skip = -1) {
+    GuideScore out;
+    out.photos.resize(views.size());
+    double total = 0.0, orientation = 0.0, mask = 0.0, coarseSum = 0.0, fineSum = 0.0, weight = 0.0;
+    const float step = std::max(0.25f, o.stepPx);
     for (std::size_t k = 0; k < views.size(); ++k) {
-        const PreparedView& v = views[k];
         if (static_cast<int>(k) == skip) continue;
-        const OrientationField* flow = v.coarse ? v.coarse.get() : v.field.get();
-        if (!flow) continue;
-        const float fx = static_cast<float>(flow->width) / static_cast<float>(v.width), fy = static_cast<float>(flow->height) / static_cast<float>(v.height);
+        const PreparedView& v = views[k];
+        GuidePhotoScore& ps = out.photos[k];
+        const OrientationField* coarse = v.coarse ? v.coarse.get() : v.field.get();
+        const OrientationField* fine = v.fine ? v.fine.get() : v.field.get();
+        if (!coarse || !fine || v.mask.empty()) continue;
+        const float cx = static_cast<float>(coarse->width) / static_cast<float>(v.width), cy = static_cast<float>(coarse->height) / static_cast<float>(v.height);
+        const float fx = static_cast<float>(fine->width) / static_cast<float>(v.width), fy = static_cast<float>(fine->height) / static_cast<float>(v.height);
+        int inMask = 0;
+        double cS = 0.0, cW = 0.0, cE = 0.0, fS = 0.0, fW = 0.0, fE = 0.0, support = 0.0;
         for (std::size_t i = 1; i < path.size(); ++i) {
-            float u0 = 0, v0 = 0, z0 = 0, u1 = 0, v1 = 0;
-            if (!v.camera.project(path[i - 1], u0, v0, &z0) || !v.camera.project(path[i], u1, v1)) continue;
-            const float mu = 0.5f * (u0 + u1), mv = 0.5f * (v0 + v1);
-            if (!v.inFrame(mu, mv) || v.hidden(mu, mv, z0) || v.mask.sample(mu, mv) < 0.5f) continue;
+            float u0 = 0, v0 = 0, z0 = 0, u1 = 0, v1 = 0, z1 = 0;
+            if (!v.camera.project(path[i - 1], u0, v0, &z0) || !v.camera.project(path[i], u1, v1, &z1)) continue;
             const float du = u1 - u0, dv = v1 - v0, l = std::hypot(du, dv);
-            if (l < 1.0f) continue;
-            float fu = 0, fv = 0, conf = 0;
-            if (!flow->sample(mu * fx, mv * fy, fu, fv, conf) || conf < 0.05f) continue;
-            const float c = (du * fu + dv * fv) / l;
-            sum += 2.0 * c * c - 1.0;
-            ++n;
+            if (l < 1e-6f) continue;
+            const float tu = du / l, tv = dv / l;
+            const int n = std::max(1, static_cast<int>(std::ceil(l / step)));
+            for (int j = 0; j < n; ++j) {
+                const float t = (static_cast<float>(j) + 0.5f) / static_cast<float>(n);
+                const float u = u0 + du * t, w = v0 + dv * t, z = z0 + (z1 - z0) * t;
+                if (!v.inFrame(u, w)) continue;
+                if (v.hidden(u, w, z)) {
+                    ++ps.hidden;
+                    continue;
+                }
+                ++ps.samples;
+                if (v.mask.sample(u, w) < 0.5f) {
+                    support -= 1.0;
+                    continue;
+                }
+                ++inMask;
+                float ou = 0, ow = 0, c = 0;
+                float sc = 0.5f, sf = 0.5f;  // (this sample's, unsure where the photo says nothing)
+                if (coarse->sample(u * cx, w * cy, ou, ow, c) && c > 0.0f) {
+                    const float e = std::acos(std::clamp(std::abs(tu * ou + tv * ow), 0.0f, 1.0f));
+                    cS += c * (1.0f - e / (0.5f * kPi));
+                    cE += c * e;
+                    cW += c;
+                    sc = 0.5f + std::min(1.0f, c) * (0.5f - e / (0.5f * kPi));
+                }
+                if (fine->sample(u * fx, w * fy, ou, ow, c) && c > 0.0f) {
+                    const float e = std::acos(std::clamp(std::abs(tu * ou + tv * ow), 0.0f, 1.0f));
+                    fS += c * (1.0f - e / (0.5f * kPi));
+                    fE += c * e;
+                    fW += c;
+                    sf = 0.5f + std::min(1.0f, c) * (0.5f - e / (0.5f * kPi));
+                }
+                support += 2.0 * (o.coarseShare * sc + (1.0f - o.coarseShare) * sf) - 1.0;
+            }
         }
+        if (ps.samples == 0) continue;
+        ps.mask = static_cast<float>(inMask) / static_cast<float>(ps.samples);
+        ps.coarse = cW > 0.0 ? static_cast<float>(cS / cW) : 0.0f;
+        ps.fine = fW > 0.0 ? static_cast<float>(fS / fW) : 0.0f;
+        ps.coarseError = cW > 0.0 ? static_cast<float>(cE / cW * 180.0 / kPi) : 90.0f;
+        ps.fineError = fW > 0.0 ? static_cast<float>(fE / fW * 180.0 / kPi) : 90.0f;
+        ps.confidence = inMask ? static_cast<float>(0.5 * (cW + fW) / inMask) : 0.0f;
+        const float orient = o.coarseShare * ps.coarse + (1.0f - o.coarseShare) * ps.fine;
+        ps.score = orient * ps.mask;
+        ps.support = static_cast<float>(support * step);
+        out.support += ps.support;
+        ++out.views;
+        const double wk = static_cast<double>(ps.samples);
+        total += wk * ps.score;
+        orientation += wk * orient;
+        mask += wk * ps.mask;
+        coarseSum += wk * ps.coarse;
+        fineSum += wk * ps.fine;
+        weight += wk;
     }
-    if (count) *count = n;
-    return n ? static_cast<float>(sum / n) : 0.0f;
+    if (weight > 0.0) {
+        out.score = static_cast<float>(total / weight);
+        out.orientation = static_cast<float>(orientation / weight);
+        out.mask = static_cast<float>(mask / weight);
+        out.coarse = static_cast<float>(coarseSum / weight);
+        out.fine = static_cast<float>(fineSum / weight);
+    }
+    return out;
 }
 
 // How well a guide's way agrees with the photos' fine strand directions where they see it in the
@@ -2900,13 +2966,23 @@ std::array<float, 2> pictureDown(const RefCamera& camera, const Vec3f& up) {
     return l > 0.2f ? std::array<float, 2>{du / l, dv / l} : std::array<float, 2>{0.0f, 1.0f};
 }
 
+constexpr float kWeakFlow = 0.06f;    // a lock line's flow this unsure (its confidence) says nothing
+// A lock centreline takes a root's place when the photos (but the one it was traced in) support it at
+// least this share as much as the guide grown there (GuideScore::support: their agreeing length, less
+// what runs across their flow or off their hair). The mean score alone chose short locks traced part
+// way over long grown guides (the synthetic deep waves: the hair a fifth short); the support at 0.8:
+// 11 locks there (a mean within 0.01: 11, 0.85 of the length), a six-photo test head 15 (mean rule 20, the
+// flow agreement 0.370 against 0.377).
+constexpr float kLockSupport = 0.8f;
+
 // A lock's line from (u, w), leaving along (du, dw): a pixel a step along `flow`, its line taken the
 // way the lock goes. The way is the lock's own: it turns at most a quarter turn over one and a half
 // curl periods, a flow across it by more than 40 degrees says less and past 70 nothing (a curl's
 // crest), and where the flow says little it falls a little toward the picture's `down` (long hair
 // hangs). It ends where the hair does (the mask's edge, a gap of three pixels crossed), where it
 // curls round on itself, or where it has run across a confident flow for a period while not falling
-// (a line going sideways over locks that fall).
+// (a line going sideways over locks that fall), or where the flow has been unsure for a period and a
+// half (its confidence under kWeakFlow: the lock is lost; the unsure stretch is cut off).
 LockLine traceLockLine(const PreparedView& v, const OrientationField& flow, float u, float w, float du, float dw, float period,
                        const std::array<float, 2>& down, int maxSteps) {
     LockLine out;
@@ -2914,7 +2990,7 @@ LockLine traceLockLine(const PreparedView& v, const OrientationField& flow, floa
     const float maxTurn = 0.5f * kPi / (1.5f * period);
     const float cosFull = pm::cos(40.0f * kPi / 180.0f), cosNone = pm::cos(70.0f * kPi / 180.0f);
     float turned = 0.0f;
-    int outside = 0, across = 0;
+    int outside = 0, across = 0, weak = 0;
     out.line.push_back({u, w});
     for (int k = 0; k < maxSteps; ++k) {
         if (!v.inFrame(u, w)) break;
@@ -2935,6 +3011,8 @@ LockLine traceLockLine(const PreparedView& v, const OrientationField& flow, floa
             // (running across a confident flow while not falling: not this lock's way)
             if (c > 0.25f && gate <= 0.0f && du * down[0] + dw * down[1] < 0.5f) ++across;
             else across = 0;
+            // (where the flow is unsure for a period and a half running, the lock is lost: it ends)
+            weak = c < kWeakFlow ? weak + 1 : 0;
         }
         wu += 0.15f * (1.0f - say) * down[0];
         ww += 0.15f * (1.0f - say) * down[1];
@@ -2953,6 +3031,10 @@ LockLine traceLockLine(const PreparedView& v, const OrientationField& flow, floa
             for (int t = 0; t < across && out.line.size() > 1; ++t) out.line.pop_back();
             break;
         }
+        if (static_cast<float>(weak) > 1.5f * period) {
+            for (int t = 0; t < weak && out.line.size() > 1; ++t) out.line.pop_back();
+            break;
+        }
     }
     while (out.line.size() > 1 && (!v.inFrame(out.line.back()[0], out.line.back()[1]) || v.mask.sample(out.line.back()[0], out.line.back()[1]) < 0.5f))
         out.line.pop_back();
@@ -2964,14 +3046,14 @@ LockLine traceLockLine(const PreparedView& v, const OrientationField& flow, floa
 // one the flow holds longest, a little toward the longer and the falling); the clearest lines kept
 // as locks, none running for half its length within half a lock's width of one kept already; then
 // all the lines laid into the view's coarse flow (where none runs, the base flow).
-void traceViewLocks(PreparedView& v, const std::vector<SurfacePoint>& seeds, const Vec3f& up) {
+void traceViewLocks(PreparedView& v, const std::vector<SurfacePoint>& seeds, const Vec3f& up, bool bilateral) {
     v.lockLines.assign(seeds.size(), LockLine{});
     if (!v.fine || v.mask.empty()) return;
     const int size = std::max(v.width, v.height);
     float period = v.curl.wavelengthPx > 0.0f ? v.curl.wavelengthPx : 0.05f * static_cast<float>(size);
     period = std::clamp(period, 0.02f * static_cast<float>(size), 0.12f * static_cast<float>(size));
     v.lockPeriodPx = period;
-    auto base = std::make_shared<OrientationField>(coarseField(*v.fine, v.mask, 0.5f * period));
+    auto base = std::make_shared<OrientationField>(coarseField(*v.fine, v.mask, 0.5f * period, bilateral));
     const std::array<float, 2> down = pictureDown(v.camera, up);
     const Vec3f eye = v.camera.eye();
     const int maxSteps = 3 * (v.width + v.height);
@@ -3107,8 +3189,8 @@ struct PlacedLock {
     int view = -1;
     bool triangulated = false;
     float score = 0.0f;
-    float agreement = 0.0f;  // with the other views' coarse flow (coarseAgreement)
-    int agreementSteps = 0;
+    float agreement = 0.0f;  // the other views' score (scoreOnViews)
+    float support = 0.0f;    // their support (GuideScore::support)
 };
 
 // Two views' lines of one lock (from the same root): for points along a's line, the other view's
@@ -3282,7 +3364,7 @@ std::vector<PlacedLock> placeLocks(const Context& ctx, const std::vector<Surface
         p.view = static_cast<int>(a);
         p.triangulated = triangulated;
         p.score = la.score;
-        p.path.push_back(root.position);
+        // (the line alone: rootGuide joins it to the scalp, the end nearer it first)
         for (std::size_t i = 0; i < n; i += 2) p.path.push_back(eye + pixelRay(va.camera, la.line[i][0], la.line[i][1]) * t[i]);
     }, 1);
     for (std::size_t k = 0; k < jobs.size(); ++k) {
@@ -3621,7 +3703,7 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
             const int seedCount = std::clamp(2 * options.guideCount, 200, 2000);
             lockSeeds = blueNoiseRoots(scalp, seedCount, options.seed + 101);
             seedSpacing = std::sqrt(scalp.totalArea() / static_cast<float>(std::max<std::size_t>(1, lockSeeds.size())));
-            for (PreparedView& v : prepared) traceViewLocks(v, lockSeeds, options.up.normalized());
+            for (PreparedView& v : prepared) traceViewLocks(v, lockSeeds, options.up.normalized(), options.orientation.bilateralCoarse);
         }
         const bool coarse = options.curlFlow > 0 || (options.curlFlow < 0 && (result.look.curly || wavy)) || lockPaths;
         if (coarse)
@@ -3879,23 +3961,38 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         grownPaths[i] = std::move(path);
     }, 4);
     // Lock paths (locks as objects): each lock's 3D centreline (placeLocks) takes the place of the
-    // nearest root's grown guide where the views agree with it at least as well (their coarse flow
-    // along it, the view it was traced in left out); the rest grow.
+    // nearest root's grown guide where the views support it about as much (PhotoScorer's support: the
+    // length along which the coarse and fine flow agree with it, weighted by their confidence, less
+    // what runs across them or off the hair mask, points the head hides left out; the view it was
+    // traced in left out); the rest grow. With symmetry a lock on the mirrored side competes as its
+    // mirror image.
     std::vector<int> lockViewOf;
+    // The head the guides stay out of (rooting): the first occluder (a whole head), else the scalp.
+    const ScalpMesh* headMesh = nullptr;
+    for (const auto& o : options.occluders)
+        if (o && !headMesh) headMesh = o.get();
+    GuideRootingOptions rooting = options.rooting;
+    rooting.up = options.up;
     const bool lockGuides = lockPaths && options.roots.empty();
     std::vector<int> lockAt(roots.size(), -1);
     std::vector<PlacedLock> placed;
     if (lockGuides) {
         placed = placeLocks(ctx, lockSeeds, result);
         for (const auto& c : result.lockViews) result.locksDetected += c.detected;
-        // (with symmetry, the locks on the grown side: the guides are mirrored over)
+        // (with symmetry the guides on the other side are the grown side's mirrored: a lock there is
+        // mirrored over to compete for a root on the grown side, as its mirror image)
         if (ctx.mirror.on())
-            placed.erase(std::remove_if(placed.begin(), placed.end(), [&](const PlacedLock& l) {
-                             const Vec3f m = ctx.mirror.point(l.root.position);
-                             return (m - l.root.position).length() >= 0.5f * spacing && l.root.position.x < m.x;
-                         }), placed.end());
+            for (PlacedLock& l : placed) {
+                const Vec3f m = ctx.mirror.point(l.root.position);
+                if ((m - l.root.position).length() < 0.5f * spacing || l.root.position.x >= m.x) continue;
+                for (Vec3f& p : l.path) p = ctx.mirror.point(p);
+                l.root = scalp.closestPoint(m);
+            }
         // (each lock checked against all the views: cut where it leaves the hair they show for a few
-        // steps running, dropped when that leaves less than half of it; smoothed, kept off the scalp)
+        // steps running, dropped when that leaves less than half of it; smoothed, kept off the scalp;
+        // rooted on the scalp: the end nearer it first, joined to it, out of the head)
+        const GuideRootingCounts rootScale = guideRootingScale(scalp, rooting);
+        std::vector<RootedGuide> rooted(placed.size());
         parallelFor(0, placed.size(), [&](std::size_t k) {
             std::vector<Vec3f>& path = placed[k].path;
             const float before = arcLength(path);
@@ -3914,12 +4011,32 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
                 return;
             }
             path = keptOut(ctx, smoothed(std::move(path), 3));
-            path[0] = placed[k].root.position;
+            rooted[k] = rootGuide(path, scalp, headMesh, rooting, rootScale);
+            if (rooted[k].points.size() < 4 || arcLength(rooted[k].points) < minLength) {
+                path.clear();
+                return;
+            }
+            path = rooted[k].points;
+            placed[k].root = rooted[k].root;
             if (arcLength(path) > 2.0f * size) path = truncated(path, 2.0f * size);
-            placed[k].agreement = coarseAgreement(prepared, path, placed[k].view, &placed[k].agreementSteps);
+            const GuideScore sc = scoreOnViews(prepared, path, GuideScoreOptions{}, placed[k].view);
+            placed[k].agreement = sc.score;
+            placed[k].support = sc.support;
         }, 4);
+        result.lockRooting = rootScale;
+        for (const RootedGuide& g : rooted) {
+            ++result.lockRooting.guides;
+            result.lockRooting.flipped += g.flipped;
+            result.lockRooting.snapped += g.snapped;
+            result.lockRooting.connected += g.connected;
+            result.lockRooting.pushed += g.pushed;
+            result.lockRooting.cut += g.cut;
+            result.lockRooting.droppedGap += g.droppedGap;
+            result.lockRooting.droppedShort += g.droppedShort;
+        }
+        result.lockRooting.dropped = result.lockRooting.droppedGap + result.lockRooting.droppedShort;
         placed.erase(std::remove_if(placed.begin(), placed.end(), [](const PlacedLock& l) { return l.path.size() < 4; }), placed.end());
-        // (the views' best agreed first; each takes the nearest root not taken, within 0.6 spacing)
+        // (the views' best scored first; each takes the nearest root not taken, within 0.6 spacing)
         std::vector<std::size_t> order(placed.size());
         for (std::size_t q = 0; q < order.size(); ++q) order[q] = q;
         std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return placed[a].agreement > placed[b].agreement; });
@@ -3933,8 +4050,8 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
                 if (d < bestDistance) bestDistance = d, best = i;
             }
             if (best == roots.size()) continue;
-            const float grown = grownPaths[best].empty() ? -1.0f : coarseAgreement(prepared, grownPaths[best], l.view, nullptr);
-            if (l.agreement + 0.02f >= grown) lockAt[best] = static_cast<int>(q);
+            const GuideScore gs = grownPaths[best].empty() ? GuideScore{} : scoreOnViews(prepared, grownPaths[best], GuideScoreOptions{}, l.view);
+            if (grownPaths[best].empty() || l.support >= kLockSupport * gs.support) lockAt[best] = static_cast<int>(q);
         }
     }
     for (std::size_t i : live) {
@@ -3970,6 +4087,26 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
     result.lockRoots = std::max(result.lockRoots, result.lockGuides);
     if (options.lockCurls && result.look.curly) bakeLocks(prepared, scalp, options, grownGuides, paths, result);
     else if (options.lockCurls && lockPaths && result.look.wavy) waveLocks(prepared, options, grownGuides, paths, lockViewOf, result);
+    // Every guide rooted on the scalp (guide_rooting.h): grown guides start on it and the locks were
+    // rooted already; what is left is a pass through the head (cut, or a shallow dip pushed out) and
+    // the guides that leaves too short (dropped). Before mirroring: a mirror is its rooted guide's.
+    {
+        std::vector<std::size_t> kept;
+        std::vector<SurfacePoint> rootsOn;
+        result.rooting = rootGuides(paths, scalp, headMesh, rooting, &kept, &rootsOn);
+        std::vector<ReferenceGuide> keptGuides;
+        std::vector<std::uint8_t> keptSeam;
+        std::vector<int> keptView;
+        for (std::size_t q = 0; q < kept.size(); ++q) {
+            keptGuides.push_back(std::move(grownGuides[kept[q]]));
+            keptGuides.back().root = rootsOn[q].root;
+            keptSeam.push_back(grownSeam[kept[q]]);
+            keptView.push_back(lockViewOf[kept[q]]);
+        }
+        grownGuides.swap(keptGuides);
+        grownSeam.swap(keptSeam);
+        lockViewOf.swap(keptView);
+    }
     for (std::size_t i = 0; i < grownGuides.size(); ++i) {
         std::size_t count = static_cast<std::size_t>(std::max(2, options.points));
         if (grownGuides[i].lockWavelength > 0.0f)
@@ -3992,6 +4129,17 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         result.guides.push_back(std::move(m));
     }
 
+    // Each guide's score against all the views (PhotoScorer's), and their mean.
+    {
+        std::vector<float> scores(result.guides.size(), 0.0f);
+        parallelFor(0, result.guides.size(), [&](std::size_t i) { scores[i] = scoreOnViews(prepared, result.guides[i].points, GuideScoreOptions{}).score; }, 8);
+        double sum = 0.0;
+        for (std::size_t i = 0; i < scores.size(); ++i) {
+            result.guides[i].score = scores[i];
+            sum += scores[i];
+        }
+        result.score = scores.empty() ? 0.0f : static_cast<float>(sum / static_cast<double>(scores.size()));
+    }
     {
         const ReferenceLookFit curls = result.look;
         result.look = fitLook(prepared, grownGuides, options);
@@ -4031,6 +4179,11 @@ ReferenceViewPreview previewReferenceView(const ScalpMesh& scalp, const Referenc
     ReferenceViewPreview out;
     out.mask = pv.mask;
     out.crop = pv.crop;
+    if (pv.field && pv.field->width == pv.mask.width && pv.field->height == pv.mask.height) {
+        out.confidence = pv.mask;
+        for (std::size_t i = 0; i < out.confidence.pixels.size(); ++i)
+            out.confidence.pixels[i] = pv.mask.pixels[i] >= 0.5f ? std::clamp(pv.field->confidence[i], 0.0f, 1.0f) : 0.0f;
+    }
     if (!pv.field || pv.crop[2] <= 0 || pv.crop[3] <= 0) return out;
     const float sx = static_cast<float>(pv.width) / static_cast<float>(pv.crop[2]);
     const float sy = static_cast<float>(pv.height) / static_cast<float>(pv.crop[3]);
@@ -4039,7 +4192,8 @@ ReferenceViewPreview previewReferenceView(const ScalpMesh& scalp, const Referenc
     const bool curls = pv.curl.periodicShare > kCurlShare && swing > kCurlAmplitude;
     const bool waves = pv.curl.streamlines >= 5 && !curls && pv.curl.periodicShare > kWavyShare && swing > kWavyAmplitude;
     if (options.lockPaths > 0 || (options.lockPaths < 0 && waves)) {
-        traceViewLocks(pv, blueNoiseRoots(scalp, std::clamp(2 * options.guideCount, 200, 2000), options.seed + 101), options.up.normalized());
+        traceViewLocks(pv, blueNoiseRoots(scalp, std::clamp(2 * options.guideCount, 200, 2000), options.seed + 101), options.up.normalized(),
+                       options.orientation.bilateralCoarse);
         if (pv.coarse) pv.field = pv.coarse;
         for (const LockLine& l : pv.lockLines) {
             if (!l.kept) continue;
@@ -4058,6 +4212,33 @@ ReferenceViewPreview previewReferenceView(const ScalpMesh& scalp, const Referenc
             if (!pv.field->sample(u, v, du, dv, conf) || conf < 0.08f) continue;
             out.flowLines.push_back({x - du * half, y - dv * half, x + du * half, y + dv * half});
         }
+    return out;
+}
+
+// ---- Scoring guides against the photos ----------------------------------------------------------
+
+struct PhotoScorer::Impl {
+    std::vector<PreparedView> views;
+    GuideScoreOptions scoring;
+};
+
+PhotoScorer::PhotoScorer(const ScalpMesh& scalp, const std::vector<ReferenceView>& views, const ReferenceGuideOptions& options,
+                         const GuideScoreOptions& scoring)
+    : impl_(std::make_unique<Impl>()) {
+    if (scalp.triangleCount() == 0) throw std::invalid_argument("PhotoScorer: the scalp has no triangles");
+    impl_->views = prepareViews(scalp, views, options, scalpDiagonal(scalp));
+    impl_->scoring = scoring;
+}
+
+PhotoScorer::~PhotoScorer() = default;
+
+std::size_t PhotoScorer::viewCount() const { return impl_->views.size(); }
+
+GuideScore PhotoScorer::score(const std::vector<Vec3f>& points) const { return scoreOnViews(impl_->views, points, impl_->scoring); }
+
+std::vector<GuideScore> PhotoScorer::score(const std::vector<std::vector<Vec3f>>& guides) const {
+    std::vector<GuideScore> out(guides.size());
+    parallelFor(0, guides.size(), [&](std::size_t i) { out[i] = scoreOnViews(impl_->views, guides[i], impl_->scoring); }, 4);
     return out;
 }
 
