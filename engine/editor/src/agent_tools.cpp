@@ -1599,6 +1599,11 @@ struct AgentTools::Impl {
         const GuideHierarchy& h = live ? *live : stored;
         const std::string only = str(a, "group");
         const std::size_t limit = static_cast<std::size_t>(std::clamp(num(a, "limit", 100.0), 1.0, 2000.0));
+        const bool withPoints = a.value("with_points", false);
+        std::set<GuideId> onlyIds;
+        if (a.contains("ids") && a["ids"].is_array()) {
+            for (const json& id : a["ids"]) onlyIds.insert(id.get<GuideId>());
+        }
         json groups = json::array();
         for (const GuideGroup& gr : h.groups()) {
             json e = {{"name", gr.name}, {"depth", h.groupDepth(gr.id)}, {"guides", h.guidesInGroup(gr.id).size()}};
@@ -1610,6 +1615,7 @@ struct AgentTools::Impl {
         for (const HierarchyGuide& guide : h.guides()) {
             const GuideGroup* gr = h.group(guide.group);
             if (!only.empty() && (!gr || gr->name != only)) continue;
+            if (!onlyIds.empty() && !onlyIds.count(guide.id)) continue;
             ++total;
             if (guides.size() >= limit || guide.points.empty()) continue;
             float length = 0.0f;
@@ -1624,6 +1630,11 @@ struct AgentTools::Impl {
             json e = {{"id", guide.id}, {"group", gr ? gr->name : std::string()}, {"root", vec(guide.points.front())},
                       {"tip", vec(guide.points.back())}, {"length", r4(length)}, {"points", guide.points.size()}, {"tube", t}};
             if (guide.isChild()) e["parent"] = guide.parent;
+            if (withPoints) {
+                json positions = json::array();
+                for (const Vec3f& q : guide.points) positions.push_back(vec(q));
+                e["positions"] = positions;
+            }
             guides.push_back(e);
         }
         json out = {{"groom", g.name()}, {"groups", groups}, {"guides", guides}, {"count", total}};
@@ -3027,8 +3038,8 @@ struct AgentTools::Impl {
 
     static json cameraInfo(const RefCamera& c) {
         const Vec3f look = -c.axis(2);
-        return {{"eye", vec(c.eye())}, {"looking", vec(look)}, {"focal_mm", r4(focalPixelsToMm(c.focalPx, c.width))},
-                {"width", c.width}, {"height", c.height}};
+        return {{"eye", vec(c.eye())}, {"looking", vec(look)}, {"up", vec(c.axis(1))},
+                {"focal_mm", r4(focalPixelsToMm(c.focalPx, c.width))}, {"width", c.width}, {"height", c.height}};
     }
 
     ToolResult addPhoto(const json& a) {
@@ -4690,8 +4701,12 @@ struct AgentTools::Impl {
                          {"guides"}),
             &Impl::addGuides);
         add("get_guides", "List guides",
-            "Lists the groom's guide groups and guides: each guide's id, root and tip, length, points and tube.",
+            "Lists the groom's guide groups and guides: each guide's id, root and tip, length, point count and tube; "
+            "with_points their points as well (world space, root first: reshape a guide by deleting it with guide_op and "
+            "adding the new points with add_guides).",
             objectSchema({{"groom", groom}, {"group", prop("string", "Only this group's guides.")},
+                          {"ids", {{"type", "array"}, {"items", {{"type", "integer"}}}, {"description", "Only these guides."}}},
+                          {"with_points", prop("boolean", "Each guide's points too (positions).")},
                           {"limit", prop("integer", "List at most this many guides (default 100).")}}),
             &Impl::getGuides);
         {
