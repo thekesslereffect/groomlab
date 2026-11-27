@@ -24,6 +24,7 @@ add_executable(groomlab_tests
     engine/core/test_lock_guides.cpp
     engine/core/test_guide_field.cpp
     engine/core/test_guide_rooting.cpp
+    engine/core/test_guide_fit.cpp
     engine/core/test_color_patterns.cpp
     engine/core/test_hair_color.cpp
     engine/core/test_debug_node.cpp

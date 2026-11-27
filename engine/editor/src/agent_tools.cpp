@@ -41,9 +41,11 @@
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/guide_field.h"
+#include "groomlab/guide_fit.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/hair_shell.h"
 #include "groomlab/lock_guides.h"
+#include "groomlab/parallel.h"
 #include "groomlab/random.h"
 #include "groomlab/node_library.h"
 #include "groomlab/presets.h"
@@ -73,6 +75,9 @@ constexpr std::size_t kMaxStrokePoints = 4000;
 // blend: the nearest keys' shapes copied / combed) when not told.
 constexpr const char* kDefaultFillMode = "field";
 constexpr const char* kDefaultCombMode = "field";
+// How guides_from_strokes lifts strokes when not told (fit: fitted to every photo's strokes,
+// guide_fit.h; shell: each stroke's points cast onto the hair's shell from its photo).
+constexpr const char* kDefaultStrokeLift = "fit";
 constexpr int kPhotoShown = 768;  // a photo's picture at most this many pixels across (default)
 constexpr int kMaxSimFrames = 1000;    // frames one simulate or sim_cache call steps
 // A stroke's radius when none is given, and a placed guide's length (where no guides are near to
@@ -4590,8 +4595,9 @@ struct AgentTools::Impl {
     static json strokeSetProperties() {
         return {{"photo", prop("string", "The lined-up photo the strokes are drawn on (default: the only one).")},
                 {"strokes", {{"type", "array"}, {"items", {{"type", json::array({"object", "array"})}}},
-                             {"description", "The strokes: each [[u, v], ...] or {\"points\": [[u, v], ...]} in the photo's pixels, the root "
-                                             "end first (see root)."}}},
+                             {"description", "The strokes: each [[u, v], ...] or {\"points\": [[u, v], ...], \"lock\": name} in the photo's "
+                                             "pixels, the root end first (see root); strokes on different photos with the same lock (a name "
+                                             "or number) are one lock: one guide fitted to them all (lift fit); fit_guides: \"guide\": an id gives it to that guide."}}},
                 {"strokes_image", prop("string", "Or an image with the strokes drawn on it in one color (PNG, JPEG...): the photo's size or a "
                                                  "uniform scale of it, or placed by image_transform. Each stroke's root is the end with a dot.")},
                 {"image_transform", objectSchema({{"scale", prop("number", "Image pixels a photo pixel (default: the image's width over the photo's).")},
@@ -4606,9 +4612,94 @@ struct AgentTools::Impl {
                                                            "symmetry_center), auto (x when the head is symmetric), none (default).")}};
     }
 
-    ToolResult guidesFromStrokes(const json& a) {
-        AgentGroom& g = target.groom(str(a, "groom"));
-        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+    // A set's strokes as read: lines in its photo's pixels (root first), each one's lock label ("" none),
+    // and whether its guides are mirrored.
+    struct StrokeSetRead {
+        std::size_t photo = 0;  // in the groom's photos
+        std::vector<std::vector<std::array<float, 2>>> lines;
+        std::vector<std::string> locks;
+        std::vector<long long> guides;  // the guide each names (fit_guides; -1 none)
+        bool mirror = false;
+    };
+
+    StrokeSetRead readStrokeSet(const json& s, std::vector<AgentPhoto>& photos, const std::string& defaultMirror, const ScalpMesh& head) {
+        StrokeSetRead out;
+        AgentPhoto& photo = photoNamed(photos, str(s, "photo"));
+        out.photo = static_cast<std::size_t>(&photo - photos.data());
+        if (!photo.camera) throw ToolError("the photo '" + photo.name + "' is not lined up yet (align_photo)");
+        if (s.contains("strokes") == s.contains("strokes_image")) throw ToolError("each set gives strokes or strokes_image (one of them)");
+        const std::string root = str(s, "root", s.contains("strokes_image") ? "dot" : "first");
+        if (s.contains("strokes")) {
+            if (root != "first" && root != "last") throw ToolError("root for strokes is first or last");
+            for (std::size_t k = 0; k < s["strokes"].size(); ++k) {
+                const json& item = s["strokes"][k];
+                auto px = strokePixels(item, "strokes[" + std::to_string(k) + "]");
+                if (root == "last") std::reverse(px.begin(), px.end());
+                out.lines.push_back(std::move(px));
+                std::string lock;
+                if (item.is_object() && item.contains("lock")) {
+                    const json& l = item["lock"];
+                    if (l.is_string()) lock = l.get<std::string>();
+                    else if (l.is_number_integer()) lock = std::to_string(l.get<long long>());
+                    else throw ToolError("strokes[" + std::to_string(k) + "].lock is a name or a number");
+                    if (lock.empty()) throw ToolError("strokes[" + std::to_string(k) + "].lock is empty");
+                }
+                out.locks.push_back(lock);
+                long long guide = -1;
+                if (item.is_object() && item.contains("guide")) {
+                    if (!item["guide"].is_number_integer()) throw ToolError("strokes[" + std::to_string(k) + "].guide is a guide id");
+                    guide = item["guide"].get<long long>();
+                }
+                out.guides.push_back(guide);
+            }
+        } else {
+            if (root != "dot" && root != "top" && root != "bottom") throw ToolError("root for strokes_image is dot, top or bottom");
+            const RefImage image = loadImage(files().resolve(str(s, "strokes_image")), 3);
+            StrokeImageOptions io;
+            io.root = root;
+            io.photoWidth = photo.width;
+            io.photoHeight = photo.height;
+            if (s.contains("color")) io.color = {s["color"][0].get<float>(), s["color"][1].get<float>(), s["color"][2].get<float>()};
+            if (s.contains("image_transform")) {
+                const json& t = s["image_transform"];
+                io.scale = static_cast<float>(num(t, "scale", static_cast<double>(image.width) / std::max(1, photo.width)));
+                if (t.contains("offset")) io.offset = {t["offset"][0].get<float>(), t["offset"][1].get<float>()};
+                if (!(io.scale > 0.0f)) throw ToolError("image_transform.scale must be positive");
+            } else {
+                io.scale = static_cast<float>(image.width) / static_cast<float>(std::max(1, photo.width));
+                if (std::abs(static_cast<float>(image.height) / io.scale - static_cast<float>(photo.height)) > 0.02f * static_cast<float>(photo.height) + 1.0f) {
+                    throw ToolError("strokes_image is " + std::to_string(image.width) + " x " + std::to_string(image.height) + ", not the photo's " +
+                                    std::to_string(photo.width) + " x " + std::to_string(photo.height) +
+                                    " or a uniform scale of it: give image_transform {scale, offset}");
+                }
+            }
+            for (const ImageStroke& is : strokesFromImage(image, io)) out.lines.push_back(is.points);
+            if (out.lines.empty()) throw ToolError("no strokes of that color found in " + str(s, "strokes_image"));
+            out.locks.assign(out.lines.size(), "");
+            out.guides.assign(out.lines.size(), -1);
+        }
+        const std::string mirror = str(s, "mirror", defaultMirror);
+        if (mirror != "x" && mirror != "auto" && mirror != "none") throw ToolError("mirror is none, x or auto");
+        out.mirror = mirror == "x" || (mirror == "auto" && scalpLooksSymmetric(head));
+        return out;
+    }
+
+    static json fitViewJson(const FitViewResidual& v, const std::vector<AgentPhoto>& photos) {
+        return {{"photo", photos[static_cast<std::size_t>(v.photo)].name}, {"stroke", v.stroke}, {"meanPx", r4(v.meanPx)}, {"maxPx", r4(v.maxPx)},
+                {"covered", r4(v.covered)}, {"strokeCovered", r4(v.strokeCovered)}};
+    }
+
+    // The fit's settings: the head's radius the scale, rooted again as a lift roots.
+    static GuideFitOptions strokeFitOptions(const LockSetup& setup, const ScalpMesh* rootScalp) {
+        GuideFitOptions fo;
+        fo.headRadius = setup.frame.radius;
+        fo.scalp = rootScalp;
+        fo.rooting = StrokeLiftOptions{}.rooting;
+        return fo;
+    }
+
+    // The stroke sets given: "sets", and the top-level photo / strokes / strokes_image as one more.
+    json strokeSets(const json& a) {
         json sets = json::array();
         const json setSchema = objectSchema(strokeSetProperties());
         if (a.contains("sets")) {
@@ -4625,99 +4716,337 @@ struct AgentTools::Impl {
             sets.push_back(s);
         }
         if (sets.empty()) throw ToolError("give the strokes: \"strokes\" (lines in a photo's pixels) or \"strokes_image\", with \"photo\"; or \"sets\"");
+        return sets;
+    }
+
+    // Refits existing guides to strokes drawn on the photos (guide_fit.h): each stroke given to the
+    // guide that lies along it in its photo (or the one its "guide" names), each guide fitted to its
+    // strokes in place.
+    ToolResult fitGuidesToStrokes(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        const json sets = strokeSets(a);
+        const LockSetup setup = lockSetup(g, str(a, "depth", "auto"), num(a, "volume", 0.0));
+        const HairShell& shell = *setup.shell;
+        const ScalpMesh& rootScalp = *setup.hair.scalp;
+        const ScalpMesh& head = setup.hair.head ? *setup.hair.head : rootScalp;
+        const float R = setup.frame.radius;
+        // The guides: ids, a group's, or every guide.
+        std::vector<GuideId> which;
+        std::vector<std::vector<Vec3f>> pts;
+        {
+            const GuideHierarchy stored = GuideHierarchy::fromJson(hierarchyText(g));
+            const HierarchyPtr live = g.session().hierarchy();
+            const GuideHierarchy& h = live ? *live : stored;
+            const std::string only = str(a, "group");
+            std::set<GuideId> ids;
+            if (a.contains("ids"))
+                for (const json& id : a["ids"]) ids.insert(id.get<GuideId>());
+            bool groupFound = only.empty();
+            for (const HierarchyGuide& guide : h.guides()) {
+                const GuideGroup* gr = h.group(guide.group);
+                if (gr && gr->name == only) groupFound = true;
+                if (!only.empty() && (!gr || gr->name != only)) continue;
+                if (!ids.empty() && !ids.count(guide.id)) continue;
+                if (guide.points.size() < 2) continue;
+                which.push_back(guide.id);
+                pts.push_back(guide.points);
+            }
+            if (!groupFound) throw ToolError("no group named '" + only + "'");
+            for (GuideId id : ids)
+                if (std::find(which.begin(), which.end(), id) == which.end()) throw ToolError("no guide " + std::to_string(id) + " (ids)");
+            if (pts.empty()) throw ToolError("no guides to fit (ids, group)");
+        }
+        // The strokes.
+        std::vector<FitStroke> strokes;
+        std::vector<long long> named;  // the guide a stroke names (-1: none)
+        std::size_t total = 0;
+        for (const json& s : sets) {
+            const StrokeSetRead rs = readStrokeSet(s, photos, "none", head);
+            total += rs.lines.size();
+            if (total > 400) throw ToolError("at most 400 strokes a call");
+            for (std::size_t k = 0; k < rs.lines.size(); ++k) {
+                FitStroke f;
+                f.camera = *photos[rs.photo].camera;
+                f.pixels = rs.lines[k];
+                f.photo = static_cast<int>(rs.photo);
+                f.stroke = static_cast<int>(k + 1);
+                strokes.push_back(std::move(f));
+                named.push_back(rs.guides[k]);
+            }
+        }
+        // Each stroke to a guide: the one it names, else the one lying along it (closest).
+        const double reach = num(a, "reach", 0.3);
+        if (!(reach > 0.0)) throw ToolError("reach must be positive (head radii)");
+        std::vector<int> owner(strokes.size(), -1);
+        std::vector<StrokeMatch> before(strokes.size());
+        parallelFor(0, strokes.size(), [&](std::size_t si) {
+            int best = -1;
+            StrokeMatch bestMatch;
+            for (std::size_t gi = 0; gi < pts.size(); ++gi) {
+                const bool isNamed = named[si] >= 0;
+                if (isNamed && static_cast<long long>(which[gi]) != named[si]) continue;
+                const StrokeMatch m = matchStroke(pts[gi], strokes[si], &head, setup.frame.center, R);
+                const bool close = m.coveredPoints >= 3 && m.covered >= 0.2f && m.strokeCovered >= 0.3f && m.agreement >= 0.5f &&
+                                   m.meanR <= static_cast<float>(reach);
+                if (!isNamed && !close) continue;
+                if (best < 0 || m.meanR < bestMatch.meanR) {
+                    best = static_cast<int>(gi);
+                    bestMatch = m;
+                }
+            }
+            owner[si] = best;
+            before[si] = bestMatch;
+        }, 1);
+        for (std::size_t si = 0; si < strokes.size(); ++si)
+            if (named[si] >= 0 && owner[si] < 0) throw ToolError("strokes name guide " + std::to_string(named[si]) + ", which is not among those fitted");
+        // At most a stroke a photo per guide: the closest.
+        std::vector<std::vector<std::size_t>> mine(pts.size());
+        for (std::size_t si = 0; si < strokes.size(); ++si) {
+            if (owner[si] < 0) continue;
+            std::vector<std::size_t>& list = mine[static_cast<std::size_t>(owner[si])];
+            bool placed = false;
+            for (std::size_t& other : list) {
+                if (strokes[other].photo != strokes[si].photo) continue;
+                placed = true;
+                if (named[si] >= 0 || (named[other] < 0 && before[si].meanR < before[other].meanR)) {
+                    owner[other] = -1;
+                    other = si;
+                } else {
+                    owner[si] = -1;
+                }
+            }
+            if (!placed) list.push_back(si);
+        }
+        std::vector<std::size_t> fitted;
+        std::vector<std::vector<Vec3f>> init;
+        std::vector<std::vector<FitStroke>> theirs;
+        for (std::size_t gi = 0; gi < pts.size(); ++gi) {
+            if (mine[gi].empty()) continue;
+            fitted.push_back(gi);
+            init.push_back(pts[gi]);
+            std::vector<FitStroke> ss;
+            for (std::size_t si : mine[gi]) ss.push_back(strokes[si]);
+            theirs.push_back(std::move(ss));
+        }
+        GuideFitOptions fo = strokeFitOptions(setup, flag(a, "reroot", false) ? &rootScalp : nullptr);
+        if (!flag(a, "length", false)) fo.lengthRounds = 1;
+        const std::vector<FittedGuide> result = fitGuides(init, theirs, shell, &head, fo);
+        json guidesOut = json::array();
+        double sumBefore = 0.0, sumAfter = 0.0;
+        int views = 0;
+        for (std::size_t k = 0; k < fitted.size(); ++k) {
+            const std::size_t gi = fitted[k];
+            json fit = json::array();
+            for (std::size_t v = 0; v < result[k].views.size(); ++v) {
+                json e = fitViewJson(result[k].views[v], photos);
+                const StrokeMatch& m = before[mine[gi][v]];
+                e["meanPxBefore"] = r4(m.meanPx);
+                sumBefore += m.meanPx;
+                sumAfter += result[k].views[v].meanPx;
+                ++views;
+                fit.push_back(e);
+            }
+            guidesOut.push_back({{"id", which[gi]}, {"fit", fit}, {"length", r4(result[k].lengthAfter)}, {"lengthBefore", r4(result[k].lengthBefore)}});
+        }
+        json unmatched = json::array();
+        for (std::size_t si = 0; si < strokes.size(); ++si)
+            if (owner[si] < 0) unmatched.push_back({{"photo", photos[static_cast<std::size_t>(strokes[si].photo)].name}, {"stroke", strokes[si].stroke}});
+        std::vector<GuideId> changed;
+        if (!fitted.empty()) {
+            const MeshPtr scalp = scalpOf(g);
+            edit(g, "fit guides", [&](std::string&, std::string& hierarchy) {
+                GuideHierarchy h = hierarchyOf(g);
+                for (std::size_t k = 0; k < fitted.size(); ++k) {
+                    if (result[k].points.size() < 2) continue;
+                    h.setPoints(which[fitted[k]], result[k].points);
+                    changed.push_back(which[fitted[k]]);
+                }
+                h.evaluate(scalp.get());
+                hierarchy = h.toJson();
+            });
+        }
+        json out = {{"fitted", changed}, {"guides", guidesOut}, {"unmatched", unmatched},
+                    {"meanPxBefore", r4(views ? sumBefore / views : 0.0)}, {"meanPxAfter", r4(views ? sumAfter / views : 0.0)}, {"units", g.units()}};
+        out["about"] = "Each stroke went to the guide lying along it in its photo (covering a fair share of the guide and at least "
+                       "30% of the stroke, the same way, its mean distance within reach head radii; or the guide the stroke names), "
+                       "at most one stroke a photo a guide; each such guide was fitted to its strokes (as guides_from_strokes lift "
+                       "fit) in place, its root and length kept (reroot: rooted again under where its strokes start; length: grown "
+                       "or shortened to where they end). fit per stroke: meanPx / maxPx the distance in that photo's "
+                       "pixels from the guide's points the stroke covers to it, after (meanPxBefore: before), covered the share of "
+                       "the points it sees that the stroke covers, strokeCovered the share of the stroke the guide covers. "
+                       "unmatched: strokes no guide lies along (draw them nearer one, name it with guide, or raise reach).";
+        return textResult(withSummary(g, out));
+    }
+
+    ToolResult guidesFromStrokes(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        const json sets = strokeSets(a);
         const std::string defaultMirror = str(a, "mirror", "none");
+        const std::string liftMode = str(a, "lift", kDefaultStrokeLift);
+        if (liftMode != "fit" && liftMode != "shell") throw ToolError("lift is fit or shell");
+        const bool fitMode = liftMode == "fit";
+        const bool fuse = flag(a, "fuse", true);
         const LockSetup setup = lockSetup(g, str(a, "depth", "auto"), num(a, "volume", 0.0));
         const HairShell& shell = *setup.shell;
         const ScalpMesh& rootScalp = *setup.hair.scalp;
         const ScalpMesh& head = setup.hair.head ? *setup.hair.head : rootScalp;
         const bool clip = flag(a, "clip", true);
         const float center = static_cast<float>(num(a, "symmetry_center", 0.0));
+        // Every set's strokes read and lifted onto the shell (one photo's guess of their depth).
+        std::vector<StrokeSetRead> read;
+        std::size_t total = 0;
+        for (const json& s : sets) {
+            read.push_back(readStrokeSet(s, photos, defaultMirror, head));
+            total += read.back().lines.size();
+            if (total > 400) throw ToolError("at most 400 strokes a call");
+        }
+        struct StrokeRef {
+            std::size_t set = 0, line = 0;
+            LiftedStroke lifted;
+        };
+        std::vector<StrokeRef> all;
+        for (std::size_t si = 0; si < read.size(); ++si)
+            for (std::size_t k = 0; k < read[si].lines.size(); ++k) all.push_back({si, k, {}});
+        parallelFor(0, all.size(), [&](std::size_t i) {
+            const StrokeSetRead& rs = read[all[i].set];
+            all[i].lifted = liftStroke(*photos[rs.photo].camera, rs.lines[all[i].line], shell, rootScalp, StrokeLiftOptions{}, &head);
+        }, 1);
         std::vector<std::vector<Vec3f>> keys;
+        std::vector<std::vector<std::vector<Vec3f>>> madeBySet(read.size());
         json strokeInfo = json::array();
         ToolResult r;
-        std::size_t total = 0;
         GuideRootingOptions strokeRootingOptions = StrokeLiftOptions{}.rooting;
         strokeRootingOptions.headRadius = setup.frame.radius;
         strokeRootingOptions.center = setup.frame.center;
         strokeRootingOptions.up = setup.frame.up;
         GuideRootingCounts strokeRooting = guideRootingScale(rootScalp, strokeRootingOptions);
-        for (std::size_t si = 0; si < sets.size(); ++si) {
-            const json& s = sets[si];
-            AgentPhoto& photo = photoNamed(photos, str(s, "photo"));
-            if (!photo.camera) throw ToolError("the photo '" + photo.name + "' is not lined up yet (align_photo)");
-            std::vector<std::vector<std::array<float, 2>>> lines;
-            if (s.contains("strokes") == s.contains("strokes_image")) throw ToolError("each set gives strokes or strokes_image (one of them)");
-            const std::string root = str(s, "root", s.contains("strokes_image") ? "dot" : "first");
-            if (s.contains("strokes")) {
-                if (root != "first" && root != "last") throw ToolError("root for strokes is first or last");
-                for (std::size_t k = 0; k < s["strokes"].size(); ++k) {
-                    auto px = strokePixels(s["strokes"][k], "strokes[" + std::to_string(k) + "]");
-                    if (root == "last") std::reverse(px.begin(), px.end());
-                    lines.push_back(std::move(px));
-                }
-            } else {
-                if (root != "dot" && root != "top" && root != "bottom") throw ToolError("root for strokes_image is dot, top or bottom");
-                const RefImage image = loadImage(files().resolve(str(s, "strokes_image")), 3);
-                StrokeImageOptions io;
-                io.root = root;
-                io.photoWidth = photo.width;
-                io.photoHeight = photo.height;
-                if (s.contains("color")) io.color = {s["color"][0].get<float>(), s["color"][1].get<float>(), s["color"][2].get<float>()};
-                if (s.contains("image_transform")) {
-                    const json& t = s["image_transform"];
-                    io.scale = static_cast<float>(num(t, "scale", static_cast<double>(image.width) / std::max(1, photo.width)));
-                    if (t.contains("offset")) io.offset = {t["offset"][0].get<float>(), t["offset"][1].get<float>()};
-                    if (!(io.scale > 0.0f)) throw ToolError("image_transform.scale must be positive");
-                } else {
-                    io.scale = static_cast<float>(image.width) / static_cast<float>(std::max(1, photo.width));
-                    if (std::abs(static_cast<float>(image.height) / io.scale - static_cast<float>(photo.height)) > 0.02f * static_cast<float>(photo.height) + 1.0f) {
-                        throw ToolError("strokes_image is " + std::to_string(image.width) + " x " + std::to_string(image.height) + ", not the photo's " +
-                                        std::to_string(photo.width) + " x " + std::to_string(photo.height) +
-                                        " or a uniform scale of it: give image_transform {scale, offset}");
-                    }
-                }
-                for (const ImageStroke& is : strokesFromImage(image, io)) lines.push_back(is.points);
-                if (lines.empty()) throw ToolError("no strokes of that color found in " + str(s, "strokes_image"));
+        auto strokeName = [&](std::size_t i) {
+            return json{{"photo", photos[read[all[i].set].photo].name}, {"stroke", all[i].line + 1}};
+        };
+        // A made guide clipped where the photos show the hair end (kept whole when they disagree with most of it).
+        auto clipped = [&](const std::vector<Vec3f>& pts, json& e) {
+            if (!clip) return pts;
+            std::vector<Vec3f> out = clippedToPhotos(pts, shell);
+            const float length = guideLength(pts);
+            if (guideLength(out) < 0.5f * length) {
+                e["clipIgnored"] = "the photos show most of it off the hair (its depth is likely off): kept whole";
+                return pts;
             }
-            const std::string mirror = str(s, "mirror", defaultMirror);
-            if (mirror != "x" && mirror != "auto" && mirror != "none") throw ToolError("mirror is none, x or auto");
-            const bool mirrorOn = mirror == "x" || (mirror == "auto" && scalpLooksSymmetric(head));
-            std::vector<std::vector<Vec3f>> made;
-            for (std::size_t k = 0; k < lines.size(); ++k) {
-                if (++total > 400) throw ToolError("at most 400 strokes a call");
-                const LiftedStroke lifted = liftStroke(*photo.camera, lines[k], shell, rootScalp, StrokeLiftOptions{}, &head);
-                addRooting(strokeRooting, lifted.rooting);
+            if (out.size() < pts.size()) e["clippedFrom"] = r4(length);
+            return out;
+        };
+        auto keep = [&](const std::vector<Vec3f>& pts, bool mirror, json& e, const std::vector<std::size_t>& setsOf) {
+            keys.push_back(pts);
+            for (std::size_t si : setsOf) madeBySet[si].push_back(pts);
+            if (mirror) {
+                keys.push_back(mirroredGuide(pts, Vec3f(center, 0.0f, 0.0f), Vec3f(1.0f, 0.0f, 0.0f), &rootScalp));
+                e["mirrored"] = true;
+            }
+        };
+        auto dropped = [&](std::size_t i) {
+            const LiftedStroke& lifted = all[i].lifted;
+            json e = strokeName(i);
+            e["dropped"] = lifted.rooting.droppedGap ? "no scalp under it" : "too short once cut where it passes through the head";
+            e["rootGap"] = r4(lifted.rooting.rootGap);
+            strokeInfo.push_back(e);
+        };
+        for (const StrokeRef& sr : all) addRooting(strokeRooting, sr.lifted.rooting);
+        json fitInfo;
+        if (!fitMode) {
+            for (std::size_t i = 0; i < all.size(); ++i) {
+                const LiftedStroke& lifted = all[i].lifted;
                 if (lifted.points.size() < 2) {
-                    strokeInfo.push_back({{"photo", photo.name}, {"stroke", k + 1},
-                                          {"dropped", lifted.rooting.droppedGap ? "no scalp under it"
-                                                                                : "too short once cut where it passes through the head"},
-                                          {"rootGap", r4(lifted.rooting.rootGap)}});
+                    dropped(i);
                     continue;
                 }
-                std::vector<Vec3f> pts = clip ? clippedToPhotos(lifted.points, shell) : lifted.points;
-                // (the photos disagreeing with most of a drawn stroke say its depth is off, not that the hair ends: kept)
-                const bool clipKept = clip && guideLength(pts) < 0.5f * lifted.length;
-                if (clipKept) pts = lifted.points;
-                json e = {{"photo", photo.name}, {"stroke", k + 1}, {"points", pts.size()},
-                          {"hitShare", r4(static_cast<double>(lifted.hits) / std::max(1, lifted.hits + lifted.misses))},
-                          {"length", r4(guideLength(pts))}, {"root", vec(pts.front())}};
-                if (pts.size() < lifted.points.size()) e["clippedFrom"] = r4(lifted.length);
-                if (clipKept) e["clipIgnored"] = "the photos show most of it off the hair (its depth is likely off): kept whole";
+                json e = strokeName(i);
+                const std::vector<Vec3f> pts = clipped(lifted.points, e);
+                e["points"] = pts.size();
+                e["hitShare"] = r4(static_cast<double>(lifted.hits) / std::max(1, lifted.hits + lifted.misses));
+                e["length"] = r4(guideLength(pts));
+                e["root"] = vec(pts.front());
                 if (lifted.rooting.flipped) e["flipped"] = "drawn tip first: turned round (its end nearer the scalp is the root)";
                 if (lifted.rooting.connected) e["rootGap"] = r4(lifted.rooting.rootGap);
                 if (lifted.rooting.cut) e["cutAtHead"] = true;
-                keys.push_back(pts);
-                made.push_back(pts);
-                if (mirrorOn) {
-                    keys.push_back(mirroredGuide(pts, Vec3f(center, 0.0f, 0.0f), Vec3f(1.0f, 0.0f, 0.0f), &rootScalp));
-                    e["mirrored"] = true;
-                }
+                keep(pts, read[all[i].set].mirror, e, {all[i].set});
                 strokeInfo.push_back(e);
             }
-            if (r.content.size() < 4) {
-                const RefImage image = loadImage(photo.image, 3);
-                r.content.push_back({{"type", "image"}, {"data", base64Encode(strokesOverlayPng(image, *photo.camera, lines, made, 512))}, {"mimeType", "image/png"}});
+        } else {
+            // Fitted: each stroke's lift the start, strokes of one lock on several photos matched
+            // (or labelled alike with lock) and fitted as one guide (guide_fit.h).
+            std::vector<FitStroke> fs(all.size());
+            std::vector<std::vector<Vec3f>> lifts(all.size());
+            std::vector<int> forced(all.size(), -1);
+            std::map<std::string, int> lockIds;
+            bool anyForced = false;
+            for (std::size_t i = 0; i < all.size(); ++i) {
+                const StrokeSetRead& rs = read[all[i].set];
+                fs[i].camera = *photos[rs.photo].camera;
+                fs[i].pixels = rs.lines[all[i].line];
+                fs[i].photo = static_cast<int>(rs.photo);
+                fs[i].stroke = static_cast<int>(all[i].line + 1);
+                fs[i].rootGap = all[i].lifted.rooting.rootGap;
+                lifts[i] = all[i].lifted.points;
+                const std::string& lock = rs.locks[all[i].line];
+                if (!lock.empty()) {
+                    const auto it = lockIds.emplace(lock, static_cast<int>(lockIds.size())).first;
+                    forced[i] = it->second;
+                    anyForced = true;
+                }
             }
+            const GuideFitOptions fo = strokeFitOptions(setup, &rootScalp);
+            const StrokeFitResult fit = fitStrokes(fs, lifts, shell, &head, fuse, fo, {}, anyForced ? &forced : nullptr);
+            double residualSum = 0.0;
+            int residualViews = 0, strokesFused = 0;
+            for (const StrokeFitGroup& grp : fit.groups) {
+                if (grp.guide.points.size() < 2) continue;
+                const std::size_t first = static_cast<std::size_t>(grp.strokes.front());
+                const LiftedStroke& lifted = all[first].lifted;
+                json e = strokeName(first);
+                const std::vector<Vec3f> pts = clipped(grp.guide.points, e);
+                e["points"] = pts.size();
+                e["hitShare"] = r4(static_cast<double>(lifted.hits) / std::max(1, lifted.hits + lifted.misses));
+                e["length"] = r4(guideLength(pts));
+                e["liftedLength"] = r4(lifted.length);
+                e["root"] = vec(pts.front());
+                if (lifted.rooting.flipped) e["flipped"] = "drawn tip first: turned round (its end nearer the scalp is the root)";
+                json views = json::array();
+                for (const FitViewResidual& v : grp.guide.views) {
+                    views.push_back(fitViewJson(v, photos));
+                    residualSum += v.meanPx;
+                    ++residualViews;
+                }
+                e["fit"] = views;
+                bool mirror = false;
+                std::vector<std::size_t> setsOf;
+                for (int s : grp.strokes) {
+                    mirror = mirror || read[all[static_cast<std::size_t>(s)].set].mirror;
+                    setsOf.push_back(all[static_cast<std::size_t>(s)].set);
+                }
+                if (grp.strokes.size() > 1) {
+                    json fused = json::array();
+                    for (int s : grp.strokes) fused.push_back(strokeName(static_cast<std::size_t>(s)));
+                    e["fused"] = fused;
+                    strokesFused += static_cast<int>(grp.strokes.size());
+                }
+                if (grp.split) e["split"] = "matched with a stroke on another photo, but one guide fitted both badly: fitted alone";
+                keep(pts, mirror, e, setsOf);
+                strokeInfo.push_back(e);
+            }
+            for (std::size_t i = 0; i < all.size(); ++i)
+                if (all[i].lifted.points.size() < 2) dropped(i);
+            fitInfo = {{"guides", fit.groups.size()}, {"fused", fit.fused}, {"strokesFused", strokesFused}, {"split", fit.split},
+                       {"meanResidualPx", r4(residualViews ? residualSum / residualViews : 0.0)}, {"matching", fuse}};
+            if (anyForced) fitInfo["locks"] = lockIds.size();
+        }
+        for (std::size_t si = 0; si < read.size(); ++si) {
+            if (r.content.size() >= 4) break;
+            const AgentPhoto& photo = photos[read[si].photo];
+            const RefImage image = loadImage(photo.image, 3);
+            r.content.push_back({{"type", "image"}, {"data", base64Encode(strokesOverlayPng(image, *photo.camera, read[si].lines, madeBySet[si], 512))},
+                                 {"mimeType", "image/png"}});
         }
         // The fill: the hair region's roots from their nearest keys, combed where none is near.
         const bool fill = flag(a, "fill", false);
@@ -4815,12 +5144,19 @@ struct AgentTools::Impl {
             out["fill"] = fillInfo;
         }
         if (!look.is_null()) out["lookApplied"] = look;
+        out["lift"] = liftMode;
+        if (!fitInfo.is_null()) out["fit"] = fitInfo;
         out["about"] = "Each stroke's points lifted through its photo's camera onto the hair's shell (hitShare: the share whose ray met "
                        "it; the rest took the point nearest it), then rooted on the scalp (rooting: the end nearer the scalp is the "
                        "root, flipped: a stroke drawn tip first turned round; its first point joined to the nearest scalp point; cut "
                        "where it passed through the head; thresholds in scene units); clippedFrom: its length before the tail the "
-                       "photos show past the hair was cut; mirrored: a mirror guide was made too. The images: each photo with its "
-                       "strokes (red, the root a ring) and the guides made from them (yellow).";
+                       "photos show past the hair was cut; mirrored: a mirror guide was made too. lift fit (fit): that lift is the "
+                       "start; each guide is then fitted to its strokes on every photo (fit per stroke: meanPx and maxPx the "
+                       "distance in that photo's pixels from the guide's points it covers to the stroke, covered the share of the "
+                       "points it sees that the stroke covers, strokeCovered the share of the stroke the guide covers; "
+                       "liftedLength: the lift's length), rooted again under where the strokes start; fused: the strokes on other "
+                       "photos made one guide with it. The images: each photo with its strokes (red, the root a ring) and the "
+                       "guides made from them (yellow).";
         out["hint"] = "Check the guides with render_preview camera={\"photo\": ...} guides=true (and views front, right, back), then "
                       "compare_to_photo. reshape_guides fixes one in place; calling again replaces the groups.";
         r.content.push_back({{"type", "text"}, {"text", withSummary(g, out).dump(-1, ' ', false, json::error_handler_t::replace)}});
@@ -6486,6 +6822,15 @@ struct AgentTools::Impl {
                                                                        "guessed volume over it (volume).")},
                       {"volume", prop("number", "The guessed hair's thickness over the head where no photo sees it (scene units; default 0.3 head radii).")},
                       {"clip", prop("boolean", "Cut each guide's tail where the photos show the hair end (default true).")},
+                      {"lift", enumProp({"fit", "shell"}, "How strokes become guides: fit (default): each guide's points fitted so that, "
+                                                          "seen through each photo with a stroke for it, it lies on that stroke, its depth "
+                                                          "kept smooth (a stiff rod), out of the head, in the shell and toward the hair's "
+                                                          "outside each photo sees (from the shell lift as a start; strokes covering only "
+                                                          "part of a lock do not pull the rest); shell: each stroke's points cast onto "
+                                                          "the hair's shell from its own photo (the depth smoothed).")},
+                      {"fuse", prop("boolean", "lift fit: strokes of one lock drawn on several photos made one guide fitted to all of "
+                                               "them (default true): matched when one stroke's guide lies along the other stroke in its "
+                                               "photo and one guide fits both; or label them alike with a stroke's lock.")},
                       {"group", prop("string", "The stroke guides' group (default strokes).")},
                       {"replace", prop("boolean", "Empty the groups first (default true).")},
                       {"fill", prop("boolean", "Also fill the hair region with guides from the stroke guides (fill_mode): grown root "
@@ -6516,12 +6861,38 @@ struct AgentTools::Impl {
             add("guides_from_strokes", "Guides from strokes on photos",
                 "Turns strokes drawn on lined-up photos into guides, one undo step: each stroke (a line in the photo's pixels, root "
                 "end first, or strokes drawn in a color on an image of the photo, the root the end with a dot) is lifted through the "
-                "photo's camera onto the hair's shell the photos show (hair_shell), its root on the scalp under its first point, its "
-                "tail cut where the photos show the hair end; mirrored to the other side on request. Several photos at once with "
-                "sets. fill grows guides over the rest of the hair region from them (and the comb where none is near); apply_look "
-                "sets the lock look. Answers with the ids, per stroke its points, the share of its rays that met the shell and its "
-                "length, and a picture per photo of the strokes and the guides made.",
+                "photo's camera onto the hair's shell the photos show (hair_shell), its root on the scalp under its first point, "
+                "then (lift fit, default) fitted in 3D so it lies on its strokes in every photo, its depth smooth and toward the "
+                "hair's outside, strokes of one lock on several photos made one guide (fuse); its tail cut where the photos show "
+                "the hair end; mirrored to the other side on request. Several photos at once with sets. fill grows guides over the "
+                "rest of the hair region from them (and the comb where none is near); apply_look sets the lock look. Answers with "
+                "the ids, per guide its points, length, the strokes fused into it and how far it lies off each (pixels), and a "
+                "picture per photo of the strokes and the guides made.",
                 objectSchema(p), &Impl::guidesFromStrokes);
+        }
+        {
+            json p = strokeSetProperties();
+            p.erase("mirror");
+            p["groom"] = groom;
+            p["sets"] = {{"type", "array"}, {"items", {{"type", "object"}}},
+                         {"description", "Strokes from several photos in one call: each {photo, strokes or strokes_image, image_transform, "
+                                         "color, root} as the arguments of the same names."}};
+            p["ids"] = {{"type", "array"}, {"items", {{"type", "integer"}}}, {"description", "The guides to fit (default: group's, or every guide)."}};
+            p["group"] = prop("string", "The guides to fit: this group's.");
+            p["reach"] = prop("number", "How far off a stroke (in its photo, head radii at the head's depth; default 0.3) a guide may lie "
+                                        "and still take it.");
+            p["reroot"] = prop("boolean", "Root each fitted guide again under where its strokes start (default false: roots stay).");
+            p["length"] = prop("boolean", "Let each guide grow or shorten to where its strokes end (default false: lengths stay).");
+            p["depth"] = enumProp({"auto", "photos", "volume"}, "The shell the fit keeps the guides in: auto, photos (insist on them), volume (the guess).");
+            p["volume"] = prop("number", "The guessed volume's thickness (scene units; default 0.3 head radii).");
+            add("fit_guides", "Fit guides to strokes on photos",
+                "Refits existing guides to strokes drawn on the lined-up photos, in place (ids, attributes and tubes kept), one undo "
+                "step: each stroke (as guides_from_strokes takes them; a stroke {\"points\": ..., \"guide\": id} names its guide) "
+                "goes to the guide lying along it in its photo, and each such guide is fitted so it lies on its strokes in every "
+                "photo, its depth smooth (a stiff rod), out of the head, in the hair's shell and toward the outside each photo sees "
+                "(guides_from_strokes lift fit). Answers per guide how far it lay off each of its strokes before and after (pixels) "
+                "and the strokes no guide took.",
+                objectSchema(p), &Impl::fitGuidesToStrokes);
         }
         {
             json p = combProperties();

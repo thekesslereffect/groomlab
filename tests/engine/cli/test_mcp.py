@@ -348,6 +348,9 @@ def everything_else(c, root):
     assert lifted["rooting"]["thresholds"]["maxRootGap"] == "none", lifted  # (a drawn stroke is never dropped for its gap)
     assert lifted["fill"]["guides"] > 10 and "subClump" in lifted["lookApplied"], lifted
     assert lifted["fill"]["mode"] == "field" and lifted["fill"]["field"]["cells"] > 0, lifted["fill"]
+    # (fitted by default: each guide on its stroke in the photo, nothing to fuse with one photo)
+    assert lifted["lift"] == "fit" and lifted["fit"]["fused"] == 0 and lifted["fit"]["guides"] == 2, lifted["fit"]
+    assert all(s["fit"][0]["photo"] == "front" and s["fit"][0]["meanPx"] < 3.0 for s in lifted["strokes"]), lifted["strokes"]
     # The region filled between the stroke guides through their field, scored against the photo.
     filled, _ = c.call("fill_guides", dict(f, group="strokes", count=40))
     assert filled["group"] == "fill" and filled["keys"] == 4 and filled["guides"] > 10, filled
@@ -355,8 +358,9 @@ def everything_else(c, root):
     assert stops["length"] + stops["faded"] + stops["hull"] + stops["turn"] + stops["nothing"] == filled["roots"], filled
     assert 0.0 <= filled["score"]["mean"] <= 1.0 and filled["score"]["photos"][0]["photo"] == "front", filled
     old_fill, _ = c.call("guides_from_strokes", dict(f, photo="front", strokes=strokes, fill=True, fill_count=20, fill_mode="blend",
-                                                    group="strokes2", fill_group="strokeFill2"))
+                                                    group="strokes2", fill_group="strokeFill2", lift="shell"))
     assert old_fill["fill"]["mode"] == "blend" and old_fill["fill"]["guides"] > 5, old_fill["fill"]
+    assert old_fill["lift"] == "shell" and "fit" not in old_fill and "fit" not in old_fill["strokes"][0], old_fill
     c.call("guide_op", dict(f, op="delete_guides", group="strokes2"))
     c.call("guide_op", dict(f, op="delete_guides", group="strokeFill2"))
     assert len([x for x in result["content"] if x["type"] == "image"]) == 1
@@ -365,6 +369,14 @@ def everything_else(c, root):
     reshaped, _ = c.call("reshape_guides", dict(f, guides=[{"id": one["id"], "points": moved}]))
     again = c.call("get_guides", dict(f, ids=[one["id"]]))[0]["guides"][0]
     assert reshaped["count"] == 1 and again["group"] == "strokes" and again["id"] == one["id"], (reshaped, again)
+    # Fitted back onto its stroke in place (the stroke naming its guide), the others left as they are.
+    refit, _ = c.call("fit_guides", dict(f, group="strokes", photo="front", strokes=[{"points": strokes[0], "guide": one["id"]}]))
+    assert refit["fitted"] == [one["id"]] and refit["unmatched"] == [], refit
+    assert refit["meanPxAfter"] < 2.0 < refit["meanPxBefore"], refit
+    back = c.call("get_guides", dict(f, ids=[one["id"]]))[0]["guides"][0]
+    assert back["id"] == one["id"] and back["group"] == "strokes", back
+    _, bad = c.call("fit_guides", dict(f, group="strokes", photo="front", strokes=[{"points": strokes[0], "guide": 999999}]), expect_error=True)
+    assert "999999" in json.dumps(bad), bad
     combed, _ = c.call("comb_guides", dict(f, count=40, part="none", sweep={"front": "back", "sides": "down"}))
     assert combed["guides"] > 10 and combed["shell"]["from"] == "photos" and combed["rooting"]["flipped"] == 0, combed
     assert combed["mode"] == "field" and combed["field"]["keys"] > 5, combed
@@ -446,7 +458,7 @@ def main():
                        "measure_guides", "add_photo", "photo_view", "mesh_landmarks", "align_photo", "photo_edit",
                        "guides_from_photos", "compare_to_photo", "checkpoint", "restore", "batch", "show_map", "suggest_pairs", "root_tube", "tube_levels", "tube_shape", "check_expression", "import_animation",
                        "animate_scalp", "simulate", "sim_cache", "export_cards", "export_game", "stats", "guides_from_strokes", "comb_guides",
-                       "hair_shell", "photo_project", "reshape_guides", "score_guides", "fill_guides"]:
+                       "hair_shell", "photo_project", "reshape_guides", "score_guides", "fill_guides", "fit_guides"]:
             assert wanted in names, wanted
         assert c.request("tools/call", {"name": "no_such_tool", "arguments": {}})["error"]["code"] == -32602
         assert c.request("no/such/method")["error"]["code"] == -32601

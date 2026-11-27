@@ -625,7 +625,7 @@ TEST(AgentTools, PhotosRootsTubesExpressionsAndSimulation) {
 TEST(AgentTools, LockToolsStrokesCombShellAndReshape) {
     SessionTarget target;
     AgentTools tools(target);
-    for (const char* name : {"guides_from_strokes", "comb_guides", "hair_shell", "photo_project", "reshape_guides"}) EXPECT_TRUE(tools.has(name)) << name;
+    for (const char* name : {"guides_from_strokes", "fit_guides", "comb_guides", "hair_shell", "photo_project", "reshape_guides"}) EXPECT_TRUE(tools.has(name)) << name;
     call(tools, "new_groom", {{"name", "ball"}, {"mesh", "ball"}});
     AgentGroom& g = target.groom("ball");
 

@@ -291,6 +291,20 @@ would: a few key locks drawn on the photos, the rest combed and filled in from t
   to the other side. With `fill`, the rest of the hair region gets guides grown through the flow
   the strokes make (below), combed where no stroke is near; `fill_mode blend` copies each root's
   nearest strokes' shapes instead.
+- **Fitting the strokes in 3D** (`lift fit`, the default): that lift is only the start. Each guide is
+  then fitted so that, seen through each photo with a stroke for it, it lies on that stroke, while
+  its depth (which one photo cannot see) stays smooth like a stiff rod, out of the head, inside the
+  shell and toward the hair's outside as each photo sees it. Rays that only graze the shell no
+  longer make depth zig-zags or loops, and a start drawn out on the hair (a side lock seen where it
+  comes out from under other hair) is carried back along the lock onto the scalp instead of joined
+  to it by a straight spike. The same lock drawn on two photos (front and side, say) becomes one
+  guide fitted to both strokes, its depth then known from the photos: strokes are matched when one
+  guide fits both and stays where each photo could see it, or label them yourself by giving the
+  strokes the same `lock`. A stroke drawn over only part of a lock does not pull the rest of it.
+  The answer says, per guide, how far it lies off each of its strokes in pixels and which strokes
+  were fused into it; `lift shell` keeps the plain lift.
+- **Refitting guides** (`fit_guides`): strokes drawn later on any photo refit the guides lying along
+  them in place, keeping their ids (a stroke can name its guide with `guide`).
 - **Filling between guides** (`fill_guides`, and the fill of the two tools above): a smooth field of
   hair directions is solved through the hair's shell that follows each guide root to tip, fades out
   a little past each guide's tip and leans out of the scalp near it; new guides grow through it root
