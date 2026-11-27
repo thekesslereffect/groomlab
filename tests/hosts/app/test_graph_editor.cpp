@@ -857,6 +857,61 @@ TEST(AppGraphEditor, ANodesActionsSitOverItsParams) {
     EXPECT_TRUE(panel->actionsBar()->isHidden());
 }
 
+TEST(AppGraphEditor, ASculptNodesPanelEntersAndLeavesSculpting) {
+    // A Sculpt node's actions: Sculpt (the brushes shape its guides), Done Sculpting in its place
+    // while they do, which is what Esc in the brush tool does (MainWindow::leaveSculptNode: no undo
+    // step); the bar follows the target however it changes (Esc, a Correctives row).
+    Window w;
+    GroomDocument* doc = w.doc();
+    auto settle = [] {
+        for (int i = 0; i < 4; ++i) QCoreApplication::processEvents();
+    };
+    for (const char* type : {"SculptGuides", "SculptStrands"}) {
+        std::string sculpt;
+        ASSERT_EQ(doc->addNode(type, 0.0f, 600.0f, &sculpt), "");
+        w.graph()->refresh();
+        w.graph()->selectNode(sculpt);
+        QCoreApplication::processEvents();
+        ParamPanel* panel = nullptr;
+        for (ParamPanel* p : w.window.findChildren<ParamPanel*>()) {
+            if (p->node() == sculpt) panel = p;
+        }
+        ASSERT_NE(panel, nullptr) << type;
+        auto has = [panel](const std::string& id) {
+            const std::vector<std::string> ids = panel->actionIds();
+            return std::find(ids.begin(), ids.end(), id) != ids.end();
+        };
+        EXPECT_TRUE(has("sculpt.brush")) << type;
+        EXPECT_FALSE(has("sculpt.done")) << type;
+        QPushButton* enter = panel->actionButton("sculpt.brush");
+        ASSERT_NE(enter, nullptr);
+        EXPECT_EQ(enter->text(), QStringLiteral("Sculpt"));
+        const std::string undo = doc->undoText();
+        enter->click();
+        settle();  // (the click's action, then the bar built again)
+        EXPECT_EQ(doc->sculptTarget(), sculpt) << type;
+        EXPECT_FALSE(has("sculpt.brush")) << type;
+        QPushButton* done = panel->actionButton("sculpt.done");
+        ASSERT_NE(done, nullptr) << type;
+        EXPECT_EQ(done->text(), QStringLiteral("Done Sculpting"));
+        done->click();
+        settle();
+        EXPECT_EQ(doc->sculptTarget(), "") << type;
+        EXPECT_EQ(doc->undoText(), undo) << "what the brushes shape is no undo step";
+        EXPECT_TRUE(has("sculpt.brush")) << type;
+        EXPECT_FALSE(has("sculpt.done")) << type;
+        // Esc in the brush tool (its slot): the same, the bar following.
+        panel->actionButton("sculpt.brush")->click();
+        settle();
+        ASSERT_TRUE(has("sculpt.done")) << type;
+        EXPECT_TRUE(w.window.leaveSculptNode());
+        settle();
+        EXPECT_EQ(doc->sculptTarget(), "");
+        EXPECT_TRUE(has("sculpt.brush")) << type;
+        EXPECT_FALSE(w.window.leaveSculptNode()) << "nothing to leave";
+    }
+}
+
 TEST(AppGraphEditor, UnitsShowRealMeasures) {
     const std::string before = unitChoice("width");
     setUnitChoice("width", "um");

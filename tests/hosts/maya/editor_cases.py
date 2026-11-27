@@ -887,7 +887,24 @@ class GraphEditorTest(unittest.TestCase):
             for k, p in enumerate(g.points):
                 for i in range(3):
                     self.assertAlmostEqual(shown[3 * k + i], p[i], delta=1e-3)
+        # Done Sculpting on its panel: what Esc in the brush tool does (sculpts.leave), no undo step;
+        # Sculpt in its place, which brushes it again; Esc (or a Correctives row) changes it too.
+        undo_name = cmds.undoInfo(query=True, undoName=True)
+        self._action("Done Sculpting").click()
+        wait(50)  # actions run once the click is over
+        self.assertIsNone(sculpts.target(self.groom))
+        self.assertEqual(cmds.undoInfo(query=True, undoName=True), undo_name)
+        self.assertFalse([b for b in self.editor.params.findChildren(QtWidgets.QPushButton)
+                          if b.objectName() == "nodeAction_DoneSculpting" and b.isVisibleTo(self.editor.params)])
+        self._action("Sculpt").click()
+        wait(50)
+        self.assertEqual(sculpts.target(self.groom), sculpt)
+        self._action("Done Sculpting")
+        self.assertEqual(sculpts.leave(self.groom), sculpt)  # (Esc in the brush tool)
+        wait(50)  # (the groom's sculptNode watched: the panel follows)
+        self._action("Sculpt")
         # The node's menu turns brushing it off: the base groom's guides again.
+        self.editor.target_sculpt(sculpt)
         self.editor.target_sculpt(None)
         self.assertIsNone(sculpts.target(self.groom))
 

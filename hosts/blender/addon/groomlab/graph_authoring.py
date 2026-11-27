@@ -1489,6 +1489,37 @@ class GROOMLAB_OT_graph_sculpt_clear(_NodeOp):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_graph_sculpt_brush(_NodeOp):
+    """Brush this node: the brushes shape the guides it hands on (a SculptStrands node's: its strands), each stroke kept in the node"""
+    bl_idname = "groomlab.graph_sculpt_brush"
+    bl_label = "Sculpt"
+    bl_options = {"REGISTER"}  # (what brushes shape is a tool setting: no undo step, as Esc)
+    action_id = "sculpt.brush"
+
+    def execute(self, context):
+        from . import tools
+        scalp = _ge().context_groom(context)
+        try:
+            tools.sculpt_target(scalp, node=self.target(context))
+            tools.refresh_correctives(scalp, context.scene)
+        except HelperError as e:
+            return _fail(self, e)
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_graph_sculpt_done(_NodeOp):
+    """Back to brushing the guides: the brushes leave this node, its strokes kept (Esc in the brush tool does it too)"""
+    bl_idname = "groomlab.graph_sculpt_done"
+    bl_label = "Done Sculpting"
+    bl_options = {"REGISTER"}  # (no undo step, as Esc)
+    action_id = "sculpt.done"
+
+    def execute(self, context):
+        from . import tool_ops
+        tool_ops.leave_sculpt_node(context, _ge().context_groom(context))  # (Esc in the brush tool's)
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_graph_sculpt_sections(_NodeOp):
     """Brush the braid's sections: each section's curve a guide the brushes shape (a Sculpt node keeps the strokes), its hair following it"""
     bl_idname = "groomlab.graph_sculpt_sections"
@@ -1602,6 +1633,8 @@ def _bind_all():
     bind("node.brushSculpt", "groomlab.graph_brush_sculpt", _n,
          lambda ctx, item: bool(ctx.scalp) and sculpt_target(ctx.scalp) == ctx.node)
     bind("sculpt.clearEdits", "groomlab.graph_sculpt_clear", _n)
+    bind("sculpt.brush", "groomlab.graph_sculpt_brush", _n)
+    bind("sculpt.done", "groomlab.graph_sculpt_done", _n)
     bind("braid.sculptSections", "groomlab.graph_sculpt_sections", _n)
     bind("braid.doneSculptSections", "groomlab.graph_sculpt_sections_done", _n)
 
@@ -1616,7 +1649,8 @@ classes = (GROOMLAB_OT_graph_group, GROOMLAB_OT_graph_ungroup, GROOMLAB_OT_graph
            GROOMLAB_OT_graph_open_nodes_folder, GROOMLAB_OT_graph_save_preset, GROOMLAB_OT_graph_copy,
            GROOMLAB_OT_graph_paste, GROOMLAB_OT_graph_backdrop_add, GROOMLAB_OT_graph_backdrop_rename,
            GROOMLAB_OT_graph_backdrop_color, GROOMLAB_OT_graph_backdrop_delete, GROOMLAB_OT_graph_rename,
-           GROOMLAB_OT_graph_delete, GROOMLAB_OT_graph_brush_sculpt, GROOMLAB_OT_graph_sculpt_clear, GROOMLAB_OT_graph_sculpt_sections,
+           GROOMLAB_OT_graph_delete, GROOMLAB_OT_graph_brush_sculpt, GROOMLAB_OT_graph_sculpt_clear,
+           GROOMLAB_OT_graph_sculpt_brush, GROOMLAB_OT_graph_sculpt_done, GROOMLAB_OT_graph_sculpt_sections,
            GROOMLAB_OT_graph_sculpt_sections_done, GROOMLAB_OT_graph_paint_param)
 
 

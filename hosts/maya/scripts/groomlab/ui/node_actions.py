@@ -32,6 +32,9 @@ def node_actions(self, name):
     from maya import cmds
     node_type = self.editor.model.node_type(name)
     groom = self.editor.groom
+    # What the brushes shape as these actions are built (a Sculpt node's Sculpt or Done Sculpting, a
+    # Braid's Sculpt Sections or Done): GraphEditor.sculpt_target_soon builds them again when it changes.
+    self.shown_sculpt_target = self.editor.sculpt_target()
     buttons = []
     run = self.action_runner
 
@@ -227,8 +230,9 @@ def node_actions(self, name):
         what = "strands" if node_type == "SculptStrands" else "guides"
         buttons.append(QtWidgets.QLabel(
             "%s. %s" % ("%d %s sculpted" % (edited, what) if edited else "No strokes yet",
-                        "Brushes shape this node's %s (shaping brushes; Esc in the brush tool: done)" % what if brushing else
-                        "Select this node (or its row in Sculpt > Correctives) to brush its %s" % what)))
+                        "Brushes shape this node's %s (shaping brushes; Done Sculpting or Esc in the brush tool: "
+                        "the guides again)" % what if brushing else
+                        "Sculpt (or its row in Sculpt > Correctives) brushes its %s" % what)))
     elif node_type == "Simulate":
         # One click to a preset's settings (the core's, every host's), into the editor's graph.
         from groomlab import sim
