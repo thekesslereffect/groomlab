@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
@@ -176,6 +177,77 @@ constexpr float kWavyShare = 0.12f, kWavyAmplitude = 15.0f;
 // read a medium brown).
 constexpr float kPhotoWhite = 0.5f;
 
+// A separable Gaussian blur of `channels` floats a pixel (clamped at the borders).
+std::vector<float> gaussianBlurred(const std::vector<float>& in, int w, int h, int channels, float sigma) {
+    const int r = std::max(1, static_cast<int>(std::ceil(2.5f * sigma)));
+    std::vector<float> g(static_cast<std::size_t>(2 * r + 1));
+    float total = 0.0f;
+    for (int i = -r; i <= r; ++i) total += g[static_cast<std::size_t>(i + r)] = pm::exp(-0.5f * static_cast<float>(i * i) / (sigma * sigma));
+    for (float& x : g) x /= total;
+    const std::size_t c = static_cast<std::size_t>(channels);
+    std::vector<float> tmp(in.size(), 0.0f), out(in.size(), 0.0f);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            for (int i = -r; i <= r; ++i) {
+                const int xx = std::clamp(x + i, 0, w - 1);
+                for (std::size_t k = 0; k < c; ++k)
+                    tmp[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * c + k] +=
+                        g[static_cast<std::size_t>(i + r)] * in[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(xx)) * c + k];
+            }
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            for (int i = -r; i <= r; ++i) {
+                const int yy = std::clamp(y + i, 0, h - 1);
+                for (std::size_t k = 0; k < c; ++k)
+                    out[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * c + k] +=
+                        g[static_cast<std::size_t>(i + r)] * tmp[(static_cast<std::size_t>(yy) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * c + k];
+            }
+    return out;
+}
+
+// A picture's strand directions from its brightness gradients: the structure tensor (Sobel) smoothed
+// over `sigma` pixels, the strands across the gradient, the coherence the confidence (as an
+// OrientationField: its tensor the doubled-angle vectors sample() reads). On curls it follows each
+// strand where the Gabor bank (tuned to straight stripes) blurs them.
+OrientationField structureField(const RefImage& image, float sigma) {
+    OrientationField f;
+    const int w = image.width, h = image.height;
+    f.width = w;
+    f.height = h;
+    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+    std::vector<float> t(3 * n, 0.0f);
+    const std::size_t channels = static_cast<std::size_t>(std::max(1, image.channels));
+    auto at = [&](int x, int y) {
+        const std::size_t q = (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * channels;
+        if (channels < 3) return image.pixels[q];
+        return (image.pixels[q] + image.pixels[q + 1] + image.pixels[q + 2]) / 3.0f;
+    };
+    for (int y = 1; y + 1 < h; ++y)
+        for (int x = 1; x + 1 < w; ++x) {
+            const float gx = (at(x + 1, y - 1) + 2.0f * at(x + 1, y) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2.0f * at(x - 1, y) + at(x - 1, y + 1));
+            const float gy = (at(x - 1, y + 1) + 2.0f * at(x, y + 1) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2.0f * at(x, y - 1) + at(x + 1, y - 1));
+            const std::size_t q = static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
+            t[3 * q] = gx * gx;
+            t[3 * q + 1] = gy * gy;
+            t[3 * q + 2] = gx * gy;
+        }
+    t = gaussianBlurred(t, w, h, 3, sigma);
+    f.angle.assign(n, 0.0f);
+    f.confidence.assign(n, 0.0f);
+    f.tensor.assign(2 * n, 0.0f);
+    for (std::size_t q = 0; q < n; ++q) {
+        const float a = t[3 * q], b = t[3 * q + 1], c = t[3 * q + 2];
+        const float norm = std::hypot(a - b, 2.0f * c), coherence = norm / std::max(1e-9f, a + b);
+        if (norm < 1e-12f) continue;
+        // (the strands across the gradient: the doubled angle turned half a turn)
+        f.tensor[2 * q] = -coherence * (a - b) / norm;
+        f.tensor[2 * q + 1] = -coherence * 2.0f * c / norm;
+        f.confidence[q] = coherence;
+        f.angle[q] = std::fmod(0.5f * pm::atan2(2.0f * c, a - b) + 0.5f * kPi + kPi, kPi);
+    }
+    return f;
+}
+
 float median(std::vector<float> values) {
     if (values.empty()) return 0.0f;
     const std::size_t mid = values.size() / 2;
@@ -204,6 +276,7 @@ struct PreparedView {
     float scalpDepth = 0.0f;            // the scalp's typical depth along the view (0: unseen)
     float reachWorld = 0.0f;            // how far the hair reaches past the scalp's outline (its 90th percentile), scene units
     std::shared_ptr<const OrientationField> coarse;  // the field smoothed past its curls
+    std::shared_ptr<const OrientationField> fine;    // the field with its curls (field may become coarse)
     CurlEstimate curl;
     std::vector<float> hintWay;         // 3 a pixel: the directed hints' way (u, v) and their strength (empty: none)
     std::vector<float> hintLength;      // 2 a pixel: how long the drawn lines say the hair is from there on (scene units)
@@ -951,6 +1024,8 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
                        scalpDepth > 0.0f ? scalpDepth / static_cast<float>(pv.camera.focalPx) : 0.0f);
         // The locks' flow past their curls, and the curls themselves.
         if (!view.field) {
+            pv.fine = !pv.rgb.empty() ? std::make_shared<OrientationField>(structureField(pv.rgb, std::max(1.5f, static_cast<float>(std::max(pv.width, pv.height)) / 250.0f)))
+                                      : pv.field;
             pv.coarse = std::make_shared<OrientationField>(coarseField(*pv.field, pv.mask, 0.02f * static_cast<float>(std::max(pv.width, pv.height))));
             pv.curl = measureCurl(*pv.field, *pv.coarse, pv.mask);
         }
@@ -1754,6 +1829,205 @@ std::vector<Vec3f> volumized(const Context& ctx, const std::vector<Vec3f>& path,
     return out;
 }
 
+// ---- Locks: each guide's own curl ----------------------------------------------------------------
+
+// A lock's curl along a guide as one view shows it: the photo's fine strand direction against the
+// guide's projected way, sampled a pixel apart along the longest stretch the view sees in the hair,
+// fitted with one wave (period near the view's curl period): a(s) = amplitude cos(2 pi s / period +
+// phase). quality: the wave's share of the swing (1 all of it).
+struct LockFit {
+    bool ok = false;
+    int view = -1;
+    float periodPx = 0.0f, amplitude = 0.0f, phase = 0.0f, quality = 0.0f;
+    float pxPerUnit = 0.0f;    // across the view at the stretch's depth (focal / depth)
+    float pxPerLength = 0.0f;  // along it: projected pixels per unit of the guide's length
+    std::size_t first = 0, last = 0;  // the stretch (path indices)
+    std::vector<float> s;      // each path point's place along the wave, pixels (extended past the stretch)
+    float score = 0.0f;        // to pick the view: quality times the turns seen
+    float shiftPx = 0.0f;      // the path moved this far sideways in the view onto the lock's middle
+    // The lock's own path in the view: how far its strands stand sideways off the guide (pixels, along
+    // the guide's way turned a quarter) at each pixel along the stretch: the swing summed up, its
+    // drift over a turn taken out (the guide follows the lock's middle).
+    std::vector<float> offset;
+    // Sideways off the guide at `s` pixels along (past the stretch: the fitted wave, met smoothly).
+    float sideways(float at) const {
+        const float radius = std::tan(std::min(amplitude, 1.2f)) * periodPx / (2.0f * kPi);
+        const auto wave = [&](float x) { return radius * std::sin(2.0f * kPi * x / periodPx + phase); };
+        if (offset.empty()) return wave(at);
+        const float end = static_cast<float>(offset.size() - 1);
+        if (at >= 0.0f && at <= end) {
+            const std::size_t k = std::min(offset.size() - 2, static_cast<std::size_t>(at));
+            const float t = at - static_cast<float>(k);
+            return offset[k] + (offset[k + 1] - offset[k]) * t;
+        }
+        const float edge = at < 0.0f ? 0.0f : end, past = std::abs(at - edge);
+        const float meet = std::clamp(1.0f - past / (0.25f * periodPx), 0.0f, 1.0f);
+        return wave(at) + (offset[at < 0.0f ? 0 : offset.size() - 1] - wave(edge)) * meet;
+    }
+};
+
+// `shiftPx`: the path tried that far sideways in the view (its projected way turned a quarter).
+LockFit fitLock(const PreparedView& v, int viewIndex, const std::vector<Vec3f>& path, float shiftPx = 0.0f) {
+    LockFit fit;
+    fit.view = viewIndex;
+    fit.shiftPx = shiftPx;
+    const OrientationField* fine = v.fine ? v.fine.get() : v.field.get();
+    if (!fine || v.curl.wavelengthPx <= 0.0f || path.size() < 4) return fit;
+    const std::size_t n = path.size();
+    std::vector<float> u(n), vv(n), z(n);
+    std::vector<std::uint8_t> seen(n, 0), front(n, 0);
+    for (std::size_t i = 0; i < n; ++i) front[i] = v.camera.project(path[i], u[i], vv[i], &z[i]) ? 1 : 0;
+    if (shiftPx != 0.0f) {
+        const std::vector<float> u0 = u, v0 = vv;
+        for (std::size_t i = 0; i < n; ++i) {
+            const std::size_t a = i > 0 ? i - 1 : 0, b = std::min(n - 1, i + 1);
+            const float du = u0[b] - u0[a], dv = v0[b] - v0[a], l = std::hypot(du, dv);
+            if (l < 1e-6f) continue;
+            u[i] = u0[i] - dv / l * shiftPx;
+            vv[i] = v0[i] + du / l * shiftPx;
+        }
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!front[i] || !v.inFrame(u[i], vv[i])) continue;
+        seen[i] = !v.hidden(u[i], vv[i], z[i]) && v.mask.sample(u[i], vv[i]) >= 0.5f ? 1 : 0;
+    }
+    // The longest stretch seen.
+    std::size_t best0 = 0, best1 = 0;
+    for (std::size_t i = 0; i < n;) {
+        if (!seen[i]) {
+            ++i;
+            continue;
+        }
+        std::size_t j = i;
+        while (j + 1 < n && seen[j + 1]) ++j;
+        if (j - i > best1 - best0) best0 = i, best1 = j;
+        i = j + 1;
+    }
+    if (best1 <= best0 + 2) return fit;
+    std::vector<float> along(n, 0.0f), length(n, 0.0f);
+    for (std::size_t i = 1; i < n; ++i) length[i] = length[i - 1] + (path[i] - path[i - 1]).length();
+    for (std::size_t i = best0 + 1; i <= best1; ++i) along[i] = along[i - 1] + std::hypot(u[i] - u[i - 1], vv[i] - vv[i - 1]);
+    const float pixels = along[best1], period0 = v.curl.wavelengthPx;
+    if (pixels < 1.5f * period0 || length[best1] - length[best0] <= 0.0f) return fit;
+    // Sampled a pixel apart: the fine direction's angle to the guide's way.
+    std::vector<float> a, at;
+    const float fx = static_cast<float>(fine->width) / static_cast<float>(v.width), fy = static_cast<float>(fine->height) / static_cast<float>(v.height);
+    std::size_t seg = best0;
+    for (float s = 0.0f; s <= pixels; s += 1.0f) {
+        while (seg + 1 < best1 && along[seg + 1] < s) ++seg;
+        const float l = std::max(1e-6f, along[seg + 1] - along[seg]), t = std::clamp((s - along[seg]) / l, 0.0f, 1.0f);
+        const float pu = u[seg] + (u[seg + 1] - u[seg]) * t, pv = vv[seg] + (vv[seg + 1] - vv[seg]) * t;
+        const float tu = (u[seg + 1] - u[seg]) / l, tv = (vv[seg + 1] - vv[seg]) / l;
+        float du = 0, dv = 0, conf = 0;
+        if (!fine->sample(pu * fx, pv * fy, du, dv, conf) || conf < 0.05f) continue;
+        float angle = pm::atan2(tu * dv - tv * du, tu * du + tv * dv);
+        if (angle > 0.5f * kPi) angle -= kPi;
+        if (angle < -0.5f * kPi) angle += kPi;
+        a.push_back(angle);
+        at.push_back(s);
+    }
+    if (static_cast<float>(a.size()) < 1.2f * period0) return fit;
+    double mean = 0.0;
+    for (float x : a) mean += x;
+    mean /= static_cast<double>(a.size());
+    double var = 0.0;
+    for (float& x : a) {
+        x -= static_cast<float>(mean);
+        var += static_cast<double>(x) * x;
+    }
+    var /= static_cast<double>(a.size());
+    if (var < 1e-6) return fit;
+    double bestPower = -1.0, bestRe = 0.0, bestIm = 0.0;
+    float bestPeriod = period0;
+    for (float period = 0.6f * period0; period <= 1.6f * period0; period += std::max(0.5f, 0.04f * period0)) {
+        if (pixels < 1.2f * period) break;
+        const double w = 2.0 * kPi / period;
+        double re = 0.0, im = 0.0;
+        for (std::size_t k = 0; k < a.size(); ++k) {
+            re += a[k] * pm::cos(static_cast<float>(w * at[k]));
+            im -= a[k] * pm::sin(static_cast<float>(w * at[k]));
+        }
+        const double power = re * re + im * im;
+        if (power > bestPower) bestPower = power, bestRe = re, bestIm = im, bestPeriod = period;
+    }
+    const double count = static_cast<double>(a.size());
+    // The swing summed along the stretch (a pixel a sample; gaps where the field is unsure carry the
+    // last swing on), each turn's mean taken out.
+    {
+        std::vector<float> raw(static_cast<std::size_t>(std::floor(pixels)) + 1, 0.0f);
+        std::size_t k = 0;
+        float swing = 0.0f, side = 0.0f;
+        for (std::size_t x = 1; x < raw.size(); ++x) {
+            while (k < at.size() && at[k] <= static_cast<float>(x)) swing = a[k++];
+            side += std::tan(std::clamp(swing, -1.05f, 1.05f));
+            raw[x] = side;
+        }
+        const int half = std::max(1, static_cast<int>(0.5f * bestPeriod));
+        fit.offset.resize(raw.size());
+        for (std::size_t x = 0; x < raw.size(); ++x) {
+            const std::size_t lo = x > static_cast<std::size_t>(half) ? x - static_cast<std::size_t>(half) : 0;
+            const std::size_t hi = std::min(raw.size() - 1, x + static_cast<std::size_t>(half));
+            double m = 0.0;
+            for (std::size_t y = lo; y <= hi; ++y) m += raw[y];
+            fit.offset[x] = raw[x] - static_cast<float>(m / static_cast<double>(hi - lo + 1));
+        }
+    }
+    fit.periodPx = bestPeriod;
+    fit.amplitude = static_cast<float>(2.0 * std::sqrt(std::max(bestPower, 0.0)) / count);
+    // (the lock's own path at most half again as far off the guide as the fitted wave swings: what
+    // the summed swing drifts past that is the field's bias, not the lock)
+    {
+        const float reach = 1.5f * std::tan(std::min(fit.amplitude, 1.2f)) * bestPeriod / (2.0f * kPi);
+        for (float& o : fit.offset) o = std::clamp(o, -reach, reach);
+    }
+    fit.phase = static_cast<float>(std::atan2(bestIm, bestRe));
+    fit.quality = static_cast<float>(std::min(1.0, 0.5 * fit.amplitude * fit.amplitude / var));
+    double depth = 0.0;
+    for (std::size_t i = best0; i <= best1; ++i) depth += z[i];
+    depth /= static_cast<double>(best1 - best0 + 1);
+    fit.pxPerUnit = static_cast<float>(v.camera.focalPx / std::max(depth, 1e-6));
+    fit.pxPerLength = pixels / (length[best1] - length[best0]);
+    fit.first = best0;
+    fit.last = best1;
+    fit.s.assign(n, 0.0f);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (i < best0) fit.s[i] = -(length[best0] - length[i]) * fit.pxPerLength;
+        else if (i > best1) fit.s[i] = pixels + (length[i] - length[best1]) * fit.pxPerLength;
+        else fit.s[i] = along[i];
+    }
+    fit.score = fit.quality * pixels / bestPeriod;
+    fit.ok = true;
+    return fit;
+}
+
+// The curl baked into a guide: each point moved `side[i]` along the direction the swing shows there
+// (`across(i)`, the traced view's sideways) and `depth[i]` along the guide's way crossed with it
+// (the helix's other half), growing in over the first half turn from the root (the root holds).
+std::vector<Vec3f> bakedCurl(const std::vector<Vec3f>& path, float wavelength, const std::vector<float>& side,
+                             const std::vector<float>& depth, const std::function<Vec3f(std::size_t, const Vec3f&)>& across) {
+    std::vector<Vec3f> out = path;
+    const std::size_t n = path.size();
+    float length = 0.0f;
+    Vec3f last(0, 0, 0);
+    for (std::size_t i = 1; i < n; ++i) {
+        length += (path[i] - path[i - 1]).length();
+        const Vec3f t = (path[std::min(n - 1, i + 1)] - path[i - 1]).normalized();
+        Vec3f a = across(i, t);
+        a = a - t * a.dot(t);
+        if (a.length() < 1e-6f) a = last;
+        if (a.length() < 1e-6f) continue;
+        a = a.normalized();
+        // (the same side all along: where the guide's projection turns back, its sideways would flip)
+        if (last.length() > 0.5f && a.dot(last) < 0.0f) a = -a;
+        last = a;
+        const Vec3f b = t.cross(a);
+        const float grow = std::clamp(length / std::max(1e-6f, 0.5f * wavelength), 0.0f, 1.0f);
+        const float k = grow * grow * (3.0f - 2.0f * grow);
+        out[i] = path[i] + (a * side[i] + b * depth[i]) * k;
+    }
+    return out;
+}
+
 // The polyline's first `length` units.
 std::vector<Vec3f> truncated(const std::vector<Vec3f>& pts, float length) {
     std::vector<Vec3f> out;
@@ -2103,6 +2377,224 @@ ReferenceShell::ReferenceShell(const ScalpMesh& scalp, const std::vector<Referen
     ReferenceShellBuilder::build(*this, ctx);
 }
 
+// How well a guide's way agrees with the photos' fine strand directions where they see it in the
+// hair (the mean of cos 2x the angle between them, 1 along).
+float fineAgreement(const std::vector<PreparedView>& views, const std::vector<Vec3f>& path) {
+    double sum = 0.0;
+    int count = 0;
+    for (const PreparedView& v : views) {
+        const OrientationField* fine = v.fine ? v.fine.get() : v.field.get();
+        if (!fine) continue;
+        const float fx = static_cast<float>(fine->width) / static_cast<float>(v.width), fy = static_cast<float>(fine->height) / static_cast<float>(v.height);
+        for (std::size_t i = 1; i < path.size(); ++i) {
+            float u0 = 0, v0 = 0, z0 = 0, u1 = 0, v1 = 0;
+            if (!v.camera.project(path[i - 1], u0, v0, &z0) || !v.camera.project(path[i], u1, v1)) continue;
+            const float mu = 0.5f * (u0 + u1), mv = 0.5f * (v0 + v1);
+            if (!v.inFrame(mu, mv) || v.hidden(mu, mv, z0) || v.mask.sample(mu, mv) < 0.5f) continue;
+            const float du = u1 - u0, dv = v1 - v0, l = std::hypot(du, dv);
+            if (l < 0.3f) continue;
+            float fu = 0, fv = 0, conf = 0;
+            if (!fine->sample(mu * fx, mv * fy, fu, fv, conf) || conf < 0.05f) continue;
+            const float c = (du * fu + dv * fv) / l;
+            sum += 2.0 * c * c - 1.0;
+            ++count;
+        }
+    }
+    return count ? static_cast<float>(sum / count) : 0.0f;
+}
+
+// Each guide's lock: traced where a view sees it broadside (the best view's fit), its curl baked
+// in; the rest take their traced neighbours' curl (radius, turn length, tightness; their own phase).
+// The guide moved `shiftPx` sideways in view `v` (its projected way turned a quarter), its root slid
+// back onto the scalp.
+std::vector<Vec3f> movedSideways(const PreparedView& v, const std::vector<Vec3f>& path, float shiftPx, const ScalpMesh& scalp,
+                                 StrandRoot* root) {
+    // (all of it the same way: the view's sideways to the guide's way root to tip, at its depth)
+    std::vector<Vec3f> moved = path;
+    float u0 = 0, v0 = 0, u1 = 0, v1 = 0, z = 0;
+    if (path.size() < 2 || !v.camera.project(path.front(), u0, v0, &z) || !v.camera.project(path.back(), u1, v1)) return moved;
+    const float du = u1 - u0, dv = v1 - v0, l = std::hypot(du, dv);
+    if (l < 1e-6f) return moved;
+    const Vec3f side = v.camera.axis(0) * (-dv / l) - v.camera.axis(1) * (du / l);
+    for (Vec3f& p : moved) p = p + side * (shiftPx * z / static_cast<float>(v.camera.focalPx));
+    const SurfacePoint sp = scalp.closestPoint(moved[0]);
+    if (sp.root.face >= 0) {
+        const Vec3f lift = moved[0] - sp.position;
+        for (Vec3f& p : moved) p = p - lift;
+        moved[0] = sp.position;
+        if (root) *root = sp.root;
+    }
+    return moved;
+}
+
+// A guide following the lock a view traced along it: the lock's own sideways path there (`gain`
+// times what the photo shows), its other half a quarter turn on, turned by `hand` (a helix).
+std::vector<Vec3f> tracedCurl(const PreparedView& v, const LockFit& f, const std::vector<Vec3f>& path, float gain, float hand) {
+    const float wavelength = f.periodPx / f.pxPerLength;
+    const auto across = [&](std::size_t k, const Vec3f& t) {
+        float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+        if (!v.camera.project(path[k], u0, v0) || !v.camera.project(path[k] + t * (0.01f * wavelength), u1, v1)) return Vec3f(0, 0, 0);
+        const float du = u1 - u0, dv = v1 - v0, l = std::hypot(du, dv);
+        if (l < 1e-9f) return Vec3f(0, 0, 0);
+        return v.camera.axis(0) * (-dv / l) - v.camera.axis(1) * (du / l);  // (pixels: v down)
+    };
+    std::vector<float> side(path.size()), depth(path.size());
+    const float k = gain / f.pxPerUnit;
+    for (std::size_t j = 0; j < path.size(); ++j) {
+        side[j] = k * f.sideways(f.s[j]);
+        depth[j] = hand * k * f.sideways(f.s[j] + 0.25f * f.periodPx);
+    }
+    return bakedCurl(path, wavelength, side, depth, across);
+}
+
+static void bakeLocks(const std::vector<PreparedView>& views, const ScalpMesh& scalp, const ReferenceGuideOptions& options,
+               std::vector<ReferenceGuide>& guides, std::vector<std::vector<Vec3f>>& paths, ReferenceGuidesResult& result) {
+    const std::size_t count = guides.size();
+    std::vector<LockFit> fits(count);
+    std::vector<float> gains(count, 0.0f);
+    // Each guide's lock: where a view's strands swing most clearly along it (the view, and a shift
+    // sideways within about half a turn: a lock's spacing), the guide moved there and given that
+    // lock's curl, both ways round; kept when the photos' strands agree with it better than with the
+    // guide as it grew (lockAgreement: one guide down the middle of a lock, in step with its curl).
+    parallelFor(0, count, [&](std::size_t i) {
+        std::vector<LockFit> candidates;
+        for (std::size_t k = 0; k < views.size(); ++k) {
+            const float period = views[k].curl.wavelengthPx;
+            if (period <= 0.0f) continue;
+            const float step = std::max(1.0f, 0.1f * period);
+            std::vector<LockFit> here;
+            for (float shift = -0.5f * period; shift <= 0.5f * period + 1e-3f; shift += step) {
+                LockFit f = fitLock(views[k], static_cast<int>(k), paths[i], shift);
+                if (f.ok && f.quality >= 0.2f) here.push_back(std::move(f));
+            }
+            std::sort(here.begin(), here.end(), [](const LockFit& a, const LockFit& b) { return a.score > b.score; });
+            for (std::size_t c = 0; c < std::min<std::size_t>(2, here.size()); ++c) candidates.push_back(std::move(here[c]));
+        }
+        float best = fineAgreement(views, paths[i]) + 0.02f;
+        std::vector<Vec3f> chosen, chosenBase;
+        StrandRoot chosenRoot = guides[i].root;
+        float chosenHand = 1.0f;
+        for (const LockFit& c : candidates) {
+            const PreparedView& v = views[static_cast<std::size_t>(c.view)];
+            StrandRoot root = guides[i].root;
+            const std::vector<Vec3f> moved = c.shiftPx != 0.0f ? movedSideways(v, paths[i], c.shiftPx, scalp, &root) : paths[i];
+            const LockFit f = c.shiftPx != 0.0f ? fitLock(v, c.view, moved) : c;
+            if (!f.ok) continue;
+            for (const float gain : {1.0f, options.lockGain})
+                for (const float hand : {1.0f, -1.0f}) {
+                    std::vector<Vec3f> baked = tracedCurl(v, f, moved, gain, hand);
+                    const float score = fineAgreement(views, baked);
+                    if (score <= best) continue;
+                    best = score;
+                    chosen = std::move(baked);
+                    chosenBase = moved;
+                    chosenRoot = root;
+                    chosenHand = hand;
+                    fits[i] = f;
+                    gains[i] = gain;
+                }
+        }
+        if (chosen.empty()) return;
+        // The lock's depth in the traced view: the guide moved sideways in each other view too (the
+        // traced view's fit kept on it), where the photos agree better.
+        const PreparedView& traced = views[static_cast<std::size_t>(fits[i].view)];
+        for (std::size_t k = 0; k < views.size(); ++k) {
+            if (static_cast<int>(k) == fits[i].view) continue;
+            const float period = views[k].curl.wavelengthPx > 0.0f ? views[k].curl.wavelengthPx : traced.curl.wavelengthPx;
+            const float step = std::max(1.0f, 0.125f * period);
+            const std::vector<Vec3f> base = chosenBase;
+            for (float shift = -0.5f * period; shift <= 0.5f * period + 1e-3f; shift += step) {
+                if (std::abs(shift) < 1e-3f) continue;
+                StrandRoot root = chosenRoot;
+                const std::vector<Vec3f> moved = movedSideways(views[k], base, shift, scalp, &root);
+                const LockFit f = fitLock(traced, fits[i].view, moved);
+                if (!f.ok) continue;
+                std::vector<Vec3f> baked = tracedCurl(traced, f, moved, gains[i], chosenHand);
+                const float score = fineAgreement(views, baked);
+                if (score <= best) continue;
+                best = score;
+                chosen = std::move(baked);
+                chosenBase = moved;
+                chosenRoot = root;
+                fits[i] = f;
+            }
+        }
+        paths[i] = std::move(chosen);
+        guides[i].root = chosenRoot;
+    }, 1);
+    auto handOf = [](std::size_t i) { return ((i * 2654435761u) >> 7) & 1u ? 1.0f : -1.0f; };
+    std::vector<std::size_t> traced;
+    double radiusSum = 0.0, wavelengthSum = 0.0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const LockFit& f = fits[i];
+        if (gains[i] <= 0.0f) continue;
+        ReferenceGuide& g = guides[i];
+        g.lock = 1;
+        g.lockView = f.view;
+        g.lockWavelength = f.periodPx / f.pxPerLength;
+        g.lockRadius = gains[i] * std::tan(std::min(f.amplitude, 1.2f)) * f.periodPx / (2.0f * kPi) / f.pxPerUnit;
+        g.lockStrength = std::clamp(0.5f + 0.45f * f.quality, 0.5f, 0.95f);
+        traced.push_back(i);
+        radiusSum += g.lockRadius;
+        wavelengthSum += g.lockWavelength;
+    }
+    if (traced.empty()) return;
+    result.locksTraced = static_cast<int>(traced.size());
+    result.lockRadius = static_cast<float>(radiusSum / static_cast<double>(traced.size()));
+    result.lockWavelength = static_cast<float>(wavelengthSum / static_cast<double>(traced.size()));
+    for (std::size_t i = 0; i < count; ++i) {
+        ReferenceGuide& g = guides[i];
+        std::vector<Vec3f>& path = paths[i];
+        if (path.size() < 3 || g.lock == 1) continue;
+        std::vector<float> side(path.size(), 0.0f), depth(path.size(), 0.0f);
+        // Filled: the nearest traced guides' curl, by their roots (inverse distance).
+        std::vector<std::pair<float, std::size_t>> near;
+        for (std::size_t j : traced) near.push_back({(paths[j][0] - path[0]).length(), j});
+        const std::size_t take = std::min<std::size_t>(4, near.size());
+        std::partial_sort(near.begin(), near.begin() + static_cast<std::ptrdiff_t>(take), near.end());
+        double w = 0.0, radius = 0.0, wavelength = 0.0, strength = 0.0;
+        for (std::size_t t = 0; t < take; ++t) {
+            const double k = 1.0 / (1e-3 + near[t].first);
+            w += k;
+            radius += k * guides[near[t].second].lockRadius;
+            wavelength += k * guides[near[t].second].lockWavelength;
+            strength += k * guides[near[t].second].lockStrength;
+        }
+        g.lock = 2;
+        g.lockRadius = static_cast<float>(radius / w);
+        g.lockWavelength = static_cast<float>(wavelength / w);
+        g.lockStrength = static_cast<float>(strength / w);
+        const float phase = 2.0f * kPi * static_cast<float>((i * 40503u) % 1000u) / 1000.0f;
+        std::vector<float> theta(path.size(), 0.0f);
+        float length = 0.0f;
+        for (std::size_t k = 0; k < path.size(); ++k) {
+            if (k > 0) length += (path[k] - path[k - 1]).length();
+            theta[k] = 2.0f * kPi * length / std::max(1e-6f, g.lockWavelength) + phase;
+        }
+        const Vec3f up = options.up.normalized();
+        const auto across = [&](std::size_t, const Vec3f& t) {
+            const Vec3f a = t.cross(up);
+            return a.length() > 1e-3f ? a : t.cross(Vec3f(1, 0, 0));
+        };
+        // (the phase and the handedness the photos' strands agree with best, where any sees it)
+        std::vector<Vec3f> best;
+        float bestScore = -2.0f;
+        for (int turn = 0; turn < 8; ++turn)
+            for (const float hand : {handOf(i), -handOf(i)}) {
+                for (std::size_t j = 0; j < path.size(); ++j) {
+                    const float t = theta[j] + 2.0f * kPi * static_cast<float>(turn) / 8.0f;
+                    side[j] = g.lockRadius * std::sin(t);
+                    depth[j] = g.lockRadius * std::cos(t) * hand;
+                }
+                std::vector<Vec3f> baked = bakedCurl(path, g.lockWavelength, side, depth, across);
+                const float score = fineAgreement(views, baked);
+                if (score > bestScore) bestScore = score, best = std::move(baked);
+            }
+        path = std::move(best);
+        ++result.locksFilled;
+    }
+}
+
 ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vector<ReferenceView>& views,
                                           const ReferenceGuideOptions& options) {
     const auto started = std::chrono::steady_clock::now();
@@ -2368,9 +2860,11 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         choice.swap(next);
     }
 
-    // The guides: smoothed, resampled; mirrored pairs with symmetry.
+    // The guides: smoothed, lifted, each following its lock's curl (curly hair), resampled; mirrored
+    // pairs with symmetry.
     const float minLength = options.minLength > 0 ? options.minLength : 3.0f * ctx.step;
     std::vector<ReferenceGuide> grownGuides;
+    std::vector<std::vector<Vec3f>> paths;
     std::vector<std::uint8_t> grownSeam;
     for (std::size_t i : live) {
         const Grown& g = ways[choice[i]][i];
@@ -2386,12 +2880,21 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         // heads: such guides came out 1.15x too long).
         if (options.maxLength > 0.0f && g.stop == "length" && options.lengthTrim < 1.0f && !drawnLength[i])
             path = truncated(path, options.lengthTrim * arcLength(path));
-        guide.points = resampleByArcLength(path.data(), path.size(), static_cast<std::size_t>(std::max(2, options.points)));
-        guide.points[0] = roots[i].position;
+        path[0] = roots[i].position;
         guide.confidence = g.confidence;
         guide.stop = g.stop;
         grownGuides.push_back(std::move(guide));
+        paths.push_back(std::move(path));
         grownSeam.push_back(seam[i]);
+    }
+    if (options.lockCurls && result.look.curly) bakeLocks(prepared, scalp, options, grownGuides, paths, result);
+    for (std::size_t i = 0; i < grownGuides.size(); ++i) {
+        std::size_t count = static_cast<std::size_t>(std::max(2, options.points));
+        if (grownGuides[i].lockWavelength > 0.0f)
+            count = std::clamp<std::size_t>(static_cast<std::size_t>(std::ceil(12.0f * arcLength(paths[i]) / grownGuides[i].lockWavelength)), count, 128);
+        const Vec3f root = paths[i][0];
+        grownGuides[i].points = resampleByArcLength(paths[i].data(), paths[i].size(), count);
+        grownGuides[i].points[0] = root;
     }
     for (std::size_t i = 0; i < grownGuides.size(); ++i) {
         result.guides.push_back(grownGuides[i]);
@@ -2612,6 +3115,63 @@ PhotoComparison compareToPhoto(const ScalpMesh& scalp, const StrandSet& strands,
     out.iou = any > 0 ? static_cast<double>(out.both) / any : 0.0;
     out.missedShare = out.photoPixels ? 1.0 - static_cast<double>(out.both) / out.photoPixels : 0.0;
     out.extraShare = out.groomPixels ? 1.0 - static_cast<double>(out.both) / out.groomPixels : 0.0;
+    // The strands' flow against the photo's: each strand drawn a pixel wide in its own shade (the
+    // nearest in front), both pictures' fine strand directions (orientationField), compared where
+    // both show hair, each pixel weighing the lesser confidence: curls in step read alike.
+    if (view.image.channels >= 1 && out.both > 0) {
+        // (drawn at twice the size and halved: smooth lines, as a photo's strands; aliased steps would
+        // read as directions of their own)
+        const int w2 = 2 * w, h2 = 2 * h;
+        RefImage big;
+        big.width = w2;
+        big.height = h2;
+        big.channels = 1;
+        big.pixels.assign(static_cast<std::size_t>(w2) * static_cast<std::size_t>(h2), 0.6f);
+        std::vector<float> nearest(big.pixels.size(), kInf);
+        for (std::size_t s = 0; s < strands.strandCount(); ++s) {
+            const float shade = 0.1f + 0.3f * static_cast<float>((s * 2654435761u >> 8) % 1000u) / 1000.0f;
+            const Vec3f* p = strands.strandPoints(s);
+            const std::size_t count = strands.strandPointCount(s);
+            for (std::size_t i = 1; i < count; ++i) {
+                float u0 = 0, v0 = 0, z0 = 0, u1 = 0, v1 = 0, z1 = 0;
+                if (!camera.project(p[i - 1], u0, v0, &z0) || !camera.project(p[i], u1, v1, &z1)) continue;
+                const int steps = std::max(1, static_cast<int>(std::ceil(4.0f * std::max(std::abs(u1 - u0), std::abs(v1 - v0)))));
+                for (int k = 0; k <= steps; ++k) {
+                    const float t = static_cast<float>(k) / static_cast<float>(steps);
+                    const float u = u0 + (u1 - u0) * t, v = v0 + (v1 - v0) * t;
+                    if (u < 0.0f || v < 0.0f || u >= static_cast<float>(w) || v >= static_cast<float>(h)) continue;
+                    const std::size_t at = static_cast<std::size_t>(v) * static_cast<std::size_t>(w) + static_cast<std::size_t>(u);
+                    const float z = z0 + (z1 - z0) * t;
+                    if (z > depth[at] + 0.002f * z) continue;
+                    const std::size_t at2 = static_cast<std::size_t>(2.0f * v) * static_cast<std::size_t>(w2) + static_cast<std::size_t>(2.0f * u);
+                    if (z > nearest[at2]) continue;
+                    nearest[at2] = z;
+                    big.pixels[at2] = shade;
+                }
+            }
+        }
+        const RefImage render = big.resized(w, h);
+        // Each picture's strand directions from its brightness gradients (structureField), smoothed
+        // over a couple of pixels.
+        const float sigma = std::max(1.5f, static_cast<float>(std::max(w, h)) / 250.0f);
+        const OrientationField photoFlow = structureField(view.image, sigma), groomFlow = structureField(render, sigma);
+        double sum = 0.0, aligned = 0.0, weight = 0.0;
+        for (std::size_t q = 0; q < n; ++q) {
+            if (!out.photoHair[q] || !out.groomHair[q]) continue;
+            const double c = std::min(photoFlow.confidence[q], groomFlow.confidence[q]);
+            if (c <= 0.05) continue;
+            float d = std::fmod(std::abs(photoFlow.angle[q] - groomFlow.angle[q]), kPi);
+            if (d > 0.5f * kPi) d = kPi - d;
+            sum += c * std::cos(2.0 * d);
+            aligned += d < 20.0f * kPi / 180.0f ? c : 0.0;
+            weight += c;
+            ++out.flowPixels;
+        }
+        if (weight > 0.0) {
+            out.flowAgreement = sum / weight;
+            out.flowAligned = aligned / weight;
+        }
+    }
     // Round the head: each direction's farthest hair pixel from the head's middle, the photo's and the groom's.
     Vec3f lo, hi;
     lo = hi = scalp.points().front();

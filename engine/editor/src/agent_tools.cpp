@@ -1087,18 +1087,51 @@ struct AgentTools::Impl {
     // The look the photos suggest set on the graph: HairColor's melanin and redness, Clump's size and
     // strength, Curl's radius and frequency, Flyaway's fraction (each node the graph's first of its
     // type, added before the chain's color and width end when it has none). One undo step.
-    json applyPhotoLook(AgentGroom& g, const ReferenceLookFit& look) {
+    // Locks: the guides carry each lock's curl (guides_from_photos on curly hair), so the strands clump
+    // onto their own guide's curve (Clump centersFrom inputCurves, the guides its centers; strength per
+    // strand from the guides' lockStrength) and keep the guides' curls where they blend (Interpolate's
+    // keepCurls); no Curl node over them all, Noise low.
+    struct LockLook {
+        bool on = false;
+        float radius = 0.0f, wavelength = 0.0f;
+    };
+    json applyPhotoLook(AgentGroom& g, const ReferenceLookFit& look, const LockLook& locks = {}) {
         std::vector<std::pair<std::string, json>> wants;
         wants.push_back({"HairColor", {{"mode", "melanin"}, {"melanin", r4(look.melanin)}, {"redness", r4(look.redness)}}});
-        // (Clump's strength at most 0.5: the measure saturates at 1 on any clumped photo, and a whole
-        // groom gathered that hard reads as spikes, not locks)
-        if (look.clumped) {
-            wants.push_back({"Clump", {{"clumpBy", "size"}, {"size", r4(look.clumpSize)}, {"strength", r4(std::min(0.5f, look.clumpStrength))}}});
+        if (locks.on) {
+            // (each lock a round lock about as thick as the photos' clumps are apart show it)
+            json clump = {{"centersFrom", "inputCurves"}, {"strength", {{"attribute", "lockStrength"}}}, {"pastTip", "fit"}};
+            if (look.clumped) clump["volumize"] = r4(0.35f * look.clumpSize);
+            wants.push_back({"Clump", clump});
+            wants.push_back({"Interpolate", {{"keepCurls", 1.0}, {"curlLength", r4(1.5f * locks.wavelength)}}});
+            wants.push_back({"Noise", {{"amplitude", r4(0.3f * locks.radius)}}});
+        } else {
+            // (Clump's strength at most 0.5: the measure saturates at 1 on any clumped photo, and a whole
+            // groom gathered that hard reads as spikes, not locks)
+            if (look.clumped) {
+                wants.push_back({"Clump", {{"clumpBy", "size"}, {"size", r4(look.clumpSize)}, {"strength", r4(std::min(0.5f, look.clumpStrength))}}});
+            }
+            if (look.curly) wants.push_back({"Curl", {{"radius", r4(look.curlRadius)}, {"frequency", r4(look.curlFrequency)}}});
         }
-        if (look.curly) wants.push_back({"Curl", {{"radius", r4(look.curlRadius)}, {"frequency", r4(look.curlFrequency)}}});
         if (look.flyawayFraction > 0.0f) wants.push_back({"Flyaway", {{"fraction", r4(look.flyawayFraction)}}});
         json done = json::object();
         edit(g, "apply photo look", [&](std::string& graph, std::string&) {
+            auto firstOfType = [&](const std::string& type) {
+                for (const json& n : json::parse(graph).value("nodes", json::array())) {
+                    if (n.value("type", std::string()) == type) return n.value("name", std::string());
+                }
+                return std::string();
+            };
+            if (locks.on) {
+                // (the curl comes from the guides: a Curl over every strand would frizz the locks)
+                const std::string curl = firstOfType("Curl");
+                if (!curl.empty()) {
+                    GraphEdit e(graph);
+                    e.removeNode(curl);
+                    graph = e.toJson();
+                    done["Curl"] = {{"node", curl}, {"removed", true}};
+                }
+            }
             for (const auto& [type, values] : wants) {
                 auto firstOf = [&](const std::vector<std::string>& types) {
                     for (const json& n : json::parse(graph).value("nodes", json::array())) {
@@ -1137,6 +1170,20 @@ struct AgentTools::Impl {
                 }
                 graph = gj.dump();
                 done[type] = {{"node", node}, {"set", set}, {"added", added}};
+                if (locks.on && type == "Clump") {
+                    // The guides as its centers' curves.
+                    const std::string guides = firstOfType("Guides");
+                    if (!guides.empty()) {
+                        GraphEdit e(graph);
+                        try {
+                            e.connect(guides, node, "centers");
+                            graph = e.toJson();
+                            done[type]["centers"] = guides;
+                        } catch (const std::exception& error) {
+                            done[type]["centersError"] = error.what();
+                        }
+                    }
+                }
             }
         });
         return done;
@@ -3160,6 +3207,7 @@ struct AgentTools::Impl {
                       {"color", {{"photo", {{"linear", c3(c.photoColor)}, {"melanin", r4(c.photoMelanin)}, {"redness", r4(c.photoRedness)}}},
                                  {"groom", {{"linear", c3(c.groomColor)}, {"melanin", r4(c.groomMelanin)}, {"redness", r4(c.groomRedness)}}}}}};
             if (c.hairlineFound) e["hairlineOffset"] = r4(c.hairlineOffset);
+            if (c.flowPixels > 0) e["flow"] = {{"agreement", r4(c.flowAgreement)}, {"aligned", r4(c.flowAligned)}};
             per.push_back(e);
             if (r.content.size() < 6) {
                 r.content.push_back({{"type", "image"}, {"data", base64Encode(comparisonPng(view.image, c, 512))}, {"mimeType", "image/png"}});
@@ -3171,7 +3219,10 @@ struct AgentTools::Impl {
                                "photo's; regions: how far the photo's hair reaches past the groom's (missing) and the groom's past the "
                                "photo's (extra), round the head in the picture, scene units; hairlineOffset: where the hair from the "
                                "top ends on the face (the head's middle third), the groom's below the photo's when positive; color: the photo's hair (white "
-                               "balanced) and the strands' appearance, each's nearest melanin. The images: green the hair the groom "
+                               "balanced) and the strands' appearance, each's nearest melanin; flow: the strands' directions against "
+                               "the photo's where both show hair, lock by lock (agreement: the mean of cos 2x their angle, 1 alike, "
+                               "0 unrelated; aligned: the share within 20 degrees): curls in step with the photo's raise it, an even "
+                               "frizz or straight strands over curls lower it. The images: green the hair the groom "
                                "misses, magenta the groom's outside the photo's, each outline."}};
         r.content.push_back({{"type", "text"}, {"text", withSummary(g, info).dump(-1, ' ', false, json::error_handler_t::replace)}});
         return r;
@@ -3254,6 +3305,7 @@ struct AgentTools::Impl {
         options.guideCount = static_cast<int>(std::clamp(num(a, "guide_count", 300.0), 10.0, 5000.0));
         options.maxLength = static_cast<float>(num(a, "max_length", 0.0));
         options.symmetry = referenceSymmetryFromName(str(a, "symmetry", "auto"));
+        options.lockCurls = flag(a, "locks", true);
         options.up = upOf(g);
         const HairScalp hair = hairScalpOf(g);
         if (hair.head) options.occluders.push_back(hair.head);
@@ -3268,7 +3320,9 @@ struct AgentTools::Impl {
             const GroupId group = h.addGroup(groupName);
             for (const ReferenceGuide& rg : result.guides) {
                 if (rg.points.size() < 2) continue;
-                h.addGuide(group, rg.points);
+                const GuideId id = h.addGuide(group, rg.points);
+                // (each lock's tightness, for its strands' clump: Interpolate carries it onto them)
+                if (result.locksTraced > 0) h.setAttribute(id, "lockStrength", rg.lock ? rg.lockStrength : 0.5f);
                 ++added;
             }
             h.evaluate(scalp.get());
@@ -3303,6 +3357,17 @@ struct AgentTools::Impl {
                     {"rootsTried", result.rootsTried}, {"rootsBald", result.rootsBald}, {"rootsUnseen", result.rootsUnseen},
                     {"rootsShort", result.rootsShort}, {"maxLength", r4(result.maxLength)}, {"seconds", r4(result.seconds)}};
         const ReferenceLookFit& look = result.look;
+        LockLook locks;
+        if (result.locksTraced > 0) {
+            locks = {true, result.lockRadius, result.lockWavelength};
+            out["locks"] = {{"traced", result.locksTraced}, {"filled", result.locksFilled}, {"radius", r4(result.lockRadius)},
+                            {"turnLength", r4(result.lockWavelength)},
+                            {"about", "each guide follows a lock: traced, the curl a photo shows along it (moved onto the lock, "
+                                      "its turn, size, phase and handedness); filled, its traced neighbours' curl where no "
+                                      "photo shows one. Scene units. apply_look clumps each guide's strands onto it "
+                                      "(Clump centersFrom inputCurves, strength per lock from the guides' lockStrength) "
+                                      "instead of a Curl node over every strand."}};
+        }
         if (look.ok) {
             out["look"] = {{"melanin", r4(look.melanin)}, {"redness", r4(look.redness)}, {"baseColor", {r4(look.baseColor[0]), r4(look.baseColor[1]), r4(look.baseColor[2])}},
                            {"curly", look.curly}, {"curlFrequency", r4(look.curlFrequency)}, {"curlRadius", r4(look.curlRadius)},
@@ -3315,7 +3380,7 @@ struct AgentTools::Impl {
                                   "show curls, add a Curl node (add_node) with the measured radius and frequency";
             }
             if (flag(a, "apply_look", false)) {
-                out["lookApplied"] = applyPhotoLook(g, look);
+                out["lookApplied"] = applyPhotoLook(g, look, locks);
             } else {
                 out["lookHint"] = "What the photos suggest for HairColor (melanin, redness), Curl (frequency, radius), Clump (size, "
                                   "strength) and Flyaway: apply_look: true sets them, or set_params one by one.";
@@ -4521,11 +4586,15 @@ struct AgentTools::Impl {
             "Grows guides from the lined-up photos (reference_guides: the hair's silhouette and strand flow in each photo, their "
             "flow arrows and mask touch-ups), into one group (default fromReference, replaced each time). One undo step. Answers "
             "with the guides made, the roots that were bald or unseen, the scalp's sides no photo sees (unseenShare, alignMore: "
-            "line up a photo from there), and the look the photos suggest (melanin, curls, clumps; apply_look sets it).",
+            "line up a photo from there), and the look the photos suggest (melanin, curls, clumps; apply_look sets it). On curly "
+            "hair each guide follows a lock (locks: traced in a photo, or filled from its neighbours) with its curl in its points; "
+            "apply_look then clumps each guide's strands onto it instead of a Curl node over every strand.",
             objectSchema({{"groom", groom}, {"guide_count", prop("integer", "Roots tried, spread over the scalp (default 300).")},
                           {"max_length", prop("number", "The longest guide (scene units; default 0: what the photos show).")},
                           {"symmetry", enumProp({"auto", "none", "x", "topology"}, "Mirror what one side shows (default auto).")},
                           {"group", prop("string", "The guide group (default fromReference).")},
+                          {"locks", prop("boolean", "On curly hair, each guide follows its lock's curl (default true; false: smooth "
+                                                    "guides and a Curl node over every strand).")},
                           {"apply_look", prop("boolean", "Also set the look the photos suggest (HairColor melanin and redness, Clump, "
                                                          "Curl, Flyaway; nodes added where missing): a second undo step.")}}),
             &Impl::guidesFromPhotos);

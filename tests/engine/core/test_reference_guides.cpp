@@ -182,13 +182,16 @@ TEST(ReferenceLook, MelaninOfAppearanceIsHairColorsInverse) {
 // under it) photographed from four sides on a light backdrop. Strands from roots over the cap, lifted
 // off it (volume), along it away from the top, then hanging down past the ball's middle (short over
 // the face: a fringe); curling round their way with `curlWavelength` and `curlRadius` (0: straight).
+// With `locks` the strands grow in that many locks, each curling as one (its own phase and
+// handedness, its strands about its axis), the locks' axes kept (lockAxes).
 struct SyntheticShoot {
     ScalpMesh cap;
     std::shared_ptr<ScalpMesh> head;
     std::vector<ReferenceView> views;
+    std::vector<std::vector<Vec3f>> lockAxes;
 };
 
-SyntheticShoot syntheticShoot(float melanin, float curlWavelength = 0.0f, float curlRadius = 0.0f) {
+SyntheticShoot syntheticShoot(float melanin, float curlWavelength = 0.0f, float curlRadius = 0.0f, int locks = 0) {
     // (the cap the ball's own top 9 rings of 24: the same triangles)
     const float capTheta = kPi * 9.0f / 24.0f;
     SyntheticShoot shoot{sphere(1.0f, 9, 48, capTheta), std::make_shared<ScalpMesh>(sphere(1.0f, 24, 48)), {}};
@@ -198,9 +201,32 @@ SyntheticShoot syntheticShoot(float melanin, float curlWavelength = 0.0f, float 
         state = state * 1664525u + 1013904223u;
         return static_cast<float>(state >> 8) / static_cast<float>(1u << 24);
     };
-    for (int i = 0; i < 6000; ++i) {
-        const float theta0 = std::acos(1.0f - random() * (1.0f - std::cos(capTheta - 0.05f))), phi = 2.0f * kPi * random();
-        const float phase = 2.0f * kPi * random();
+    struct Lock {
+        float theta, phi, phase, hand;
+    };
+    std::vector<Lock> lockList;
+    for (int l = 0; l < locks; ++l)
+        lockList.push_back({std::acos(1.0f - random() * (1.0f - std::cos(capTheta - 0.12f))), 2.0f * kPi * random(), 2.0f * kPi * random(),
+                            random() < 0.5f ? 1.0f : -1.0f});
+    for (int i = 0; i < 6000 + (locks ? 1 : 0) * locks; ++i) {
+        // (with locks: first each lock's axis, then its strands round it)
+        const bool axis = locks && i < locks;
+        const Lock* lock = locks ? &lockList[static_cast<std::size_t>(axis ? i : i % locks)] : nullptr;
+        float theta0 = std::acos(1.0f - random() * (1.0f - std::cos(capTheta - 0.05f))), phi = 2.0f * kPi * random();
+        float phase = 2.0f * kPi * random(), hand = 1.0f;
+        // (a lock's strands: its middle strand's path moved a little across the flow and off the
+        // scalp, so they curl together as a rope)
+        float acrossShift = 0.0f, outShift = 0.0f;
+        if (lock) {
+            theta0 = lock->theta;
+            phi = lock->phi;
+            phase = lock->phase;
+            hand = lock->hand;
+            if (!axis) {
+                acrossShift = 0.05f * (2.0f * random() - 1.0f);
+                outShift = 0.03f * random();
+            }
+        }
         std::vector<Vec3f> s;
         float theta = theta0, y = 0.0f;
         bool hanging = false;
@@ -223,13 +249,14 @@ SyntheticShoot syntheticShoot(float melanin, float curlWavelength = 0.0f, float 
                 p = Vec3f(out.x * radius, y, out.z * radius);
                 across = Vec3f(std::cos(phi), 0.0f, -std::sin(phi));
             }
-            if (curlWavelength > 0.0f) {
+            if (curlWavelength > 0.0f && !axis) {
                 const float a = 2.0f * kPi * t / curlWavelength + phase;
-                p = p + (across * std::cos(a) + out * std::sin(a)) * (curlRadius * std::min(1.0f, t / 0.1f));
+                p = p + (across * std::cos(a) + out * std::sin(a) * hand) * (curlRadius * std::min(1.0f, t / 0.1f));
             }
-            s.push_back(p);
+            s.push_back(p + across * acrossShift + out * outShift);
         }
-        truth.push_back(s);
+        if (axis) shoot.lockAxes.push_back(s);
+        else truth.push_back(s);
     }
     const std::array<float, 3> hairColor = hairAppearanceColor(melaninColor(melanin, 0.1f));
     const int size = 512;  // drawn at twice the photos' size, then halved (smooth edges, as a photo's)
@@ -295,6 +322,25 @@ SyntheticShoot syntheticShoot(float melanin, float curlWavelength = 0.0f, float 
     return shoot;
 }
 
+// A groom from guides: a lock of a dozen strands round each, a little apart, coming together at the root.
+StrandSet lockStrands(const std::vector<ReferenceGuide>& guides) {
+    StrandSet strands;
+    StrandId id = 1;
+    std::uint32_t state = 3;
+    auto random = [&]() {
+        state = state * 1664525u + 1013904223u;
+        return static_cast<float>(state >> 8) / static_cast<float>(1u << 24);
+    };
+    for (const ReferenceGuide& g : guides)
+        for (int k = 0; k < 12; ++k) {
+            const Vec3f shift(0.12f * (random() - 0.5f), 0.12f * (random() - 0.5f), 0.12f * (random() - 0.5f));
+            std::vector<Vec3f> pts;
+            for (std::size_t i = 0; i < g.points.size(); ++i) pts.push_back(g.points[i] + shift * (static_cast<float>(i) / static_cast<float>(g.points.size())));
+            strands.addStrand(id++, pts);
+        }
+    return strands;
+}
+
 // Grown back from its photos, the known groom's guides (a lock of strands round each) match each
 // photo's hair through its camera, and the look reads the hair's color.
 TEST(ReferenceGuidesEndToEnd, AKnownGroomGrowsBackFromItsPhotos) {
@@ -308,20 +354,8 @@ TEST(ReferenceGuidesEndToEnd, AKnownGroomGrowsBackFromItsPhotos) {
     ASSERT_TRUE(r.look.ok);
     EXPECT_NEAR(r.look.melanin, 0.6f, 0.08f);
     EXPECT_FALSE(r.look.curly) << r.look.curlShare << " " << r.look.curlAmplitudeDeg;
-    StrandSet strands;
-    StrandId id = 1;
-    std::uint32_t state = 3;
-    auto random = [&]() {
-        state = state * 1664525u + 1013904223u;
-        return static_cast<float>(state >> 8) / static_cast<float>(1u << 24);
-    };
-    for (const ReferenceGuide& g : r.guides)
-        for (int k = 0; k < 12; ++k) {
-            const Vec3f shift(0.12f * (random() - 0.5f), 0.12f * (random() - 0.5f), 0.12f * (random() - 0.5f));
-            std::vector<Vec3f> pts;
-            for (std::size_t i = 0; i < g.points.size(); ++i) pts.push_back(g.points[i] + shift * (static_cast<float>(i) / static_cast<float>(g.points.size())));
-            strands.addStrand(id++, pts);
-        }
+    EXPECT_EQ(r.locksTraced + r.locksFilled, 0);  // (straight hair: no locks' curls)
+    const StrandSet strands = lockStrands(r.guides);
     double sum = 0.0;
     for (const ReferenceView& v : shoot.views) {
         const PhotoComparison c = compareToPhoto(shoot.cap, strands, v, options);
@@ -345,6 +379,58 @@ TEST(ReferenceGuidesEndToEnd, CurlyHairReadsAsCurly) {
     ASSERT_TRUE(r.look.ok);
     EXPECT_TRUE(r.look.curly) << r.look.curlShare << " " << r.look.curlAmplitudeDeg;
     EXPECT_NEAR(r.look.curlFrequency, 1.0f / wavelength, 0.3f / wavelength);
+}
+
+// Curly locks: traced back one guide a lock, each guide curling as its lock, near its axis.
+TEST(ReferenceGuidesEndToEnd, CurlyLocksAreTracedOneGuideALock) {
+    const float wavelength = 0.3f, radius = 0.05f;
+    const SyntheticShoot shoot = syntheticShoot(0.6f, wavelength, radius, 150);
+    ReferenceGuideOptions options;
+    options.symmetry = ReferenceSymmetry::None;
+    options.occluders.push_back(shoot.head);
+    options.guideCount = 80;
+    const ReferenceGuidesResult r = guidesFromReference(shoot.cap, shoot.views, options);
+    ASSERT_TRUE(r.look.curly) << r.look.curlShare << " " << r.look.curlAmplitudeDeg;
+    EXPECT_GT(r.locksTraced, static_cast<int>(r.guides.size()) / 4);
+    EXPECT_EQ(r.locksTraced + r.locksFilled, static_cast<int>(r.guides.size()));
+    // (the radius reads low: a lock's strands out of step and the fields' smoothing narrow the swing,
+    // and where the photos cannot place a lock exactly they agree better with a smaller curl)
+    EXPECT_GT(r.lockRadius, 0.35f * radius);
+    EXPECT_LT(r.lockRadius, 1.5f * radius);
+    EXPECT_NEAR(r.lockWavelength, wavelength, 0.25f * wavelength);
+    // Each traced guide runs near a true lock (its axis, within the lock's width and the curl).
+    double near = 0.0;
+    int n = 0;
+    for (const ReferenceGuide& g : r.guides) {
+        if (g.lock != 1) continue;
+        double best = 1e9;
+        for (const auto& axis : shoot.lockAxes) {
+            double sum = 0.0;
+            for (const Vec3f& p : g.points) {
+                float d = 1e9f;
+                for (const Vec3f& q : axis) d = std::min(d, (p - q).length());
+                sum += d;
+            }
+            best = std::min(best, sum / static_cast<double>(g.points.size()));
+        }
+        near += best;
+        ++n;
+    }
+    ASSERT_GT(n, 0);
+    EXPECT_LT(near / n, 0.2);
+    // A lock of strands round each guide curls with the photos' locks: their flow agrees with the
+    // photos' better than the same guides grown without their locks' curls.
+    ReferenceGuideOptions plain = options;
+    plain.lockCurls = false;
+    const ReferenceGuidesResult straight = guidesFromReference(shoot.cap, shoot.views, plain);
+    double curled = 0.0, uncurled = 0.0;
+    for (const ReferenceView& v : shoot.views) {
+        const PhotoComparison a = compareToPhoto(shoot.cap, lockStrands(r.guides), v, options);
+        const PhotoComparison b = compareToPhoto(shoot.cap, lockStrands(straight.guides), v, options);
+        curled += a.flowAgreement;
+        uncurled += b.flowAgreement;
+    }
+    EXPECT_GT(curled, uncurled);
 }
 
 TEST(ReferenceLook, ClumpsAreTheBrightnessPeriodAcrossTheFlow) {

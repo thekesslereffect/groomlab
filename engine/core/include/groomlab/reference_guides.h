@@ -24,7 +24,13 @@
 //    ways are grown; the one with more evidence, leaning toward gravity, wins, then neighbours vote.
 //    A guide stops where the photos that see it say it left the hair, at the shell, or its length.
 //    Then it is lifted off the scalp toward the hair's thickness the silhouettes show over it
-//    (ReferenceGuideOptions::volume), so voluminous hair is not combed flat.
+//    (ReferenceGuideOptions::volume), so voluminous hair is not combed flat. On curly hair
+//    (lockCurls) each guide then follows a lock: the view and the sideways shift where the photo's
+//    strands swing most clearly along it (fitLock: the swing's period, size and phase), the guide
+//    moved onto that lock and given its curl (the lock's own path in that view, its other half a
+//    quarter turn on, the handedness the other views agree with: structureField's directions);
+//    kept when the photos agree with it better than with the smooth guide. The rest take their
+//    traced neighbours' curl.
 // 4. Symmetry (world X or the scalp's topology, scalp_mirror.h): every photo also judges each
 //    point's mirror image, so one three-quarter view covers both sides; the guides come in
 //    mirrored pairs (one grown, the other its mirror, as Mirror Group makes them).
@@ -142,6 +148,7 @@ struct CurlEstimate {
 };
 CurlEstimate measureCurl(const OrientationField& fine, const OrientationField& coarse, const RefImage& mask);
 
+
 // ---- 6-10. The measured look (reference_look.cpp) ----------------------------------------------
 
 // Clumps and color variation: profiles of the log brightness across the flow (perpendicular to the
@@ -229,7 +236,7 @@ struct ReferenceGuideOptions {
     float minLength = 0.0f;             // shorter guides are dropped; 0: three steps
     float lengthTrim = 0.86f;           // a guide that reaches a given maxLength (its tip never seen) is cut to this share
     float step = 0.0f;                  // 0: maxLength / 80, at least ~1.5 pixels in the views
-    int points = 16;                    // points a guide
+    int points = 16;                    // points a guide (more for a guide carrying a lock's curl: a dozen a turn)
     float scalpOffset = 0.0f;           // kept above the scalp; 0: 0.4% of the scalp's size
     ReferenceSymmetry symmetry = ReferenceSymmetry::Auto;
     float symmetryCenter = 0.0f;        // the world X plane (WorldX)
@@ -266,6 +273,12 @@ struct ReferenceGuideOptions {
     LookBalance lookBalance = LookBalance::Auto;  // the look: how the light's color is taken out
     float lookQuantile = 0.65f;         // the look: which share of the hair's pixels is darker than its color (the lit side above 0.5)
     bool lookExposure = true;           // the look: a dim photo brightened (its white point lifted to a well exposed photo's)
+    // Curly hair: each guide follows its own lock's curl (lockCurls): the curl the photo shows along it
+    // (its swing's period, size and phase where a view sees the guide's lock broadside) baked into
+    // the guide's points as a helix; guides no view traces take their traced neighbours' curl.
+    bool lockCurls = true;
+    float lockGain = 2.0f;              // the curl's radius from the swing the photo shows (strands of a lock
+                                        // out of phase and the field's smoothing read it low)
 };
 
 struct ReferenceGuide {
@@ -274,6 +287,12 @@ struct ReferenceGuide {
     int mirrorOf = -1;           // the guide this one mirrors (symmetry), else -1
     float confidence = 0.0f;     // the evidence's mean confidence along it
     std::string stop;            // why it ended: "length", "mask", "shell", "unseen", "scalp"
+    // Its lock (curly hair, lockCurls): 0 none, 1 traced in a photo, 2 filled from traced neighbours;
+    // the curl baked into its points (radius and length of a turn, scene units), and how tight the
+    // lock is (0-1: a clear ringlet near 1, a loose wave lower), what its strands' clump takes.
+    int lock = 0;
+    float lockRadius = 0.0f, lockWavelength = 0.0f, lockStrength = 0.0f;
+    int lockView = -1;           // the view it was traced in
 };
 
 struct ReferenceLookFit {
@@ -322,6 +341,10 @@ struct ReferenceGuidesResult {
     int rootsShort = 0;    // grown shorter than minLength
     float step = 0.0f, maxLength = 0.0f, scalpOffset = 0.0f;
     float shellFill = 0.0f;  // the shell's share of its grid
+    // Locks (lockCurls on curly hair): guides that follow a lock a photo shows, guides that took
+    // their neighbours' curl, and the traced locks' mean radius and turn length (scene units).
+    int locksTraced = 0, locksFilled = 0;
+    float lockRadius = 0.0f, lockWavelength = 0.0f;
     float rimLength = 0.0f;  // how far the hair reaches past the scalp's outline in the views (scene units, its rim)
     float reachLength = 0.0f;  // the same, its 90th percentile (what an automatic length starts from)
     ReferenceLookFit look;
@@ -423,6 +446,12 @@ struct PhotoComparison {
     // strands' appearance (linear, their mean), each's nearest melanin and redness.
     std::array<float, 3> photoColor{0, 0, 0}, groomColor{0, 0, 0};
     float photoMelanin = 0.0f, photoRedness = 0.0f, groomMelanin = 0.0f, groomRedness = 0.0f;
+    // The flow, lock by lock: the photo's fine strand directions against the strands' (each drawn a
+    // pixel wide, its own shade) where both show hair, each pixel weighing the lesser confidence: the
+    // mean of cos 2x their angle (1 alike, 0 unrelated) and the share within 20 degrees. Curls in step
+    // with the photo's raise both; an even frizz or straight strands over curls lower them.
+    double flowAgreement = 0.0, flowAligned = 0.0;
+    int flowPixels = 0;
 };
 PhotoComparison compareToPhoto(const ScalpMesh& scalp, const StrandSet& strands, const ReferenceView& view,
                                const ReferenceGuideOptions& options = {});
