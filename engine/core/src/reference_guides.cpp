@@ -10,6 +10,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -22,7 +23,11 @@
 #include "groomlab/scalp_mirror.h"
 #include "groomlab/strand_set.h"
 #include "groomlab/export_view.h"
+#include "groomlab/guide_fit.h"
+#include "groomlab/guide_merge.h"
 #include "groomlab/guide_rooting.h"
+#include "groomlab/hair_shell.h"
+#include "groomlab/lock_guides.h"
 
 namespace groomlab {
 
@@ -3258,7 +3263,8 @@ int triangulateLines(const PreparedView& a, const LockLine& la, const PreparedVi
 // outline the last depth carried on), moved to the triangulated depths where those are known (the
 // difference blended between them, held past them, smoothed over a period). The guide: the lock's
 // root, then the line's points. Counts in result.lockViews.
-std::vector<PlacedLock> placeLocks(const Context& ctx, const std::vector<SurfacePoint>& seeds, ReferenceGuidesResult& result) {
+std::vector<PlacedLock> placeLocks(const Context& ctx, const std::vector<SurfacePoint>& seeds, ReferenceGuidesResult& result,
+                                   bool triangulate = true) {
     std::vector<PlacedLock> out;
     const std::vector<PreparedView>& views = ctx.views;
     result.lockViews.assign(views.size(), ReferenceGuidesResult::LockViewCounts{});
@@ -3317,7 +3323,7 @@ std::vector<PlacedLock> placeLocks(const Context& ctx, const std::vector<Surface
         const Vec3f lookA = -va.camera.axis(2);
         const float perPx = va.scalpDepth > 0.0f ? va.scalpDepth / static_cast<float>(va.camera.focalPx) : 0.0f;
         const float tolerance = std::max(4.0f, 0.75f * va.lockPeriodPx) * perPx;
-        for (std::size_t b = 0; b < views.size(); ++b) {
+        for (std::size_t b = 0; b < views.size() && triangulate; ++b) {
             if (b == a || s >= views[b].lockLines.size() || views[b].lockLines[s].line.size() < 4) continue;
             const float angle = std::acos(std::clamp(lookA.dot(-views[b].camera.axis(2)), -1.0f, 1.0f)) * 180.0f / kPi;
             if (angle < 20.0f || angle > 120.0f) continue;
@@ -3375,6 +3381,247 @@ std::vector<PlacedLock> placeLocks(const Context& ctx, const std::vector<Surface
         else ++c.singleView;
         if (placed[k].path.size() >= 4) out.push_back(std::move(placed[k]));
     }
+    return out;
+}
+
+// The part of a guide its strokes cover: the points that, projected into a stroke's photo, lie
+// within `tolerancePx` of the stroke, nearest a place along it that is not one of its ends (the fit's
+// rule: a stroke says nothing past its ends). [first, last] covered by any of them; {1, 0} none.
+static std::pair<std::size_t, std::size_t> coveredSpan(const std::vector<Vec3f>& points, const std::vector<const FitStroke*>& strokes) {
+    std::size_t first = points.size(), last = 0;
+    for (const FitStroke* s : strokes) {
+        const std::vector<std::array<float, 2>>& px = s->pixels;
+        if (px.size() < 2) continue;
+        const float tolerance = std::max(3.0f, 0.02f * static_cast<float>(std::max(s->camera.width, s->camera.height)));
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            float u = 0, v = 0;
+            if (!s->camera.project(points[i], u, v)) continue;
+            float best = std::numeric_limits<float>::max();
+            bool end = true;
+            for (std::size_t j = 0; j + 1 < px.size(); ++j) {
+                const float ax = px[j][0], ay = px[j][1], bx = px[j + 1][0] - ax, by = px[j + 1][1] - ay;
+                const float ll = bx * bx + by * by;
+                float t = ll > 1e-12f ? ((u - ax) * bx + (v - ay) * by) / ll : 0.0f;
+                t = std::clamp(t, 0.0f, 1.0f);
+                const float d = std::hypot(u - (ax + t * bx), v - (ay + t * by));
+                if (d < best) {
+                    best = d;
+                    end = (j == 0 && t <= 0.0f) || (j + 2 == px.size() && t >= 1.0f);
+                }
+            }
+            if (best > tolerance || end) continue;
+            first = std::min(first, i);
+            last = std::max(last, i);
+        }
+    }
+    if (first > last) return {1, 0};
+    return {first, last};
+}
+
+// Locks the views trace, lifted first and merged in 3D (LockJoin::Merge; see reference_guides.h):
+// each view's kept lines as strokes, lifted onto a shell carved from the prepared masks and fitted
+// (guide_fit.h), cut to what their lines cover, repeats dropped, joined end to end (guide_merge.h),
+// rooted (guide_rooting.h) and scored against every view. What placeLocks returns, for the same
+// competition for roots; counts in result.lockViews and result.lockMerge.
+std::vector<PlacedLock> mergeLocks(const Context& ctx, const std::vector<SurfacePoint>& seeds, const ScalpMesh* headMesh,
+                                   const GuideRootingOptions& rootingOptions, ReferenceGuidesResult& result) {
+    std::vector<PlacedLock> out;
+    const std::vector<PreparedView>& views = ctx.views;
+    const ReferenceGuideOptions& options = ctx.options;
+    const LockMergeOptions& mo = options.lockMerge;
+    ReferenceGuidesResult::LockMergeCounts& counts = result.lockMerge;
+    counts.on = true;
+    result.lockViews.assign(views.size(), ReferenceGuidesResult::LockViewCounts{});
+    const ScalpMesh& head = headMesh ? *headMesh : ctx.scalp;
+    // The head's frame and the hair's shell (the prepared masks carved per direction: hair_shell.h).
+    const Vec3f up = options.up.normalized();
+    const Vec3f front = std::abs(up.z) > 0.5f ? Vec3f(0.0f, -1.0f, 0.0f) : Vec3f(0.0f, 0.0f, 1.0f);
+    const HeadFrame frame = headFrameOf(ctx.scalp, up, front);
+    const float R = frame.radius;
+    counts.headRadius = R;
+    std::vector<ShellPhoto> shellPhotos;
+    for (const PreparedView& v : views) {
+        ShellPhoto sp;
+        sp.camera = v.camera;
+        sp.width = v.width;
+        sp.height = v.height;
+        const RefImage mask = v.mask.width == v.width && v.mask.height == v.height ? v.mask : v.mask.resized(v.width, v.height);
+        sp.hair.resize(static_cast<std::size_t>(v.width) * static_cast<std::size_t>(v.height));
+        for (std::size_t i = 0; i < sp.hair.size(); ++i) sp.hair[i] = mask.pixels[i * static_cast<std::size_t>(mask.channels)] >= 0.5f ? 1 : 0;
+        shellPhotos.push_back(std::move(sp));
+    }
+    const HairShell shell = HairShell::fromMasks(head, frame, shellPhotos);
+    // Each view's kept lines, strokes lifted onto the shell (rooted radially, as a drawn stroke).
+    std::vector<FitStroke> strokes;
+    for (std::size_t a = 0; a < views.size(); ++a)
+        for (std::size_t s = 0; s < views[a].lockLines.size(); ++s) {
+            const LockLine& l = views[a].lockLines[s];
+            if (!l.kept || l.line.size() < 4) continue;
+            FitStroke fs;
+            fs.camera = views[a].camera;
+            fs.pixels = l.line;
+            fs.photo = static_cast<int>(a);
+            fs.stroke = static_cast<int>(s);
+            strokes.push_back(std::move(fs));
+            ++result.lockViews[a].detected;
+        }
+    counts.pieces = static_cast<int>(strokes.size());
+    StrokeLiftOptions lo;
+    lo.rooting.headRadius = R;
+    lo.rooting.center = frame.center;
+    lo.rooting.up = up;
+    std::vector<LiftedStroke> lifts(strokes.size());
+    if (mo.lift == LockMergeOptions::Lift::Shell) {
+        parallelFor(0, strokes.size(), [&](std::size_t i) { lifts[i] = liftStroke(strokes[i].camera, strokes[i].pixels, shell, ctx.scalp, lo, &head); }, 2);
+    } else {
+        // (Match's single-view placement: along each ray at the hair's thickness over the lock's
+        // root; rooted as a stroke's lift is)
+        ReferenceGuidesResult scratch;
+        const std::vector<PlacedLock> single = placeLocks(ctx, seeds, scratch, false);
+        std::map<std::pair<int, std::size_t>, std::size_t> index;
+        for (std::size_t i = 0; i < strokes.size(); ++i) index[{strokes[i].photo, static_cast<std::size_t>(strokes[i].stroke)}] = i;
+        GuideRootingOptions ro = lo.rooting;
+        const GuideRootingCounts scale = guideRootingScale(ctx.scalp, ro);
+        parallelFor(0, single.size(), [&](std::size_t k) {
+            const auto it = index.find({single[k].view, single[k].seed});
+            if (it == index.end() || single[k].path.size() < 2) return;
+            LiftedStroke& l = lifts[it->second];
+            l.rooting = rootGuide(single[k].path, ctx.scalp, &head, ro, scale);
+            l.points = l.rooting.points;
+        }, 2);
+    }
+    std::vector<FitStroke> liftedStrokes;
+    std::vector<std::vector<Vec3f>> liftedPoints;
+    for (std::size_t i = 0; i < strokes.size(); ++i) {
+        if (lifts[i].points.size() < 2) continue;
+        strokes[i].rootGap = lifts[i].rooting.rootGap;
+        liftedStrokes.push_back(strokes[i]);
+        liftedPoints.push_back(lifts[i].points);
+    }
+    counts.lifted = static_cast<int>(liftedStrokes.size());
+    // Fitted (alone, or with the same lock's lines on other photos). Not rooted again: the pieces
+    // are joined first, the chains rooted after.
+    std::vector<std::vector<Vec3f>> pieces;
+    std::vector<std::vector<int>> pieceStrokes;  // into liftedStrokes
+    if (mo.fit) {
+        GuideFitOptions fo;
+        fo.headRadius = R;
+        fo.scalp = nullptr;
+        const StrokeFitResult fit = fitStrokes(liftedStrokes, liftedPoints, shell, &head, mo.fuse, fo);
+        for (const StrokeFitGroup& g : fit.groups) {
+            if (g.guide.points.size() < 2) continue;
+            pieces.push_back(g.guide.points);
+            pieceStrokes.push_back(g.strokes);
+        }
+    } else {
+        for (std::size_t i = 0; i < liftedPoints.size(); ++i) {
+            pieces.push_back(liftedPoints[i]);
+            pieceStrokes.push_back({static_cast<int>(i)});
+        }
+    }
+    counts.fitted = static_cast<int>(pieces.size());
+    for (const std::vector<int>& g : pieceStrokes) {
+        std::vector<std::size_t> photos;
+        for (int s : g) photos.push_back(static_cast<std::size_t>(liftedStrokes[static_cast<std::size_t>(s)].photo));
+        std::sort(photos.begin(), photos.end());
+        const bool fused = std::unique(photos.begin(), photos.end()) - photos.begin() > 1;
+        if (fused) ++counts.fused;
+        for (int s : g) {
+            ReferenceGuidesResult::LockViewCounts& c = result.lockViews[static_cast<std::size_t>(liftedStrokes[static_cast<std::size_t>(s)].photo)];
+            if (fused) ++c.matched, ++c.triangulated;
+            else ++c.singleView;
+        }
+    }
+    // Each cut to what its lines cover (the lift's join from the scalp up to where a line starts on
+    // the hair is not the lock's: a piece starts where its line does).
+    std::vector<std::vector<Vec3f>> cut;
+    std::vector<int> cutView;  // the one view a piece's lines are on, -1 several
+    double pieceLength = 0.0;
+    for (std::size_t k = 0; k < pieces.size(); ++k) {
+        std::vector<const FitStroke*> ss;
+        for (int s : pieceStrokes[k]) ss.push_back(&liftedStrokes[static_cast<std::size_t>(s)]);
+        const auto [first, last] = coveredSpan(pieces[k], ss);
+        std::vector<Vec3f> p;
+        if (first <= last) p.assign(pieces[k].begin() + static_cast<std::ptrdiff_t>(first), pieces[k].begin() + static_cast<std::ptrdiff_t>(last) + 1);
+        if (p.size() < 3 || arcLength(p) < mo.minPieceLength * R) {
+            ++counts.tooShort;
+            continue;
+        }
+        pieceLength += arcLength(p);
+        int view = ss.front()->photo;
+        for (const FitStroke* s : ss)
+            if (s->photo != view) view = -1;
+        cut.push_back(std::move(p));
+        cutView.push_back(view);
+    }
+    counts.pieceLength = cut.empty() ? 0.0f : static_cast<float>(pieceLength / static_cast<double>(cut.size())) / R;
+    // Repeats dropped (the same lock lifted from two photos that the fit did not match).
+    DuplicatePieceOptions dup;
+    dup.distance = mo.duplicateDistance * R;
+    const std::vector<int> repeats = duplicatePieces(cut, dup);
+    std::vector<std::vector<Vec3f>> kept;
+    std::vector<int> keptView;
+    for (std::size_t k = 0; k < cut.size(); ++k) {
+        if (repeats[k] >= 0) {
+            ++counts.duplicates;
+            continue;
+        }
+        kept.push_back(cut[k]);
+        keptView.push_back(cutView[k]);
+    }
+    // Joined end to end, the thresholds relaxing.
+    PieceMergeOptions pm;
+    pm.distanceStart = mo.distanceStart * R;
+    pm.distanceEnd = mo.distanceEnd * R;
+    pm.angleStart = mo.angleStart;
+    pm.angleEnd = mo.angleEnd;
+    pm.levels = mo.levels;
+    const PieceMergeResult merged = mergePieces(kept, pm);
+    counts.merges = merged.merges;
+    counts.mergesPerPass = merged.mergesPerPass;
+    for (float d : merged.passDistance) counts.passDistance.push_back(d / R);
+    counts.passAngle = merged.passAngle;
+    counts.chains = static_cast<int>(merged.chains.size());
+    double chainLength = 0.0;
+    for (const auto& c : merged.chains) chainLength += arcLength(c);
+    counts.chainLength = merged.chains.empty() ? 0.0f : static_cast<float>(chainLength / static_cast<double>(merged.chains.size())) / R;
+    // Each chain rooted (the end nearer the scalp first, joined to it, out of the head), then scored
+    // against every view.
+    const GuideRootingCounts rootScale = guideRootingScale(ctx.scalp, rootingOptions);
+    std::vector<PlacedLock> placed(merged.chains.size());
+    std::vector<int> fate(merged.chains.size(), 0);  // 0 kept, 1 rooting dropped it, 2 gated out
+    parallelFor(0, merged.chains.size(), [&](std::size_t k) {
+        const RootedGuide rg = rootGuide(merged.chains[k], ctx.scalp, headMesh, rootingOptions, rootScale);
+        if (rg.points.size() < 4) {
+            fate[k] = 1;
+            return;
+        }
+        const GuideScore sc = scoreOnViews(views, rg.points, GuideScoreOptions{});
+        if (sc.score < mo.minScore || sc.support <= 0.0f) {
+            fate[k] = 2;
+            return;
+        }
+        PlacedLock& p = placed[k];
+        p.path = rg.points;
+        p.root = rg.root;
+        int view = keptView[static_cast<std::size_t>(merged.members[k].front())];
+        for (int m : merged.members[k])
+            if (keptView[static_cast<std::size_t>(m)] != view) view = -1;
+        p.view = view;
+        p.triangulated = view < 0;
+        p.score = sc.score;
+    }, 2);
+    double scoreSum = 0.0;
+    for (std::size_t k = 0; k < placed.size(); ++k) {
+        if (fate[k] == 1) ++counts.rootDropped;
+        else if (fate[k] == 2) ++counts.gatedOut;
+        else {
+            scoreSum += placed[k].score;
+            out.push_back(std::move(placed[k]));
+        }
+    }
+    counts.kept = static_cast<int>(out.size());
+    counts.meanScore = out.empty() ? 0.0f : static_cast<float>(scoreSum / static_cast<double>(out.size()));
     return out;
 }
 
@@ -3977,7 +4224,7 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
     std::vector<int> lockAt(roots.size(), -1);
     std::vector<PlacedLock> placed;
     if (lockGuides) {
-        placed = placeLocks(ctx, lockSeeds, result);
+        placed = options.lockJoin == LockJoin::Merge ? mergeLocks(ctx, lockSeeds, headMesh, rooting, result) : placeLocks(ctx, lockSeeds, result);
         for (const auto& c : result.lockViews) result.locksDetected += c.detected;
         // (with symmetry the guides on the other side are the grown side's mirrored: a lock there is
         // mirrored over to compete for a root on the grown side, as its mirror image)

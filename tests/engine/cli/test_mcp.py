@@ -286,8 +286,18 @@ def everything_else(c, root):
     c.call("morph_to_photos", dict(f, reset=True))
     region, _ = c.call("scalp_from_landmarks", f)
     assert region["linked"].endswith(".density") and 0.05 < region["scalpShare"] < 0.7, region
+    # The traced locks lifted first and merged in 3D (lock_join merge: traced on any hair); each
+    # step's counts add up. (The same group: the grow below replaces it.)
+    merged, _ = c.call("guides_from_photos", dict(f, guide_count=80, lock_join="merge"))
+    m = merged["lockMerge"]
+    assert merged["guides"] > 5 and m["pieces"] == sum(p["detected"] for p in merged["lockPaths"]["photos"]), merged
+    assert m["chains"] + m["merges"] == m["fitted"] - m["tooShort"] - m["duplicates"], m
+    assert m["kept"] + m["gatedOut"] + m["rootDropped"] == m["chains"] and m["usable"] == merged["lockPaths"]["lockGuides"], m
+    assert m["passes"] and m["passes"][0]["distance"] <= m["passes"][-1]["distance"] and m["passes"][-1]["angle"] == 40.0, m
+    _, bad = c.call("guides_from_photos", dict(f, lock_join="glue"), expect_error=True)
+    assert "lock_join" in json.dumps(bad), bad
     grown, _ = c.call("guides_from_photos", dict(f, guide_count=80, apply_look=True))
-    assert grown["guides"] > 5 and "unseenShare" in grown, grown
+    assert grown["guides"] > 5 and "unseenShare" in grown and "lockMerge" not in grown, grown
     assert grown["rooting"]["guides"] > 0 and grown["rooting"]["flipped"] == 0 and 0.0 <= grown["score"]["mean"] <= 1.0, grown
     assert "lookApplied" in grown or "look" not in grown, grown
     # The groom against its photo: the silhouettes' overlap, where the hair differs, its color.

@@ -78,6 +78,9 @@ constexpr const char* kDefaultCombMode = "field";
 // How guides_from_strokes lifts strokes when not told (fit: fitted to every photo's strokes,
 // guide_fit.h; shell: each stroke's points cast onto the hair's shell from its photo).
 constexpr const char* kDefaultStrokeLift = "fit";
+// How guides_from_photos turns the locks it traces into 3D (match: triangulated across two photos;
+// merge: lifted and fitted per photo, joined in 3D: reference_guides.h LockJoin).
+constexpr const char* kDefaultLockJoin = "match";
 constexpr int kPhotoShown = 768;  // a photo's picture at most this many pixels across (default)
 constexpr int kMaxSimFrames = 1000;    // frames one simulate or sim_cache call steps
 // A stroke's radius when none is given, and a placed guide's length (where no guides are near to
@@ -3849,6 +3852,19 @@ struct AgentTools::Impl {
         options.symmetry = referenceSymmetryFromName(str(a, "symmetry", "auto"));
         options.lockCurls = flag(a, "locks", true);
         if (a.contains("lock_paths")) options.lockPaths = flag(a, "lock_paths", true) ? 1 : 0;
+        const std::string lockJoin = str(a, "lock_join", kDefaultLockJoin);
+        if (lockJoin != "match" && lockJoin != "merge") throw ToolError("lock_join is match or merge");
+        if (lockJoin == "merge") {
+            options.lockJoin = LockJoin::Merge;
+            if (a.contains("lock_fit")) options.lockMerge.fit = flag(a, "lock_fit", options.lockMerge.fit);
+            if (a.contains("lock_lift")) {
+                const std::string lift = str(a, "lock_lift", "surface");
+                if (lift != "surface" && lift != "shell") throw ToolError("lock_lift is surface or shell");
+                options.lockMerge.lift = lift == "shell" ? LockMergeOptions::Lift::Shell : LockMergeOptions::Lift::Surface;
+            }
+            // (merging is about the traced locks: traced on any hair unless lock_paths says not)
+            if (!a.contains("lock_paths")) options.lockPaths = 1;
+        }
         if (a.contains("volume")) {
             const double volume = num(a, "volume", 0.75);
             if (volume < 0.0 || volume > 1.5) throw ToolError("volume is 0 to 1.5 (a share of the hair's thickness the photos show)");
@@ -3926,6 +3942,25 @@ struct AgentTools::Impl {
                 const auto& c = result.lockViews[k];
                 perPhoto.push_back({{"photo", used[k]}, {"detected", c.detected}, {"matched", c.matched},
                                     {"triangulated", c.triangulated}, {"singleView", c.singleView}});
+            }
+            if (result.lockMerge.on) {
+                const auto& m = result.lockMerge;
+                json passes = json::array();
+                for (std::size_t k = 0; k < m.mergesPerPass.size(); ++k)
+                    passes.push_back({{"merges", m.mergesPerPass[k]}, {"distance", r4(m.passDistance[k])}, {"angle", r4(m.passAngle[k])}});
+                out["lockMerge"] = {{"pieces", m.pieces}, {"lifted", m.lifted}, {"fitted", m.fitted}, {"fused", m.fused},
+                                    {"tooShort", m.tooShort}, {"duplicates", m.duplicates}, {"merges", m.merges}, {"passes", passes},
+                                    {"chains", m.chains}, {"rootDropped", m.rootDropped}, {"gatedOut", m.gatedOut}, {"kept", m.kept},
+                                    {"usable", result.lockGuides}, {"pieceLength", r4(m.pieceLength)}, {"chainLength", r4(m.chainLength)},
+                                    {"meanScore", r4(m.meanScore)}, {"headRadius", r4(m.headRadius)},
+                                    {"about", "lock_join merge: each photo's traced lock lines (pieces) lifted (lock_lift) and "
+                                              "fitted as strokes (fitted: a lock's lines on several photos fitted as one, fused), cut to "
+                                              "what their lines cover (tooShort dropped), pieces repeating a longer one dropped "
+                                              "(duplicates), joined end to end in 3D where one carries on into the next (merges, each "
+                                              "pass's distance in head radii and largest turn in degrees, relaxing), each chain rooted "
+                                              "on the scalp (rootDropped: no scalp near either end) and scored against every photo "
+                                              "(gatedOut: below the score bar), the kept ones competing for roots as matched locks do "
+                                              "(usable: those that took one). Lengths in head radii."}};
             }
             out["lockPaths"] = {{"photos", perPhoto}, {"lockGuides", result.lockGuides},
                                 {"about", "Wavy hair: in each photo the locks' paths traced from their roots along the coarse flow "
@@ -6780,6 +6815,18 @@ struct AgentTools::Impl {
                           {"lock_paths", prop("boolean", "Trace the locks as objects: in each photo along the coarse flow from their "
                                                          "roots (through the crests where the fine strands run across them), matched "
                                                          "across photos and triangulated (default: on wavy hair).")},
+                          {"lock_fit", prop("boolean", "lock_join merge: fit each piece to its lines on every photo (guide_fit, a "
+                                                       "lock's lines on several photos fused; default true) or keep the lift alone.")},
+                          {"lock_lift", enumProp({"surface", "shell"},
+                                                 "lock_join merge: where a line is lifted to first: surface (along its rays at the "
+                                                 "hair's thickness over the lock's root, default) or shell (the photos' hull, as a "
+                                                 "drawn stroke).")},
+                          {"lock_join", enumProp({"match", "merge"},
+                                                 "How the traced locks become 3D: match (two photos' lines from the same root "
+                                                 "triangulated) or merge (each photo's lines lifted and fitted as strokes, a lock's "
+                                                 "lines on several photos fused, the pieces joined end to end in 3D, scored against "
+                                                 "every photo and rooted; traces the locks on any hair). Default " +
+                                                     std::string(kDefaultLockJoin) + ".")},
                           {"apply_look", prop("boolean", "Also set the look the photos suggest (HairColor melanin and redness, Clump, "
                                                          "Curl, Flyaway; nodes added where missing): a second undo step.")},
                           {"orientation", enumProp({"multiscale", "variance"},
