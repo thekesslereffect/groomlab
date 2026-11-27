@@ -393,10 +393,9 @@ TEST(ReferenceGuidesEndToEnd, CurlyLocksAreTracedOneGuideALock) {
     ASSERT_TRUE(r.look.curly) << r.look.curlShare << " " << r.look.curlAmplitudeDeg;
     EXPECT_GT(r.locksTraced, static_cast<int>(r.guides.size()) / 4);
     EXPECT_EQ(r.locksTraced + r.locksFilled, static_cast<int>(r.guides.size()));
-    // (the radius reads low: a lock's strands out of step and the fields' smoothing narrow the swing,
-    // and where the photos cannot place a lock exactly they agree better with a smaller curl)
-    EXPECT_GT(r.lockRadius, 0.35f * radius);
-    EXPECT_LT(r.lockRadius, 1.5f * radius);
+    EXPECT_NEAR(r.lockRadius, radius, 0.25f * radius);
+    EXPECT_GT(r.locksDetected, 20);
+    EXPECT_GT(r.lockRoots, 10);
     EXPECT_NEAR(r.lockWavelength, wavelength, 0.25f * wavelength);
     // Each traced guide runs near a true lock (its axis, within the lock's width and the curl).
     double near = 0.0;
@@ -417,9 +416,9 @@ TEST(ReferenceGuidesEndToEnd, CurlyLocksAreTracedOneGuideALock) {
         ++n;
     }
     ASSERT_GT(n, 0);
-    EXPECT_LT(near / n, 0.2);
-    // A lock of strands round each guide curls with the photos' locks: their flow agrees with the
-    // photos' better than the same guides grown without their locks' curls.
+    EXPECT_LT(near / n, 0.16);
+    // A lock of strands round each guide curls with the photos' locks: full-size curls not quite in
+    // their place cost a little of the flow's agreement against smooth guides, no more.
     ReferenceGuideOptions plain = options;
     plain.lockCurls = false;
     const ReferenceGuidesResult straight = guidesFromReference(shoot.cap, shoot.views, plain);
@@ -430,7 +429,7 @@ TEST(ReferenceGuidesEndToEnd, CurlyLocksAreTracedOneGuideALock) {
         curled += a.flowAgreement;
         uncurled += b.flowAgreement;
     }
-    EXPECT_GT(curled, uncurled);
+    EXPECT_GT(curled, uncurled - 0.06 * static_cast<double>(shoot.views.size()));
 }
 
 TEST(ReferenceLook, ClumpsAreTheBrightnessPeriodAcrossTheFlow) {

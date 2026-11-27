@@ -437,6 +437,90 @@ std::vector<std::uint8_t> meshCandidatesPng(const ScalpMesh& scalp, const RefCam
     return c.png();
 }
 
+PairSnap snapToFeature(const RefImage& image, float u, float v, float window) {
+    PairSnap out;
+    out.u = u;
+    out.v = v;
+    if (image.empty()) return out;
+    const int r = std::max(3, static_cast<int>(std::ceil(window)));
+    const int x0 = std::max(2, static_cast<int>(u) - r), x1 = std::min(image.width - 3, static_cast<int>(u) + r);
+    const int y0 = std::max(2, static_cast<int>(v) - r), y1 = std::min(image.height - 3, static_cast<int>(v) + r);
+    if (x1 <= x0 || y1 <= y0) return out;
+    auto gray = [&](int x, int y) {
+        if (image.channels < 3) return image.at(x, y, 0);
+        return (image.at(x, y, 0) + image.at(x, y, 1) + image.at(x, y, 2)) / 3.0f;
+    };
+    const int w = x1 - x0 + 1, h = y1 - y0 + 1;
+    std::vector<float> xx(static_cast<std::size_t>(w * h)), yy(xx.size()), xy(xx.size());
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const float gx = 0.5f * (gray(x0 + x + 1, y0 + y) - gray(x0 + x - 1, y0 + y));
+            const float gy = 0.5f * (gray(x0 + x, y0 + y + 1) - gray(x0 + x, y0 + y - 1));
+            const std::size_t i = static_cast<std::size_t>(y * w + x);
+            xx[i] = gx * gx;
+            yy[i] = gy * gy;
+            xy[i] = gx * gy;
+        }
+    // The tensor over 5 x 5, then Harris's response.
+    std::vector<float> response(xx.size(), 0.0f);
+    double sum = 0.0;
+    for (int y = 2; y + 2 < h; ++y)
+        for (int x = 2; x + 2 < w; ++x) {
+            float a = 0, b = 0, c = 0;
+            for (int dy = -2; dy <= 2; ++dy)
+                for (int dx = -2; dx <= 2; ++dx) {
+                    const std::size_t i = static_cast<std::size_t>((y + dy) * w + x + dx);
+                    a += xx[i];
+                    b += yy[i];
+                    c += xy[i];
+                }
+            const float resp = std::max(0.0f, a * b - c * c - 0.04f * (a + b) * (a + b));
+            response[static_cast<std::size_t>(y * w + x)] = resp;
+            sum += resp;
+        }
+    float best = 0.0f, bestRaw = 0.0f;
+    const float sigma = 0.6f * static_cast<float>(r);
+    for (int y = 2; y + 2 < h; ++y)
+        for (int x = 2; x + 2 < w; ++x) {
+            const float px = static_cast<float>(x0 + x) + 0.5f, py = static_cast<float>(y0 + y) + 0.5f;
+            const float d2 = (px - u) * (px - u) + (py - v) * (py - v);
+            const float raw = response[static_cast<std::size_t>(y * w + x)];
+            const float score = raw * std::exp(-0.5f * d2 / (sigma * sigma));
+            if (score > best) {
+                best = score;
+                bestRaw = raw;
+                out.u = px;
+                out.v = py;
+            }
+        }
+    const double mean = sum / static_cast<double>(std::max(1, (w - 4) * (h - 4)));
+    out.confidence = bestRaw > 0.0f ? static_cast<float>(std::clamp(1.0 - 4.0 * mean / bestRaw, 0.0, 1.0)) : 0.0f;
+    if (out.confidence <= 0.0f) {
+        out.u = u;
+        out.v = v;
+    }
+    out.moved = std::hypot(out.u - u, out.v - v);
+    return out;
+}
+
+std::vector<std::uint8_t> pairCropPng(const RefImage& image, float u, float v, const PairSnap& snap, float window, int zoom) {
+    const int r = std::max(4, static_cast<int>(std::ceil(1.5f * window)));
+    const int x0 = std::clamp(static_cast<int>(u) - r, 0, std::max(0, image.width - 1));
+    const int y0 = std::clamp(static_cast<int>(v) - r, 0, std::max(0, image.height - 1));
+    const int x1 = std::clamp(static_cast<int>(u) + r, x0 + 1, image.width), y1 = std::clamp(static_cast<int>(v) + r, y0 + 1, image.height);
+    const RefImage crop = cropImage(image, x0, y0, x1 - x0, y1 - y0);
+    Canvas canvas = Canvas::ofImage(crop, static_cast<float>(zoom));
+    const float k = static_cast<float>(zoom);
+    for (int gx = (x0 + 9) / 10 * 10; gx < x1; gx += 10) canvas.line((static_cast<float>(gx - x0)) * k, 0.0f, (static_cast<float>(gx - x0)) * k, static_cast<float>(canvas.height()), {0.3f, 0.6f, 1.0f}, 1.0f, 0.35f);
+    for (int gy = (y0 + 9) / 10 * 10; gy < y1; gy += 10) canvas.line(0.0f, (static_cast<float>(gy - y0)) * k, static_cast<float>(canvas.width()), (static_cast<float>(gy - y0)) * k, {0.3f, 0.6f, 1.0f}, 1.0f, 0.35f);
+    canvas.ring((u - static_cast<float>(x0)) * k, (v - static_cast<float>(y0)) * k, 2.5f * k, {1.0f, 0.9f, 0.2f}, 2.0f);
+    const float sx = (snap.u - static_cast<float>(x0)) * k, sy = (snap.v - static_cast<float>(y0)) * k;
+    canvas.line(sx - 3.0f * k, sy, sx + 3.0f * k, sy, {0.2f, 1.0f, 0.35f}, 2.0f);
+    canvas.line(sx, sy - 3.0f * k, sx, sy + 3.0f * k, {0.2f, 1.0f, 0.35f}, 2.0f);
+    canvas.text(2, 2, std::to_string(x0) + "," + std::to_string(y0), {1.0f, 1.0f, 1.0f});
+    return canvas.png();
+}
+
 std::vector<std::uint8_t> comparisonPng(const RefImage& image, const PhotoComparison& c, int maxSize) {
     const float k = fitScale(image.width, image.height, maxSize);
     Canvas canvas = Canvas::ofImage(image, k);

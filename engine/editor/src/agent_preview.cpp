@@ -8,6 +8,7 @@
 #include <limits>
 #include <stdexcept>
 
+#include "groomlab/editor/agent_canvas.h"
 #include "groomlab/export_view.h"
 #include "groomlab/instances.h"
 #include "groomlab/png.h"
@@ -207,6 +208,11 @@ PreviewImage renderPreview(const ScalpMesh* scalp, const StrandSet* strands, con
     const int ss = std::max(tile, tileH) <= 512 ? 2 : 1;  // supersampling: rendered at twice the size up to 512 px tiles
     const int inner = tile * ss, innerH = tileH * ss;
     std::vector<std::uint8_t> pixels(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 3);
+    struct Label {
+        float x, y;
+        std::string text;
+    };
+    std::vector<Label> labels;  // in the image's pixels
     for (int v = 0; v < count; ++v) {
         Raster r;
         r.w = inner;
@@ -246,14 +252,17 @@ PreviewImage renderPreview(const ScalpMesh* scalp, const StrandSet* strands, con
             const auto& pts = scalp->points();
             std::vector<Vec3f> screen(pts.size());
             for (std::size_t i = 0; i < pts.size(); ++i) screen[i] = r.project(pts[i]);
+            const bool colored = options.faceColors.size() == scalp->triangleCount();
+            std::size_t face = 0;
             for (const auto& t : scalp->triangles()) {
+                const std::size_t ti = face++;
                 const Vec3f& a = pts[static_cast<std::size_t>(t[0])];
                 const Vec3f& b = pts[static_cast<std::size_t>(t[1])];
                 const Vec3f& c = pts[static_cast<std::size_t>(t[2])];
                 Vec3f n = (b - a).cross(c - a).normalized();
                 if (n.dot(toEye) < 0.0f) n = -n;  // two-sided
                 const float shade = flat ? 0.75f : (rim ? 0.35f : 0.18f) + (rim ? 0.65f : 0.82f) * std::max(0.0f, n.dot(light));
-                const Color& skin = clay ? kClaySkin : kSkin;
+                const Color& skin = colored ? options.faceColors[ti] : clay ? kClaySkin : kSkin;
                 const Color col{skin[0] * shade, skin[1] * shade, skin[2] * shade};
                 drawTriangle(r, screen[static_cast<std::size_t>(t[0])], screen[static_cast<std::size_t>(t[1])],
                              screen[static_cast<std::size_t>(t[2])], col);
@@ -377,6 +386,17 @@ PreviewImage renderPreview(const ScalpMesh* scalp, const StrandSet* strands, con
                         over(a.x + dx * t, a.y + dy * t, a.z + (b.z - a.z) * t, kGuide);
                     }
                 }
+                const std::size_t gi = static_cast<std::size_t>(&guide - options.guides.data());
+                if (gi < options.guideLabels.size() && !options.guideLabels[gi].empty() && !guide.empty()) {
+                    const Vec3f tip = r.project(guide.back());
+                    const int tx = static_cast<int>(std::floor(tip.x)), ty = static_cast<int>(std::floor(tip.y));
+                    if (!r.behind(tip) && tx >= 0 && ty >= 0 && tx < r.w && ty < r.h &&
+                        tip.z - guideBias < scalpDepth[static_cast<std::size_t>(ty) * static_cast<std::size_t>(r.w) + static_cast<std::size_t>(tx)]) {
+                        const int tileX = (v % image.columns) * tile, tileY = (v / image.columns) * tileH;
+                        labels.push_back({static_cast<float>(tileX) + tip.x / static_cast<float>(ss),
+                                          static_cast<float>(tileY) + tip.y / static_cast<float>(ss), options.guideLabels[gi]});
+                    }
+                }
                 if (!guide.empty()) {
                     const Vec3f root = r.project(guide.front());
                     for (int oy = -1; oy <= 1; ++oy) {
@@ -419,7 +439,29 @@ PreviewImage renderPreview(const ScalpMesh* scalp, const StrandSet* strands, con
             }
         }
     }
+    // The guides' labels, each beside its tip.
+    if (!labels.empty()) {
+        RefImage shown;
+        shown.width = image.width;
+        shown.height = image.height;
+        shown.channels = 3;
+        shown.pixels.resize(pixels.size());
+        for (std::size_t i = 0; i < pixels.size(); ++i) shown.pixels[i] = static_cast<float>(pixels[i]) / 255.0f;
+        Canvas canvas = Canvas::ofImage(shown);
+        for (const Label& l : labels) {
+            canvas.dot(l.x, l.y, 1.5f, {1.0f, 1.0f, 0.3f});
+            canvas.text(static_cast<int>(l.x) + 3, static_cast<int>(l.y) - 3, l.text, {1.0f, 1.0f, 0.6f});
+        }
+        for (int y = 0; y < image.height; ++y)
+            for (int x = 0; x < image.width; ++x) {
+                const Rgb c = canvas.at(x, y);
+                for (int k = 0; k < 3; ++k)
+                    pixels[(static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) + static_cast<std::size_t>(x)) * 3 + static_cast<std::size_t>(k)] =
+                        static_cast<std::uint8_t>(std::lround(std::clamp(c[static_cast<std::size_t>(k)], 0.0f, 1.0f) * 255.0f));
+            }
+    }
     image.png = encodePng(image.width, image.height, 3, pixels);
+    image.rgb = std::move(pixels);
     return image;
 }
 

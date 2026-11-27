@@ -7,6 +7,7 @@
 // or several fixed views laid out in a grid. Orthographic, rendered at twice the size and filtered down.
 // Deterministic: the same groom and options give the same pixels on any machine and thread count.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -38,6 +39,12 @@ struct PreviewOptions {
     bool zUp = false;                               // the points are Z-up (Blender, Houdini)
     // Guide curves drawn over the hair (world points, root first), bright, hidden only by the scalp.
     std::vector<std::vector<Vec3f>> guides;
+    // A label a guide (empty: none; else as many as guides), drawn at its tip where the scalp does
+    // not hide it (render_preview label_guides: guide IDs).
+    std::vector<std::string> guideLabels;
+    // The scalp's triangles each in its own color (linear RGB; empty: the skin's), lit as the skin:
+    // a map's values over the scalp (show_map).
+    std::vector<std::array<float, 3>> faceColors;
     // Tube wires (display.h appendTubeWire: segments as pairs of points), drawn as the guides are.
     std::vector<Vec3f> tubeLines;
     // The look (previewLookNames): "studio" (a key light from above right), "flat" (each strand's
@@ -52,6 +59,7 @@ struct PreviewOptions {
 struct PreviewImage {
     int width = 0, height = 0;
     std::vector<std::uint8_t> png;  // the encoded image
+    std::vector<std::uint8_t> rgb;  // its pixels (8-bit sRGB, 3 a pixel, row by row)
     std::size_t strandsTotal = 0, strandsDrawn = 0, stride = 1;
     int columns = 1;
 };

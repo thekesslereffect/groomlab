@@ -933,6 +933,109 @@ TEST(AgentAlign, TheOutlineTightensARoughCameraOnASyntheticPortrait) {
     EXPECT_FALSE(refineWithOutline(*head, busy, RefImage{}, start, pairs, nullptr).ok);
 }
 
+TEST(AgentTools, CheckpointsBatchesMapsLabelsAndPhotosBeside) {
+    SessionTarget target;
+    AgentTools tools(target);
+    for (const char* name : {"checkpoint", "restore", "batch", "show_map", "suggest_pairs"}) EXPECT_TRUE(tools.has(name)) << name;
+    call(tools, "new_groom", {{"name", "ball"}, {"mesh", "ball"}});
+    AgentGroom& g = target.groom("ball");
+    call(tools, "brush_stroke", {{"mode", "place"}, {"from", "front_hairline"}, {"via", {"top", "crown"}}, {"to", "nape"},
+                                 {"length", 6.0}, {"spacing", 2.0}});
+    // A checkpoint, a change, the checkpoint back as one undo step (and undone again).
+    const std::string guides = g.session().data().hierarchyJson, graph = g.session().data().graphJson;
+    const json saved = call(tools, "checkpoint", {{"name", "placed"}});
+    EXPECT_EQ(saved["checkpoints"], json::array({"placed"}));
+    call(tools, "brush_stroke", {{"mode", "comb"}, {"from", "top"}, {"to", "back"}, {"offset", 2.0}, {"radius", 5.0}});
+    call(tools, "set_params", {{"node", "length"}, {"params", {{"randomness", 0.6}}}});
+    ASSERT_NE(g.session().data().hierarchyJson, guides);
+    const std::size_t steps = g.history().size();
+    const json back = call(tools, "restore", {{"name", "placed"}});
+    EXPECT_EQ(g.session().data().hierarchyJson, guides);
+    EXPECT_EQ(g.session().data().graphJson, graph);
+    EXPECT_EQ(g.history().size(), steps + 1);
+    EXPECT_FALSE(back["changed"].empty());
+    call(tools, "undo", json::object());
+    EXPECT_NE(g.session().data().hierarchyJson, guides);
+    call(tools, "restore", {{"name", "nothing"}}, true);
+    EXPECT_EQ(call(tools, "checkpoint", json::object())["checkpoints"], json::array({"placed"}));
+
+    // A batch: each call answered in order, stopping at the first error; images only when asked.
+    const ToolResult batch = tools.call("batch", {{"calls", {{{"tool", "evaluate"}, {"arguments", json::object()}},
+                                                             {{"tool", "render_preview"}, {"arguments", {{"size", 96}}}},
+                                                             {{"tool", "set_params"}, {"arguments", {{"node", "nope"}, {"params", json::object()}}}},
+                                                             {{"tool", "evaluate"}, {"arguments", json::object()}}}}});
+    EXPECT_TRUE(batch.isError);
+    EXPECT_EQ(images(batch), 0);
+    const json ran = json::parse(batch.content.back()["text"].get<std::string>());
+    EXPECT_EQ(ran["ran"], 3);
+    EXPECT_EQ(ran["stoppedAt"], 2);
+    EXPECT_EQ(ran["calls"][0]["ok"], true);
+    EXPECT_EQ(ran["calls"][2]["ok"], false);
+    const ToolResult pictures = tools.call("batch", {{"calls", {{{"tool", "render_preview"}, {"arguments", {{"size", 96}}}}}}, {"images", true}});
+    EXPECT_FALSE(pictures.isError);
+    EXPECT_EQ(images(pictures), 1);
+    call(tools, "batch", {{"calls", {{{"tool", "batch"}, {"arguments", json::object()}}}}}, true);
+
+    // A heatmap of an expression over the scalp: the values and a legend.
+    const ToolResult map = tools.call("show_map", {{"expression", "$y"}, {"views", {"front"}}, {"size", 256}});
+    ASSERT_FALSE(map.isError) << map.content.dump();
+    EXPECT_EQ(images(map), 1);
+    const json shown = json::parse(map.content.back()["text"].get<std::string>());
+    EXPECT_GT(shown["values"]["max"].get<double>(), shown["values"]["min"].get<double>() + 5.0);
+    call(tools, "show_map", json::object(), true);
+    const ToolResult checked = tools.call("check_expression", {{"expression", "$y"}, {"image", true}});
+    EXPECT_EQ(images(checked), 1);
+
+    // Guides labelled with their IDs.
+    const ToolResult labelled = tools.call("render_preview", {{"views", {"top"}}, {"label_guides", true}, {"size", 256}});
+    ASSERT_FALSE(labelled.isError) << labelled.content.dump();
+    const json drawn = json::parse(labelled.content.back()["text"].get<std::string>());
+    ASSERT_TRUE(drawn.contains("guidesLabelled")) << drawn.dump();
+    EXPECT_GT(drawn["guidesLabelled"]["count"].get<int>(), 8);
+    call(tools, "render_preview", {{"label_guides", "no such group"}}, true);
+
+    // The groom beside a lined-up photo: the photo and the groom through its camera, the same size.
+    writePhoto(fs::u8path(target.folders().root) / "shot.png", 320, 240);
+    call(tools, "add_photo", {{"path", "shot.png"}});
+    const RefCamera camera = viewCamera(*g.session().scalp(), "Y", "front", 320, 240, 50.0);
+    const json marks = call(tools, "mesh_landmarks", {{"view", "front"}, {"photo", "shot"}, {"count", 12}});
+    json pairs = json::array();
+    for (const json& p : marks["points"]) {
+        float u = 0, v = 0;
+        if (camera.project(Vec3f(p["p"][0].get<float>(), p["p"][1].get<float>(), p["p"][2].get<float>()), u, v)) pairs.push_back({{"pixel", {u, v}}, {"point", p["p"]}});
+    }
+    call(tools, "align_photo", {{"pairs", pairs}, {"focal_mm", 50.0}, {"keep_focal", true}, {"view", "front"}});
+    const ToolResult beside = tools.call("render_preview", {{"beside", "shot"}});
+    ASSERT_FALSE(beside.isError) << beside.content.dump();
+    const json besideInfo = json::parse(beside.content.back()["text"].get<std::string>());
+    EXPECT_EQ(besideInfo["width"], 640);
+    EXPECT_EQ(besideInfo["height"], 240);
+    const json blended = call(tools, "render_preview", {{"beside", "shot"}, {"blend", 0.5}});
+    EXPECT_EQ(blended["width"], 320);
+    // A ball has no face to name: suggest_pairs says so.
+    call(tools, "suggest_pairs", {{"photo", "shot"}}, true);
+}
+
+TEST(AgentPhotos, PairsSnapToTheNearestCorner) {
+    // A light square on a dark ground: a prediction a few pixels off its corner snaps onto it.
+    RefImage im;
+    im.width = im.height = 80;
+    im.channels = 3;
+    im.pixels.assign(80 * 80 * 3, 0.1f);
+    for (int y = 30; y < 60; ++y)
+        for (int x = 30; x < 60; ++x)
+            for (int c = 0; c < 3; ++c) im.pixels[static_cast<std::size_t>((y * 80 + x) * 3 + c)] = 0.9f;
+    const PairSnap snap = snapToFeature(im, 34.0f, 26.0f, 8.0f);
+    EXPECT_NEAR(snap.u, 30.0f, 2.0f);
+    EXPECT_NEAR(snap.v, 30.0f, 2.0f);
+    EXPECT_GT(snap.confidence, 0.5f);
+    // A flat patch: nothing stands out, the prediction kept.
+    const PairSnap flat = snapToFeature(im, 10.0f, 10.0f, 5.0f);
+    EXPECT_EQ(flat.confidence, 0.0f);
+    EXPECT_FLOAT_EQ(flat.u, 10.0f);
+    EXPECT_FALSE(pairCropPng(im, 34.0f, 26.0f, snap, 8.0f, 4).empty());
+}
+
 TEST(AgentTools, MorphToPhotosLandsThePairsAndUndoes) {
     SessionTarget target;
     AgentTools tools(target);
