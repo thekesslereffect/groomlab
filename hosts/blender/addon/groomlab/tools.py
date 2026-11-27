@@ -660,14 +660,21 @@ def setting_targets(scalp):
     return targets["settings"], targets["others"]
 
 
-def map_for_param(scalp, node, param, kind="vertices", resolution=1024, faces=None, map_node=False):
+def map_for_param(scalp, node, param, kind="vertices", resolution=1024, faces=None, map_node=False, name=None, typed=False):
     """New Map > For a setting: the map node.param reads, or a white one (`kind`: vertices, texture
     or guides) made and linked to it, one undo step (helper map_for_param); picked in the Paint tab,
     painted toward 1 (Ctrl: toward 0; on Density, no hair). A map made with `faces` (the scalp's
     polygon indices) is white on those faces only. Linked in the param itself, or with `map_node`
-    (New Map for a setting) through a Map node wired into it, seen in the graph. The caller picks
-    the Paint tool."""
+    (New Map for a setting) through a Map node wired into it, seen in the graph. With `typed`
+    (New Map's Name field) `name` is as the user left it: the param's own name (setting_targets'
+    "map") or the map it reads asks for the default, another names a new map (refused when empty,
+    invalid or taken). The caller picks the Paint tool."""
     args = {"node": node, "param": param, "kind": kind, "resolution": int(resolution)}
+    if typed:
+        args["map"] = name or ""
+        args["typed"] = True
+    elif name:
+        args["map"] = name
     if map_node:
         args["mapNode"] = True
     if faces:

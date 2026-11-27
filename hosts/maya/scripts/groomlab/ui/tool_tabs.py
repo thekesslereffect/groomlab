@@ -995,10 +995,12 @@ class NewMapDialog(QtWidgets.QDialog):
         self.target.addItem("Nothing yet (a blank map)", None)
         model = self.target.model()
         self.setting_kinds = {}  # node.param -> where a setting's new map lives by default
+        self.setting_maps = {}  # node.param -> the name its new map gets by default (the core's <node>_<param>)
         for s in settings:
             self.target.addItem("Setting: %s" % s["label"], "%s.%s" % (s["node"], s["param"]) if s["node"] else None)
             if s["node"]:
                 self.setting_kinds["%s.%s" % (s["node"], s["param"])] = s.get("kind", "vertices")
+                self.setting_maps["%s.%s" % (s["node"], s["param"])] = s.get("map") or "%s_%s" % (s["node"], s["param"])
             row = self.target.count() - 1
             self.target.setItemData(row, s["hint"], QtCore.Qt.ToolTipRole)
             if not s["node"]:
@@ -1011,11 +1013,15 @@ class NewMapDialog(QtWidgets.QDialog):
         self.other.setObjectName("newMapOther")
         for o in others:
             self.other.addItem(o["label"], "%s.%s" % (o["node"], o["param"]))
+            self.setting_maps["%s.%s" % (o["node"], o["param"])] = o.get("map") or "%s_%s" % (o["node"], o["param"])
             self.other.setItemData(self.other.count() - 1, o["hint"], QtCore.Qt.ToolTipRole)
         self.other_label = QtWidgets.QLabel("Setting")
         form.addRow(self.other_label, self.other)
         self.name = QtWidgets.QLineEdit(name)
+        self.name.setObjectName("newMapName")
         self.name.setToolTip("Letters, digits and _ (not starting with a digit)")
+        self.blank_name = name
+        self.auto_name = name  # what the field was filled with: replaced when the target changes, unless typed over
         form.addRow("Name", self.name)
         self.kind = QtWidgets.QComboBox()
         self.values_box = QtWidgets.QComboBox()
@@ -1037,7 +1043,7 @@ class NewMapDialog(QtWidgets.QDialog):
         self.kind.currentIndexChanged.connect(self._kind_changed)
         self.values_box.currentIndexChanged.connect(self._kind_changed)
         self.target.currentIndexChanged.connect(self._target_changed)
-        self.other.currentIndexChanged.connect(self._kind_changed)
+        self.other.currentIndexChanged.connect(self._other_changed)
         self._target_changed()
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -1074,15 +1080,28 @@ class NewMapDialog(QtWidgets.QDialog):
         self.other.setVisible(target == "other")
         self.other_label.setVisible(target == "other")
         for_setting = target is not None
-        # A setting's map is named for it (<node>_<param>), gray, on the scalp's vertices unless picked
-        # otherwise (the regions: on the guides, a value a group of guides).
-        self.name.setEnabled(not for_setting)
+        # A setting's map is named for it (<node>_<param>) unless named here, gray, on the scalp's
+        # vertices unless picked otherwise (the regions: on the guides, a value a group of guides).
+        self._default_name()
         if for_setting:
             self.values_box.setCurrentIndex(0)
             wanted = self.setting_kinds.get(target, "vertices")
             if wanted == "guides" or self.kind.currentData() == "guides":
                 self.kind.setCurrentIndex(max(0, self.kind.findData(wanted)))
         self._kind_changed()
+
+    def _other_changed(self, *_):
+        self._default_name()
+        self._kind_changed()
+
+    def _default_name(self):
+        """The Name field at the picked target's default (a setting's own name, else the blank
+        map's), unless the user typed another name there."""
+        target = self.chosen_target()
+        wanted = self.setting_maps.get("%s.%s" % target, "%s_%s" % target) if target else self.blank_name
+        if self.name.text().strip() in ("", self.auto_name):
+            self.name.setText(wanted)
+        self.auto_name = wanted
 
     def _kind_changed(self, *_):
         kind = self.kind.currentData()
@@ -1094,7 +1113,8 @@ class NewMapDialog(QtWidgets.QDialog):
         text = KIND_TIPS[kind] + "\n\n" + VALUES_TIPS[self.values_box.currentData()]
         if for_setting:
             node, param = self.chosen_target()
-            text = "For %s.%s: named %s_%s. %s\n\n%s" % (node, param, node, param, FOR_TIP, KIND_TIPS[kind])
+            text = "For %s.%s: named as above (%s, or the map it reads already, unless named otherwise). %s\n\n%s" % (
+                node, param, self.auto_name, FOR_TIP, KIND_TIPS[kind])
         if kind == "texture" and not groomlab.scene_folder():
             text += "\n\nThe scene is untitled: save it first, so the image lands beside it."
         self.about.setText(text)
@@ -1697,24 +1717,29 @@ class PaintTab(_GroomTab):
         # Faces of the scalp selected: the new map is white on them, black elsewhere.
         faces = groomlab.selected_scalp_faces(self.groom)
         if target:
-            return self.map_for_setting(target[0], target[1], kind=kind, resolution=resolution, faces=faces)
+            return self.map_for_setting(target[0], target[1], kind=kind, resolution=resolution, faces=faces, name=name)
         return self.make_map(name, kind, resolution=resolution, color=color, faces=faces)
 
-    def map_for_setting(self, node, param, kind="vertices", resolution=1024, faces=None):
+    def map_for_setting(self, node, param, kind="vertices", resolution=1024, faces=None, name=None):
         """+ New Map > for a setting: the map node.param reads, or a white one made (`kind`) and
         linked to it (groomlab.paint_param, the Graph Editor's Paint), picked, and the Paint brush
-        on it toward 1 (Ctrl: toward 0; on Density, no hair), all one undo step. Returns the
-        map's name, or None (the status line says why)."""
+        on it toward 1 (Ctrl: toward 0; on Density, no hair), all one undo step. `name`: what the
+        dialog's Name field holds (its default, <node>_<param>, as without it; another names a new
+        map, refused when taken or not a valid name). Returns the map's name, or None (the status
+        line says why)."""
         if not self.need():
             return None
         from groomlab.base import undo_chunk
         with undo_chunk("map for %s.%s" % (node, param)):
             before = groomlab.param_map(self.groom, node, param)
             # (New Map for a setting: the map's Map node wired into the param, seen in the graph.)
+            typed = {"name": name, "typed": True} if name is not None else {}
             name = self.run(groomlab.paint_param, self.groom, node, param, kind=kind, resolution=resolution, paint=False,
-                            faces=faces, map_node=True)
+                            faces=faces, map_node=True, **typed)
             if not name:
                 return None
+            if before and before[0] != name:
+                before = None  # a new map named in the dialog: it reads that one now
             self.refresh(force=True)
             self.select(name)
             channel = before[1] if before else "luminance"

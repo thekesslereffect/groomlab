@@ -560,6 +560,54 @@ TEST(AppPanels, NewMapForASettingMakesLinksPaintsThenCtrlLowers) {
     EXPECT_EQ(session.settings().brush.attribute, map);
 }
 
+TEST(AppPanels, NewMapForASettingTakesATypedName) {
+    // New map's Name for a setting: filled with the setting's own name (following the target until
+    // typed over), editable; a typed name makes that map, the param reading it; a taken, bad or
+    // empty one is refused with the form kept; the own name left there makes the default map.
+    const std::string path = sampleCopy("groomlab_app_setting_map_name");
+    MainWindow window;
+    window.resize(1280, 720);
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(path)));
+    GroomDocument* doc = window.document();
+    MapsPanel* panel = window.mapsPanel();
+    const std::string scatter = nodeOfType(*doc, "Scatter"), noise = nodeOfType(*doc, "Noise");
+    ASSERT_FALSE(scatter.empty());
+    ASSERT_FALSE(noise.empty());
+    auto* name = panel->findChild<QLineEdit*>(QStringLiteral("newMapName"));
+    ASSERT_TRUE(name);
+    panel->setNewMapFields(QString(), QStringLiteral("vertices"), false, 1.0, 64);
+    ASSERT_TRUE(panel->setNewMapTarget(QString::fromStdString(scatter), QStringLiteral("density")));
+    EXPECT_TRUE(name->isEnabled());
+    EXPECT_EQ(name->text().toStdString(), paramMapName(scatter, "density"));
+    ASSERT_TRUE(panel->setNewMapTarget(QString::fromStdString(noise), QStringLiteral("fraction")));
+    EXPECT_EQ(name->text().toStdString(), paramMapName(noise, "fraction")) << "the default follows the setting";
+    name->setText(QStringLiteral("speckle_mask"));
+    ASSERT_TRUE(panel->setNewMapTarget(QString::fromStdString(scatter), QStringLiteral("density")));
+    EXPECT_EQ(name->text(), QStringLiteral("speckle_mask")) << "a typed name stays";
+    const std::size_t mapsBefore = doc->maps().size();
+    EXPECT_EQ(panel->createFromFields(), "");
+    ASSERT_TRUE(doc->map("speckle_mask"));
+    EXPECT_EQ(doc->map(paramMapName(scatter, "density")), nullptr);
+    EXPECT_EQ(doc->maps().size(), mapsBefore + 1);
+    const auto users = doc->mapUsers("speckle_mask");
+    EXPECT_NE(std::find(users.begin(), users.end(), std::make_pair(scatter, std::string("density"))), users.end());
+    EXPECT_EQ(panel->selectedMap(), "speckle_mask");
+    // Taken, bad, empty: refused, nothing made.
+    ASSERT_TRUE(panel->setNewMapTarget(QString::fromStdString(noise), QStringLiteral("fraction")));
+    name->setText(QStringLiteral("speckle_mask"));
+    EXPECT_NE(panel->createFromFields().find("already has a map named"), std::string::npos);
+    name->setText(QStringLiteral("2bad"));
+    EXPECT_NE(panel->createFromFields().find("letters, digits"), std::string::npos);
+    name->setText(QStringLiteral("  "));
+    EXPECT_NE(panel->createFromFields(), "");
+    EXPECT_EQ(doc->maps().size(), mapsBefore + 1);
+    // The setting's own name left there: its own map, as before.
+    name->setText(QString::fromStdString(paramMapName(noise, "fraction")));
+    EXPECT_EQ(panel->createFromFields(), "");
+    ASSERT_TRUE(doc->map(paramMapName(noise, "fraction")));
+    EXPECT_EQ(doc->maps().size(), mapsBefore + 2);
+}
+
 // Param keys (Maya's and Blender's Set Key): a param keyed is linked to a control of its own in
 // place (graph_controls.h linkControl: <node>_<param>, no Control node), its value keyed at frames
 // and applied as the frame changes, saved with the groom; Remove Animation leaves it at its value.

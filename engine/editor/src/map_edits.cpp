@@ -599,8 +599,23 @@ static bool colorFieldParam(const std::string& graphJson, const std::string& nod
     return false;
 }
 
+std::string typedParamMapName(const std::string& node, const std::string& param, const std::string& typed, const std::string& reads,
+                              const std::function<bool(const std::string&)>& taken) {
+    const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+    std::size_t begin = 0, end = typed.size();
+    while (begin < end && space(typed[begin])) ++begin;
+    while (end > begin && space(typed[end - 1])) --end;
+    const std::string name = typed.substr(begin, end - begin);
+    if (name.empty()) throw std::invalid_argument("the map needs a name");
+    if (name == paramMapName(node, param) || (!reads.empty() && name == reads)) return {};  // the default, as it was
+    if (!validMapName(name)) throw std::invalid_argument(mapNameError(name));
+    if (taken && taken(name)) throw std::invalid_argument("the groom already has a map named '" + name + "'");
+    return name;
+}
+
 ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage,
-                      const std::string& node, const std::string& param, const ParamPaintRequest& paint, const MapFiles& files) {
+                      const std::string& node, const std::string& param, const ParamPaintRequest& asked, const MapFiles& files) {
+    ParamPaintRequest paint = asked;
     const std::string full = graphOrDefault(graph);
     if (!GraphEdit(full).hasNode(node)) throw std::invalid_argument("no node '" + node + "'");
     // A color param (a ColorLayers layer's): painted as a color map.
@@ -620,6 +635,11 @@ ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const Gui
         read = paramMapOf(full, maps, guides, node, param);
     } catch (const std::exception& e) {
         throw std::invalid_argument(e.what());
+    }
+    if (paint.typed) {  // New Map for a setting's Name field: the default, or a new map of the typed name
+        paint.name = typedParamMapName(node, param, paint.name, read.map,
+                                       [&](const std::string& n) { return !mapKindOf(maps, guides, n).empty(); });
+        paint.typed = false;
     }
     ParamPaint out;
     out.created.maps = maps;
