@@ -833,6 +833,10 @@ def draw_pinned_actions(layout, context, node):
         from . import tools
         if tools.sculpted_braid(_node_scalp(node)) == node.gl_name:
             state.add("braid.sculpting")
+    if node.gl_type in ("SculptGuides", "SculptStrands"):  # brushed: Done Sculpting in Sculpt's place
+        from . import tools
+        if tools.sculpted_node(_node_scalp(node)) == node.gl_name:
+            state.add("node.sculpting")
     container = graph_ui.get("graph/nodeActions", {}) or {}
     items = [i for i in graph_ui.resolve(container.get("items", []), state, values) if i["kind"] == "action"]
     items = [i for i in items if i["id"] in graph_ui.ACTIONS or i["id"] in actions.BINDINGS]

@@ -889,6 +889,60 @@ def main():
             widgets.dispose(empty)
     check.run("the Graph Editor's search ranks names first; no note on the default graph", graph_search_and_notes)
 
+    # A Sculpt node's panel: Sculpt, or Done Sculpting in its place while the brushes shape it (what
+    # Esc in the brush tool does: GraphEditor.done_sculpting, sculpts.leave); the panel follows the
+    # target when it changes elsewhere (a Correctives row, Esc: the groom's sculptNode watched).
+    def sculpt_enter_exit():
+        from groomlab.ui import definitions
+        editor = graph_editor.GraphEditor()
+        editor.catalog = catalog
+        editor.model = gm.GraphModel(catalog, groomlab_core.default_graph())
+        editor.rebuild()
+        try:
+            for op_type in ("SculptGuides", "SculptStrands"):
+                node = editor.model.add_node(op_type)
+                target = [None]
+                calls = []
+                editor.sculpt_target = lambda: target[0]
+                editor.brush_sculpt_node = lambda name: calls.append(("brush", name))
+                editor.done_sculpting = lambda name=None: calls.append(("done", name))
+
+                def shown():
+                    state = editor.params.node_action_state(node)
+                    return [i["id"] for i in definitions.resolve(definitions.get("graph/nodeActions")["items"], state)
+                            if i["kind"] == "action"]
+                _expect("sculpt.brush" in shown() and "sculpt.done" not in shown(), "%s not brushed: Sculpt (%r)"
+                        % (op_type, shown()))
+                target[0] = node
+                _expect("sculpt.done" in shown() and "sculpt.brush" not in shown(), "%s brushed: Done Sculpting (%r)"
+                        % (op_type, shown()))
+                target[0] = "other"
+                _expect("sculpt.brush" in shown(), "another node brushed: Sculpt on %s" % op_type)
+                table = editor.params.node_action_table(node)
+                table["sculpt.brush"]()
+                table["sculpt.done"]()
+                settle()  # (they run once the click is over)
+                _expect(calls == [("brush", node), ("done", node)], "%s's buttons: %r" % (op_type, calls))
+                # The target changed elsewhere: the shown node's actions are built again, once.
+                rebuilt = []
+                editor.refresh_node_actions = lambda: rebuilt.append(editor.params.node)
+                editor.params.node = node
+                editor.params.shown_sculpt_target = "other"
+                editor.sculpt_target_soon()
+                editor.sculpt_target_soon()
+                settle()
+                _expect(rebuilt == [], "the same target: not rebuilt (%r)" % rebuilt)
+                target[0] = node
+                editor.sculpt_target_soon()
+                editor.sculpt_target_soon()
+                settle()
+                _expect(rebuilt == [node], "a new target: rebuilt once (%r)" % rebuilt)
+                del editor.refresh_node_actions, editor.sculpt_target, editor.brush_sculpt_node, editor.done_sculpting
+                editor.params.node = None
+        finally:
+            widgets.dispose(editor)
+    check.run("a Sculpt node's panel: Sculpt, or Done Sculpting while it is brushed", sculpt_enter_exit)
+
     # UX batch 2: one name per thing, the core's categories and keys, units and decimals.
     def names_keys_and_units():
         from groomlab.ui import shortcuts, hotkeys

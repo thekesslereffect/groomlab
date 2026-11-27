@@ -846,6 +846,28 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(tools.correctives(head)["target"], {"kind": "node", "name": made})
         self.assertEqual(menu.correctives_menu(bpy.context), "GROOMLAB_MT_sculpt_node_context")
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_sculpt_node_context)), ["Clear Edits"])
+        # Its panel (graph_ui.json's nodeActions): Done Sculpting while it is brushed, what Esc in the
+        # brush tool does (tool_ops.leave_sculpt_node, no undo step); Sculpt in its place then, which
+        # brushes it again.
+        ge = importlib.import_module(bu.MODULE + ".graph_editor")
+        gt = importlib.import_module(bu.MODULE + ".graph_tree")
+        authoring = importlib.import_module(bu.MODULE + ".graph_authoring")
+        gt.flush()
+        node = gt.node_named(gt.tree_of(head), made)
+        pinned = lambda: ge.draw_pinned_actions(Recorder([]), bpy.context, node)  # noqa: E731
+        self.assertIn("sculpt.done", pinned())
+        self.assertNotIn("sculpt.brush", pinned())
+        for op in (authoring.GROOMLAB_OT_graph_sculpt_done, authoring.GROOMLAB_OT_graph_sculpt_brush):
+            self.assertNotIn("UNDO", op.bl_options)  # (a tool setting, as Esc)
+        self.assertEqual(bpy.ops.groomlab.graph_sculpt_done(node=made), {"FINISHED"})
+        self.assertEqual(tools.correctives(head)["target"]["kind"], "base")
+        self.assertEqual(bpy.context.scene.groomlab_tools.status, "Brushing the guides again")
+        self.assertIn("sculpt.brush", pinned())
+        self.assertNotIn("sculpt.done", pinned())
+        self.assertEqual(bpy.ops.groomlab.graph_sculpt_brush(node=made), {"FINISHED"})
+        self.assertEqual(tools.correctives(head)["target"], {"kind": "node", "name": made})
+        self.assertEqual([(r.kind, r.name) for r in t.correctives][t.corrective_index], ("node", made))
+        self.assertIn("sculpt.done", pinned())
         self.assertEqual(bpy.ops.groomlab.sculpt_clear(), {"FINISHED"})
         self.assertEqual(bpy.ops.groomlab.sculpt_target(), {"FINISHED"})  # the base groom again
         self.assertEqual(tools.correctives(head)["target"]["kind"], "base")
