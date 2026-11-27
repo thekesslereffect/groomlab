@@ -259,6 +259,14 @@ float median(std::vector<float> values) {
 
 // ---- Prepared views -------------------------------------------------------------------------------
 
+// A lock's path traced in one view (lockPaths): pixels a step apart, root end first.
+struct LockLine {
+    std::vector<std::array<float, 2>> line;
+    float say = 0.0f;    // the flow's say summed along it (pixels where the flow held the lock's way)
+    float score = 0.0f;  // what it was chosen by (its say, its length, falling)
+    bool kept = false;   // a lock of its own (not running along a clearer one kept already)
+};
+
 struct PreparedView {
     RefCamera camera;  // at the working size
     int width = 0, height = 0;
@@ -279,6 +287,10 @@ struct PreparedView {
     std::shared_ptr<const OrientationField> fine;    // the field with its curls (field may become coarse)
     std::vector<float> strandLength;  // a pixel: the longest a strand path runs on from it (strandPathLength; scene units, 0 none)
     CurlEstimate curl;
+    // Lock paths: the lines traced from each seed root (indexed as the seeds; empty: not traced here)
+    // and the curl period they were traced at (pixels).
+    std::vector<LockLine> lockLines;
+    float lockPeriodPx = 0.0f;
     std::vector<float> hintWay;         // 3 a pixel: the directed hints' way (u, v) and their strength (empty: none)
     std::vector<float> hintLength;      // 2 a pixel: how long the drawn lines say the hair is from there on (scene units)
                                         // and how much they say it (0-1; empty: none)
@@ -783,7 +795,30 @@ std::vector<std::uint8_t> maskStrokePixels(const std::vector<RefMaskStroke>& str
 std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector<ReferenceView>& views,
                                        const ReferenceGuideOptions& options, float scalpSize) {
     std::vector<PreparedView> out;
-    for (const ReferenceView& original : views) {
+    // The face's side of the head: from the scalp's middle toward the occluders' (a head under its
+    // scalp: the face is where the head reaches past the scalp, level), none when they line up (a
+    // ball under a cap).
+    Vec3f scalpCenter(0, 0, 0), face(0, 0, 0);
+    {
+        for (const Vec3f& q : scalp.points()) scalpCenter = scalpCenter + q;
+        scalpCenter = scalpCenter * (1.0f / static_cast<float>(std::max<std::size_t>(1, scalp.pointCount())));
+        Vec3f head(0, 0, 0);
+        std::size_t n = 0;
+        for (const auto& occluder : options.occluders)
+            if (occluder)
+                for (const Vec3f& q : occluder->points()) head = head + q, ++n;
+        if (n) {
+            const Vec3f up = options.up.normalized();
+            Vec3f d = head * (1.0f / static_cast<float>(n)) - scalpCenter;
+            d = d - up * d.dot(up);
+            if (d.length() > 0.05f * scalpSize) face = d.normalized();
+        }
+    }
+    // (each view once; again with the crop's reach doubled while its hair runs out of the crop: long
+    // hair past the reach an automatic length starts from)
+    for (std::size_t viewIndex = 0, attempt = 0; viewIndex < views.size();) {
+        const ReferenceView& original = views[viewIndex];
+        const float reachShare = 0.3f * static_cast<float>(1u << attempt);
         PreparedView pv;
         // The subject's part of the photo: where the scalp and the longest hair from it project
         // (finer detail at the same working size). Its image, mask, hints and camera cropped.
@@ -801,7 +836,7 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
             float lo[2] = {kInf, kInf}, hi[2] = {-kInf, -kInf};
             // The reach past the scalp: the given length, else a third of the scalp's size; a given
             // mask's hair counts too (all of it is in the crop).
-            const float longest = options.maxLength > 0.0f ? options.maxLength : 0.3f * scalpSize;
+            const float longest = options.maxLength > 0.0f ? options.maxLength : reachShare * scalpSize;
             float reachPx = 0.0f;
             const std::size_t every = std::max<std::size_t>(1, scalp.pointCount() / 20000);
             for (std::size_t i = 0; i < scalp.pointCount(); i += every) {
@@ -1006,15 +1041,70 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
             if (!byColor) pv.mask = refineMask(pv.rgb, pv.mask, seeds, sureBackdrop, likelyHair);
             touchUp();
         }
+        // Hair hanging from the scalp (long hair down the back and the neck): down the picture from
+        // hair over the scalp without a gap of bare skin, the hair's colors where an occluder shows
+        // (the hair over the scalp's median, within three of its median deviations: skin the mask
+        // took in is not), never on the face's side of the head (a beard).
+        std::vector<std::uint8_t> hanging(pixels, 0);
+        {
+            std::array<float, 3> hairColor{0, 0, 0};
+            float hairSpread = kInf;
+            if (!pv.rgb.empty() && pv.rgb.channels >= 3) {
+                std::vector<float> channel[3];
+                for (std::size_t i = 0; i < pixels; ++i)
+                    if (pv.scalpCover[i] && pv.mask.pixels[i] >= 0.5f)
+                        for (int c = 0; c < 3; ++c) channel[c].push_back(pv.rgb.pixels[i * static_cast<std::size_t>(pv.rgb.channels) + static_cast<std::size_t>(c)]);
+                if (channel[0].size() > 20) {
+                    for (int c = 0; c < 3; ++c) hairColor[static_cast<std::size_t>(c)] = median(channel[c]);
+                    std::vector<float> off;
+                    for (std::size_t k = 0; k < channel[0].size(); ++k)
+                        off.push_back(std::hypot(channel[0][k] - hairColor[0], channel[1][k] - hairColor[1], channel[2][k] - hairColor[2]));
+                    hairSpread = std::max(0.08f, 3.0f * median(off));
+                }
+            }
+            const Vec3f eye = pv.camera.eye();
+            auto hangs = [&](std::size_t i) {
+                if (pv.scalpCover[i] || occluded.empty() || !occluded[i]) return true;
+                if (hairSpread < kInf) {
+                    const float* c = &pv.rgb.pixels[i * static_cast<std::size_t>(pv.rgb.channels)];
+                    if (std::hypot(c[0] - hairColor[0], c[1] - hairColor[1], c[2] - hairColor[2]) >= hairSpread) return false;
+                }
+                if (face.length() <= 0.0f) return true;
+                const float u = static_cast<float>(i % static_cast<std::size_t>(pv.width)) + 0.5f, w = static_cast<float>(i / static_cast<std::size_t>(pv.width)) + 0.5f;
+                const Vec3f ray = (pv.camera.axis(0) * static_cast<float>((u - 0.5 * pv.camera.width - pv.camera.offsetU) / pv.camera.focalPx) -
+                                   pv.camera.axis(1) * static_cast<float>((w - 0.5 * pv.camera.height - pv.camera.offsetV) / pv.camera.focalPx) - pv.camera.axis(2));
+                return (eye + ray * pv.depth[i] - scalpCenter).dot(face) <= 0.15f * scalpSize;
+            };
+            // (down the picture: the world's down as it shows; along its columns or its rows)
+            const float du = -options.up.dot(pv.camera.axis(0)), dv = options.up.dot(pv.camera.axis(1));
+            const bool columns = std::abs(dv) >= std::abs(du);
+            const int lines = columns ? pv.width : pv.height, length = columns ? pv.height : pv.width;
+            const bool forward = columns ? dv >= 0.0f : du >= 0.0f;
+            const int gapMax = std::max(3, std::max(pv.width, pv.height) / 150);
+            for (int a = 0; a < lines; ++a) {
+                bool hung = false;
+                int gap = 0;
+                for (int b = 0; b < length; ++b) {
+                    const int c = forward ? b : length - 1 - b;
+                    const std::size_t i = columns ? static_cast<std::size_t>(c) * static_cast<std::size_t>(pv.width) + static_cast<std::size_t>(a)
+                                                  : static_cast<std::size_t>(a) * static_cast<std::size_t>(pv.width) + static_cast<std::size_t>(c);
+                    const bool hair = pv.mask.pixels[i] >= 0.5f && hangs(i);
+                    if (hair && pv.scalpCover[i]) hung = true, gap = 0;
+                    else if (hair) gap = 0;
+                    else if (++gap > gapMax) hung = false;
+                    if (hung && hair) hanging[i] = 1;
+                }
+            }
+        }
         // An occluder well away from the scalp's outline (a whole head's beard, the face below the
         // hair) is no hair to grow guides over, whatever its color; hair over the forehead, near the
-        // scalp, stays.
+        // scalp, stays, and so does hair hanging from the scalp over it.
         if (!occluded.empty()) {
             std::size_t cover = 0;
             for (std::uint8_t c : pv.scalpCover) cover += c;
             const float far = 0.25f * std::sqrt(static_cast<float>(cover));
             for (std::size_t i = 0; i < pixels; ++i)
-                if (occluded[i] && pv.scalpDistance[i] > far) pv.mask.pixels[i] = 0.0f;
+                if (occluded[i] && pv.scalpDistance[i] > far && !hanging[i]) pv.mask.pixels[i] = 0.0f;
         }
         pv.hullMask = grown(pv.mask, 2);
         // Roots grow only where the hair is sure: the mask a few pixels in (an eye's, a nose's or a
@@ -1069,7 +1159,42 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
                 pv.reachWorld = reach[at] * scalpDepth / static_cast<float>(pv.camera.focalPx);
             }
         }
+        // Hair running out of the crop where the crop is not the photo's edge: the crop again, wider.
+        // (only the side the picture's down is toward: hair hanging past the crop)
+        if (attempt < 2 && crop[2] > 0 && options.maxLength <= 0.0f && original.mask.empty() && !pv.mask.empty()) {
+            const int W = original.image.width, Hh = original.image.height;
+            const float du = -options.up.dot(pv.camera.axis(0)), dv = options.up.dot(pv.camera.axis(1));
+            const int downSide = std::abs(dv) >= std::abs(du) ? (dv >= 0.0f ? 3 : 1) : (du >= 0.0f ? 2 : 0);
+            bool sides[4] = {crop[0] > 0, crop[1] > 0, crop[0] + crop[2] < W, crop[1] + crop[3] < Hh};  // left, top, right, bottom
+            for (int side = 0; side < 4; ++side) sides[side] = sides[side] && side == downSide;
+            bool spills = false;
+            for (int side = 0; side < 4 && !spills; ++side) {
+                if (!sides[side]) continue;
+                const bool vertical = side == 0 || side == 2;
+                const int along = vertical ? pv.height : pv.width;
+                int hair = 0;
+                for (int k = 0; k < along; ++k) {
+                    for (int d = 0; d < 2; ++d) {
+                        const int x = vertical ? (side == 0 ? d : pv.width - 1 - d) : k;
+                        const int y = vertical ? k : (side == 1 ? d : pv.height - 1 - d);
+                        const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(pv.width) + static_cast<std::size_t>(x);
+                        if (pv.mask.pixels[i] >= 0.5f && hanging[i]) {
+                            ++hair;
+                            break;
+                        }
+                    }
+                }
+                // (hair hanging from the scalp across a good part of the edge: not a beard's sideburns)
+                spills = hair > std::max(3, (3 * along) / 20);
+            }
+            if (spills) {
+                ++attempt;
+                continue;
+            }
+        }
         out.push_back(std::move(pv));
+        ++viewIndex;
+        attempt = 0;
     }
     return out;
 }
@@ -1681,6 +1806,7 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign, float maxLe
         const Evidence e = ctx.evidence(p);
         if (e.outside > 0 && e.outside >= e.inside) {
             g.stop = "mask";
+            for (int drop = 0; drop < 2 && g.points.size() > 4; ++drop) g.points.pop_back();  // (the steps found past the hair: the guide ends in it)
             break;
         }
         // The outward direction off the scalp and the distance to it.
@@ -2486,6 +2612,36 @@ ReferenceShell::ReferenceShell(const ScalpMesh& scalp, const std::vector<Referen
     ReferenceShellBuilder::build(*this, ctx);
 }
 
+// How well a path runs with the views' coarse flow (the locks' paths): where each view (but `skip`)
+// sees it in its hair, the mean of cos 2x the angle between its picture and the flow (1 along it, -1
+// across), each step a pixel or more; `count`: the steps that counted.
+float coarseAgreement(const std::vector<PreparedView>& views, const std::vector<Vec3f>& path, int skip, int* count) {
+    double sum = 0.0;
+    int n = 0;
+    for (std::size_t k = 0; k < views.size(); ++k) {
+        const PreparedView& v = views[k];
+        if (static_cast<int>(k) == skip) continue;
+        const OrientationField* flow = v.coarse ? v.coarse.get() : v.field.get();
+        if (!flow) continue;
+        const float fx = static_cast<float>(flow->width) / static_cast<float>(v.width), fy = static_cast<float>(flow->height) / static_cast<float>(v.height);
+        for (std::size_t i = 1; i < path.size(); ++i) {
+            float u0 = 0, v0 = 0, z0 = 0, u1 = 0, v1 = 0;
+            if (!v.camera.project(path[i - 1], u0, v0, &z0) || !v.camera.project(path[i], u1, v1)) continue;
+            const float mu = 0.5f * (u0 + u1), mv = 0.5f * (v0 + v1);
+            if (!v.inFrame(mu, mv) || v.hidden(mu, mv, z0) || v.mask.sample(mu, mv) < 0.5f) continue;
+            const float du = u1 - u0, dv = v1 - v0, l = std::hypot(du, dv);
+            if (l < 1.0f) continue;
+            float fu = 0, fv = 0, conf = 0;
+            if (!flow->sample(mu * fx, mv * fy, fu, fv, conf) || conf < 0.05f) continue;
+            const float c = (du * fu + dv * fv) / l;
+            sum += 2.0 * c * c - 1.0;
+            ++n;
+        }
+    }
+    if (count) *count = n;
+    return n ? static_cast<float>(sum / n) : 0.0f;
+}
+
 // How well a guide's way agrees with the photos' fine strand directions where they see it in the
 // hair (the mean of cos 2x the angle between them, 1 along).
 float fineAgreement(const std::vector<PreparedView>& views, const std::vector<Vec3f>& path) {
@@ -2726,6 +2882,449 @@ std::vector<Vec3f> tracedCurl(const PreparedView& v, const LockFit& f, const std
     return out;
 }
 
+namespace {
+
+// ---- Lock paths: locks as objects ------------------------------------------------------------------
+//
+// On wavy hair the fine directions follow each wave, not the lock: at a crest the strands run across
+// the lock for a moment (the back of a head of loose curls reads as sideways bands). The locks' paths
+// come from a coarse flow: the fine directions averaged over half a curl period, each lock traced from
+// its root along it holding its own way (a lock bends slowly; a flow across its way is a crest, not a
+// turn), the clearest lines kept as locks, all the lines laid into the view's coarse flow (what the
+// grower and the lengths then read).
+
+// The way a picture shows the world's down (`up` reversed), pixels (v down); {0, 1} when it looks
+// straight down or up.
+std::array<float, 2> pictureDown(const RefCamera& camera, const Vec3f& up) {
+    const float du = -up.dot(camera.axis(0)), dv = up.dot(camera.axis(1)), l = std::hypot(du, dv);
+    return l > 0.2f ? std::array<float, 2>{du / l, dv / l} : std::array<float, 2>{0.0f, 1.0f};
+}
+
+// A lock's line from (u, w), leaving along (du, dw): a pixel a step along `flow`, its line taken the
+// way the lock goes. The way is the lock's own: it turns at most a quarter turn over one and a half
+// curl periods, a flow across it by more than 40 degrees says less and past 70 nothing (a curl's
+// crest), and where the flow says little it falls a little toward the picture's `down` (long hair
+// hangs). It ends where the hair does (the mask's edge, a gap of three pixels crossed), where it
+// curls round on itself, or where it has run across a confident flow for a period while not falling
+// (a line going sideways over locks that fall).
+LockLine traceLockLine(const PreparedView& v, const OrientationField& flow, float u, float w, float du, float dw, float period,
+                       const std::array<float, 2>& down, int maxSteps) {
+    LockLine out;
+    const float fx = static_cast<float>(flow.width) / static_cast<float>(v.width), fy = static_cast<float>(flow.height) / static_cast<float>(v.height);
+    const float maxTurn = 0.5f * kPi / (1.5f * period);
+    const float cosFull = pm::cos(40.0f * kPi / 180.0f), cosNone = pm::cos(70.0f * kPi / 180.0f);
+    float turned = 0.0f;
+    int outside = 0, across = 0;
+    out.line.push_back({u, w});
+    for (int k = 0; k < maxSteps; ++k) {
+        if (!v.inFrame(u, w)) break;
+        if (v.mask.sample(u, w) < 0.5f) {
+            if (++outside > 3) break;
+        } else {
+            outside = 0;
+        }
+        float ou = 0, ow = 0, c = 0, say = 0.0f;
+        float wu = du, ww = dw;
+        if (flow.sample(u * fx, w * fy, ou, ow, c)) {
+            float cs = ou * du + ow * dw;
+            if (cs < 0.0f) ou = -ou, ow = -ow, cs = -cs;
+            const float gate = std::clamp((cs - cosNone) / (cosFull - cosNone), 0.0f, 1.0f);
+            say = std::min(1.0f, c) * gate;
+            wu += say * ou;
+            ww += say * ow;
+            // (running across a confident flow while not falling: not this lock's way)
+            if (c > 0.25f && gate <= 0.0f && du * down[0] + dw * down[1] < 0.5f) ++across;
+            else across = 0;
+        }
+        wu += 0.15f * (1.0f - say) * down[0];
+        ww += 0.15f * (1.0f - say) * down[1];
+        const float angle = std::clamp(pm::atan2(du * ww - dw * wu, du * wu + dw * ww), -maxTurn, maxTurn);
+        turned += std::abs(angle);
+        if (turned > 0.9f * kPi) break;
+        const float ca = pm::cos(angle), sa = pm::sin(angle);
+        const float nu = ca * du - sa * dw, nw = sa * du + ca * dw;
+        du = nu;
+        dw = nw;
+        u += du;
+        w += dw;
+        out.line.push_back({u, w});
+        out.say += say;
+        if (static_cast<float>(across) > period) {
+            for (int t = 0; t < across && out.line.size() > 1; ++t) out.line.pop_back();
+            break;
+        }
+    }
+    while (out.line.size() > 1 && (!v.inFrame(out.line.back()[0], out.line.back()[1]) || v.mask.sample(out.line.back()[0], out.line.back()[1]) < 0.5f))
+        out.line.pop_back();
+    return out;
+}
+
+// The locks one view shows: from each seed root it sees under its hair, the lock's line (the way it
+// leaves the root: along the flow either way, or falling where the flow runs across the fall; the
+// one the flow holds longest, a little toward the longer and the falling); the clearest lines kept
+// as locks, none running for half its length within half a lock's width of one kept already; then
+// all the lines laid into the view's coarse flow (where none runs, the base flow).
+void traceViewLocks(PreparedView& v, const std::vector<SurfacePoint>& seeds, const Vec3f& up) {
+    v.lockLines.assign(seeds.size(), LockLine{});
+    if (!v.fine || v.mask.empty()) return;
+    const int size = std::max(v.width, v.height);
+    float period = v.curl.wavelengthPx > 0.0f ? v.curl.wavelengthPx : 0.05f * static_cast<float>(size);
+    period = std::clamp(period, 0.02f * static_cast<float>(size), 0.12f * static_cast<float>(size));
+    v.lockPeriodPx = period;
+    auto base = std::make_shared<OrientationField>(coarseField(*v.fine, v.mask, 0.5f * period));
+    const std::array<float, 2> down = pictureDown(v.camera, up);
+    const Vec3f eye = v.camera.eye();
+    const int maxSteps = 3 * (v.width + v.height);
+    const float fx = static_cast<float>(base->width) / static_cast<float>(v.width), fy = static_cast<float>(base->height) / static_cast<float>(v.height);
+    parallelFor(0, seeds.size(), [&](std::size_t i) {
+        const SurfacePoint& s = seeds[i];
+        float u = 0, w = 0, z = 0;
+        if (!v.camera.project(s.position, u, w, &z) || !v.inFrame(u, w) || v.hidden(u, w, z)) return;
+        if (s.normal.dot((eye - s.position).normalized()) < 0.05f || v.rootMask.sample(u, w) < 0.5f) return;
+        float ou = down[0], ow = down[1], c = 0.0f;
+        if (!base->sample(u * fx, w * fy, ou, ow, c) || c < 0.02f) ou = down[0], ow = down[1];
+        std::vector<std::array<float, 2>> starts = {{ou, ow}, {-ou, -ow}};
+        if (std::abs(ou * down[0] + ow * down[1]) < pm::cos(30.0f * kPi / 180.0f)) starts.push_back(down);
+        LockLine best;
+        best.score = -1e30f;
+        for (const auto& d0 : starts) {
+            LockLine line = traceLockLine(v, *base, u, w, d0[0], d0[1], period, down, maxSteps);
+            line.score = line.say + 0.3f * static_cast<float>(line.line.size()) + 0.2f * period * (d0[0] * down[0] + d0[1] * down[1]);
+            if (line.score > best.score) best = std::move(line);
+        }
+        if (static_cast<float>(best.line.size()) >= 0.5f * period) v.lockLines[i] = std::move(best);
+    }, 4);
+    // The clearest lines kept as locks.
+    const float width = 0.75f * period, radius = 0.5f * width;
+    std::vector<std::size_t> order;
+    for (std::size_t i = 0; i < v.lockLines.size(); ++i)
+        if (static_cast<float>(v.lockLines[i].line.size()) >= period) order.push_back(i);
+    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return v.lockLines[a].score > v.lockLines[b].score; });
+    std::vector<std::uint8_t> taken(static_cast<std::size_t>(v.width) * static_cast<std::size_t>(v.height), 0);
+    const int r = std::max(1, static_cast<int>(std::ceil(radius)));
+    for (std::size_t i : order) {
+        LockLine& l = v.lockLines[i];
+        std::size_t near = 0;
+        for (const auto& p : l.line)
+            if (v.inFrame(p[0], p[1]) && taken[v.pixel(p[0], p[1])]) ++near;
+        if (2 * near > l.line.size()) continue;
+        l.kept = true;
+        for (const auto& p : l.line) {
+            const int cx = static_cast<int>(p[0]), cy = static_cast<int>(p[1]);
+            for (int dy = -r; dy <= r; ++dy)
+                for (int dx = -r; dx <= r; ++dx) {
+                    const int x = cx + dx, y = cy + dy;
+                    if (x < 0 || y < 0 || x >= v.width || y >= v.height || static_cast<float>(dx * dx + dy * dy) > radius * radius) continue;
+                    taken[static_cast<std::size_t>(y) * static_cast<std::size_t>(v.width) + static_cast<std::size_t>(x)] = 1;
+                }
+        }
+    }
+    // The lines laid into the coarse flow: their directions (doubled angles) spread over a third of a
+    // period, where they run thick the lines' own, else blended into the base flow.
+    if (base->width != v.width || base->height != v.height) return;
+    const std::size_t pixels = static_cast<std::size_t>(v.width) * static_cast<std::size_t>(v.height);
+    std::vector<float> t(2 * pixels, 0.0f), weight(pixels, 0.0f);
+    for (const LockLine& l : v.lockLines) {
+        const std::size_t n = l.line.size();
+        if (n < 3) continue;
+        const float k = l.kept ? 1.0f : 0.5f;
+        for (std::size_t j = 0; j < n; ++j) {
+            const auto& a = l.line[j >= 2 ? j - 2 : 0];
+            const auto& b = l.line[std::min(n - 1, j + 2)];
+            const float du = b[0] - a[0], dv = b[1] - a[1], len = std::hypot(du, dv);
+            if (len < 1e-6f || !v.inFrame(l.line[j][0], l.line[j][1])) continue;
+            const float cu = du / len, cv = dv / len;
+            const std::size_t q = v.pixel(l.line[j][0], l.line[j][1]);
+            t[2 * q] += k * (cu * cu - cv * cv);
+            t[2 * q + 1] += k * 2.0f * cu * cv;
+            weight[q] += k;
+        }
+    }
+    const float sigma = std::max(1.0f, 0.35f * period);
+    t = gaussianBlurred(t, v.width, v.height, 2, sigma);
+    weight = gaussianBlurred(weight, v.width, v.height, 1, sigma);
+    const float full = 0.5f / (std::sqrt(2.0f * kPi) * sigma);  // (about one line's weight half a sigma off it)
+    auto flow = std::make_shared<OrientationField>(*base);
+    for (std::size_t q = 0; q < pixels; ++q) {
+        if (v.mask.pixels[q] < 0.5f) {
+            flow->tensor[2 * q] = flow->tensor[2 * q + 1] = 0.0f;
+            continue;
+        }
+        const float wq = weight[q];
+        const float a = std::clamp(wq / full, 0.0f, 1.0f);
+        const float r0 = wq > 1e-6f ? t[2 * q] / wq : 0.0f, r1 = wq > 1e-6f ? t[2 * q + 1] / wq : 0.0f;
+        flow->tensor[2 * q] = a * r0 + (1.0f - a) * base->tensor[2 * q];
+        flow->tensor[2 * q + 1] = a * r1 + (1.0f - a) * base->tensor[2 * q + 1];
+    }
+    v.coarse = flow;
+}
+
+// A pixel's ray (unit, from the eye).
+Vec3f pixelRay(const RefCamera& c, float u, float w) {
+    return (c.axis(0) * static_cast<float>((u - 0.5 * c.width - c.offsetU) / c.focalPx) -
+            c.axis(1) * static_cast<float>((w - 0.5 * c.height - c.offsetV) / c.focalPx) - c.axis(2))
+        .normalized();
+}
+
+// How far a point is from the nearest surface (the scalp or an occluder), up to `reach`.
+float surfaceDistance(const Context& ctx, const Vec3f& p, float reach) {
+    float best = reach;
+    const SurfacePoint sp = ctx.scalp.closestPoint(p, reach);
+    if (sp.root.face >= 0) best = std::min(best, (p - sp.position).length());
+    for (const auto& occluder : ctx.options.occluders) {
+        if (!occluder) continue;
+        const SurfacePoint hit = occluder->closestPoint(p, best);
+        if (hit.root.face >= 0) best = std::min(best, (p - hit.position).length());
+    }
+    return best;
+}
+
+// Along a view's ray through (u, w): how far from the eye the hair's surface is, `thickness` off the
+// scalp or occluder the view sees there (the nearest point of the ray that far from them); -1 where
+// the ray meets neither.
+float hairSurfaceAlong(const Context& ctx, const PreparedView& v, float u, float w, float thickness) {
+    if (!v.inFrame(u, w)) return -1.0f;
+    const float z = v.depth[v.pixel(u, w)];
+    if (!(z < kInf)) return -1.0f;
+    const Vec3f eye = v.camera.eye(), ray = pixelRay(v.camera, u, w);
+    const float along = std::max(1e-6f, -ray.dot(v.camera.axis(2)));
+    const float far = z / along;  // (the surface)
+    float lo = std::max(0.5f * far, far - 8.0f * thickness / along), hi = far;
+    if (surfaceDistance(ctx, eye + ray * lo, 2.0f * thickness) <= thickness) return lo;
+    for (int it = 0; it < 8; ++it) {
+        const float mid = 0.5f * (lo + hi);
+        if (surfaceDistance(ctx, eye + ray * mid, 2.0f * thickness) <= thickness) hi = mid;
+        else lo = mid;
+    }
+    return 0.5f * (lo + hi);
+}
+
+// A placed lock: its guide's path (root on the scalp first) and where it came from.
+struct PlacedLock {
+    std::vector<Vec3f> path;
+    SurfacePoint root;
+    std::size_t seed = 0;
+    int view = -1;
+    bool triangulated = false;
+    float score = 0.0f;
+    float agreement = 0.0f;  // with the other views' coarse flow (coarseAgreement)
+    int agreementSteps = 0;
+};
+
+// Two views' lines of one lock (from the same root): for points along a's line, the other view's
+// line where a's ray's picture in it (its epipolar line) crosses it, at a clear angle, the crossing
+// nearest the way along b's line the walk has reached (never far back); the rays' nearest meeting
+// there, kept where they nearly meet (`tolerance`, scene units). `rayT`: how far along a's rays (per
+// point of a's line, -1 where none); the points found.
+int triangulateLines(const PreparedView& a, const LockLine& la, const PreparedView& b, const LockLine& lb, float tolerance,
+                     std::vector<float>& rayT) {
+    const std::size_t na = la.line.size(), nb = lb.line.size();
+    rayT.assign(na, -1.0f);
+    if (na < 4 || nb < 4 || a.scalpDepth <= 0.0f) return 0;
+    const Vec3f ea = a.camera.eye(), eb = b.camera.eye();
+    std::vector<float> lengthB(nb, 0.0f);
+    for (std::size_t j = 1; j < nb; ++j) lengthB[j] = lengthB[j - 1] + std::hypot(lb.line[j][0] - lb.line[j - 1][0], lb.line[j][1] - lb.line[j - 1][1]);
+    const float ratio = lengthB.back() / static_cast<float>(na);
+    float reached = 0.0f;  // along b's line, pixels
+    int found = 0;
+    const float sinMin = pm::sin(15.0f * kPi / 180.0f);
+    for (std::size_t i = 0; i < na; i += 2) {
+        const Vec3f ra = pixelRay(a.camera, la.line[i][0], la.line[i][1]);
+        const float along = std::max(1e-6f, -ra.dot(a.camera.axis(2)));
+        float u0 = 0, w0 = 0, u1 = 0, w1 = 0;
+        if (!b.camera.project(ea + ra * (0.5f * a.scalpDepth / along), u0, w0) || !b.camera.project(ea + ra * (1.5f * a.scalpDepth / along), u1, w1)) continue;
+        const float eu = u1 - u0, ew = w1 - w0, el = std::hypot(eu, ew);
+        if (el < 1e-6f) continue;
+        const float expected = std::max(reached, static_cast<float>(i) * ratio);
+        float bestGap = 0.35f * lengthB.back() + 2.0f, bestAt = -1.0f;
+        std::array<float, 2> bestPx{0, 0};
+        for (std::size_t j = 0; j + 1 < nb; ++j) {
+            const float pu = lb.line[j][0], pw = lb.line[j][1], qu = lb.line[j + 1][0] - pu, qw = lb.line[j + 1][1] - pw;
+            const float den = eu * qw - ew * qu;
+            const float ql = std::hypot(qu, qw);
+            if (ql < 1e-6f || std::abs(den) < sinMin * el * ql) continue;
+            const float s = ((pu - u0) * qw - (pw - w0) * qu) / den;  // along the epipolar segment
+            const float t = ((pu - u0) * ew - (pw - w0) * eu) / den;  // along b's segment
+            if (s < 0.0f || s > 1.0f || t < 0.0f || t > 1.0f) continue;
+            const float at = lengthB[j] + t * (lengthB[j + 1] - lengthB[j]);
+            if (at < reached - 0.1f * lengthB.back()) continue;
+            const float gap = std::abs(at - expected);
+            if (gap < bestGap) bestGap = gap, bestAt = at, bestPx = {pu + t * qu, pw + t * qw};
+        }
+        if (bestAt < 0.0f) continue;
+        const Vec3f rb = pixelRay(b.camera, bestPx[0], bestPx[1]);
+        // (the rays' nearest points)
+        const Vec3f d0 = ea - eb;
+        const float A = ra.dot(ra), B = ra.dot(rb), C = rb.dot(rb), D = ra.dot(d0), E = rb.dot(d0);
+        const float den = A * C - B * B;
+        if (den < 1e-8f) continue;
+        const float ta = (B * E - C * D) / den, tb = (A * E - B * D) / den;
+        if (ta <= 0.0f || tb <= 0.0f) continue;
+        const Vec3f pa = ea + ra * ta, pb = eb + rb * tb;
+        if ((pa - pb).length() > tolerance) continue;
+        rayT[i] = ta + 0.5f * (pb - pa).dot(ra);
+        reached = std::max(reached, bestAt);
+        ++found;
+    }
+    return found;
+}
+
+// Each lock the views show placed in 3D: in each view, each lock's line (from a seed root); where
+// another view traces a line from the same root at a clear angle (20-120 degrees apart), the two
+// triangulated (the pair with the most points); its points along the line's rays at the hair's
+// surface (the hair's thickness over its root off the scalp or occluder under them; past the head's
+// outline the last depth carried on), moved to the triangulated depths where those are known (the
+// difference blended between them, held past them, smoothed over a period). The guide: the lock's
+// root, then the line's points. Counts in result.lockViews.
+std::vector<PlacedLock> placeLocks(const Context& ctx, const std::vector<SurfacePoint>& seeds, ReferenceGuidesResult& result) {
+    std::vector<PlacedLock> out;
+    const std::vector<PreparedView>& views = ctx.views;
+    result.lockViews.assign(views.size(), ReferenceGuidesResult::LockViewCounts{});
+    struct Job {
+        std::size_t view, seed;
+    };
+    std::vector<Job> jobs;
+    for (std::size_t a = 0; a < views.size(); ++a)
+        for (std::size_t s = 0; s < views[a].lockLines.size(); ++s)
+            if (views[a].lockLines[s].kept) jobs.push_back({a, s});
+    std::vector<PlacedLock> placed(jobs.size());
+    std::vector<int> partnered(jobs.size(), 0);
+    const float share = std::max(0.3f, ctx.options.volume);
+    parallelFor(0, jobs.size(), [&](std::size_t k) {
+        const std::size_t a = jobs[k].view, s = jobs[k].seed;
+        const PreparedView& va = views[a];
+        const LockLine& la = va.lockLines[s];
+        const SurfacePoint& root = seeds[s];
+        const std::size_t n = la.line.size();
+        const Vec3f eye = va.camera.eye();
+        float thickness = hairThickness(ctx, root.position, root.normal.normalized(), 0.5f * ctx.maxLength);
+        if (thickness <= 0.0f) thickness = va.rimWorld;
+        thickness = std::max(2.0f * ctx.offset, share * thickness);
+        // Each point's ray's view depth factor (its z per unit along it).
+        std::vector<float> along(n);
+        for (std::size_t i = 0; i < n; ++i) along[i] = std::max(1e-6f, -pixelRay(va.camera, la.line[i][0], la.line[i][1]).dot(va.camera.axis(2)));
+        // Single-view: along each ray at the hair's surface (every third point; between, the view depth
+        // blended; where no surface is under the line, the nearest known view depth carried on).
+        std::vector<float> single(n, -1.0f);
+        for (std::size_t i = 0; i < n; i += 3) single[i] = hairSurfaceAlong(ctx, va, la.line[i][0], la.line[i][1], thickness);
+        if (n > 1) single[n - 1] = hairSurfaceAlong(ctx, va, la.line[n - 1][0], la.line[n - 1][1], thickness);
+        {
+            std::vector<float> z(n, -1.0f);
+            for (std::size_t i = 0; i < n; ++i)
+                if (single[i] >= 0.0f) z[i] = single[i] * along[i];
+            std::size_t prev = n;
+            for (std::size_t i = 0; i < n; ++i) {
+                if (z[i] < 0.0f) continue;
+                if (prev < n && i > prev + 1 && i - prev <= 4)
+                    for (std::size_t j = prev + 1; j < i; ++j)
+                        z[j] = z[prev] + (z[i] - z[prev]) * static_cast<float>(j - prev) / static_cast<float>(i - prev);
+                prev = i;
+            }
+            float carry = -1.0f;
+            for (std::size_t i = 0; i < n && carry < 0.0f; ++i)
+                if (z[i] >= 0.0f) carry = z[i];
+            if (carry < 0.0f) carry = std::max(1e-3f, (root.position + root.normal.normalized() * thickness - eye).dot(-va.camera.axis(2)));
+            for (std::size_t i = 0; i < n; ++i) {
+                if (z[i] >= 0.0f) carry = z[i];
+                single[i] = carry / along[i];
+            }
+        }
+        // Triangulated with the other views' lines from the same root.
+        std::vector<float> best;
+        int bestFound = 0;
+        const Vec3f lookA = -va.camera.axis(2);
+        const float perPx = va.scalpDepth > 0.0f ? va.scalpDepth / static_cast<float>(va.camera.focalPx) : 0.0f;
+        const float tolerance = std::max(4.0f, 0.75f * va.lockPeriodPx) * perPx;
+        for (std::size_t b = 0; b < views.size(); ++b) {
+            if (b == a || s >= views[b].lockLines.size() || views[b].lockLines[s].line.size() < 4) continue;
+            const float angle = std::acos(std::clamp(lookA.dot(-views[b].camera.axis(2)), -1.0f, 1.0f)) * 180.0f / kPi;
+            if (angle < 20.0f || angle > 120.0f) continue;
+            partnered[k] = 1;
+            std::vector<float> t;
+            const int found = triangulateLines(va, la, views[b], views[b].lockLines[s], tolerance, t);
+            if (found > bestFound) bestFound = found, best = std::move(t);
+        }
+        // (enough of the line: a third of the points tried, three at least)
+        const bool triangulated = bestFound >= 3 && 6 * bestFound >= static_cast<int>(n);
+        std::vector<float> t = single;
+        if (triangulated) {
+            std::vector<std::size_t> known;
+            for (std::size_t i = 0; i < n; ++i)
+                if (best[i] >= 0.0f) known.push_back(i);
+            std::vector<float> offset(n, 0.0f);
+            for (std::size_t i = 0; i < n; ++i) {
+                const auto it = std::lower_bound(known.begin(), known.end(), i);
+                if (it == known.begin()) offset[i] = best[known.front()] - single[known.front()];
+                else if (it == known.end()) offset[i] = best[known.back()] - single[known.back()];
+                else {
+                    const std::size_t hi = *it, lo = *(it - 1);
+                    const float f = static_cast<float>(i - lo) / static_cast<float>(std::max<std::size_t>(1, hi - lo));
+                    offset[i] = (best[lo] - single[lo]) * (1.0f - f) + (best[hi] - single[hi]) * f;
+                }
+            }
+            // (smoothed over a period: the views' small misalignments are not the lock's)
+            const long half = std::max(2L, static_cast<long>(0.5f * va.lockPeriodPx));
+            for (std::size_t i = 0; i < n; ++i) {
+                double sum = 0.0;
+                int c = 0;
+                for (long d = -half; d <= half; ++d) {
+                    const long j = static_cast<long>(i) + d;
+                    if (j < 0 || j >= static_cast<long>(n)) continue;
+                    sum += offset[static_cast<std::size_t>(j)];
+                    ++c;
+                }
+                t[i] = single[i] + static_cast<float>(sum / std::max(1, c));
+            }
+        }
+        PlacedLock& p = placed[k];
+        p.root = root;
+        p.seed = s;
+        p.view = static_cast<int>(a);
+        p.triangulated = triangulated;
+        p.score = la.score;
+        p.path.push_back(root.position);
+        for (std::size_t i = 0; i < n; i += 2) p.path.push_back(eye + pixelRay(va.camera, la.line[i][0], la.line[i][1]) * t[i]);
+    }, 1);
+    for (std::size_t k = 0; k < jobs.size(); ++k) {
+        ReferenceGuidesResult::LockViewCounts& c = result.lockViews[jobs[k].view];
+        ++c.detected;
+        if (partnered[k]) ++c.matched;
+        if (placed[k].triangulated) ++c.triangulated;
+        else ++c.singleView;
+        if (placed[k].path.size() >= 4) out.push_back(std::move(placed[k]));
+    }
+    return out;
+}
+
+// A path kept off the scalp and the occluders (each point at least the offset out along the nearest
+// surface's outward normal), its root where it is.
+std::vector<Vec3f> keptOut(const Context& ctx, std::vector<Vec3f> path) {
+    for (std::size_t i = 1; i < path.size(); ++i) {
+        Vec3f& q = path[i];
+        const SurfacePoint near = ctx.scalp.closestPoint(q, 4.0f * ctx.offset + ctx.step);
+        if (near.root.face >= 0) {
+            const Vec3f n = near.normal.normalized();
+            const float h = (q - near.position).dot(n);
+            if (h < ctx.offset) q = q + n * (ctx.offset - h);
+        }
+        for (std::size_t o = 0; o < ctx.options.occluders.size(); ++o) {
+            const auto& occluder = ctx.options.occluders[o];
+            if (!occluder || ctx.occluderSigns[o] == 0.0f) continue;
+            const SurfacePoint hit = occluder->closestPoint(q, 4.0f * ctx.offset + ctx.step);
+            if (hit.root.face < 0) continue;
+            const Vec3f outward = hit.normal.normalized() * ctx.occluderSigns[o];
+            const float h = (q - hit.position).dot(outward);
+            if (h < ctx.offset) q = q + outward * (ctx.offset - h);
+        }
+    }
+    return path;
+}
+
+}  // namespace
+
+static void fillLockCurls(const std::vector<PreparedView>& views, const ReferenceGuideOptions& options, std::vector<ReferenceGuide>& guides,
+                          std::vector<std::vector<Vec3f>>& paths, ReferenceGuidesResult& result);
+
 static void bakeLocks(const std::vector<PreparedView>& views, const ScalpMesh& scalp, const ReferenceGuideOptions& options,
                std::vector<ReferenceGuide>& guides, std::vector<std::vector<Vec3f>>& paths, ReferenceGuidesResult& result) {
     const std::size_t count = guides.size();
@@ -2815,9 +3414,6 @@ static void bakeLocks(const std::vector<PreparedView>& views, const ScalpMesh& s
         paths[i] = std::move(chosen);
         guides[i].root = chosenRoot;
     }, 1);
-    auto handOf = [](std::size_t i) { return ((i * 2654435761u) >> 7) & 1u ? 1.0f : -1.0f; };
-    std::vector<std::size_t> traced;
-    double radiusSum = 0.0, wavelengthSum = 0.0;
     for (std::size_t i = 0; i < count; ++i) {
         const LockFit& f = fits[i];
         if (gains[i] <= 0.0f) continue;
@@ -2827,9 +3423,24 @@ static void bakeLocks(const std::vector<PreparedView>& views, const ScalpMesh& s
         g.lockWavelength = f.periodPx / f.pxPerLength;
         g.lockRadius = gains[i] * std::tan(std::min(f.amplitude, 1.2f)) * f.periodPx / (2.0f * kPi) / f.pxPerUnit;
         g.lockStrength = std::clamp(0.5f + 0.45f * f.quality, 0.5f, 0.95f);
+    }
+    fillLockCurls(views, options, guides, paths, result);
+}
+
+// The traced guides' (lock 1) curls counted (result's locksTraced, mean radius and turn length);
+// the rest take the nearest traced guides' curl (by their roots, inverse distance), their own phase
+// and handedness (the ones the photos' strands agree with best, where any sees it).
+static void fillLockCurls(const std::vector<PreparedView>& views, const ReferenceGuideOptions& options, std::vector<ReferenceGuide>& guides,
+                          std::vector<std::vector<Vec3f>>& paths, ReferenceGuidesResult& result) {
+    const std::size_t count = guides.size();
+    auto handOf = [](std::size_t i) { return ((i * 2654435761u) >> 7) & 1u ? 1.0f : -1.0f; };
+    std::vector<std::size_t> traced;
+    double radiusSum = 0.0, wavelengthSum = 0.0;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (guides[i].lock != 1) continue;
         traced.push_back(i);
-        radiusSum += g.lockRadius;
-        wavelengthSum += g.lockWavelength;
+        radiusSum += guides[i].lockRadius;
+        wavelengthSum += guides[i].lockWavelength;
     }
     if (traced.empty()) return;
     result.locksTraced = static_cast<int>(traced.size());
@@ -2888,6 +3499,46 @@ static void bakeLocks(const std::vector<PreparedView>& views, const ScalpMesh& s
     }
 }
 
+// Waves inside the locks (lock paths on wavy hair): each guide's fine wave as a view shows it along
+// it (fitLock: the strands' swing about the lock's way, its period, size and phase; a lock guide's
+// own view, a grown guide's the clearest), baked in at waveGain times that swing (the lock's own path
+// round its middle, its other half a quarter turn on: a loose curl), the handedness the photos agree
+// with best; kept unless the photos agree with the smooth guide clearly better. The rest take their
+// neighbours' (fillLockCurls).
+static void waveLocks(const std::vector<PreparedView>& views, const ReferenceGuideOptions& options, std::vector<ReferenceGuide>& guides,
+                      std::vector<std::vector<Vec3f>>& paths, const std::vector<int>& lockView, ReferenceGuidesResult& result) {
+    parallelFor(0, guides.size(), [&](std::size_t i) {
+        // (a lock guide's own view; a grown guide's, the view that shows its wave most clearly)
+        LockFit f;
+        for (std::size_t k = 0; k < views.size(); ++k) {
+            if (i < lockView.size() && lockView[i] >= 0 && static_cast<int>(k) != lockView[i]) continue;
+            if (views[k].curl.wavelengthPx <= 0.0f) continue;
+            LockFit fit = fitLock(views[k], static_cast<int>(k), paths[i]);
+            if (fit.ok && (!f.ok || fit.score > f.score)) f = std::move(fit);
+        }
+        if (!f.ok || f.quality < 0.15f) return;
+        f.offset.clear();  // (the fitted wave, not the swing summed: a wave is even along the lock)
+        const PreparedView& v = views[static_cast<std::size_t>(f.view)];
+        const float smooth = fineAgreement(views, paths[i]);
+        float best = -2.0f;
+        std::vector<Vec3f> chosen;
+        for (const float hand : {1.0f, -1.0f}) {
+            std::vector<Vec3f> baked = tracedCurl(v, f, paths[i], options.waveGain, hand);
+            const float score = fineAgreement(views, baked);
+            if (score > best) best = score, chosen = std::move(baked);
+        }
+        if (chosen.empty() || best < smooth - 0.03f) return;
+        ReferenceGuide& g = guides[i];
+        g.lock = 1;
+        g.lockView = f.view;
+        g.lockWavelength = f.periodPx / f.pxPerLength;
+        g.lockRadius = options.waveGain * std::tan(std::min(f.amplitude, 1.2f)) * f.periodPx / (2.0f * kPi) / f.pxPerUnit;
+        g.lockStrength = std::clamp(0.5f + 0.45f * f.quality, 0.5f, 0.95f);
+        paths[i] = std::move(chosen);
+    }, 1);
+    fillLockCurls(views, options, guides, paths, result);
+}
+
 ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vector<ReferenceView>& views,
                                           const ReferenceGuideOptions& options) {
     const auto started = std::chrono::steady_clock::now();
@@ -2911,6 +3562,72 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
     // Long hair lying over the head (swept back, falling down the back) reaches little past the
     // outline for its length: the strands' own paths in the photos say how long it is (their upper
     // quartile, the longest view's), when longer.
+    // (the curls judged on the outline's length: the strands' paths are read along the coarse flow
+    // the curls decide on)
+    const float provisional = result.reachLength > 0 ? measured : size;
+    bool lockPaths = false;
+    std::vector<SurfacePoint> lockSeeds;
+    float seedSpacing = 0.0f;
+    // Curls: measured in every view; curly hair grows guides along the locks' coarse flow (a Curl
+    // node puts the curls back), not along each curl.
+    {
+        std::vector<float> shares, amplitudes, wavelengths;
+        std::vector<std::pair<float, int>> swings;  // a view's swing, its streamlines
+        bool wavy = false;
+        for (const PreparedView& v : prepared) {
+            if (v.curl.streamlines < 5) continue;
+            shares.push_back(v.curl.periodicShare);
+            if (v.curl.wavelengthPx > 0.0f && v.scalpDepth > 0.0f) {
+                amplitudes.push_back(v.curl.amplitude);
+                swings.push_back({v.curl.amplitude, v.curl.streamlines});
+                wavelengths.push_back(v.curl.wavelengthPx * v.scalpDepth / static_cast<float>(v.camera.focalPx));
+            }
+        }
+        if (!shares.empty()) {
+            result.look.curlShare = median(shares);
+            result.look.curlAmplitudeDeg = amplitudes.empty() ? 0.0f : median(amplitudes) * 180.0f / kPi;
+            // (Short fur lies flat: what swings in it is not curls.)
+            const float longest = options.maxLength > 0 ? options.maxLength : provisional;
+            // (Judged by the views' lower quartile swing, each view weighing its streamlines: curls
+            // swing in every view that shows much hair; straight hair's strands crossing each other
+            // swing in one now and then.)
+            float swing = 0.0f;
+            if (!swings.empty()) {
+                std::sort(swings.begin(), swings.end());
+                int total = 0, below = 0;
+                for (const auto& s : swings) total += s.second;
+                for (const auto& s : swings) {
+                    below += s.second;
+                    swing = s.first * 180.0f / kPi;
+                    if (4 * below > total) break;
+                }
+            }
+            const bool curls = result.look.curlShare > kCurlShare && swing > kCurlAmplitude;
+            const bool waves = result.look.curlShare > kWavyShare && swing > kWavyAmplitude;
+            // (waves are the strands' own long paths: the guides follow them, no curl of their own)
+            result.look.curly = curls && longest >= size / 7.0f;
+            wavy = waves && !result.look.curly;
+            result.look.wavy = wavy;
+            if (!wavelengths.empty()) {
+                const float wavelength = median(wavelengths);
+                result.look.curlFrequency = 1.0f / std::max(wavelength, 1e-6f);
+                result.look.curlRadius = kCurlRadiusGain * wavelength * pm::tan(std::min(median(amplitudes), 1.2f)) / (2.0f * kPi);
+            }
+        }
+        // Locks as objects: in each view the locks' paths from seed roots over the whole scalp (their
+        // lines laid into the view's coarse flow, what the grower and the lengths read).
+        lockPaths = options.lockPaths > 0 || (options.lockPaths < 0 && wavy);
+        if (lockPaths) {
+            const int seedCount = std::clamp(2 * options.guideCount, 200, 2000);
+            lockSeeds = blueNoiseRoots(scalp, seedCount, options.seed + 101);
+            seedSpacing = std::sqrt(scalp.totalArea() / static_cast<float>(std::max<std::size_t>(1, lockSeeds.size())));
+            for (PreparedView& v : prepared) traceViewLocks(v, lockSeeds, options.up.normalized());
+        }
+        const bool coarse = options.curlFlow > 0 || (options.curlFlow < 0 && (result.look.curly || wavy)) || lockPaths;
+        if (coarse)
+            for (PreparedView& v : prepared)
+                if (v.coarse) v.field = v.coarse;
+    }
     result.strandLength = strandPathLength(prepared);
     if (result.reachLength > 0.0f && result.strandLength > measured) measured = std::min(1.1f * result.strandLength, 2.0f * size);
     ctx.maxLength = options.maxLength > 0 ? options.maxLength
@@ -2954,57 +3671,6 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
             sign = out >= 0.0 ? 1.0f : -1.0f;
         }
         ctx.occluderSigns.push_back(sign);
-    }
-    // Curls: measured in every view; curly hair grows guides along the locks' coarse flow (a Curl
-    // node puts the curls back), not along each curl.
-    {
-        std::vector<float> shares, amplitudes, wavelengths;
-        std::vector<std::pair<float, int>> swings;  // a view's swing, its streamlines
-        bool wavy = false;
-        for (const PreparedView& v : prepared) {
-            if (v.curl.streamlines < 5) continue;
-            shares.push_back(v.curl.periodicShare);
-            if (v.curl.wavelengthPx > 0.0f && v.scalpDepth > 0.0f) {
-                amplitudes.push_back(v.curl.amplitude);
-                swings.push_back({v.curl.amplitude, v.curl.streamlines});
-                wavelengths.push_back(v.curl.wavelengthPx * v.scalpDepth / static_cast<float>(v.camera.focalPx));
-            }
-        }
-        if (!shares.empty()) {
-            result.look.curlShare = median(shares);
-            result.look.curlAmplitudeDeg = amplitudes.empty() ? 0.0f : median(amplitudes) * 180.0f / kPi;
-            // (Short fur lies flat: what swings in it is not curls.)
-            const float longest = options.maxLength > 0 ? options.maxLength : ctx.maxLength;
-            // (Judged by the views' lower quartile swing, each view weighing its streamlines: curls
-            // swing in every view that shows much hair; straight hair's strands crossing each other
-            // swing in one now and then.)
-            float swing = 0.0f;
-            if (!swings.empty()) {
-                std::sort(swings.begin(), swings.end());
-                int total = 0, below = 0;
-                for (const auto& s : swings) total += s.second;
-                for (const auto& s : swings) {
-                    below += s.second;
-                    swing = s.first * 180.0f / kPi;
-                    if (4 * below > total) break;
-                }
-            }
-            const bool curls = result.look.curlShare > kCurlShare && swing > kCurlAmplitude;
-            const bool waves = result.look.curlShare > kWavyShare && swing > kWavyAmplitude;
-            // (waves are the strands' own long paths: the guides follow them, no curl of their own)
-            result.look.curly = curls && longest >= size / 7.0f;
-            wavy = waves && !result.look.curly;
-            result.look.wavy = wavy;
-            if (!wavelengths.empty()) {
-                const float wavelength = median(wavelengths);
-                result.look.curlFrequency = 1.0f / std::max(wavelength, 1e-6f);
-                result.look.curlRadius = kCurlRadiusGain * wavelength * pm::tan(std::min(median(amplitudes), 1.2f)) / (2.0f * kPi);
-            }
-        }
-        const bool coarse = options.curlFlow > 0 || (options.curlFlow < 0 && (result.look.curly || wavy));
-        if (coarse)
-            for (PreparedView& v : prepared)
-                if (v.coarse) v.field = v.coarse;
     }
     ReferenceSymmetry symmetry = options.symmetry;
     if (symmetry == ReferenceSymmetry::Auto) symmetry = scalpLooksSymmetric(scalp) ? ReferenceSymmetry::Topology : ReferenceSymmetry::None;
@@ -3195,14 +3861,12 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
     std::vector<ReferenceGuide> grownGuides;
     std::vector<std::vector<Vec3f>> paths;
     std::vector<std::uint8_t> grownSeam;
-    for (std::size_t i : live) {
+    // Each root's grown guide: smoothed, lifted, cut to its length (empty: too short).
+    std::vector<std::vector<Vec3f>> grownPaths(roots.size());
+    parallelFor(0, live.size(), [&](std::size_t n) {
+        const std::size_t i = live[n];
         const Grown& g = ways[choice[i]][i];
-        if (g.points.size() < 3 || arcLength(g.points) < minLength) {
-            ++result.rootsShort;
-            continue;
-        }
-        ReferenceGuide guide;
-        guide.root = roots[i].root;
+        if (g.points.size() < 3 || arcLength(g.points) < minLength) return;
         std::vector<Vec3f> path = volumized(ctx, smoothed(g.points, 3), options.volume);
         // A guide that reached the given maximum never showed its tip (hidden under the hair above
         // it): hair is mostly shorter than the longest, so it is trimmed (calibrated on the synthetic
@@ -3212,14 +3876,100 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         // (an automatic length: lifted for volume it is not much longer than it grew)
         if (options.maxLength <= 0.0f && !drawnLength[i] && arcLength(path) > 1.15f * rootLength[i]) path = truncated(path, 1.15f * rootLength[i]);
         path[0] = roots[i].position;
+        grownPaths[i] = std::move(path);
+    }, 4);
+    // Lock paths (locks as objects): each lock's 3D centreline (placeLocks) takes the place of the
+    // nearest root's grown guide where the views agree with it at least as well (their coarse flow
+    // along it, the view it was traced in left out); the rest grow.
+    std::vector<int> lockViewOf;
+    const bool lockGuides = lockPaths && options.roots.empty();
+    std::vector<int> lockAt(roots.size(), -1);
+    std::vector<PlacedLock> placed;
+    if (lockGuides) {
+        placed = placeLocks(ctx, lockSeeds, result);
+        for (const auto& c : result.lockViews) result.locksDetected += c.detected;
+        // (with symmetry, the locks on the grown side: the guides are mirrored over)
+        if (ctx.mirror.on())
+            placed.erase(std::remove_if(placed.begin(), placed.end(), [&](const PlacedLock& l) {
+                             const Vec3f m = ctx.mirror.point(l.root.position);
+                             return (m - l.root.position).length() >= 0.5f * spacing && l.root.position.x < m.x;
+                         }), placed.end());
+        // (each lock checked against all the views: cut where it leaves the hair they show for a few
+        // steps running, dropped when that leaves less than half of it; smoothed, kept off the scalp)
+        parallelFor(0, placed.size(), [&](std::size_t k) {
+            std::vector<Vec3f>& path = placed[k].path;
+            const float before = arcLength(path);
+            int bad = 0;
+            for (std::size_t i = 1; i < path.size(); ++i) {
+                const Evidence e = ctx.evidence(path[i]);
+                const bool out = (e.outside > 0 && e.outside >= e.inside) || (ctx.shell && !ctx.shell->inside(path[i]));
+                bad = out ? bad + 1 : 0;
+                if (bad >= 3) {
+                    path.resize(i - 2);
+                    break;
+                }
+            }
+            if (path.size() < 4 || arcLength(path) < 0.5f * before || arcLength(path) < minLength) {
+                path.clear();
+                return;
+            }
+            path = keptOut(ctx, smoothed(std::move(path), 3));
+            path[0] = placed[k].root.position;
+            if (arcLength(path) > 2.0f * size) path = truncated(path, 2.0f * size);
+            placed[k].agreement = coarseAgreement(prepared, path, placed[k].view, &placed[k].agreementSteps);
+        }, 4);
+        placed.erase(std::remove_if(placed.begin(), placed.end(), [](const PlacedLock& l) { return l.path.size() < 4; }), placed.end());
+        // (the views' best agreed first; each takes the nearest root not taken, within 0.6 spacing)
+        std::vector<std::size_t> order(placed.size());
+        for (std::size_t q = 0; q < order.size(); ++q) order[q] = q;
+        std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return placed[a].agreement > placed[b].agreement; });
+        for (std::size_t q : order) {
+            const PlacedLock& l = placed[q];
+            std::size_t best = roots.size();
+            float bestDistance = 0.6f * spacing;
+            for (std::size_t i : live) {
+                if (lockAt[i] >= 0) continue;
+                const float d = (roots[i].position - l.root.position).length();
+                if (d < bestDistance) bestDistance = d, best = i;
+            }
+            if (best == roots.size()) continue;
+            const float grown = grownPaths[best].empty() ? -1.0f : coarseAgreement(prepared, grownPaths[best], l.view, nullptr);
+            if (l.agreement + 0.02f >= grown) lockAt[best] = static_cast<int>(q);
+        }
+    }
+    for (std::size_t i : live) {
+        if (lockAt[i] >= 0) {
+            const PlacedLock& l = placed[static_cast<std::size_t>(lockAt[i])];
+            ReferenceGuide guide;
+            guide.root = l.root.root;
+            guide.confidence = std::clamp(l.agreement, 0.0f, 1.0f);
+            guide.stop = l.triangulated ? "lock" : "lock (one view)";
+            guide.photoLength = localStrandLength(prepared, l.root.position + l.root.normal * (ctx.offset + ctx.step));
+            grownGuides.push_back(std::move(guide));
+            paths.push_back(l.path);
+            grownSeam.push_back(seam[i]);
+            lockViewOf.push_back(l.view);
+            ++result.lockGuides;
+            continue;
+        }
+        if (grownPaths[i].empty()) {
+            ++result.rootsShort;
+            continue;
+        }
+        const Grown& g = ways[choice[i]][i];
+        ReferenceGuide guide;
+        guide.root = roots[i].root;
         guide.confidence = g.confidence;
         guide.stop = g.stop;
         guide.photoLength = photoLength[i];
         grownGuides.push_back(std::move(guide));
-        paths.push_back(std::move(path));
+        paths.push_back(std::move(grownPaths[i]));
         grownSeam.push_back(seam[i]);
+        lockViewOf.push_back(-1);
     }
+    result.lockRoots = std::max(result.lockRoots, result.lockGuides);
     if (options.lockCurls && result.look.curly) bakeLocks(prepared, scalp, options, grownGuides, paths, result);
+    else if (options.lockCurls && lockPaths && result.look.wavy) waveLocks(prepared, options, grownGuides, paths, lockViewOf, result);
     for (std::size_t i = 0; i < grownGuides.size(); ++i) {
         std::size_t count = static_cast<std::size_t>(std::max(2, options.points));
         if (grownGuides[i].lockWavelength > 0.0f)
@@ -3277,13 +4027,27 @@ ReferenceViewPreview previewReferenceView(const ScalpMesh& scalp, const Referenc
                                           float lineSpacing) {
     if (scalp.triangleCount() == 0) throw std::invalid_argument("previewReferenceView: the scalp has no triangles");
     std::vector<PreparedView> prepared = prepareViews(scalp, {view}, options, scalpDiagonal(scalp));
-    const PreparedView& pv = prepared.front();
+    PreparedView& pv = prepared.front();
     ReferenceViewPreview out;
     out.mask = pv.mask;
     out.crop = pv.crop;
     if (!pv.field || pv.crop[2] <= 0 || pv.crop[3] <= 0) return out;
     const float sx = static_cast<float>(pv.width) / static_cast<float>(pv.crop[2]);
     const float sy = static_cast<float>(pv.height) / static_cast<float>(pv.crop[3]);
+    // Waves (as guidesFromReference reads them, this view alone): the locks traced, the flow theirs.
+    const float swing = pv.curl.amplitude * 180.0f / kPi;
+    const bool curls = pv.curl.periodicShare > kCurlShare && swing > kCurlAmplitude;
+    const bool waves = pv.curl.streamlines >= 5 && !curls && pv.curl.periodicShare > kWavyShare && swing > kWavyAmplitude;
+    if (options.lockPaths > 0 || (options.lockPaths < 0 && waves)) {
+        traceViewLocks(pv, blueNoiseRoots(scalp, std::clamp(2 * options.guideCount, 200, 2000), options.seed + 101), options.up.normalized());
+        if (pv.coarse) pv.field = pv.coarse;
+        for (const LockLine& l : pv.lockLines) {
+            if (!l.kept) continue;
+            std::vector<std::array<float, 2>> line;
+            for (const auto& q : l.line) line.push_back({q[0] / sx + static_cast<float>(pv.crop[0]), q[1] / sy + static_cast<float>(pv.crop[1])});
+            out.locks.push_back(std::move(line));
+        }
+    }
     const float spacing = lineSpacing > 0.0f ? lineSpacing : std::max(4.0f, static_cast<float>(std::max(pv.crop[2], pv.crop[3])) / 48.0f);
     const float half = 0.42f * spacing;
     for (float y = static_cast<float>(pv.crop[1]) + 0.5f * spacing; y < static_cast<float>(pv.crop[1] + pv.crop[3]); y += spacing)

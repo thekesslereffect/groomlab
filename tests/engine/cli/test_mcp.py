@@ -247,7 +247,7 @@ def everything_else(c, root):
     assert len([x for x in result["content"] if x["type"] == "image"]) == 1
     c.call("photo_edit", dict(g, op="add_flow", points=[[240, 120], [250, 300]]))
     viewed, result = c.call("photo_view", dict(g, analysis=True))
-    assert viewed["linedUp"] and viewed["flowArrows"] == 1, viewed
+    assert viewed["linedUp"] and viewed["flowArrows"] == 1 and viewed["locks"] >= 0, viewed
     grown, _ = c.call("guides_from_photos", dict(g, guide_count=120))
     assert grown["guides"] > 20 and grown["group"] == "fromReference", grown
     compared, result = c.call("render_preview", dict(g, camera={"photo": "front"}, size=240))

@@ -3107,7 +3107,10 @@ struct AgentTools::Impl {
             analysisOptions.up = upOf(g);
             if (hair.head) analysisOptions.occluders.push_back(hair.head);
             preview = previewReferenceView(*hair.scalp, view, analysisOptions);
-            info["analysis"] = "pink: the hair mask guides_from_photos reads; cyan: the strands' flow it reads";
+            info["analysis"] = "pink: the hair mask guides_from_photos reads; cyan: the strands' flow it reads (on wavy hair the "
+                               "locks' flow); yellow: the locks it traces (wavy hair: from their roots along the flow, root end "
+                               "first)";
+            info["locks"] = preview->locks.size();
         }
         int shownW = 0, shownH = 0;
         const auto png = photoGridPng(image, p, step, size, preview ? &*preview : nullptr, &shownW, &shownH);
@@ -3714,6 +3717,7 @@ struct AgentTools::Impl {
         options.maxLength = static_cast<float>(num(a, "max_length", 0.0));
         options.symmetry = referenceSymmetryFromName(str(a, "symmetry", "auto"));
         options.lockCurls = flag(a, "locks", true);
+        if (a.contains("lock_paths")) options.lockPaths = flag(a, "lock_paths", true) ? 1 : 0;
         if (a.contains("volume")) {
             const double volume = num(a, "volume", 0.75);
             if (volume < 0.0 || volume > 1.5) throw ToolError("volume is 0 to 1.5 (a share of the hair's thickness the photos show)");
@@ -3770,6 +3774,22 @@ struct AgentTools::Impl {
                     {"rootsTried", result.rootsTried}, {"rootsBald", result.rootsBald}, {"rootsUnseen", result.rootsUnseen},
                     {"rootsShort", result.rootsShort}, {"maxLength", r4(result.maxLength)}, {"strandLength", r4(result.strandLength)},
                     {"seconds", r4(result.seconds)}};
+        if (!result.lockViews.empty()) {
+            // (each lined-up photo's locks, in the order the views were given)
+            json perPhoto = json::array();
+            for (std::size_t k = 0; k < result.lockViews.size() && k < used.size(); ++k) {
+                const auto& c = result.lockViews[k];
+                perPhoto.push_back({{"photo", used[k]}, {"detected", c.detected}, {"matched", c.matched},
+                                    {"triangulated", c.triangulated}, {"singleView", c.singleView}});
+            }
+            out["lockPaths"] = {{"photos", perPhoto}, {"lockGuides", result.lockGuides},
+                                {"about", "Wavy hair: in each photo the locks' paths traced from their roots along the coarse flow "
+                                          "(detected), those another photo traces from the same root (matched), of those the ones "
+                                          "whose rays meet (triangulated: a 3D centreline), the rest placed from one photo on the "
+                                          "hair's surface (singleView). lockGuides: lock centrelines that took a root's place where "
+                                          "the photos agree with them at least as well as with the guide grown there; the other "
+                                          "guides grow along the locks' flow. photo_view analysis shows the locks (yellow)."}};
+        }
         const ReferenceLookFit& look = result.look;
         LockLook locks;
         locks.waves = look.wavy;
@@ -3781,12 +3801,12 @@ struct AgentTools::Impl {
             out["locks"] = {{"detected", result.locksDetected}, {"rootsAtLocks", result.lockRoots},
                             {"traced", result.locksTraced}, {"filled", result.locksFilled}, {"radius", r4(result.lockRadius)},
                             {"turnLength", r4(result.lockWavelength)},
-                            {"about", "detected: the locks the photos show (streamlines curling clearly); rootsAtLocks: the roots "
-                                      "taken where they grow from (the rest spread evenly); each guide follows a lock: traced, the "
-                                      "curl a photo shows along it (moved onto the lock, "
-                                      "its turn, size, phase and handedness); filled, its traced neighbours' curl where no "
-                                      "photo shows one. Scene units. apply_look clumps each guide's strands onto it "
-                                      "(Clump centersFrom inputCurves, strength per lock from the guides' lockStrength) "
+                            {"about", "detected: the locks the photos show (curly hair: streamlines curling clearly; wavy hair: "
+                                      "the locks lockPaths traced); rootsAtLocks: the roots taken where they grow from (the rest "
+                                      "spread evenly); each guide follows a lock: traced, the curl or wave a photo shows along it "
+                                      "(curly: moved onto the lock; its turn, size, phase and handedness); filled, its traced "
+                                      "neighbours' where no photo shows one. Scene units. apply_look clumps each guide's strands "
+                                      "onto it (Clump centersFrom inputCurves, strength per lock from the guides' lockStrength) "
                                       "instead of a Curl node over every strand."}};
         }
         if (look.ok) {
@@ -5097,7 +5117,9 @@ struct AgentTools::Impl {
             "with the guides made, the roots that were bald or unseen, the scalp's sides no photo sees (unseenShare, alignMore: "
             "line up a photo from there), and the look the photos suggest (melanin, curls, clumps; apply_look sets it). On curly "
             "hair each guide follows a lock (locks: traced in a photo, or filled from its neighbours) with its curl in its points; "
-            "apply_look then clumps each guide's strands onto it instead of a Curl node over every strand.",
+            "apply_look then clumps each guide's strands onto it instead of a Curl node over every strand. On wavy hair the "
+            "locks' paths are traced in each photo from their roots and matched across them (lockPaths: per photo detected, "
+            "matched, triangulated, single-view), the guides follow them and carry the photos' fine waves.",
             objectSchema({{"groom", groom}, {"guide_count", prop("integer", "Roots tried, spread over the scalp (default 300).")},
                           {"max_length", prop("number", "The longest guide (scene units; default 0: what the photos show).")},
                           {"symmetry", enumProp({"auto", "none", "x", "topology"}, "Mirror what one side shows (default auto).")},
@@ -5106,6 +5128,9 @@ struct AgentTools::Impl {
                                                     "photos' outlines show over each spot (default 0.75; 0 as grown, along the scalp).")},
                           {"locks", prop("boolean", "On curly hair, each guide follows its lock's curl (default true; false: smooth "
                                                     "guides and a Curl node over every strand).")},
+                          {"lock_paths", prop("boolean", "Trace the locks as objects: in each photo along the coarse flow from their "
+                                                         "roots (through the crests where the fine strands run across them), matched "
+                                                         "across photos and triangulated (default: on wavy hair).")},
                           {"apply_look", prop("boolean", "Also set the look the photos suggest (HairColor melanin and redness, Clump, "
                                                          "Curl, Flyaway; nodes added where missing): a second undo step.")}}),
             &Impl::guidesFromPhotos);

@@ -251,6 +251,9 @@ std::vector<std::uint8_t> photoGridPng(const RefImage& image, const AgentPhoto& 
             }
         }
         for (const auto& l : preview->flowLines) c.line(l[0] * k, l[1] * k, l[2] * k, l[3] * k, {0.2f, 1.0f, 1.0f});
+        for (const auto& lock : preview->locks)
+            for (std::size_t i = 1; i < lock.size(); ++i)
+                c.line(lock[i - 1][0] * k, lock[i - 1][1] * k, lock[i][0] * k, lock[i][1] * k, {1.0f, 0.85f, 0.1f});
     }
     // The grid, labelled in photo pixels along the top and the left.
     const int step = std::max(8, gridStep);
