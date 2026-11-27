@@ -111,6 +111,65 @@ TEST(ReferenceGuides, OrientationFieldFindsTheStripesDirection) {
     }
 }
 
+// The variance bank (OrientationMethod::Variance): clean stripes' direction within a couple of
+// degrees and sure; where two stripe patterns cross, or on noise, the filters' energy spreads over
+// many directions and the confidence (1 / Var^2) falls.
+TEST(ReferenceGuides, VarianceBankFindsStripesAndDoubtsCrossings) {
+    OrientationOptions o;
+    o.method = OrientationMethod::Variance;
+    o.fillWeak = false;
+    o.smoothSigma = 0.0f;
+    o.edgeWidth = 0.0f;
+    auto stripes = [](RefImage& im, float a, float period, float amplitude) {
+        for (int y = 0; y < im.height; ++y)
+            for (int x = 0; x < im.width; ++x) {
+                const float across = -static_cast<float>(x) * std::sin(a) + static_cast<float>(y) * std::cos(a);
+                im.pixels[static_cast<std::size_t>(y * im.width + x)] += amplitude * std::sin(2.0f * kPi * across / period);
+            }
+    };
+    auto middle = [](const OrientationField& f, float& angle) {  // the mean confidence over the middle, its angle
+        double c = 0.0;
+        int n = 0;
+        for (int y = 32; y < 64; ++y)
+            for (int x = 32; x < 64; ++x) {
+                c += f.confidence[static_cast<std::size_t>(y * f.width + x)];
+                ++n;
+            }
+        angle = f.angle[static_cast<std::size_t>(48 * f.width + 48)];
+        return static_cast<float>(c / n);
+    };
+    float stripeConfidence = 1.0f;
+    for (float degrees : {0.0f, 30.0f, 90.0f, 135.0f, 163.0f}) {
+        for (float period : {4.5f, 5.5f}) {
+            const float a = degrees * kPi / 180.0f;
+            RefImage im = blank(96, 96, 1, 0.5f);
+            stripes(im, a, period, 0.4f);
+            const OrientationField f = orientationField(im, RefImage{}, o);
+            float angle = 0.0f;
+            const float conf = middle(f, angle);
+            EXPECT_LT(angleBetween(angle, a), 2.0f) << degrees << " " << period;
+            EXPECT_GT(conf, 0.6f) << degrees << " " << period;
+            stripeConfidence = std::min(stripeConfidence, conf);
+        }
+    }
+    // Two stripe patterns crossing at right angles.
+    RefImage cross = blank(96, 96, 1, 0.5f);
+    stripes(cross, 0.3f, 4.8f, 0.2f);
+    stripes(cross, 0.3f + 0.5f * kPi, 4.8f, 0.2f);
+    float angle = 0.0f;
+    const float crossing = middle(orientationField(cross, RefImage{}, o), angle);
+    EXPECT_LT(crossing, 0.5f * stripeConfidence);
+    // Noise.
+    RefImage noise = blank(96, 96, 1, 0.0f);
+    std::uint32_t state = 11;
+    for (float& v : noise.pixels) {
+        state = state * 1664525u + 1013904223u;
+        v = static_cast<float>(state >> 8) / static_cast<float>(1u << 24);
+    }
+    const float noisy = middle(orientationField(noise, RefImage{}, o), angle);
+    EXPECT_LT(noisy, 0.3f * stripeConfidence);
+}
+
 // Hair hanging down a picture in locks, each strand a dark line on a light backdrop; each lock
 // swinging side to side by `amplitude` pixels every `wavelength` (0: straight), its own phase.
 RefImage lockedStrands(int size, float wavelength, float amplitude, std::uint32_t seed = 7) {
@@ -913,6 +972,81 @@ TEST(ReferenceGuidesEndToEnd, TwoDrawnViewsGiveTheGuidesBack) {
         EXPECT_LT(g.back().y, g.front().y - 0.5f) << i;
     }
     EXPECT_LT(distance / n, 0.1);  // a tenth of the scalp's radius
+}
+
+// The scorer (PhotoScorer): known locks drawn from three cameras; each true guide scores above the
+// same guide swung sideways, moved off its lock, or run across it; what the head hides from a
+// camera behind it is not counted.
+TEST(ReferenceGuidesScore, TheTrueGuideScoresAboveItsPerturbations) {
+    const ScalpMesh scalp = sphere(1.0f);
+    std::vector<std::vector<Vec3f>> truth;
+    for (int i = 0; i < 5; ++i) {
+        const float phi = (-0.6f + 1.2f * static_cast<float>(i) / 4.0f);
+        std::vector<Vec3f> g;
+        for (int k = 0; k <= 30; ++k) {
+            const float theta = 0.85f + (kPi * 0.5f - 0.85f) * static_cast<float>(k) / 30.0f;
+            g.push_back(Vec3f(std::sin(theta) * std::sin(phi), std::cos(theta), std::sin(theta) * std::cos(phi)) * 1.03f);
+        }
+        for (int k = 1; k <= 10; ++k) g.push_back(g.back() + Vec3f(0, -0.05f, 0));
+        truth.push_back(g);
+    }
+    const int size = 192;
+    std::vector<ReferenceView> views;
+    for (const Vec3f& dir : {Vec3f(0, 0.2f, 1), Vec3f(1, 0.2f, 0.4f), Vec3f(-1, 0.2f, 0.4f), Vec3f(0, 0.2f, -1)}) {
+        ReferenceView v;
+        v.camera = camera(dir, 5.0f, size);
+        v.image = blank(size, size, 3, 1.0f);
+        v.mask = blank(size, size, 1, 0.0f);
+        const Vec3f eye = v.camera.eye();
+        for (const auto& g : truth)
+            for (int s = -2; s <= 2; ++s) {
+                const float shift = 0.03f * static_cast<float>(s);
+                for (std::size_t k = 0; k + 1 < g.size(); ++k)
+                    for (int t = 0; t < 8; ++t) {
+                        const Vec3f p = g[k] + (g[k + 1] - g[k]) * (static_cast<float>(t) / 8.0f) + Vec3f(shift * std::cos(0.0f), 0, 0);
+                        // (hidden behind the ball: not drawn)
+                        const Vec3f d = (p - eye).normalized();
+                        const float b = (eye).dot(d), c = eye.dot(eye) - 1.0f, disc = b * b - c;
+                        if (disc > 0.0f && -b - std::sqrt(disc) < (p - eye).length() - 1e-3f) continue;
+                        float u = 0, vv = 0;
+                        if (!v.camera.project(p, u, vv)) continue;
+                        const int x = static_cast<int>(u), y = static_cast<int>(vv);
+                        if (x < 0 || y < 0 || x >= size || y >= size) continue;
+                        for (int ch = 0; ch < 3; ++ch) v.image.pixels[static_cast<std::size_t>((y * size + x) * 3 + ch)] = 0.15f;
+                        for (int j = -2; j <= 2; ++j)
+                            for (int i = -2; i <= 2; ++i)
+                                if (x + i >= 0 && y + j >= 0 && x + i < size && y + j < size)
+                                    v.mask.pixels[static_cast<std::size_t>((y + j) * size + x + i)] = 1.0f;
+                    }
+            }
+        views.push_back(v);
+    }
+    const PhotoScorer scorer(scalp, views);
+    ASSERT_EQ(scorer.viewCount(), 4u);
+    for (std::size_t i = 0; i < truth.size(); ++i) {
+        const std::vector<Vec3f>& g = truth[i];
+        std::vector<Vec3f> swung = g, moved = g, across;
+        for (std::size_t k = 0; k < g.size(); ++k) {
+            const float t = static_cast<float>(k) / static_cast<float>(g.size() - 1);
+            swung[k] = g[k] + Vec3f(0.6f * t * t, 0, 0);
+            moved[k] = g[k] + Vec3f(0.12f, -0.05f, 0.05f);
+            across.push_back(g.front() + Vec3f(0.8f * t, 0.05f * t, 0.0f));
+        }
+        const GuideScore right = scorer.score(g), a = scorer.score(swung), b = scorer.score(moved), c = scorer.score(across);
+        EXPECT_GT(right.score, 0.5f) << i;
+        EXPECT_GT(right.score, a.score + 0.05f) << i;
+        EXPECT_GT(right.score, b.score + 0.05f) << i;
+        EXPECT_GT(right.score, c.score + 0.05f) << i;
+        EXPECT_LT(right.photos[0].coarseError, 15.0f) << i;
+        // The camera behind the ball sees none of it: its points are hidden, not counted.
+        EXPECT_EQ(right.photos[3].samples, 0) << i;
+        EXPECT_GT(right.photos[3].hidden, 0) << i;
+        EXPECT_EQ(right.views, 3) << i;
+    }
+    // In parallel: the same.
+    const std::vector<GuideScore> all = scorer.score(truth);
+    ASSERT_EQ(all.size(), truth.size());
+    EXPECT_NEAR(all[2].score, scorer.score(truth[2]).score, 1e-6f);
 }
 
 }  // namespace

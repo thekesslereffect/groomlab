@@ -115,6 +115,11 @@ PairSnap snapToFeature(const RefImage& image, float u, float v, float window);
 // snapped pixel a green cross, a 10-pixel grid labelled in the photo's pixels.
 std::vector<std::uint8_t> pairCropPng(const RefImage& image, float u, float v, const PairSnap& snap, float window, int zoom);
 
+// photo_view analysis' confidence picture: the photo dimmed to gray, the orientation's confidence
+// over the hair mask (previewReferenceView's) from dark blue (unsure: strands crossing, curls, noise)
+// through green to yellow (sure).
+std::vector<std::uint8_t> confidencePng(const RefImage& image, const ReferenceViewPreview& preview, int maxSize);
+
 // compare_to_photo's picture: the photo dimmed, the hair the groom misses tinted green, the groom's
 // hair outside the photo's tinted magenta, both outlines (the photo's green, the groom's magenta).
 std::vector<std::uint8_t> comparisonPng(const RefImage& image, const PhotoComparison& c, int maxSize);

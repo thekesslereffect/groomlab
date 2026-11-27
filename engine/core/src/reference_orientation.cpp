@@ -289,7 +289,115 @@ float percentile(std::vector<float> values, float q) {
     return values[i];
 }
 
+// ---- The variance bank (OrientationMethod::Variance) ------------------------------------------------
+
+constexpr int kVarianceBank = 180;
+
+// A quadrature pair of Gabor filters for strands running at `theta` (from +u toward +v): a cosine
+// and a sine across the strands at `frequency` cycles a pixel under a Gaussian envelope (`sigmaAcross`
+// across, `sigmaAlong` along); the cosine's mean taken out. Row-major (2r+1)^2.
+struct QuadratureKernel {
+    int radius = 0;
+    std::vector<float> even, odd;
+};
+
+QuadratureKernel quadratureGabor(float theta, float sigmaAcross, float sigmaAlong, float frequency) {
+    QuadratureKernel k;
+    k.radius = static_cast<int>(std::ceil(3.0f * std::max(sigmaAcross, sigmaAlong)));
+    const int size = 2 * k.radius + 1;
+    k.even.resize(static_cast<std::size_t>(size * size));
+    k.odd.resize(k.even.size());
+    std::vector<float> env(k.even.size());
+    const float c = pm::cos(theta), s = pm::sin(theta);
+    double sum = 0.0, envelope = 0.0;
+    for (int y = -k.radius; y <= k.radius; ++y)
+        for (int x = -k.radius; x <= k.radius; ++x) {
+            const float along = static_cast<float>(x) * c + static_cast<float>(y) * s;
+            const float across = -static_cast<float>(x) * s + static_cast<float>(y) * c;
+            const float e = pm::exp(-0.5f * (across * across / (sigmaAcross * sigmaAcross) + along * along / (sigmaAlong * sigmaAlong)));
+            const std::size_t i = static_cast<std::size_t>((y + k.radius) * size + (x + k.radius));
+            env[i] = e;
+            k.even[i] = e * pm::cos(2.0f * kPi * frequency * across);
+            k.odd[i] = e * pm::sin(2.0f * kPi * frequency * across);
+            sum += k.even[i];
+            envelope += e;
+        }
+    const float mean = static_cast<float>(sum / envelope);
+    for (std::size_t i = 0; i < k.even.size(); ++i) k.even[i] -= mean * env[i];
+    return k;
+}
+
+struct VarianceBank {
+    std::vector<QuadratureKernel> kernels;
+    float scale = 1.0f;
+    float idealInverse = 1.0f;  // 1 / Var^2 of the bank's own clean stripes (what maps to confidence 1)
+};
+
+// One patch's direction (the strongest filter's, refined by a parabola), its circular variance and
+// the strongest energy. `patch`: (2r+1)^2 values.
+void bankAt(const VarianceBank& bank, const float* patch, float* energy, float& angle, float& variance, float& peak) {
+    const int n = static_cast<int>(bank.kernels.size());
+    const std::size_t taps = bank.kernels[0].even.size();
+    double total = 0.0;
+    int best = 0;
+    for (int b = 0; b < n; ++b) {
+        const float* ke = bank.kernels[static_cast<std::size_t>(b)].even.data();
+        const float* ko = bank.kernels[static_cast<std::size_t>(b)].odd.data();
+        float e = 0.0f, o = 0.0f;
+        for (std::size_t i = 0; i < taps; ++i) {
+            e += ke[i] * patch[i];
+            o += ko[i] * patch[i];
+        }
+        energy[b] = std::sqrt(e * e + o * o);
+        total += energy[b];
+        if (energy[b] > energy[best]) best = b;
+    }
+    const float a0 = energy[(best + n - 1) % n], b0 = energy[best], c0 = energy[(best + 1) % n];
+    const float denom = a0 - 2.0f * b0 + c0;
+    const float offset = std::abs(denom) > 1e-12f ? std::clamp(0.5f * (a0 - c0) / denom, -0.5f, 0.5f) : 0.0f;
+    angle = std::fmod(kPi * (static_cast<float>(best) + offset) / static_cast<float>(n) + kPi, kPi);
+    peak = b0;
+    if (total <= 1e-12) {
+        variance = kPi * kPi / 12.0f;
+        return;
+    }
+    double var = 0.0;
+    for (int b = 0; b < n; ++b) {
+        float d = std::abs(angle - kPi * static_cast<float>(b) / static_cast<float>(n));
+        d = std::min(d, kPi - d);
+        var += static_cast<double>(energy[b]) * static_cast<double>(d) * static_cast<double>(d);
+    }
+    variance = static_cast<float>(var / total);
+}
+
+VarianceBank varianceBank(float wavelength) {
+    VarianceBank bank;
+    bank.scale = std::max(0.25f, wavelength / 4.35f);
+    for (int b = 0; b < kVarianceBank; ++b)
+        bank.kernels.push_back(quadratureGabor(kPi * static_cast<float>(b) / static_cast<float>(kVarianceBank), 1.8f * bank.scale,
+                                               2.4f * bank.scale, 0.23f / bank.scale));
+    // The calibration: clean stripes at the bank's own frequency, running at 0.
+    const int r = bank.kernels[0].radius, size = 2 * r + 1;
+    std::vector<float> patch(static_cast<std::size_t>(size * size)), energy(kVarianceBank);
+    for (int y = -r; y <= r; ++y)
+        for (int x = -r; x <= r; ++x) patch[static_cast<std::size_t>((y + r) * size + (x + r))] = pm::cos(2.0f * kPi * 0.23f / bank.scale * static_cast<float>(y));
+    float angle = 0.0f, variance = 1.0f, peak = 0.0f;
+    bankAt(bank, patch.data(), energy.data(), angle, variance, peak);
+    bank.idealInverse = 1.0f / std::max(1e-6f, variance * variance);
+    return bank;
+}
+
 }  // namespace
+
+const char* orientationMethodName(OrientationMethod m) {
+    return m == OrientationMethod::Variance ? "variance" : "multiscale";
+}
+
+OrientationMethod orientationMethodFromName(const std::string& name) {
+    if (name == "variance") return OrientationMethod::Variance;
+    if (name == "multiscale") return OrientationMethod::MultiScale;
+    throw std::invalid_argument("the orientation method is multiscale or variance, not '" + name + "'");
+}
 
 OrientationField orientationField(const RefImage& grayIn, const RefImage& mask, const OrientationOptions& options) {
     RefImage gray = grayIn.channels == 1 ? grayIn : grayIn.gray();
@@ -337,84 +445,132 @@ OrientationField orientationField(const RefImage& grayIn, const RefImage& mask, 
         }
     }
 
-    // Responses summed over the scales (each normalized by its strong responses), at full size.
-    std::vector<float> total(pixels * static_cast<std::size_t>(n), 0.0f);
-    const int scales = std::max(1, options.scales);
-    for (int s = 0; s < scales; ++s) {
-        const int f = 1 << s;
-        const int sw = std::max(1, w / f), sh = std::max(1, h / f);
-        const RefImage level = (s == 0) ? gray : gray.resized(sw, sh);
-        std::vector<std::uint8_t> want(static_cast<std::size_t>(sw) * static_cast<std::size_t>(sh), 0);
-        for (int y = 0; y < h; ++y)
-            for (int x = 0; x < w; ++x)
-                if (inside[static_cast<std::size_t>(y * w + x)])
-                    want[static_cast<std::size_t>(std::min(sh - 1, y / f) * sw + std::min(sw - 1, x / f))] = 1;
-        const std::vector<float> response = gaborResponses(level, want, n, options.wavelength);
-        std::vector<float> maxima;
-        for (std::size_t i = 0; i < want.size(); ++i)
-            if (want[i]) maxima.push_back(*std::max_element(response.begin() + static_cast<std::ptrdiff_t>(i * static_cast<std::size_t>(n)),
-                                                            response.begin() + static_cast<std::ptrdiff_t>((i + 1) * static_cast<std::size_t>(n))));
-        const float norm = std::max(1e-6f, percentile(maxima, 0.9f));
+    if (options.method == OrientationMethod::Variance) {
+        // The variance bank on the image band-passed (a difference of Gaussians, each normalized at the
+        // borders): the direction, 1 / Var^2 mapped between an even spread and clean stripes, times the
+        // strength against the image's usual peak (flat patches give little).
+        const VarianceBank bank = varianceBank(options.wavelength);
+        std::vector<float> band(pixels);
+        {
+            const std::vector<float> ones(pixels, 1.0f);
+            const std::vector<float> lo = blurred(gray.pixels, w, h, 1, 0.4f * bank.scale), loW = blurred(ones, w, h, 1, 0.4f * bank.scale);
+            const std::vector<float> hi = blurred(gray.pixels, w, h, 1, 10.0f * bank.scale), hiW = blurred(ones, w, h, 1, 10.0f * bank.scale);
+            for (std::size_t i = 0; i < pixels; ++i) band[i] = lo[i] / std::max(1e-9f, loW[i]) - hi[i] / std::max(1e-9f, hiW[i]);
+        }
+        const int r = bank.kernels[0].radius, size = 2 * r + 1;
+        std::vector<float> variance(pixels, kPi * kPi / 12.0f), peak(pixels, 0.0f);
         parallelFor(0, static_cast<std::size_t>(h), [&](std::size_t yy) {
             const int y = static_cast<int>(yy);
+            std::vector<float> patch(static_cast<std::size_t>(size * size)), energy(kVarianceBank);
             for (int x = 0; x < w; ++x) {
-                const std::size_t at = static_cast<std::size_t>(y * w + x);
+                const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
                 if (!inside[at]) continue;
-                // Bilinear from the level (pixel centers).
-                const float lx = std::clamp((static_cast<float>(x) + 0.5f) / static_cast<float>(f) - 0.5f, 0.0f, static_cast<float>(sw - 1));
-                const float ly = std::clamp((static_cast<float>(y) + 0.5f) / static_cast<float>(f) - 0.5f, 0.0f, static_cast<float>(sh - 1));
-                const int x0 = static_cast<int>(lx), y0 = static_cast<int>(ly);
-                const int x1 = std::min(x0 + 1, sw - 1), y1 = std::min(y0 + 1, sh - 1);
-                const float fx = lx - static_cast<float>(x0), fy = ly - static_cast<float>(y0);
-                const float wt[4] = {(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy};
-                const std::size_t src[4] = {static_cast<std::size_t>(y0 * sw + x0), static_cast<std::size_t>(y0 * sw + x1),
-                                            static_cast<std::size_t>(y1 * sw + x0), static_cast<std::size_t>(y1 * sw + x1)};
-                for (int k = 0; k < n; ++k) {
-                    float value = 0.0f, weight = 0.0f;
-                    for (int c = 0; c < 4; ++c) {
-                        if (!want[src[c]]) continue;
-                        value += wt[c] * response[src[c] * static_cast<std::size_t>(n) + static_cast<std::size_t>(k)];
-                        weight += wt[c];
+                for (int j = -r; j <= r; ++j) {
+                    const int sy = std::clamp(y + j, 0, h - 1);
+                    for (int i = -r; i <= r; ++i) {
+                        const int sx = std::clamp(x + i, 0, w - 1);
+                        patch[static_cast<std::size_t>((j + r) * size + (i + r))] =
+                            band[static_cast<std::size_t>(sy) * static_cast<std::size_t>(w) + static_cast<std::size_t>(sx)];
                     }
-                    if (weight > 0.0f) total[at * static_cast<std::size_t>(n) + static_cast<std::size_t>(k)] += value / weight / norm;
                 }
+                bankAt(bank, patch.data(), energy.data(), field.angle[at], variance[at], peak[at]);
             }
-        }, 8);
-    }
-
-    // The peak (refined by a parabola through its neighbours).
-    std::vector<float> peak(pixels, 0.0f), coherence(pixels, 0.0f), peaks, coherences;
-    for (std::size_t i = 0; i < pixels; ++i) {
-        if (!inside[i]) continue;
-        const float* r = &total[i * static_cast<std::size_t>(n)];
-        int best = 0;
-        float sum = 0.0f;
-        for (int k = 0; k < n; ++k) {
-            sum += r[k];
-            if (r[k] > r[best]) best = k;
+        }, 2);
+        std::vector<float> peaks;
+        for (std::size_t i = 0; i < pixels; ++i)
+            if (inside[i]) peaks.push_back(peak[i]);
+        const float usualPeak = std::max(1e-9f, percentile(peaks, 0.5f));
+        const float even = 1.0f / ((kPi * kPi / 12.0f) * (kPi * kPi / 12.0f));
+        for (std::size_t i = 0; i < pixels; ++i) {
+            if (!inside[i]) continue;
+            const float inverse = 1.0f / std::max(1e-6f, variance[i] * variance[i]);
+            // (its square root: strands a little off the bank's own frequency stay fairly sure)
+            const float sure = std::sqrt(std::clamp((inverse - even) / std::max(1e-6f, bank.idealInverse - even), 0.0f, 1.0f));
+            const float conf = sure * std::min(1.0f, peak[i] / (0.25f * usualPeak));
+            field.confidence[i] = conf;
+            field.tensor[2 * i] = conf * pm::cos(2.0f * field.angle[i]);
+            field.tensor[2 * i + 1] = conf * pm::sin(2.0f * field.angle[i]);
         }
-        const float mean = sum / static_cast<float>(n);
-        const float a = r[(best + n - 1) % n], b = r[best], c = r[(best + 1) % n];
-        const float denom = a - 2.0f * b + c;
-        const float offset = std::abs(denom) > 1e-12f ? std::clamp(0.5f * (a - c) / denom, -0.5f, 0.5f) : 0.0f;
-        float angle = kPi * (static_cast<float>(best) + offset) / static_cast<float>(n);
-        field.angle[i] = std::fmod(angle + kPi, kPi);
-        peak[i] = b;
-        coherence[i] = b > 1e-9f ? std::clamp((b - mean) / b, 0.0f, 1.0f) : 0.0f;
-        peaks.push_back(b);
-        coherences.push_back(coherence[i]);
-    }
-    // The confidence: the peak's lead over the mean (coherence) against the image's usual lead,
-    // times its strength against the usual strength (flat patches give little). Relative to the
-    // image itself, so a fine fur and a coarse lock both count.
-    const float usualLead = std::max(1e-6f, percentile(coherences, 0.75f));
-    const float usualPeak = std::max(1e-6f, percentile(peaks, 0.5f));
-    for (std::size_t i = 0; i < pixels; ++i) {
-        if (!inside[i]) continue;
-        const float conf = std::min(1.0f, coherence[i] / usualLead) * std::min(1.0f, peak[i] / (0.5f * usualPeak));
-        field.confidence[i] = conf;
-        field.tensor[2 * i] = conf * pm::cos(2.0f * field.angle[i]);
-        field.tensor[2 * i + 1] = conf * pm::sin(2.0f * field.angle[i]);
+    } else {
+        // Responses summed over the scales (each normalized by its strong responses), at full size.
+        std::vector<float> total(pixels * static_cast<std::size_t>(n), 0.0f);
+        const int scales = std::max(1, options.scales);
+        for (int s = 0; s < scales; ++s) {
+            const int f = 1 << s;
+            const int sw = std::max(1, w / f), sh = std::max(1, h / f);
+            const RefImage level = (s == 0) ? gray : gray.resized(sw, sh);
+            std::vector<std::uint8_t> want(static_cast<std::size_t>(sw) * static_cast<std::size_t>(sh), 0);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                    if (inside[static_cast<std::size_t>(y * w + x)])
+                        want[static_cast<std::size_t>(std::min(sh - 1, y / f) * sw + std::min(sw - 1, x / f))] = 1;
+            const std::vector<float> response = gaborResponses(level, want, n, options.wavelength);
+            std::vector<float> maxima;
+            for (std::size_t i = 0; i < want.size(); ++i)
+                if (want[i]) maxima.push_back(*std::max_element(response.begin() + static_cast<std::ptrdiff_t>(i * static_cast<std::size_t>(n)),
+                                                                response.begin() + static_cast<std::ptrdiff_t>((i + 1) * static_cast<std::size_t>(n))));
+            const float norm = std::max(1e-6f, percentile(maxima, 0.9f));
+            parallelFor(0, static_cast<std::size_t>(h), [&](std::size_t yy) {
+                const int y = static_cast<int>(yy);
+                for (int x = 0; x < w; ++x) {
+                    const std::size_t at = static_cast<std::size_t>(y * w + x);
+                    if (!inside[at]) continue;
+                    // Bilinear from the level (pixel centers).
+                    const float lx = std::clamp((static_cast<float>(x) + 0.5f) / static_cast<float>(f) - 0.5f, 0.0f, static_cast<float>(sw - 1));
+                    const float ly = std::clamp((static_cast<float>(y) + 0.5f) / static_cast<float>(f) - 0.5f, 0.0f, static_cast<float>(sh - 1));
+                    const int x0 = static_cast<int>(lx), y0 = static_cast<int>(ly);
+                    const int x1 = std::min(x0 + 1, sw - 1), y1 = std::min(y0 + 1, sh - 1);
+                    const float fx = lx - static_cast<float>(x0), fy = ly - static_cast<float>(y0);
+                    const float wt[4] = {(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy};
+                    const std::size_t src[4] = {static_cast<std::size_t>(y0 * sw + x0), static_cast<std::size_t>(y0 * sw + x1),
+                                                static_cast<std::size_t>(y1 * sw + x0), static_cast<std::size_t>(y1 * sw + x1)};
+                    for (int k = 0; k < n; ++k) {
+                        float value = 0.0f, weight = 0.0f;
+                        for (int c = 0; c < 4; ++c) {
+                            if (!want[src[c]]) continue;
+                            value += wt[c] * response[src[c] * static_cast<std::size_t>(n) + static_cast<std::size_t>(k)];
+                            weight += wt[c];
+                        }
+                        if (weight > 0.0f) total[at * static_cast<std::size_t>(n) + static_cast<std::size_t>(k)] += value / weight / norm;
+                    }
+                }
+            }, 8);
+        }
+
+        // The peak (refined by a parabola through its neighbours).
+        std::vector<float> peak(pixels, 0.0f), coherence(pixels, 0.0f), peaks, coherences;
+        for (std::size_t i = 0; i < pixels; ++i) {
+            if (!inside[i]) continue;
+            const float* r = &total[i * static_cast<std::size_t>(n)];
+            int best = 0;
+            float sum = 0.0f;
+            for (int k = 0; k < n; ++k) {
+                sum += r[k];
+                if (r[k] > r[best]) best = k;
+            }
+            const float mean = sum / static_cast<float>(n);
+            const float a = r[(best + n - 1) % n], b = r[best], c = r[(best + 1) % n];
+            const float denom = a - 2.0f * b + c;
+            const float offset = std::abs(denom) > 1e-12f ? std::clamp(0.5f * (a - c) / denom, -0.5f, 0.5f) : 0.0f;
+            float angle = kPi * (static_cast<float>(best) + offset) / static_cast<float>(n);
+            field.angle[i] = std::fmod(angle + kPi, kPi);
+            peak[i] = b;
+            coherence[i] = b > 1e-9f ? std::clamp((b - mean) / b, 0.0f, 1.0f) : 0.0f;
+            peaks.push_back(b);
+            coherences.push_back(coherence[i]);
+        }
+        // The confidence: the peak's lead over the mean (coherence) against the image's usual lead,
+        // times its strength against the usual strength (flat patches give little). Relative to the
+        // image itself, so a fine fur and a coarse lock both count.
+        const float usualLead = std::max(1e-6f, percentile(coherences, 0.75f));
+        const float usualPeak = std::max(1e-6f, percentile(peaks, 0.5f));
+        for (std::size_t i = 0; i < pixels; ++i) {
+            if (!inside[i]) continue;
+            const float conf = std::min(1.0f, coherence[i] / usualLead) * std::min(1.0f, peak[i] / (0.5f * usualPeak));
+            field.confidence[i] = conf;
+            field.tensor[2 * i] = conf * pm::cos(2.0f * field.angle[i]);
+            field.tensor[2 * i + 1] = conf * pm::sin(2.0f * field.angle[i]);
+        }
     }
 
     // The mask's edge: what the filters see there is the outline (hair against the backdrop, the
@@ -545,7 +701,7 @@ OrientationField orientationField(const RefImage& grayIn, const RefImage& mask, 
     return field;
 }
 
-OrientationField coarseField(const OrientationField& field, const RefImage& mask, float sigma) {
+OrientationField coarseField(const OrientationField& field, const RefImage& mask, float sigma, bool bilateral) {
     OrientationField out = field;
     const int w = field.width, h = field.height;
     const std::size_t pixels = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
@@ -567,6 +723,50 @@ OrientationField coarseField(const OrientationField& field, const RefImage& mask
         out.tensor[2 * i] = bt[2 * i] * k;
         out.tensor[2 * i + 1] = bt[2 * i + 1] * k;
     }
+    if (!bilateral || w <= 0 || h <= 0) return out;
+    // Bilateral: each neighbour (every `stride` pixels within 2.5 sigma) weighted by distance and by
+    // how well its own direction agrees with the plain average's at the pixel (its confidence is in
+    // its vector already).
+    const std::vector<float> plain = out.tensor;
+    const int stride = std::max(1, static_cast<int>(std::lround(0.25f * sigma)));
+    const int radius = static_cast<int>(std::ceil(2.5f * sigma / static_cast<float>(stride)));
+    std::vector<float> spatial(static_cast<std::size_t>(2 * radius + 1));
+    for (int k = -radius; k <= radius; ++k) {
+        const float d = static_cast<float>(k * stride);
+        spatial[static_cast<std::size_t>(k + radius)] = pm::exp(-0.5f * d * d / (sigma * sigma));
+    }
+    parallelFor(0, static_cast<std::size_t>(h), [&](std::size_t yy) {
+        const int y = static_cast<int>(yy);
+        for (int x = 0; x < w; ++x) {
+            const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
+            if (in[at] <= 0.0f) continue;
+            const float gx = plain[2 * at], gy = plain[2 * at + 1], gl = std::sqrt(gx * gx + gy * gy);
+            if (gl <= 1e-6f) continue;
+            const float cx = gx / gl, cy = gy / gl;  // (the plain average's doubled angle)
+            double sx = 0.0, sy = 0.0, sw = 0.0;
+            for (int j = -radius; j <= radius; ++j) {
+                const int py = y + j * stride;
+                if (py < 0 || py >= h) continue;
+                for (int i = -radius; i <= radius; ++i) {
+                    const int px = x + i * stride;
+                    if (px < 0 || px >= w) continue;
+                    const std::size_t o = static_cast<std::size_t>(py) * static_cast<std::size_t>(w) + static_cast<std::size_t>(px);
+                    if (in[o] <= 0.0f) continue;
+                    const float tx = t[2 * o], ty = t[2 * o + 1], tl = std::sqrt(tx * tx + ty * ty);
+                    const float agree = tl > 1e-6f ? (tx * cx + ty * cy) / tl : 0.0f;  // cos 2d
+                    const float k = spatial[static_cast<std::size_t>(j + radius)] * spatial[static_cast<std::size_t>(i + radius)] *
+                                    pm::exp(-(1.0f - agree) / 0.18f);
+                    sx += k * tx;
+                    sy += k * ty;
+                    sw += k;
+                }
+            }
+            if (sw > 1e-12) {
+                out.tensor[2 * at] = static_cast<float>(sx / sw);
+                out.tensor[2 * at + 1] = static_cast<float>(sy / sw);
+            }
+        }
+    }, 4);
     return out;
 }
 

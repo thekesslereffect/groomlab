@@ -10,7 +10,8 @@
 // - liftStroke: a stroke on a photo to a 3D guide: each point's ray through the photo's camera to
 //   the hair's shell (the first point in it; a ray that misses it takes the point it passes
 //   nearest it, no deeper than the head's middle), the depth smoothed along the stroke (rays that
-//   graze the shell would zig-zag), the root on the scalp under its first point.
+//   graze the shell would zig-zag), then rooted on the scalp (guide_rooting.h: the end nearer the
+//   scalp first, joined to the nearest scalp point, out of the head).
 // - combDirection / combGuide: a combing field and a guide grown root out along it: away from a
 //   part line and back over the top, the sides back over the ears, the back falling; the guide
 //   rides the shell (rising off the scalp first, the forehead's hairline lifting up and back),
@@ -25,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "groomlab/guide_rooting.h"
 #include "groomlab/hair_shell.h"
 
 namespace groomlab {
@@ -61,18 +63,30 @@ struct StrokeLiftOptions {
     float spacingPx = 0.0f;     // the stroke resampled every this many photo pixels (0: 0.6% of its larger side)
     float smoothPx = 0.0f;      // the depth smoothed along it over this many pixels (0: 2% of the larger side)
     float pointSpacing = 0.0f;  // the guide's points this far apart (0: a 20th of the head's radius)
+    // The lifted line rooted on the scalp (guide_rooting.h): the end nearer the scalp first (a stroke
+    // drawn tip first is turned round), joined to the scalp under its first point (toward the head's
+    // middle: radial, the shell's frame centre; never dropped for the gap, which one photo's depth may
+    // make large), cut where it passes through the head.
+    GuideRootingOptions rooting = [] {
+        GuideRootingOptions o;
+        o.maxGapShare = 1e6f;
+        o.radial = true;
+        return o;
+    }();
 };
 
 struct LiftedStroke {
-    std::vector<Vec3f> points;  // root first (on the scalp)
+    std::vector<Vec3f> points;  // root first (on the scalp); empty when rooting dropped it
     int hits = 0, misses = 0;   // stroke samples whose ray met the shell, and those that passed it
     float length = 0.0f;
+    RootedGuide rooting;        // what rooting did (flipped, connected, cut, dropped); its points moved to `points`
 };
 
 // `pixels`: the stroke in the photo's pixels, root first (2 or more); `camera` the photo's (at its
-// size); `scalp` where the root goes (the hair's region).
+// size); `scalp` where the root goes (the hair's region); `head` the whole head the guide stays out of
+// (null: the scalp).
 LiftedStroke liftStroke(const RefCamera& camera, const std::vector<std::array<float, 2>>& pixels, const HairShell& shell,
-                        const ScalpMesh& scalp, const StrokeLiftOptions& options = {});
+                        const ScalpMesh& scalp, const StrokeLiftOptions& options = {}, const ScalpMesh* head = nullptr);
 
 // A guide's mirror image across the plane through `planePoint` square to `normal`, moved so its
 // root is on `scalp` (when given).

@@ -444,7 +444,7 @@ void bindReference(py::module_& m) {
            float step, int points, float scalpOffset, const std::string& symmetry, float symmetryCenter, int maxImageSize,
            py::object occluders, int shellResolution, int inflate, float inflateFactor, float surfacePrior,
            float continuityPrior, float gravityPrior, float orientationWeight, float downBias, float hintRadius, float hintLineRadius, float hintWeight, int refineMask, bool cropToSubject, int subjectSize, int curlFlow, float lengthTrim, py::object up, std::uint64_t seed, bool keepFields, const std::string& lookBalance, bool lookExposure, float lookQuantile, int orientations, float wavelength,
-           int scales, py::object fieldsDir) {
+           int scales, py::object fieldsDir, const std::string& orientationMethod, bool bilateralCoarse) {
             std::vector<ReferenceView> vs;
             for (py::handle v : views) vs.push_back(viewFrom(v.cast<py::dict>()));
             ReferenceGuideOptions o;
@@ -490,6 +490,8 @@ void bindReference(py::module_& m) {
             o.orientation.orientations = orientations;
             o.orientation.wavelength = wavelength;
             o.orientation.scales = scales;
+            o.orientation.method = orientationMethodFromName(orientationMethod);
+            o.orientation.bilateralCoarse = bilateralCoarse;
             ReferenceGuidesResult r;
             {
                 py::gil_scoped_release release;
@@ -506,6 +508,7 @@ void bindReference(py::module_& m) {
                 d["mirror_of"] = g.mirrorOf;
                 d["confidence"] = g.confidence;
                 d["stop"] = g.stop;
+                d["score"] = g.score;
                 guides.append(d);
             }
             out["guides"] = guides;
@@ -523,6 +526,10 @@ void bindReference(py::module_& m) {
             out["look"] = lookDict(r.look);
             out["scalp_coverage"] = r.scalpCoverage;
             out["seconds"] = r.seconds;
+            out["score"] = r.score;
+            out["rooting"] = py::dict(py::arg("guides") = r.rooting.guides, py::arg("cut") = r.rooting.cut, py::arg("pushed") = r.rooting.pushed,
+                                      py::arg("dropped") = r.rooting.dropped, py::arg("lock_flipped") = r.lockRooting.flipped,
+                                      py::arg("lock_connected") = r.lockRooting.connected, py::arg("lock_dropped") = r.lockRooting.dropped);
             if (!fieldsDir.is_none()) {
                 const std::string dir = fieldsDir.cast<std::string>();
                 py::list files;
@@ -554,7 +561,7 @@ void bindReference(py::module_& m) {
         py::arg("occluders") = py::none(), py::arg("shell_resolution") = 96, py::arg("inflate") = -1, py::arg("inflate_factor") = 1.0f,
         py::arg("surface_prior") = 0.15f, py::arg("continuity_prior") = 0.1f, py::arg("gravity_prior") = 0.15f, py::arg("orientation_weight") = 1.0f, py::arg("down_bias") = 1.0f, py::arg("hint_radius") = 0.08f, py::arg("hint_line_radius") = 0.025f, py::arg("hint_weight") = 3.0f, py::arg("refine_mask") = -1, py::arg("crop_to_subject") = true, py::arg("subject_size") = 512, py::arg("curl_flow") = -1, py::arg("length_trim") = 0.86f, py::arg("up") = py::none(), py::arg("seed") = 1,
         py::arg("keep_fields") = false, py::arg("look_balance") = "auto", py::arg("look_exposure") = true, py::arg("look_quantile") = 0.65f, py::arg("orientations") = 32, py::arg("wavelength") = 4.0f, py::arg("scales") = 3,
-        py::arg("fields_dir") = py::none(),
+        py::arg("fields_dir") = py::none(), py::arg("orientation_method") = "multiscale", py::arg("bilateral_coarse") = false,
         "Guides grown from reference photos (a prototype). `views`: dicts {image: path, mask: path or None, hints: "
         "[[[u, v], ...] root first, ...] or [{points, directed}], hint_image: an RGBA overlay of painted strokes (dark at "
         "the root end, light at the tip for a way), camera: "
@@ -707,9 +714,11 @@ void bindReference(py::module_& m) {
     m.def(
         "preview_reference_view",
         [](const ScalpMesh& scalp, const py::dict& view, float lineSpacing, float maxLength, int maxImageSize, int subjectSize,
-           bool cropToSubject, int refineMask) {
+           bool cropToSubject, int refineMask, const std::string& orientationMethod, bool bilateralCoarse) {
             const ReferenceView v = viewFrom(view);
             ReferenceGuideOptions o;
+            o.orientation.method = orientationMethodFromName(orientationMethod);
+            o.orientation.bilateralCoarse = bilateralCoarse;
             o.maxLength = maxLength;
             o.maxImageSize = maxImageSize;
             o.subjectSize = subjectSize;
@@ -725,6 +734,10 @@ void bindReference(py::module_& m) {
                 mask[i] = static_cast<char>(static_cast<unsigned char>(std::lround(255.0f * std::clamp(p.mask.pixels[i], 0.0f, 1.0f))));
             py::dict d;
             d["mask"] = py::bytes(mask);
+            std::string confidence(p.confidence.pixels.size(), '\0');
+            for (std::size_t i = 0; i < confidence.size(); ++i)
+                confidence[i] = static_cast<char>(static_cast<unsigned char>(std::lround(255.0f * std::clamp(p.confidence.pixels[i], 0.0f, 1.0f))));
+            d["confidence"] = py::bytes(confidence);
             d["width"] = p.mask.width;
             d["height"] = p.mask.height;
             d["crop"] = py::make_tuple(p.crop[0], p.crop[1], p.crop[2], p.crop[3]);
@@ -742,10 +755,10 @@ void bindReference(py::module_& m) {
         },
         py::arg("scalp"), py::arg("view"), py::arg("line_spacing") = 0.0f, py::arg("max_length") = 0.0f,
         py::arg("max_image_size") = 768, py::arg("subject_size") = 512, py::arg("crop_to_subject") = true,
-        py::arg("refine_mask") = -1,
+        py::arg("refine_mask") = -1, py::arg("orientation_method") = "multiscale", py::arg("bilateral_coarse") = false,
         "What a Reference window shows over one photo (a view dict as guides_from_reference takes, mask_strokes too): "
-        "{mask: bytes (uint8, width x height, rows top-down), width, height, crop (x0, y0, w, h photo pixels the mask "
-        "covers), lines: the orientation field as segments (x0, y0, x1, y1) in photo pixels, locks: on wavy hair the "
+        "{mask: bytes (uint8, width x height, rows top-down), confidence: the orientation's confidence the same way (0 off "
+        "the mask), width, height, crop (x0, y0, w, h photo pixels the mask covers), lines: the orientation field as segments (x0, y0, x1, y1) in photo pixels, locks: on wavy hair the "
         "locks traced in the photo, each a list of (x, y) photo pixels root end first}.");
 }
 

@@ -72,6 +72,7 @@
 #include <vector>
 
 #include "groomlab/camera_solve.h"
+#include "groomlab/guide_rooting.h"
 #include "groomlab/math.h"
 #include "groomlab/scalp_mesh.h"
 
@@ -124,14 +125,38 @@ RefImage cropImage(const RefImage& image, int x0, int y0, int w, int h);
 
 // ---- 1. Orientation ---------------------------------------------------------------------------
 
+// How the strands' directions are read (orientationField):
+// - MultiScale: an even Gabor bank (`orientations` filters, `wavelength`) summed over `scales`
+//   octaves; the confidence the peak's lead over the mean against the image's usual lead.
+// - Variance: one fine bank of 180 quadrature Gabor filters (Neural Haircut's: sigma 1.8 pixels
+//   across the strands, 2.4 along, 0.23 cycles a pixel; times wavelength / 4.35, so the bank follows
+//   `wavelength` and the working size), on the image band-passed by a difference of Gaussians (0.4
+//   and 10 pixels, scaled alike); the direction the strongest filter's, the confidence from the
+//   circular variance of the filters' energy round it, Var = sum_b w_b min(|a - b|, pi - |a - b|)^2
+//   (w_b a filter's share of the energy), as 1 / Var^2: high where one direction stands out, low
+//   where strands cross or curl (the energy spreads over many directions) and on noise. 1 / Var^2
+//   is mapped to 0-1 between an even spread (no direction: 0) and the bank's own clean stripes (1),
+//   its square root (stripes 25% off the bank's frequency: 0.6), times the filters' strength against
+//   the image's usual (flat patches give little).
+enum class OrientationMethod { MultiScale, Variance };
+const char* orientationMethodName(OrientationMethod m);
+OrientationMethod orientationMethodFromName(const std::string& name);  // multiscale, variance; throws
+
 struct OrientationOptions {
-    int orientations = 32;        // filters over 180°
+    OrientationMethod method = OrientationMethod::MultiScale;
+    int orientations = 32;        // filters over 180° (MultiScale; Variance uses 180)
     float wavelength = 4.0f;      // pixels across a strand (the carrier's period) at the finest scale
-    int scales = 3;               // octaves: the image and its halves, each filtered at `wavelength`
+    int scales = 3;               // octaves: the image and its halves, each filtered at `wavelength` (MultiScale)
     float confidenceFloor = 0.2f; // pixels below this confidence take their neighbours' direction
     bool fillWeak = true;         // weak pixels take their strong neighbours' direction
     float edgeWidth = 1.0f;       // wavelengths from the mask's edge over which the confidence fades in (the outline is not strands)
     float smoothSigma = 1.5f;     // pixels: the final blur of the direction field inside the mask
+    // The coarse (lock-scale) flow guidesFromReference reads paths and lengths from: the fine field's
+    // doubled-angle vectors (each weighted by its confidence) blurred over 2% of the working size;
+    // bilateral: each neighbour also weighted by how well it agrees with the plain blur's direction
+    // there (EnergyHair's orientation-similarity blur), so a lock's flow does not bleed across a part
+    // or a crossing lock.
+    bool bilateralCoarse = false;
 };
 
 // The strands' 2D direction at each pixel: an angle in [0, pi) from +u toward +v (v down), a
@@ -153,8 +178,11 @@ struct OrientationField {
 // diffusion.
 OrientationField orientationField(const RefImage& gray, const RefImage& mask, const OrientationOptions& options = {});
 
-// The field smoothed over `sigma` pixels inside the mask (a lock's flow, past its curls).
-OrientationField coarseField(const OrientationField& field, const RefImage& mask, float sigma);
+// The field smoothed over `sigma` pixels inside the mask (a lock's flow, past its curls): the
+// doubled-angle vectors, which carry each pixel's confidence, averaged; `bilateral`: each neighbour
+// also weighted by its agreement with the plain average's direction at the pixel (exp(-(1 - cos 2d)
+// / 0.18)), sampled every sigma / 4 pixels.
+OrientationField coarseField(const OrientationField& field, const RefImage& mask, float sigma, bool bilateral = false);
 
 // Curls in a photo: along the coarse flow (streamlines), the fine direction's swing to either side of
 // it, its period (autocorrelation's first peak) and its amplitude.
@@ -306,6 +334,10 @@ struct ReferenceGuideOptions {
     int lockPaths = -1;
     float waveGain = 1.2f;              // the fine wave's size on a guide from the swing the photo shows (larger
                                         // reads as frizz on the loose curls tried: IoU and flow fall)
+    // Every guide rooted on the scalp at the end (guide_rooting.h: the end nearer the scalp the root,
+    // a root off it joined to it or dropped, a pass through the head cut; the head the first
+    // occluder, else the scalp). Lock centrelines go through it before they take a root's place.
+    GuideRootingOptions rooting;
 };
 
 struct ReferenceGuide {
@@ -321,6 +353,7 @@ struct ReferenceGuide {
     float lockRadius = 0.0f, lockWavelength = 0.0f, lockStrength = 0.0f;
     int lockView = -1;           // the view it was traced in
     float photoLength = 0.0f;    // the longest strand path the photos show through its root (0: none)
+    float score = 0.0f;          // how well the photos agree with it (PhotoScorer's score, all views)
 };
 
 struct ReferenceLookFit {
@@ -387,6 +420,11 @@ struct ReferenceGuidesResult {
     std::vector<LockViewCounts> lockViews;
     int lockGuides = 0;  // guides on lock centrelines (each in a root's place, where the views agree with it at
                          // least as well as with the guide grown there)
+    // Scalp rooting (guide_rooting.h): of the lock centrelines placed (each a line the photos show,
+    // rooted before it competes for a root: flipped ones ran tip first), and the last pass over every
+    // guide (cut where they passed through the head, dropped).
+    GuideRootingCounts lockRooting, rooting;
+    float score = 0.0f;  // the guides' mean score against the photos (PhotoScorer)
     float rimLength = 0.0f;  // how far the hair reaches past the scalp's outline in the views (scene units, its rim)
     float reachLength = 0.0f;  // the same, its 90th percentile (what an automatic length starts from)
     float strandLength = 0.0f; // the strands' paths in the photos, their upper quartile (strandPathLength): long
@@ -417,6 +455,7 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
 // hair (lockPaths) the locks traced in the photo (root end first, photo pixels) and their flow.
 struct ReferenceViewPreview {
     RefImage mask;                    // one channel 0-1, `crop`'s part of the photo at the working size
+    RefImage confidence;              // the orientation's confidence (0-1) per pixel, same size, 0 off the mask
     std::array<int, 4> crop{0, 0, 0, 0};  // x0, y0, w, h in photo pixels
     std::vector<std::array<float, 4>> flowLines;
     std::vector<std::vector<std::array<float, 2>>> locks;
@@ -508,6 +547,65 @@ std::vector<float> meshDepthMap(const ScalpMesh& mesh, const RefCamera& camera, 
 
 PhotoComparison compareToPhoto(const ScalpMesh& scalp, const StrandSet& strands, const ReferenceView& view,
                                const ReferenceGuideOptions& options = {});
+
+// ---- Scoring guides against the photos (reprojection) ---------------------------------------------
+
+// How well a 3D polyline (a guide) agrees with the lined-up photos: each photo sees it projected
+// through its camera, sampled every `stepPx` pixels; points the head hides from that camera (the
+// scalp and occluders' depth) and points out of its frame do not count. Per photo:
+// - mask: the share of the samples inside the photo's hair mask;
+// - coarse, fine: where they are inside it, the projected tangent against the photo's orientation
+//   (the coarse lock-scale flow and the fine strands' field), the pi-periodic angle error e (0-90
+//   degrees, sign free: a line has no way) as 1 - e / 90 degrees, each sample weighted by the
+//   photo's confidence there (what it says); the confidence-weighted mean errors in degrees too;
+// - score: (coarseShare x coarse + the rest x fine) x mask.
+// A guide's score: the photos' scores weighted by their samples (photos that see more of it count
+// more). Occlusion by other hair is not modelled. guidesFromReference chooses between a lock's
+// triangulated centreline and the guide grown at its root by it (the photo the lock was traced in
+// left out).
+struct GuideScoreOptions {
+    float coarseShare = 0.5f;  // the coarse flow's share of the orientation score
+    float stepPx = 2.0f;       // samples along the projected guide (working pixels)
+};
+
+struct GuidePhotoScore {
+    int samples = 0;   // counted: in the frame, not hidden by the head
+    int hidden = 0;    // hidden by the head from this camera (not counted)
+    float mask = 0.0f;
+    float coarse = 0.0f, fine = 0.0f;
+    float coarseError = 0.0f, fineError = 0.0f;  // degrees
+    float confidence = 0.0f;  // the photo's mean confidence over the samples inside its mask
+    float score = 0.0f;
+    // How much of the photo's hair it explains: over its samples, +1 a sample along a sure flow, -1
+    // across it or outside the hair (0 where the photo says nothing), times the step (working pixels):
+    // a long guide that agrees has more than a short one, one that leaves the hair less.
+    float support = 0.0f;
+};
+
+struct GuideScore {
+    std::vector<GuidePhotoScore> photos;  // one a view (as given)
+    int views = 0;                        // the views with samples
+    float score = 0.0f, orientation = 0.0f, mask = 0.0f, coarse = 0.0f, fine = 0.0f;
+    float support = 0.0f;                 // the photos' summed
+};
+
+// The views prepared once (masks and orientation fields as guidesFromReference reads them, at the
+// working size), then any number of guides scored.
+class PhotoScorer {
+public:
+    PhotoScorer(const ScalpMesh& scalp, const std::vector<ReferenceView>& views, const ReferenceGuideOptions& options = {},
+                const GuideScoreOptions& scoring = {});
+    ~PhotoScorer();
+    PhotoScorer(const PhotoScorer&) = delete;
+    PhotoScorer& operator=(const PhotoScorer&) = delete;
+    std::size_t viewCount() const;
+    GuideScore score(const std::vector<Vec3f>& points) const;
+    std::vector<GuideScore> score(const std::vector<std::vector<Vec3f>>& guides) const;  // in parallel
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 const char* referenceSymmetryName(ReferenceSymmetry s);
 ReferenceSymmetry referenceSymmetryFromName(const std::string& name);  // none, x, topology, auto; throws

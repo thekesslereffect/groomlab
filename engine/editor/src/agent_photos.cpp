@@ -297,6 +297,33 @@ std::vector<std::uint8_t> photoGridPng(const RefImage& image, const AgentPhoto& 
     return c.png();
 }
 
+std::vector<std::uint8_t> confidencePng(const RefImage& image, const ReferenceViewPreview& preview, int maxSize) {
+    const float k = fitScale(image.width, image.height, maxSize);
+    Canvas c = Canvas::ofImage(image, k);
+    for (int y = 0; y < c.height(); ++y)
+        for (int x = 0; x < c.width(); ++x) {
+            const Rgb p = c.at(x, y);
+            const float g = 0.25f * (p[0] + p[1] + p[2]) / 3.0f;
+            c.set(x, y, {g, g, g});
+        }
+    const auto& crop = preview.crop;
+    const RefImage& conf = preview.confidence;
+    if (!conf.empty() && crop[2] > 0 && crop[3] > 0)
+        for (int y = 0; y < c.height(); ++y)
+            for (int x = 0; x < c.width(); ++x) {
+                const float px = (static_cast<float>(x) + 0.5f) / k, py = (static_cast<float>(y) + 0.5f) / k;
+                const float mu = (px - static_cast<float>(crop[0])) / static_cast<float>(crop[2]) * static_cast<float>(conf.width);
+                const float mv = (py - static_cast<float>(crop[1])) / static_cast<float>(crop[3]) * static_cast<float>(conf.height);
+                if (mu < 0.0f || mv < 0.0f || mu >= static_cast<float>(conf.width) || mv >= static_cast<float>(conf.height)) continue;
+                if (!preview.mask.empty() && preview.mask.sample(mu, mv) < 0.5f) continue;
+                const float v = std::clamp(conf.sample(mu, mv), 0.0f, 1.0f);
+                // (dark blue 0, green 0.5, yellow 1)
+                const Rgb col = v < 0.5f ? Rgb{0.05f, 0.1f + 1.4f * v, 0.5f - 0.6f * v} : Rgb{2.0f * (v - 0.5f), 0.8f + 0.2f * (v - 0.5f) * 2.0f, 0.2f - 0.4f * (v - 0.5f)};
+                c.set(x, y, col, 0.85f);
+            }
+    return c.png();
+}
+
 Vec3f markerOn(const ScalpMesh& from, const ScalpMesh& to, const MarkerPoint& point) {
     StrandRoot root = point.root;
     if (!(root.face >= 0 && static_cast<std::size_t>(root.face) < from.triangleCount())) root = from.closestPoint(point.point).root;

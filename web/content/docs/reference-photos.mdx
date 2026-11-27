@@ -198,14 +198,25 @@ direction: in each photo the locks' paths are traced from their roots along the 
 (the strand directions averaged over half a wave), each holding its way through the crests and
 falling where the photo says little, to where the hair ends. The clearest are kept as locks; the
 same lock traced in two photos from the same root is triangulated into a 3D centreline, one seen
-in one photo lies on the hair's surface over the scalp. A lock's centreline takes a root's place
-where all the photos agree with it at least as well as with the guide grown there; the other guides
-grow along the locks' flow. So the back falls down in waves and the hair at the hairline sweeps up
+in one photo lies on the hair's surface over the scalp. Each centreline is rooted on the scalp (see
+below) and scored against the other photos: projected through each photo's camera, how much of it
+runs inside the photo's hair along the photo's own strand flow (points the head hides from that
+camera don't count). It takes a root's place where the photos support it about as much as the guide
+grown there (with symmetry, a lock on the mirrored side competes as its mirror image); the other
+guides grow along the locks' flow. So the back falls down in waves and the hair at the hairline sweeps up
 and back as the photos show, not into a fringe. Each guide then carries the photos' fine wave along
 it (its size, length and phase where a photo shows it; the rest take their neighbours'), and with
 Apply each guide's strands clump onto it, with no Curl node over all of them. Long hair that hangs
 past the part of the photo first worked on (past the neck, down the back) is worked on wider, and
 hair hanging over the neck or the back is hair (a beard, on the face's side, is not).
+
+Every guide starts on the scalp. Whatever made it (grown from a root, a lock's centreline, a stroke,
+the comb), the end nearer the scalp is its root (a line that ran tip first is turned round), a root
+a little off the scalp is moved onto it and one further off is joined to it by a short segment out
+along the scalp's normal (a lock whose both ends are far from the scalp, hanging beside the face, is
+left out: more than 0.4 head radii), and a guide that passes through the head is cut where it goes
+in (a shallow dip, up to a quarter of the head's radius, that comes out again is pushed back out
+instead). The thresholds scale with the head's size.
 
 On curly hair each guide follows a lock. The photos' locks are found first (the strands curling
 clearly along each lock) and guides start where they grow from, the rest spread evenly. Where a
@@ -238,6 +249,14 @@ photo doesn't show, and guide lines that settle which way hair runs and how long
 What doesn't yet: ringlets too tight for the photo's size, very short fur (too fine to read in the
 photo), and photos lit by colored light (the fitted color takes the light's tint).
 
+How the strand directions are read can be chosen (scripts and agents: `orientation_method` /
+`orientation`): **multiscale** (the default) filters each photo at three scales; **variance** uses
+one fine bank of 180 filters and rates each pixel by how much one direction stands out (where strands
+cross or curl the filters disagree and the pixel counts little). On the wavy test head the default
+reads the waves better (the variance reading smooths them out, so the hair is not traced lock by
+lock); the confidence picture (`photo_view` with `analysis`) shows where either is unsure. A
+bilateral coarse flow (`bilateral_coarse`) keeps neighbouring locks' flows apart at a part.
+
 ```python
 import groomlab
 from groomlab import from_reference as fr
@@ -266,8 +285,9 @@ would: a few key locks drawn on the photos, the rest combed and filled in from t
 
 - **Strokes to guides** (`guides_from_strokes`): draw a stroke along each lock on a photo, root end
   first (on an image of the photo, mark the root end with a dot). Each stroke is lifted through the
-  photo's camera onto the hair's outer surface the photos show, its root on the scalp under its
-  first point, and cut where the photos show the hair end. A stroke on a side photo can be mirrored
+  photo's camera onto the hair's outer surface the photos show, rooted on the scalp under its
+  root end (a stroke drawn tip first is turned round: the end nearer the scalp is the root), and
+  cut where it passes through the head or the photos show the hair end. A stroke on a side photo can be mirrored
   to the other side. With `fill`, the rest of the hair region gets guides from the strokes (each
   takes its nearest strokes' shapes), combed where no stroke is near.
 - **The hair's shell** (`hair_shell`): the hair's outer surface round the head from every lined-up
@@ -280,4 +300,5 @@ would: a few key locks drawn on the photos, the rest combed and filled in from t
 
 The strokes and the comb work on the head as it is (after Morph to Photos) and scale with its size.
 They are a starting point: look at the guides through each photo's camera and fix single guides with
-`reshape_guides`.
+`reshape_guides`. `score_guides` rates any guides against the photos (how much of each runs inside
+the photos' hair along their strand flow, photo by photo) and lists the worst ones to fix first.

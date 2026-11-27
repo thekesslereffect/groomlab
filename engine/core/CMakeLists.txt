@@ -102,6 +102,7 @@ add_library(groomlab_core_objects OBJECT
     src/reference_guides.cpp
     src/hair_shell.cpp
     src/lock_guides.cpp
+    src/guide_rooting.cpp
     src/reference_look.cpp
     src/reference_orientation.cpp
     src/render_overrides.cpp

@@ -208,6 +208,41 @@ TEST(LockGuides, AStrokeOnTwoPhotosLiftsBackToItsCurve) {
     }
 }
 
+// A stroke drawn tip first (from the end of a lock hanging below the hair region back up to the top
+// of the head) is turned round when lifted: its root on the scalp where the same stroke drawn root
+// first has its root (guide_rooting.h).
+TEST(LockGuides, AStrokeDrawnTipFirstIsTurnedRound) {
+    const ScalpMesh head = ball(1.0f), cap = ball(1.0f, Vec3f(0, 0, 0), 16, 64, 0.5f * kPi);
+    HairShellOptions o;
+    o.volume = 0.4f;
+    const HairShell shell = HairShell::fromVolume(head, unitFrame(), o);
+    std::vector<Vec3f> truth;
+    for (int i = 0; i <= 20; ++i) {
+        const float theta = (20.0f + 60.0f * static_cast<float>(i) / 20.0f) * kPi / 180.0f, phi = 0.4f;
+        const Vec3f d(std::sin(theta) * std::sin(phi), std::cos(theta), std::sin(theta) * std::cos(phi));
+        truth.push_back(d * shell.outer(d));
+    }
+    const Vec3f last = truth.back();
+    for (int i = 1; i <= 12; ++i) truth.push_back(last + Vec3f(0.0f, -0.12f * static_cast<float>(i), 0.0f));
+    const RefCamera cam = camera(Vec3f(0.6f, 0.2f, 1.0f), 8.0f, 512);
+    std::vector<std::array<float, 2>> pixels;
+    for (const Vec3f& p : truth) {
+        float u = 0.0f, v = 0.0f;
+        ASSERT_TRUE(cam.project(p, u, v));
+        pixels.push_back({u, v});
+    }
+    const LiftedStroke forward = liftStroke(cam, pixels, shell, cap, {}, &head);
+    std::reverse(pixels.begin(), pixels.end());
+    const LiftedStroke backward = liftStroke(cam, pixels, shell, cap, {}, &head);
+    ASSERT_GE(forward.points.size(), 2u);
+    ASSERT_GE(backward.points.size(), 2u);
+    EXPECT_FALSE(forward.rooting.flipped);
+    EXPECT_TRUE(backward.rooting.flipped);
+    EXPECT_LT((backward.points.front() - forward.points.front()).length(), 0.05f);
+    EXPECT_LT((backward.points.back() - forward.points.back()).length(), 0.15f);
+    EXPECT_LT(backward.points.back().y, -0.5f);  // the tip hangs
+}
+
 TEST(LockGuides, MirroredGuidesLandOnTheOtherSide) {
     const ScalpMesh head = ball(1.0f);
     const std::vector<Vec3f> guide{Vec3f(0.6f, 0.8f, 0.0f), Vec3f(0.9f, 0.9f, 0.1f), Vec3f(1.2f, 0.5f, 0.2f)};
