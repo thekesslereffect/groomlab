@@ -942,6 +942,25 @@ class ToolsTest(unittest.TestCase):
         bpy.ops.groomlab.tool(tool="comb")
         self.assertEqual(bpy.ops.groomlab.tool_undo(), {"FINISHED"})  # the groom as the tests after expect it
         self.assertNotIn(name, [mm.name for mm in t.maps])
+        # New Map > For a setting with a name typed: a new map of that name, the param reading it
+        # (the setting's own name not made); a taken or bad name refused, nothing made.
+        self.assertEqual(density["map"], name)  # the Name field's default (the core's)
+        self.assertEqual(bpy.ops.groomlab.map_new(target="%s.density" % density["node"], name=" thin_mask ", kind="vertices"),
+                         {"FINISHED"})
+        self.assertEqual(t.paint_map, "thin_mask")
+        self.assertNotIn(name, [mm.name for mm in t.maps])
+        graph = hcall(head, "get_graph")["graph"]
+        map_node = next(n["name"] for n in graph["nodes"] if n["type"] == "Map" and n.get("params", {}).get("name") == "thin_mask")
+        self.assertTrue(any((c["from"], c["to"], c["input"]) == (map_node, density["node"], "density") for c in graph["connections"]))
+        other = next(o for o in others if (o["node"], o["param"]) != (density["node"], "density"))
+        maps = sorted(mm.name for mm in t.maps)
+        for bad in ("thin_mask", "2bad"):
+            with self.assertRaises(RuntimeError):  # the operator's error
+                bpy.ops.groomlab.map_new(target="OTHER", other=other["id"], name=bad, kind="vertices")
+        self.assertEqual(sorted(mm.name for mm in t.maps), maps)
+        bpy.ops.groomlab.tool(tool="comb")
+        self.assertEqual(bpy.ops.groomlab.tool_undo(), {"FINISHED"})
+        self.assertNotIn("thin_mask", [mm.name for mm in t.maps])
         # Groups: a new one, renamed, hidden, deleted (each one undo step).
         t.tab = "TOOLS"
         self.assertEqual(bpy.ops.groomlab.group_new(name="bangs"), {"FINISHED"})

@@ -235,7 +235,20 @@ struct ParamPaintRequest {
     std::vector<std::int32_t> faces;   // a map made here: white on those polygons of the cage only, black elsewhere
     int resolution = 1024;             // a texture map made here, this square
     bool mapNode = false;              // linked through a Map node in the graph (New Map for a setting), not in the param
+    // `name` as typed in New Map for a setting's Name field (every host's, filled with the param's
+    // own name, paramMapName): that name or the map the param reads left as it is asks for the
+    // default (the map the param reads, else its own); any other names a new map, which must be a
+    // valid map name no map of the groom has (typedParamMapName).
+    bool typed = false;
 };
+
+// The map a New Map for a setting makes from what its Name field holds (`typed`, its ends'
+// whitespace trimmed): "" for the default (the param's own name, paramMapName, or `reads`, the map
+// it reads already; paintParam's own choice), else the typed name. Throws std::invalid_argument
+// for an empty name, one that is no valid map name (mapNameError) or one `taken` says a map of the
+// groom has.
+std::string typedParamMapName(const std::string& node, const std::string& param, const std::string& typed, const std::string& reads,
+                              const std::function<bool(const std::string&)>& taken);
 
 // What Paint on a setting does.
 struct ParamPaint {

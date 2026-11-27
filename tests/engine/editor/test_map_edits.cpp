@@ -465,6 +465,36 @@ TEST(MapEdits, PaintOnASettingMakesItsMapOnceAndPacksChannelsThroughOneMapNode) 
     const ParamPaint relinked = paintParam("", made.created.maps, &none, scalp.get(), noise, "amplitude", vertices, files);
     EXPECT_FALSE(relinked.made);
     EXPECT_FALSE(relinked.graph.empty());
+    // New Map for a setting's Name field (typed): the own name or the map it reads as it was is the
+    // default; another names a new map the param reads; empty, bad or taken names are refused.
+    ParamPaintRequest typed;
+    typed.typed = true;
+    typed.name = " " + paramMapName(noise, "amplitude") + " ";
+    const ParamPaint own = paintParam(made.graph, made.created.maps, &none, scalp.get(), noise, "amplitude", typed, files);
+    EXPECT_FALSE(own.made);
+    EXPECT_TRUE(own.graph.empty()) << "the map it reads, as without a name";
+    typed.name = "speckles";
+    const ParamPaint named = paintParam(made.graph, made.created.maps, &none, scalp.get(), noise, "amplitude", typed, files);
+    EXPECT_TRUE(named.made);
+    EXPECT_EQ(named.map, "speckles");
+    ASSERT_EQ(named.created.maps.maps.count("speckles"), 1u);
+    EXPECT_EQ(paramMapOf(named.graph, named.created.maps, &none, noise, "amplitude").map, "speckles");
+    typed.name = "speckles";  // the map it reads now: the default again
+    EXPECT_TRUE(paintParam(named.graph, named.created.maps, &none, scalp.get(), noise, "amplitude", typed, files).graph.empty());
+    typed.name = paramMapName(noise, "amplitude");  // its own name left there: the default, the map it reads
+    const ParamPaint left = paintParam(named.graph, named.created.maps, &none, scalp.get(), noise, "amplitude", typed, files);
+    EXPECT_EQ(left.map, "speckles");
+    EXPECT_TRUE(left.graph.empty());
+    for (const std::string bad : {"", "  ", "2speckles", "a-b"}) {
+        typed.name = bad;
+        EXPECT_THROW(paintParam(made.graph, made.created.maps, &none, scalp.get(), noise, "amplitude", typed, files), std::invalid_argument)
+            << "'" << bad << "'";
+    }
+    typed.name = "speckles";  // another param: taken
+    EXPECT_THROW(paintParam(named.graph, named.created.maps, &none, scalp.get(), length, "keep", typed, files), std::invalid_argument);
+    EXPECT_EQ(typedParamMapName("n", "p", "n_p", "", {}), "");
+    EXPECT_EQ(typedParamMapName("n", "p", "mine", "", {}), "mine");
+    EXPECT_THROW(typedParamMapName("n", "p", "mine", "", [](const std::string&) { return true; }), std::invalid_argument);
     // Channels of one color map: one Map node feeding both params, each from its output.
     ParamPaintRequest green;
     green.name = "masks";

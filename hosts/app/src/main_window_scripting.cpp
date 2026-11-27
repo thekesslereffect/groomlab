@@ -684,14 +684,20 @@ bool MainWindow::insertPreset(const QString& nameOrPath) {
     return true;
 }
 
-bool MainWindow::paintParam(const QString& node, const QString& param, const QString& kind, bool mapNode) {
+bool MainWindow::paintParam(const QString& node, const QString& param, const QString& kind, bool mapNode, const QString& name,
+                            bool typed) {
     if (!document_) {
         report(tr("No groom open: nothing to paint"));
         return false;
     }
     std::string map;
     bool made = false;
-    const std::string error = document_->paintParam(node.toStdString(), param.toStdString(), &map, kind.toStdString(), &made, mapNode);
+    ParamPaintRequest request;
+    request.kind = kind.toStdString();
+    request.mapNode = mapNode;
+    request.name = name.toStdString();
+    request.typed = typed;
+    const std::string error = document_->paintParam(node.toStdString(), param.toStdString(), request, &map, &made);
     if (!error.empty()) {
         report(tr("Cannot paint %1.%2: %3").arg(node, param, QString::fromStdString(error)));
         return false;

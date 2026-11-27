@@ -756,7 +756,7 @@ def param_map(groom, node, param):
 
 
 def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, paint=True, channel="luminance",
-                faces=None, map_node=False):
+                faces=None, map_node=False, typed=False):
     """Paint a mappable param (+ New Map > for a setting in the Paint tab, and the Graph Editor's
     right-click a param > Paint): the map it reads already when it reads one, else the map `name`
     (default "<node>_<param>"; made white, so the look stays as it is) on the guides, the scalp's
@@ -769,12 +769,18 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
     Map node (one Map node feeds several params), a channel of a color map `name` (made if
     missing: packed masks), and the brush paints that channel only. A map made here with `faces` (scalp polygon indices: selected_scalp_faces)
     is white on those faces only, black elsewhere (a map the param already reads is left as it
-    is). The map, its link and what painting shows are one undo step. Returns the map's name."""
+    is). With `typed` (New Map for a setting's Name field) `name` is what the user left there: the
+    param's own name (setting_targets' "map") or the map it reads asks for the default, any other
+    names a new map, refused when empty, not a valid map name or taken. The map, its link and what
+    painting shows are one undo step. Returns the map's name."""
     # Every host's Paint on a setting (the editor's paintParam, in groomLabScalpMaps): what drives the
     # param must be a painted map, or nothing (an expression, a channel or an image no map of the
     # groom holds is refused); the map made and its link are one step.
     kwargs = {"paintParam": (node, param), "kind": kind, "resolution": int(resolution)}
-    if name:
+    if typed:
+        kwargs["mapName"] = name or ""
+        kwargs["typedName"] = True
+    elif name:
         kwargs["mapName"] = name
     if channel and channel != "luminance":
         kwargs["channel"] = channel
@@ -798,10 +804,10 @@ def setting_targets(groom):
     """What + New Map > for a setting offers on this groom: the common settings (groomlab_core's
     paintable_settings: Density, Width, Length, Clump strength, Curl, Noise amplitude, Flyaways,
     Guide weight, Interpolation regions),
-    each [{"id", "label", "node", "param", "hint", "kind"}] with node "" when the graph has no node of
-    its type (kind: where its new map lives unless picked otherwise, "guides" for the regions); then
-    every mappable param of the graph (Other) as {"id": "node.param", ...}. Returns
-    (settings, others)."""
+    each [{"id", "label", "node", "param", "hint", "kind", "map"}] with node "" when the graph has no
+    node of its type (kind: where its new map lives unless picked otherwise, "guides" for the regions;
+    map: the name its new map gets by default, <node>_<param>); then every mappable param of the
+    graph (Other) as {"id": "node.param", ..., "map"}. Returns (settings, others)."""
     # The core's list, every host's (stroke.h settingTargetsJson).
     targets = json.loads(groomlab_core.setting_targets_json(json.dumps(get_graph(groom, expand_default=True))))
     return targets["settings"], targets["others"]
