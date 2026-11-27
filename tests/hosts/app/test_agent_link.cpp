@@ -148,6 +148,22 @@ TEST(AppAgentLink, AnAgentGroomsTheOpenGroomInTheDocumentsHistory) {
     call("undo", json::object());
     EXPECT_FALSE(hasNode(curl));
 
+    // The lock tools: a haircut combed in (a step of the document's history), a guide reshaped in place.
+    {
+        const json blocked = call("comb_guides", {{"count", 30}, {"volume", 2.0}});
+        ASSERT_EQ(blocked["result"]["isError"], false) << blocked.dump().substr(0, 800);
+        EXPECT_GT(textOf(blocked)["guides"].get<int>(), 10);
+        EXPECT_EQ(doc->undoText(), "Undo comb guides");
+        const json one = textOf(call("get_guides", {{"group", "combed"}, {"with_points", true}, {"limit", 1}}))["guides"][0];
+        json moved = json::array();
+        for (const json& q : one["positions"]) moved.push_back({q[0], q[1], q[2].get<double>() + 1.0});
+        const json reshaped = call("reshape_guides", {{"guides", {{{"id", one["id"]}, {"points", moved}}}}});
+        EXPECT_EQ(textOf(reshaped)["reshaped"], json::array({one["id"]}));
+        EXPECT_EQ(doc->undoText(), "Undo reshape guides");
+        call("undo", json::object());
+        call("undo", json::object());
+    }
+
     // A photo of a wider head lined up, the scalp morphed to it as the Photos tab does (the groom
     // carried onto the morphed scalp: a transfer, the history starting over), reset.
     {

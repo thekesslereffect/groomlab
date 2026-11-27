@@ -572,4 +572,70 @@ std::vector<std::uint8_t> photoOverlayPng(const RefImage& image, const ScalpMesh
     return c.png();
 }
 
+std::vector<std::uint8_t> shellOverlayPng(const RefImage& image, const RefCamera& camera, const HairShell& shell, int maxSize) {
+    const float k = fitScale(image.width, image.height, maxSize);
+    Canvas c = Canvas::ofImage(image, k);
+    for (int y = 0; y < c.height(); ++y)
+        for (int x = 0; x < c.width(); ++x) c.set(x, y, {0.0f, 0.0f, 0.0f}, 0.45f);
+    const HeadFrame& f = shell.frame();
+    // A point is drawn when the camera sees it in front of the head: nearer than the head's point
+    // on the same ray (the shell's own head radius along it).
+    auto visible = [&](const Vec3f& p) {
+        const Vec3f eye = camera.eye();
+        const Vec3f d = (p - eye).normalized();
+        const float dist = (p - eye).length();
+        const float tc = (f.center - eye).dot(d);
+        for (float t = std::max(0.0f, tc - 2.0f * shell.maxOuter()); t < dist - 0.02f * f.radius; t += 0.03f * f.radius) {
+            const Vec3f q = eye + d * t - f.center;
+            if (q.length() < shell.head(q)) return false;
+        }
+        return true;
+    };
+    const float R = f.radius;
+    for (int i = 0; i < shell.thetaSteps(); ++i)
+        for (int j = 0; j < shell.phiSteps(); ++j) {
+            const Vec3f d = shell.direction(i, j);
+            const Vec3f headP = f.center + d * shell.headAt(i, j), outerP = f.center + d * shell.outerAt(i, j);
+            float u = 0.0f, v = 0.0f;
+            const float thick = shell.outerAt(i, j) - shell.headAt(i, j);
+            if (thick > 0.05f * R && visible(outerP) && camera.project(outerP, u, v)) {
+                const float t = std::clamp(thick / (0.6f * R), 0.0f, 1.0f);
+                c.dot(u * k, v * k, 1.2f, {0.2f + 0.8f * t, 0.4f + 0.5f * t, 1.0f - 0.8f * t}, 0.8f);
+            }
+            if ((i + j) % 4 == 0 && visible(headP) && camera.project(headP, u, v)) c.dot(u * k, v * k, 0.7f, {0.3f, 0.85f, 1.0f}, 0.35f);
+        }
+    return c.png();
+}
+
+std::vector<std::uint8_t> strokesOverlayPng(const RefImage& image, const RefCamera& camera, const std::vector<std::vector<std::array<float, 2>>>& strokes,
+                                            const std::vector<std::vector<Vec3f>>& guides, int maxSize) {
+    const float k = fitScale(image.width, image.height, maxSize);
+    Canvas c = Canvas::ofImage(image, k);
+    for (int y = 0; y < c.height(); ++y)
+        for (int x = 0; x < c.width(); ++x) c.set(x, y, {0.0f, 0.0f, 0.0f}, 0.3f);
+    const Rgb red{1.0f, 0.25f, 0.2f}, yellow{1.0f, 0.85f, 0.2f};
+    for (std::size_t s = 0; s < strokes.size(); ++s) {
+        const auto& st = strokes[s];
+        for (std::size_t i = 1; i < st.size(); ++i) c.line(st[i - 1][0] * k, st[i - 1][1] * k, st[i][0] * k, st[i][1] * k, red, 2.0f);
+        if (!st.empty()) {
+            c.ring(st[0][0] * k, st[0][1] * k, 5.0f, red, 2.0f);
+            c.text(static_cast<int>(st.back()[0] * k) + 4, static_cast<int>(st.back()[1] * k), std::to_string(s + 1), red, 1);
+        }
+    }
+    for (const auto& g : guides) {
+        float pu = 0.0f, pv = 0.0f;
+        bool prev = false;
+        for (std::size_t i = 0; i < g.size(); ++i) {
+            float u = 0.0f, v = 0.0f;
+            const bool ok = camera.project(g[i], u, v);
+            if (ok && prev) c.line(pu * k, pv * k, u * k, v * k, yellow, 1.0f);
+            if (ok && i == 0) c.dot(u * k, v * k, 2.5f, yellow);
+            prev = ok;
+            pu = u;
+            pv = v;
+        }
+    }
+    return c.png();
+}
+
 }  // namespace groomlab::agent

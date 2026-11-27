@@ -133,6 +133,12 @@ bool RefCamera::project(const Vec3f& p, float& u, float& v, float* depth) const 
     return true;
 }
 
+Vec3f RefCamera::ray(float u, float v) const {
+    return (axis(0) * static_cast<float>((u - 0.5 * width - offsetU) / focalPx) - axis(1) * static_cast<float>((v - 0.5 * height - offsetV) / focalPx) -
+            axis(2))
+        .normalized();
+}
+
 RefCamera RefCamera::scaled(double s) const {
     RefCamera out = *this;
     out.focalPx *= s;

@@ -4095,6 +4095,30 @@ std::vector<float> photoHairCover(const ScalpMesh& scalp, const ScalpMesh& head,
 
 // ---- How a groom compares with a photo ----------------------------------------------------------
 
+std::vector<std::uint8_t> photoHairMask(const ScalpMesh& scalp, const ReferenceView& view, const ReferenceGuideOptions& options) {
+    const int w = view.image.width, h = view.image.height;
+    if (w <= 0 || h <= 0) throw std::invalid_argument("photoHairMask: the photo is empty");
+    const ReferenceViewPreview preview = previewReferenceView(scalp, view, options, 1e9f);
+    std::vector<std::uint8_t> hair(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0);
+    if (!preview.mask.empty() && preview.crop[2] > 0 && preview.crop[3] > 0) {
+        const auto& c = preview.crop;
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                const float mu = (static_cast<float>(x) + 0.5f - static_cast<float>(c[0])) / static_cast<float>(c[2]) * static_cast<float>(preview.mask.width);
+                const float mv = (static_cast<float>(y) + 0.5f - static_cast<float>(c[1])) / static_cast<float>(c[3]) * static_cast<float>(preview.mask.height);
+                if (mu < 0.0f || mv < 0.0f || mu >= static_cast<float>(preview.mask.width) || mv >= static_cast<float>(preview.mask.height)) continue;
+                if (preview.mask.sample(mu, mv) >= 0.5f) hair[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = 1;
+            }
+    }
+    return hair;
+}
+
+std::vector<float> meshDepthMap(const ScalpMesh& mesh, const RefCamera& camera, int width, int height) {
+    std::vector<float> depth(static_cast<std::size_t>(std::max(0, width)) * static_cast<std::size_t>(std::max(0, height)), kInf);
+    if (!depth.empty() && mesh.triangleCount() > 0) rasterize(mesh, projectMesh(mesh, camera), width, height, depth, nullptr);
+    return depth;
+}
+
 PhotoComparison compareToPhoto(const ScalpMesh& scalp, const StrandSet& strands, const ReferenceView& view,
                                const ReferenceGuideOptions& options) {
     if (scalp.triangleCount() == 0) throw std::invalid_argument("compareToPhoto: the scalp has no triangles");
@@ -4106,21 +4130,9 @@ PhotoComparison compareToPhoto(const ScalpMesh& scalp, const StrandSet& strands,
     const RefCamera camera = view.camera.width > 0.0 && std::abs(view.camera.width - w) > 0.5 ? view.camera.scaled(w / view.camera.width) : view.camera;
     const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
     // The photo's hair, at its size.
-    const ReferenceViewPreview preview = previewReferenceView(scalp, view, options, 1e9f);
-    out.photoHair.assign(n, 0);
-    if (!preview.mask.empty() && preview.crop[2] > 0 && preview.crop[3] > 0) {
-        const auto& c = preview.crop;
-        for (int y = 0; y < h; ++y)
-            for (int x = 0; x < w; ++x) {
-                const float mu = (static_cast<float>(x) + 0.5f - static_cast<float>(c[0])) / static_cast<float>(c[2]) * static_cast<float>(preview.mask.width);
-                const float mv = (static_cast<float>(y) + 0.5f - static_cast<float>(c[1])) / static_cast<float>(c[3]) * static_cast<float>(preview.mask.height);
-                if (mu < 0.0f || mv < 0.0f || mu >= static_cast<float>(preview.mask.width) || mv >= static_cast<float>(preview.mask.height)) continue;
-                if (preview.mask.sample(mu, mv) >= 0.5f) out.photoHair[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = 1;
-            }
-    }
+    out.photoHair = photoHairMask(scalp, view, options);
     // The groom's: the strands through the camera, behind the scalp hidden.
-    std::vector<float> depth(n, kInf);
-    rasterize(scalp, projectMesh(scalp, camera), w, h, depth, nullptr);
+    std::vector<float> depth = meshDepthMap(scalp, camera, w, h);
     // The photo's hair that is the groom's: its pieces over the scalp (a dark patch of backdrop
     // in a corner is not).
     {

@@ -258,3 +258,26 @@ fr.apply_measured_look(groom)                    # or types=["HairColor", "Clump
 Scripts can also pass a painted overlay: a PNG at the photo's size with the strokes opaque on a
 transparent layer, dark at the root end and light at the tip (`{"camera": cam, "hint_image":
 "flow.png"}` in `groomlab.guides_from_reference`).
+
+## Lock guides from strokes (AI agents)
+
+An [AI agent](/docs/ai-agents) can block a haircut in from the lined-up photos the way an artist
+would: a few key locks drawn on the photos, the rest combed and filled in from them.
+
+- **Strokes to guides** (`guides_from_strokes`): draw a stroke along each lock on a photo, root end
+  first (on an image of the photo, mark the root end with a dot). Each stroke is lifted through the
+  photo's camera onto the hair's outer surface the photos show, its root on the scalp under its
+  first point, and cut where the photos show the hair end. A stroke on a side photo can be mirrored
+  to the other side. With `fill`, the rest of the hair region gets guides from the strokes (each
+  takes its nearest strokes' shapes), combed where no stroke is near.
+- **The hair's shell** (`hair_shell`): the hair's outer surface round the head from every lined-up
+  photo's hair mask, and how thick the hair is over each part of the head.
+- **Combing** (`comb_guides`): a haircut blocked in without strokes: a part, the front swept back
+  (or out, or forward), the sides back over the ears, the back falling, each guide riding the hair's
+  shell with a wave across the flow.
+- The lock look (`apply_look`): the guides as the clumps' centers, finer clumps inside them, the tips
+  trimmed unevenly and no hair below the lowest guide roots.
+
+The strokes and the comb work on the head as it is (after Morph to Photos) and scale with its size.
+They are a starting point: look at the guides through each photo's camera and fix single guides with
+`reshape_guides`.

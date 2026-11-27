@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <set>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -619,6 +620,142 @@ TEST(AgentTools, PhotosRootsTubesExpressionsAndSimulation) {
     const json abc = call(tools, "animate_scalp", {{"keys", {{{"frame", 1}}, {{"frame", 4}, {"translate", {1, 0, 0}}}}}}, true);
     EXPECT_NE(abc.value("error", std::string()).find("mesh caches"), std::string::npos);
     EXPECT_TRUE(call(tools, "stats", json::object())["stats"].is_object());
+}
+
+TEST(AgentTools, LockToolsStrokesCombShellAndReshape) {
+    SessionTarget target;
+    AgentTools tools(target);
+    for (const char* name : {"guides_from_strokes", "comb_guides", "hair_shell", "photo_project", "reshape_guides"}) EXPECT_TRUE(tools.has(name)) << name;
+    call(tools, "new_groom", {{"name", "ball"}, {"mesh", "ball"}});
+    AgentGroom& g = target.groom("ball");
+
+    // reshape_guides: new points in place, the id, group and tube kept; one undo step.
+    const json made = call(tools, "add_guides", {{"guides", {{{"root", {0, 10, 0}}, {"length", 4.0}}, {{"root", {10, 0, 0}}, {"length", 4.0}}}},
+                                                 {"group", "keys"}, {"tube", {{"shape", "ribbon"}}}});
+    const GuideId first = made["ids"][0].get<GuideId>();
+    const std::size_t steps = g.history().size();
+    const json reshaped = call(tools, "reshape_guides", {{"guides", {{{"id", first}, {"points", {{0.5, 10.5, 0}, {1, 13, 1}, {2, 15, 3}}}}}}});
+    EXPECT_EQ(reshaped["count"], 1);
+    EXPECT_EQ(g.history().size(), steps + 1);
+    {
+        const auto h = g.session().authoredHierarchy();
+        const HierarchyGuide* gd = h->guide(first);
+        ASSERT_NE(gd, nullptr);
+        EXPECT_EQ(gd->points.size(), 3u);
+        EXPECT_NEAR(gd->points.front().length(), 10.0f, 0.05f);  // the root snapped onto the ball
+        EXPECT_NEAR(gd->points.back().z, 3.0f - 0.0f + (gd->points.front().z - 0.0f), 0.3f);
+        EXPECT_EQ(h->group(gd->group)->name, "keys");
+        EXPECT_EQ(gd->tube.shapeName(), "ribbon");
+    }
+    call(tools, "reshape_guides", {{"guides", {{{"id", 999}, {"points", {{0, 10, 0}, {0, 12, 0}}}}}}}, true);
+    call(tools, "undo", json::object());
+    EXPECT_EQ(g.session().authoredHierarchy()->guide(first)->points.size(), 9u);  // (8 segments as added)
+
+    // delete_guides takes a whole group.
+    const json deleted = call(tools, "guide_op", {{"op", "delete_guides"}, {"group", "keys"}});
+    EXPECT_EQ(deleted["count"], 2);
+    EXPECT_EQ(authoredCount(g), 0u);
+
+    // sample_scalp: the hair region (all of a ball with no face), no two nearer than min_spacing.
+    const json spread = call(tools, "sample_scalp", {{"count", 200}, {"region", "hair"}, {"min_spacing", 4.0}});
+    ASSERT_GT(spread["points"].size(), 10u);
+    EXPECT_LT(spread["points"].size(), 200u);
+    for (std::size_t i = 0; i < spread["points"].size(); ++i)
+        for (std::size_t j = i + 1; j < spread["points"].size(); ++j) {
+            const json& a = spread["points"][i]["p"];
+            const json& b = spread["points"][j]["p"];
+            const double d = std::hypot(a[0].get<double>() - b[0].get<double>(), a[1].get<double>() - b[1].get<double>(), a[2].get<double>() - b[2].get<double>());
+            EXPECT_GE(d, 4.0 - 1e-3);
+        }
+
+    // The hair's shell without photos: a guessed volume over the head.
+    const json shell = call(tools, "hair_shell", json::object());
+    EXPECT_EQ(shell["from"], "volume");
+    EXPECT_NEAR(shell["head"]["radius"].get<double>(), 10.0, 0.2);
+    EXPECT_GT(shell["regions"]["top"]["thickness"]["mean"].get<double>(), 1.0);
+
+    // comb_guides: guides over the hair region, off the head, one undo step; its look on request.
+    const std::size_t before = g.history().size();
+    const json combed = call(tools, "comb_guides", {{"count", 60}, {"volume", 2.0}, {"part", "center"}, {"apply_look", true},
+                                                    {"wave", {{"amplitude", 0.5}}}, {"lengths", {{"back", 12.0}}}});
+    EXPECT_EQ(g.history().size(), before + 1);
+    EXPECT_GT(combed["guides"].get<int>(), 40);
+    EXPECT_EQ(combed["shell"]["from"], "volume");
+    for (const HierarchyGuide& gd : g.session().authoredHierarchy()->guides())
+        for (const Vec3f& p : gd.points) EXPECT_GE(p.length(), 9.9f);
+    const json graph = call(tools, "get_graph", json::object());
+    std::set<std::string> names;
+    for (const json& n : graph["nodes"]) names.insert(n["name"].get<std::string>());
+    EXPECT_TRUE(names.count("subClump") && names.count("tipTrim") && names.count("hairline")) << graph.dump();
+    call(tools, "comb_guides", {{"part", json::array({1, 2})}}, true);  // not two points
+    call(tools, "comb_guides", {{"sweep", {{"front", "sideways"}}}}, true);
+
+    // A photo lined up from pairs a known camera gives (as above).
+    writePhoto(fs::u8path(target.folders().root) / "shot.png", 320, 240);
+    call(tools, "add_photo", {{"path", "shot.png"}});
+    const json marks = call(tools, "mesh_landmarks", {{"view", "front"}, {"photo", "shot"}, {"count", 12}});
+    const RefCamera truth = viewCamera(*g.session().scalp(), "Y", "three_quarter", 320, 240, 40.0);
+    json pairs = json::array();
+    for (const json& p : marks["points"]) {
+        float u = 0.0f, v = 0.0f;
+        const Vec3f at(p["p"][0].get<float>(), p["p"][1].get<float>(), p["p"][2].get<float>());
+        if (truth.project(at, u, v) && u > 0 && v > 0 && u < 320 && v < 240) pairs.push_back({{"pixel", {u, v}}, {"point", p["p"]}});
+    }
+    ASSERT_GE(pairs.size(), 6u);
+    call(tools, "align_photo", {{"pairs", pairs}});
+
+    // photo_project: the photo's middle onto the ball and a point back to its pixel.
+    float cu = 0.0f, cv = 0.0f;
+    ASSERT_TRUE(truth.project(Vec3f(0, 0, 0), cu, cv));
+    const json cast = call(tools, "photo_project", {{"pixels", {{cu, cv}, {2, 2}}}, {"points", {{0, 10, 0}}}, {"onto", "shell"}});
+    ASSERT_EQ(cast["hits"].size(), 2u);
+    EXPECT_EQ(cast["hits"][0]["hit"], true);
+    EXPECT_NEAR(std::hypot(cast["hits"][0]["p"][0].get<double>(), cast["hits"][0]["p"][1].get<double>(), cast["hits"][0]["p"][2].get<double>()), 10.0, 0.1);
+    EXPECT_EQ(cast["hits"][0]["hairRegion"], true);
+    EXPECT_EQ(cast["hits"][1]["hit"], false);
+    EXPECT_TRUE(cast["hits"][0].contains("shell"));
+    float tu = 0.0f, tv = 0.0f;
+    ASSERT_TRUE(truth.project(Vec3f(0, 10, 0), tu, tv));
+    EXPECT_NEAR(cast["projected"][0]["pixel"][0].get<double>(), tu, 1.0);
+    EXPECT_NEAR(cast["projected"][0]["pixel"][1].get<double>(), tv, 1.0);
+    call(tools, "photo_project", json::object(), true);
+
+    // guides_from_strokes: a stroke over the top in the photo's pixels, onto the guessed volume
+    // (depth volume), mirrored, filled; one undo step.
+    json stroke = json::array();
+    for (int i = 0; i <= 20; ++i) {
+        const float a = (5.0f + 70.0f * static_cast<float>(i) / 20.0f) * 3.14159265f / 180.0f;
+        float u = 0.0f, v = 0.0f;
+        ASSERT_TRUE(truth.project(Vec3f(3.0f, 12.5f * std::cos(a), 12.5f * std::sin(a)), u, v));
+        stroke.push_back({u, v});
+    }
+    const std::size_t at = g.history().size();
+    const ToolResult lifted = tools.call("guides_from_strokes", {{"photo", "shot"}, {"strokes", {stroke}}, {"depth", "volume"}, {"mirror", "x"},
+                                                                 {"fill", true}, {"fill_count", 30}, {"clip", false}});
+    ASSERT_FALSE(lifted.isError) << lifted.content.dump();
+    EXPECT_EQ(images(lifted), 1);
+    const json out = json::parse(lifted.content.back()["text"].get<std::string>());
+    EXPECT_EQ(g.history().size(), at + 1);
+    ASSERT_EQ(out["ids"].size(), 2u);  // the stroke's guide and its mirror
+    EXPECT_GT(out["strokes"][0]["hitShare"].get<double>(), 0.8);
+    EXPECT_GT(out["strokes"][0]["length"].get<double>(), 8.0);
+    EXPECT_EQ(out["strokes"][0]["mirrored"], true);
+    EXPECT_GT(out["fill"]["guides"].get<int>(), 20);
+    {
+        const auto h = g.session().authoredHierarchy();
+        const HierarchyGuide* a = h->guide(out["ids"][0].get<GuideId>());
+        const HierarchyGuide* b = h->guide(out["ids"][1].get<GuideId>());
+        ASSERT_TRUE(a && b);
+        EXPECT_NEAR(a->points.back().x, -b->points.back().x, 0.5f);
+        EXPECT_NEAR(a->points.front().length(), 10.0f, 0.1f);
+    }
+    // The same strokes again replace the groups; strokes from an image of a wrong size are refused.
+    const json again = call(tools, "guides_from_strokes", {{"photo", "shot"}, {"strokes", {stroke}}, {"depth", "volume"}});
+    EXPECT_EQ(again["ids"].size(), 1u);
+    writePhoto(fs::u8path(target.folders().root) / "odd.png", 300, 300);
+    const json odd = call(tools, "guides_from_strokes", {{"photo", "shot"}, {"strokes_image", "odd.png"}}, true);
+    EXPECT_NE(odd["error"].get<std::string>().find("image_transform"), std::string::npos) << odd.dump();
+    call(tools, "guides_from_strokes", {{"photo", "shot"}}, true);  // no strokes
 }
 
 // ---- M2: the agent link's protocol ----------------------------------------------------------------

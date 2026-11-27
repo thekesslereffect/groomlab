@@ -111,6 +111,8 @@ struct RefCamera {
     Vec3f axis(int i) const;  // the camera's X (right), Y (up), Z (back: it looks down -Z) in world space
     // The point in pixels and its depth along the view; false behind the camera.
     bool project(const Vec3f& p, float& u, float& v, float* depth = nullptr) const;
+    // The ray through pixel (u, v) (pixels from the top-left; a pixel's middle at +0.5): unit, from the eye.
+    Vec3f ray(float u, float v) const;
     // The same camera for an image `scale` times the size.
     RefCamera scaled(double scale) const;
     // The same camera for the part of its image from (x0, y0), `w` x `h` pixels.
@@ -497,6 +499,13 @@ struct PhotoComparison {
     double flowAgreement = 0.0, flowAligned = 0.0;
     int flowPixels = 0;
 };
+// The photo's hair mask at the photo's own size (previewReferenceView's mask over its crop: 1 hair,
+// 0 backdrop, skin or outside the crop), rows top to bottom.
+std::vector<std::uint8_t> photoHairMask(const ScalpMesh& scalp, const ReferenceView& view, const ReferenceGuideOptions& options = {});
+// The depth along the view of a mesh's nearest surface through `camera`, `width` x `height`
+// pixels (infinity where it is not).
+std::vector<float> meshDepthMap(const ScalpMesh& mesh, const RefCamera& camera, int width, int height);
+
 PhotoComparison compareToPhoto(const ScalpMesh& scalp, const StrandSet& strands, const ReferenceView& view,
                                const ReferenceGuideOptions& options = {});
 
