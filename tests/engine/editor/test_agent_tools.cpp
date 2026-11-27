@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -82,7 +83,9 @@ private:
 class SessionTarget : public AgentTarget {
 public:
     SessionTarget() {
-        const fs::path dir = fs::temp_directory_path() / "groomlab_agent_tools";
+        // (a folder of its own a shard: shards run side by side, and each target starts it empty)
+        const char* shard = std::getenv("GTEST_SHARD_INDEX");
+        const fs::path dir = fs::temp_directory_path() / ("groomlab_agent_tools" + std::string(shard ? shard : ""));
         std::error_code ec;
         fs::remove_all(dir, ec);
         fs::create_directories(dir / "meshes");

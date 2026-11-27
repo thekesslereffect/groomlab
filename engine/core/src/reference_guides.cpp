@@ -277,6 +277,7 @@ struct PreparedView {
     float reachWorld = 0.0f;            // how far the hair reaches past the scalp's outline (its 90th percentile), scene units
     std::shared_ptr<const OrientationField> coarse;  // the field smoothed past its curls
     std::shared_ptr<const OrientationField> fine;    // the field with its curls (field may become coarse)
+    std::vector<float> strandLength;  // a pixel: the longest a strand path runs on from it (strandPathLength; scene units, 0 none)
     CurlEstimate curl;
     std::vector<float> hintWay;         // 3 a pixel: the directed hints' way (u, v) and their strength (empty: none)
     std::vector<float> hintLength;      // 2 a pixel: how long the drawn lines say the hair is from there on (scene units)
@@ -1004,6 +1005,16 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
             }
             if (!byColor) pv.mask = refineMask(pv.rgb, pv.mask, seeds, sureBackdrop, likelyHair);
             touchUp();
+        }
+        // An occluder well away from the scalp's outline (a whole head's beard, the face below the
+        // hair) is no hair to grow guides over, whatever its color; hair over the forehead, near the
+        // scalp, stays.
+        if (!occluded.empty()) {
+            std::size_t cover = 0;
+            for (std::uint8_t c : pv.scalpCover) cover += c;
+            const float far = 0.25f * std::sqrt(static_cast<float>(cover));
+            for (std::size_t i = 0; i < pixels; ++i)
+                if (occluded[i] && pv.scalpDistance[i] > far) pv.mask.pixels[i] = 0.0f;
         }
         pv.hullMask = grown(pv.mask, 2);
         // Roots grow only where the hair is sure: the mask a few pixels in (an eye's, a nose's or a
@@ -1780,13 +1791,21 @@ float hairThickness(const Context& ctx, const Vec3f& x, const Vec3f& n, float re
         float u = 0, vv = 0, z = 0;
         if (!v.camera.project(x, u, vv, &z) || !v.inFrame(u, vv)) continue;
         float t = 0.0f;
+        bool out = false;  // (the march reached the hair's edge where the view sees it)
         for (float s = ctx.step; s <= reach; s += 0.5f * ctx.step) {
             const Vec3f q = x + n * s;
             if (!v.camera.project(q, u, vv, &z) || !v.inFrame(u, vv)) break;
-            if (v.hullMask.sample(u, vv) < 0.5f && !v.hidden(u, vv, z)) break;
+            if (v.hidden(u, vv, z)) {  // (behind the head from here on: as far as it showed hair)
+                out = t > 0.0f;
+                break;
+            }
+            if (v.hullMask.sample(u, vv) < 0.5f) {
+                out = true;
+                break;
+            }
             t = s;
         }
-        seen.push_back(t);
+        if (out) seen.push_back(t);
     }
     return seen.empty() ? -1.0f : median(seen);
 }
@@ -1827,6 +1846,92 @@ std::vector<Vec3f> volumized(const Context& ctx, const std::vector<Vec3f>& path,
     std::vector<Vec3f> out = path;
     for (std::size_t i = 1; i < path.size(); ++i) out[i] = path[i] + up[i] * lift[i];
     return out;
+}
+
+// ---- How long the strands are in the photos ------------------------------------------------------
+
+// The hair's strands' lengths as the photos show them: in each view, streamlines along the locks'
+// flow (the coarse field) from points spread over the hair, both ways to where the hair ends (the
+// mask's edge) or the flow curls round on itself, in scene units at the scalp's depth; the upper
+// quartile in each view (a streamline may run on from one lock into the next), the longest view's (a profile sees the hair over the top full length, the front
+// foreshortened). 0 without views to read.
+float strandPathLength(std::vector<PreparedView>& views) {
+    float longest = 0.0f;
+    for (PreparedView& v : views) {
+        const OrientationField* flow = v.coarse ? v.coarse.get() : v.field.get();
+        if (!flow || v.scalpDepth <= 0.0f || v.mask.empty()) continue;
+        const float fx = static_cast<float>(flow->width) / static_cast<float>(v.width), fy = static_cast<float>(flow->height) / static_cast<float>(v.height);
+        auto inHair = [&](float u, float w) { return v.inFrame(u, w) && v.mask.sample(u, w) >= 0.5f; };
+        const int spacing = std::max(6, std::max(v.width, v.height) / 40);
+        std::vector<float> lengths;
+        v.strandLength.assign(static_cast<std::size_t>(v.width) * static_cast<std::size_t>(v.height), 0.0f);
+        const float perPixel = v.scalpDepth / static_cast<float>(v.camera.focalPx);
+        std::vector<std::size_t> visited[2];
+        for (int sy = spacing / 2; sy < v.height; sy += spacing)
+            for (int sx = spacing / 2; sx < v.width; sx += spacing) {
+                const float u0 = static_cast<float>(sx) + 0.5f, w0 = static_cast<float>(sy) + 0.5f;
+                if (!inHair(u0, w0)) continue;
+                float total = 0.0f;
+                visited[0].clear();
+                visited[1].clear();
+                for (int dir = 0; dir < 2; ++dir) {
+                    float u = u0, w = w0, pu = 0, pw = 0, turned = 0.0f;
+                    bool first = true;
+                    for (int k = 0; k < 4 * (v.width + v.height); ++k) {
+                        float du = 0, dw = 0, c = 0;
+                        if (!inHair(u, w) || !flow->sample(u * fx, w * fy, du, dw, c) || c < 0.05f) break;
+                        if (first) {
+                            pu = dir ? -du : du;
+                            pw = dir ? -dw : dw;
+                            first = false;
+                        }
+                        if (du * pu + dw * pw < 0.0f) du = -du, dw = -dw;
+                        if (!first) turned += std::acos(std::clamp(du * pu + dw * pw, -1.0f, 1.0f));
+                        if (turned > kPi) break;  // (curling round on itself: a strand's path does not)
+                        pu = du;
+                        pw = dw;
+                        visited[dir].push_back(v.pixel(u, w));
+                        u += du;
+                        w += dw;
+                        total += 1.0f;
+                    }
+                }
+                lengths.push_back(total * perPixel);
+                // Each pixel on it: how far the path runs on from there, the longer way (a root's strand
+                // runs one way from it; the other way is other hair passing over).
+                const std::size_t a = visited[1].size(), b = visited[0].size();
+                for (std::size_t k = 0; k < b; ++k) {
+                    const float run = static_cast<float>(std::max(a + k, b - k)) * perPixel;
+                    v.strandLength[visited[0][k]] = std::max(v.strandLength[visited[0][k]], run);
+                }
+                for (std::size_t k = 0; k < a; ++k) {
+                    const float run = static_cast<float>(std::max(a - k, b + k)) * perPixel;
+                    v.strandLength[visited[1][k]] = std::max(v.strandLength[visited[1][k]], run);
+                }
+            }
+        if (lengths.size() < 10) continue;
+        std::sort(lengths.begin(), lengths.end());
+        longest = std::max(longest, lengths[static_cast<std::size_t>(0.75 * static_cast<double>(lengths.size() - 1))]);
+    }
+    return longest;
+}
+
+// The longest strand path the views show near a spot (strandPathLength's maps, within a few pixels
+// of where each view sees it unhidden); 0 where none shows one.
+float localStrandLength(const std::vector<PreparedView>& views, const Vec3f& at) {
+    float best = 0.0f;
+    for (const PreparedView& v : views) {
+        if (v.strandLength.empty()) continue;
+        float u = 0, w = 0, z = 0;
+        if (!v.camera.project(at, u, w, &z) || !v.inFrame(u, w) || v.hidden(u, w, z)) continue;
+        const int r = std::max(2, std::max(v.width, v.height) / 100);
+        for (int dy = -r; dy <= r; ++dy)
+            for (int dx = -r; dx <= r; ++dx) {
+                const float x = u + static_cast<float>(dx), y = w + static_cast<float>(dy);
+                if (v.inFrame(x, y)) best = std::max(best, v.strandLength[v.pixel(x, y)]);
+            }
+    }
+    return best;
 }
 
 // ---- Locks: each guide's own curl ----------------------------------------------------------------
@@ -2254,7 +2359,11 @@ ReferenceLookFit fitLook(const std::vector<PreparedView>& views, const std::vect
             // T itself sits further out.
             for (std::size_t c = 0; c < 3; ++c)
                 fit.tipColor[c] = std::clamp(base[c] + (tipColor[c] - base[c]) / fit.tipStrength, 0.0f, 1.0f);
+            // (no darker than the hair's whole color reads by more than a little: long guides' roots lie
+            // in the hair's own shadow, which is no darker pigment)
+            const float overall = fit.melanin;
             fit.melaninError = nearestMelanin(hairAppearanceColor(base), fit.melanin, fit.redness);
+            fit.melanin = std::min(fit.melanin, overall + 0.1f);
         }
     }
     return fit;
@@ -2798,7 +2907,12 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
     // Short hair and fur lies at a low angle to the skin: it reaches past the outline about half its
     // length (hanging hair about all of it).
     const float lean = 1.2f * result.reachLength < size / 7.0f ? 2.0f : 1.2f;
-    const float measured = std::clamp(lean * result.reachLength, 0.02f * size, size);
+    float measured = std::clamp(lean * result.reachLength, 0.02f * size, size);
+    // Long hair lying over the head (swept back, falling down the back) reaches little past the
+    // outline for its length: the strands' own paths in the photos say how long it is (their upper
+    // quartile, the longest view's), when longer.
+    result.strandLength = strandPathLength(prepared);
+    if (result.reachLength > 0.0f && result.strandLength > measured) measured = std::min(1.1f * result.strandLength, 2.0f * size);
     ctx.maxLength = options.maxLength > 0 ? options.maxLength
                     : options.maxLength < 0 && result.rimLength > 0 ? -options.maxLength * result.rimLength
                     : result.reachLength > 0 ? measured
@@ -2877,8 +2991,10 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
             }
             const bool curls = result.look.curlShare > kCurlShare && swing > kCurlAmplitude;
             const bool waves = result.look.curlShare > kWavyShare && swing > kWavyAmplitude;
-            result.look.curly = (curls || waves) && longest >= size / 7.0f;
-            wavy = waves;
+            // (waves are the strands' own long paths: the guides follow them, no curl of their own)
+            result.look.curly = curls && longest >= size / 7.0f;
+            wavy = waves && !result.look.curly;
+            result.look.wavy = wavy;
             if (!wavelengths.empty()) {
                 const float wavelength = median(wavelengths);
                 result.look.curlFrequency = 1.0f / std::max(wavelength, 1e-6f);
@@ -2985,7 +3101,7 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
 
     // Each root's length: the drawn guide lines' where they say it (blended in by how much they
     // say it), else the longest. Both ways from every root.
-    std::vector<float> rootLength(roots.size(), ctx.maxLength);
+    std::vector<float> rootLength(roots.size(), ctx.maxLength), photoLength(roots.size(), 0.0f);
     std::vector<std::uint8_t> drawnLength(roots.size(), 0);
     std::vector<Grown> ways[2];
     ways[0].resize(roots.size());
@@ -2997,6 +3113,13 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         if (say > 0.05f && drawn > 0.0f) {
             rootLength[i] = std::max(3.0f * ctx.step, ctx.maxLength + say * (std::min(drawn, ctx.maxLength) - ctx.maxLength));
             drawnLength[i] = 1;
+        }
+        // (automatic: no longer than the longest strand path the views show through the root's spot,
+        // a little more: hair over the top long, tucked sides and the nape short)
+        if (!drawnLength[i] && options.maxLength <= 0.0f) {
+            const float local = localStrandLength(prepared, roots[i].position + roots[i].normal * (ctx.offset + ctx.step));
+            photoLength[i] = local;
+            if (local > 0.0f) rootLength[i] = std::clamp(local, 6.0f * ctx.step, rootLength[i]);
         }
         ways[0][i] = grow(ctx, roots[i], 1.0f, rootLength[i]);
         ways[1][i] = grow(ctx, roots[i], -1.0f, rootLength[i]);
@@ -3022,6 +3145,10 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         const float sum = std::max(1e-9f, a + b);
         prefer[0][i] = a / sum + options.downBias * ways[0][i].tangent.dot(gravity);
         prefer[1][i] = b / sum + options.downBias * ways[1][i].tangent.dot(gravity);
+        // (a way the photos show hair along twice as far as the other wins over falling: long hair
+        // swept back from the forehead, not a fringe over it)
+        if (a > 2.0f * b) prefer[0][i] += options.downBias;
+        if (b > 2.0f * a) prefer[1][i] += options.downBias;
         if (hinted) {
             for (int w = 0; w < 2; ++w) {
                 const std::vector<Vec3f>& pts = ways[w][i].points;
@@ -3082,9 +3209,12 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         // heads: such guides came out 1.15x too long).
         if (options.maxLength > 0.0f && g.stop == "length" && options.lengthTrim < 1.0f && !drawnLength[i])
             path = truncated(path, options.lengthTrim * arcLength(path));
+        // (an automatic length: lifted for volume it is not much longer than it grew)
+        if (options.maxLength <= 0.0f && !drawnLength[i] && arcLength(path) > 1.15f * rootLength[i]) path = truncated(path, 1.15f * rootLength[i]);
         path[0] = roots[i].position;
         guide.confidence = g.confidence;
         guide.stop = g.stop;
+        guide.photoLength = photoLength[i];
         grownGuides.push_back(std::move(guide));
         paths.push_back(std::move(path));
         grownSeam.push_back(seam[i]);
@@ -3116,6 +3246,7 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         const ReferenceLookFit curls = result.look;
         result.look = fitLook(prepared, grownGuides, options);
         result.look.curly = curls.curly;
+        result.look.wavy = curls.wavy;
         result.look.curlShare = curls.curlShare;
         result.look.curlAmplitudeDeg = curls.curlAmplitudeDeg;
         result.look.curlFrequency = curls.curlFrequency;

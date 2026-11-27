@@ -22,7 +22,8 @@
 //    give the 3D direction by least squares. The first direction: the axis on the scalp the
 //    evidence along a short line through the root agrees with best. The 180 degree ambiguity: both
 //    ways are grown; the one with more evidence, leaning toward gravity, wins, then neighbours vote.
-//    A guide stops where the photos that see it say it left the hair, at the shell, or its length.
+//    A guide stops where the photos that see it say it left the hair, at the shell, or its length
+//    (automatic: as far as the strand paths the photos show through its root run: strandPathLength).
 //    Then it is lifted off the scalp toward the hair's thickness the silhouettes show over it
 //    (ReferenceGuideOptions::volume), so voluminous hair is not combed flat. On curly hair
 //    (lockCurls) the roots are first where the photos' locks grow from (detectLocks: streamlines
@@ -297,6 +298,7 @@ struct ReferenceGuide {
     int lock = 0;
     float lockRadius = 0.0f, lockWavelength = 0.0f, lockStrength = 0.0f;
     int lockView = -1;           // the view it was traced in
+    float photoLength = 0.0f;    // the longest strand path the photos show through its root (0: none)
 };
 
 struct ReferenceLookFit {
@@ -315,6 +317,7 @@ struct ReferenceLookFit {
     // (or a smaller share swings widely: waves, curls seen in places);
     // then a Curl node's frequency (turns per unit of length) and radius, in scene units.
     bool curly = false;
+    bool wavy = false;  // waves the strands' own paths take (not curly): guides follow them
     float curlShare = 0.0f, curlAmplitudeDeg = 0.0f;
     float curlFrequency = 0.0f, curlRadius = 0.0f;
     // The measured look (6-10), each with the graph value it suggests (calibrated on the synthetic
@@ -354,6 +357,8 @@ struct ReferenceGuidesResult {
     float lockRadius = 0.0f, lockWavelength = 0.0f;
     float rimLength = 0.0f;  // how far the hair reaches past the scalp's outline in the views (scene units, its rim)
     float reachLength = 0.0f;  // the same, its 90th percentile (what an automatic length starts from)
+    float strandLength = 0.0f; // the strands' paths in the photos, their upper quartile (strandPathLength): long
+                               // hair lying over the head, whose outline says little of its length
     ReferenceLookFit look;
     // Each scalp vertex: the share of it hair covers in the views that see it face on (0-1; -1 unseen):
     // a Scatter density map (thinning) once mapped (densityOfCoverage).

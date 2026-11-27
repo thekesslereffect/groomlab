@@ -1100,11 +1100,20 @@ struct AgentTools::Impl {
     struct LockLook {
         bool on = false;
         float radius = 0.0f, wavelength = 0.0f;
+        bool waves = false;      // wavy hair: the guides follow the strands' waves (their own paths)
+        float maxLength = 0.0f;  // the guides' longest
     };
     json applyPhotoLook(AgentGroom& g, const ReferenceLookFit& look, const LockLook& locks = {}) {
         std::vector<std::pair<std::string, json>> wants;
         wants.push_back({"HairColor", {{"mode", "melanin"}, {"melanin", r4(look.melanin)}, {"redness", r4(look.redness)}}});
-        if (locks.on) {
+        if (locks.waves && !locks.on) {
+            // Waves the guides follow: each guide's strands clump onto it (its waves theirs), the guides'
+            // waves kept where they blend; no Curl over them all.
+            json clump = {{"centersFrom", "inputCurves"}, {"strength", r4(std::clamp(look.clumpStrength, 0.4f, 0.6f))}, {"pastTip", "fit"}};
+            if (look.clumped) clump["volumize"] = r4(0.35f * look.clumpSize);
+            wants.push_back({"Clump", clump});
+            wants.push_back({"Interpolate", {{"keepCurls", 1.0}, {"curlLength", r4(0.5f * locks.maxLength)}}});
+        } else if (locks.on) {
             // (each lock a round lock about as thick as the photos' clumps are apart show it)
             json clump = {{"centersFrom", "inputCurves"}, {"strength", {{"attribute", "lockStrength"}}}, {"pastTip", "fit"}};
             if (look.clumped) clump["volumize"] = r4(0.35f * look.clumpSize);
@@ -1128,7 +1137,7 @@ struct AgentTools::Impl {
                 }
                 return std::string();
             };
-            if (locks.on) {
+            if (locks.on || locks.waves) {
                 // (the curl comes from the guides: a Curl over every strand would frizz the locks)
                 const std::string curl = firstOfType("Curl");
                 if (!curl.empty()) {
@@ -1176,7 +1185,7 @@ struct AgentTools::Impl {
                 }
                 graph = gj.dump();
                 done[type] = {{"node", node}, {"set", set}, {"added", added}};
-                if (locks.on && type == "Clump") {
+                if ((locks.on || locks.waves) && type == "Clump") {
                     // The guides as its centers' curves.
                     const std::string guides = firstOfType("Guides");
                     if (!guides.empty()) {
@@ -3759,11 +3768,16 @@ struct AgentTools::Impl {
         }
         json out = {{"group", groupName}, {"guides", added}, {"photos", used}, {"symmetry", referenceSymmetryName(result.symmetry)},
                     {"rootsTried", result.rootsTried}, {"rootsBald", result.rootsBald}, {"rootsUnseen", result.rootsUnseen},
-                    {"rootsShort", result.rootsShort}, {"maxLength", r4(result.maxLength)}, {"seconds", r4(result.seconds)}};
+                    {"rootsShort", result.rootsShort}, {"maxLength", r4(result.maxLength)}, {"strandLength", r4(result.strandLength)},
+                    {"seconds", r4(result.seconds)}};
         const ReferenceLookFit& look = result.look;
         LockLook locks;
+        locks.waves = look.wavy;
+        locks.maxLength = result.maxLength;
         if (result.locksTraced > 0) {
-            locks = {true, result.lockRadius, result.lockWavelength};
+            locks.on = true;
+            locks.radius = result.lockRadius;
+            locks.wavelength = result.lockWavelength;
             out["locks"] = {{"detected", result.locksDetected}, {"rootsAtLocks", result.lockRoots},
                             {"traced", result.locksTraced}, {"filled", result.locksFilled}, {"radius", r4(result.lockRadius)},
                             {"turnLength", r4(result.lockWavelength)},
@@ -3777,7 +3791,7 @@ struct AgentTools::Impl {
         }
         if (look.ok) {
             out["look"] = {{"melanin", r4(look.melanin)}, {"redness", r4(look.redness)}, {"baseColor", {r4(look.baseColor[0]), r4(look.baseColor[1]), r4(look.baseColor[2])}},
-                           {"curly", look.curly}, {"curlFrequency", r4(look.curlFrequency)}, {"curlRadius", r4(look.curlRadius)},
+                           {"curly", look.curly}, {"wavy", look.wavy}, {"curlFrequency", r4(look.curlFrequency)}, {"curlRadius", r4(look.curlRadius)},
                            {"curlShare", r4(look.curlShare)}, {"curlSwingDegrees", r4(look.curlAmplitudeDeg)},
                            {"clumped", look.clumped}, {"clumpSize", r4(look.clumpSize)}, {"clumpStrength", r4(look.clumpStrength)},
                            {"flyawayFraction", r4(look.flyawayFraction)}, {"frizzFraction", r4(look.frizzFraction)},
@@ -3792,6 +3806,36 @@ struct AgentTools::Impl {
                 out["lookHint"] = "What the photos suggest for HairColor (melanin, redness), Curl (frequency, radius), Clump (size, "
                                   "strength) and Flyaway: apply_look: true sets them, or set_params one by one.";
             }
+        }
+        // Lengths by region, the groom's guides against the strands the photos show through their
+        // roots (medians, scene units).
+        {
+            const ScalpLandmarks marks = scalpLandmarks(*scalp, g.upAxis());
+            std::map<std::string, std::pair<std::vector<float>, std::vector<float>>> by;
+            for (const ReferenceGuide& rg : result.guides) {
+                if (rg.points.size() < 2) continue;
+                const Vec3f d = (rg.points.front() - marks.middle).normalized();
+                const float a2 = d.dot(marks.frame.left), b2 = d.dot(marks.frame.up), c2 = d.dot(marks.frame.front);
+                std::string region = "top";
+                if (b2 < 0.75f) {
+                    const float theta = std::abs(std::atan2(a2, c2) * 57.29578f);
+                    region = theta < 45.0f ? "front" : theta > 135.0f ? (b2 < -0.1f ? "nape" : "back") : "sides";
+                }
+                float length = 0.0f;
+                for (std::size_t k = 1; k < rg.points.size(); ++k) length += (rg.points[k] - rg.points[k - 1]).length();
+                by[region].first.push_back(length);
+                if (rg.photoLength > 0.0f) by[region].second.push_back(rg.photoLength);
+            }
+            auto medianOf = [](std::vector<float> v) {
+                if (v.empty()) return 0.0f;
+                std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(v.size() / 2), v.end());
+                return v[v.size() / 2];
+            };
+            json lengths = json::object();
+            for (const auto& [region, l] : by) {
+                lengths[region] = {{"guides", r4(medianOf(l.first))}, {"photos", r4(medianOf(l.second))}, {"count", l.first.size()}};
+            }
+            out["lengths"] = lengths;
         }
         if (!unseen.empty()) out["unseenShare"] = unseen;
         if (!alignMore.empty()) {
