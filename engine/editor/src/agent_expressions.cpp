@@ -82,6 +82,46 @@ const std::vector<std::pair<std::string, std::string>>& expressionVariables() {
     return vars;
 }
 
+std::vector<float> expressionFaceValues(const std::string& text, const std::vector<std::pair<std::string, float>>& constants,
+                                        const StrandSet* strands, const ScalpMesh& scalp) {
+    ExpressionEnvironment env;
+    const ScalpMesh* mesh = &scalp;
+    env.map = [mesh](const std::string& name) -> ExpressionMapPtr {
+        if (!mesh->hasColorSet(name)) return nullptr;
+        return std::make_shared<ColorSetMap>(mesh, name);
+    };
+    const ExpressionEnvironmentScope scope(&env);
+    const Expression e(text, constants, ExpressionType::Any);
+    const std::size_t faces = scalp.triangleCount();
+    std::vector<double> sum(faces, 0.0);
+    std::vector<std::size_t> count(faces, 0);
+    if (strands && strands->strandCount() > 0) {
+        const Expression::Bound bound = e.bind(*strands);
+        for (std::size_t s = 0; s < strands->strandCount(); ++s) {
+            if (s >= strands->roots().size()) break;
+            const StrandRoot& root = strands->roots()[s];
+            if (root.face < 0 || static_cast<std::size_t>(root.face) >= faces) continue;
+            const float v = e.isVector() ? e.evaluateVector(*strands, s, &scalp, &bound).length() : e.evaluate(*strands, s, &scalp, &bound);
+            if (!std::isfinite(v)) continue;
+            sum[static_cast<std::size_t>(root.face)] += v;
+            ++count[static_cast<std::size_t>(root.face)];
+        }
+    }
+    std::vector<float> out(faces, 0.0f);
+    for (std::size_t t = 0; t < faces; ++t) {
+        if (count[t]) {
+            out[t] = static_cast<float>(sum[t] / static_cast<double>(count[t]));
+            continue;
+        }
+        StrandRoot root;
+        root.face = static_cast<std::int32_t>(t);
+        root.u = root.v = 1.0f / 3.0f;
+        const float v = e.isVector() ? e.evaluateVectorAt(root, &scalp).length() : e.evaluateAt(root, &scalp);
+        out[t] = std::isfinite(v) ? v : 0.0f;
+    }
+    return out;
+}
+
 ExpressionCheck checkExpression(const std::string& text, const std::vector<std::pair<std::string, float>>& constants,
                                 const StrandSet* strands, const ScalpMesh* scalp, std::size_t maxSamples, ExpressionType want) {
     ExpressionCheck out;

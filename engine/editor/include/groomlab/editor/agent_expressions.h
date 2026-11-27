@@ -45,4 +45,10 @@ ExpressionCheck checkExpression(const std::string& text, const std::vector<std::
                                 const StrandSet* strands, const ScalpMesh* scalp, std::size_t maxSamples = 2000,
                                 ExpressionType want = ExpressionType::Any);
 
+// An expression's value over the scalp, a triangle at a time (show_map): the mean over the strands
+// rooted in it (their roots' values; a vector's length), else its value at the triangle's middle.
+// Throws ExpressionError when it does not compile.
+std::vector<float> expressionFaceValues(const std::string& text, const std::vector<std::pair<std::string, float>>& constants,
+                                        const StrandSet* strands, const ScalpMesh& scalp);
+
 }  // namespace groomlab::agent

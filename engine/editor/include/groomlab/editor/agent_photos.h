@@ -101,6 +101,19 @@ struct PointLabel {
 std::vector<std::uint8_t> meshCandidatesPng(const ScalpMesh& scalp, const RefCamera& camera,
                                             const std::vector<MeshCandidate>& candidates, int maxSize,
                                             const std::vector<PointLabel>& labels = {});
+// suggest_pairs: where a predicted pixel's feature is in the photo, the strongest corner (Harris:
+// the brightness turning in two directions at once) within `window` pixels, nearer ones preferred;
+// confidence 0-1 how much it stands out from the window (0: no corner, the prediction kept).
+struct PairSnap {
+    float u = 0.0f, v = 0.0f;  // the pixel (the prediction where nothing stands out)
+    float confidence = 0.0f;
+    float moved = 0.0f;        // pixels from the prediction
+};
+PairSnap snapToFeature(const RefImage& image, float u, float v, float window);
+// Its picture: the photo round the prediction, `zoom` times, the prediction a yellow ring and the
+// snapped pixel a green cross, a 10-pixel grid labelled in the photo's pixels.
+std::vector<std::uint8_t> pairCropPng(const RefImage& image, float u, float v, const PairSnap& snap, float window, int zoom);
+
 // compare_to_photo's picture: the photo dimmed, the hair the groom misses tinted green, the groom's
 // hair outside the photo's tinted magenta, both outlines (the photo's green, the groom's magenta).
 std::vector<std::uint8_t> comparisonPng(const RefImage& image, const PhotoComparison& c, int maxSize);

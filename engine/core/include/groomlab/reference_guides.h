@@ -25,10 +25,13 @@
 //    A guide stops where the photos that see it say it left the hair, at the shell, or its length.
 //    Then it is lifted off the scalp toward the hair's thickness the silhouettes show over it
 //    (ReferenceGuideOptions::volume), so voluminous hair is not combed flat. On curly hair
-//    (lockCurls) each guide then follows a lock: the view and the sideways shift where the photo's
+//    (lockCurls) the roots are first where the photos' locks grow from (detectLocks: streamlines
+//    curling clearly; their root ends' rays onto the scalp), the even spread filling in; each guide
+//    then follows a lock: the view and the sideways shift where the photo's
 //    strands swing most clearly along it (fitLock: the swing's period, size and phase), the guide
 //    moved onto that lock and given its curl (the lock's own path in that view, its other half a
-//    quarter turn on, the handedness the other views agree with: structureField's directions);
+//    quarter turn on, the handedness the other views agree with: structureField's directions; at
+//    lockGain times the swing the photo shows, which reads about half a lock's);
 //    kept when the photos agree with it better than with the smooth guide. The rest take their
 //    traced neighbours' curl.
 // 4. Symmetry (world X or the scalp's topology, scalp_mirror.h): every photo also judges each
@@ -277,8 +280,9 @@ struct ReferenceGuideOptions {
     // (its swing's period, size and phase where a view sees the guide's lock broadside) baked into
     // the guide's points as a helix; guides no view traces take their traced neighbours' curl.
     bool lockCurls = true;
-    float lockGain = 2.0f;              // the curl's radius from the swing the photo shows (strands of a lock
-                                        // out of phase and the field's smoothing read it low)
+    float lockGain = 2.4f;              // the curl's radius from the swing the photo shows (strands of a lock
+                                        // out of phase and the field's smoothing read it about half: the
+                                        // synthetic locks' calibration)
 };
 
 struct ReferenceGuide {
@@ -344,6 +348,9 @@ struct ReferenceGuidesResult {
     // Locks (lockCurls on curly hair): guides that follow a lock a photo shows, guides that took
     // their neighbours' curl, and the traced locks' mean radius and turn length (scene units).
     int locksTraced = 0, locksFilled = 0;
+    // The locks the views show (each a streamline curling clearly: detectLocks) and the roots taken
+    // where they grow from (their root ends' rays onto the scalp), before the even spread fills in.
+    int locksDetected = 0, lockRoots = 0;
     float lockRadius = 0.0f, lockWavelength = 0.0f;
     float rimLength = 0.0f;  // how far the hair reaches past the scalp's outline in the views (scene units, its rim)
     float reachLength = 0.0f;  // the same, its 90th percentile (what an automatic length starts from)

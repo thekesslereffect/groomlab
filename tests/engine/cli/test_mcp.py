@@ -294,6 +294,26 @@ def everything_else(c, root):
     assert len([x for x in result["content"] if x["type"] == "image"]) == 1
     one, _ = c.call("compare_to_photo", dict(f, photo="front"))
     assert len(one["photos"]) == 1, one
+    # The groom beside its photo, its guides labelled, a map over the scalp, pairs suggested.
+    beside, result = c.call("render_preview", dict(f, beside="front"))
+    assert beside["beside"] == "front" and beside["width"] == 2 * width and image_of(result)[0] == 2 * width, beside
+    labelled, _ = c.call("render_preview", dict(f, views=["front"], label_guides="fromReference", size=256))
+    assert labelled["guidesLabelled"]["count"] > 0, labelled
+    shown, result = c.call("show_map", dict(f, expression="$y", views=["front"], size=256))
+    assert shown["values"]["max"] > shown["values"]["min"] and len([x for x in result["content"] if x["type"] == "image"]) == 1, shown
+    suggested, result = c.call("suggest_pairs", dict(f, photo="front", landmarks=["nose_tip", "chin", "left_eye"]))
+    seen = [p for p in suggested["pairs"] if p["seen"]]
+    assert len(seen) == 3 and all(0.0 <= p["confidence"] <= 1.0 for p in seen), suggested
+    near = project(names["nose_tip"]["p"])
+    nose = [p for p in seen if p["landmark"] == "nose_tip"][0]
+    assert abs(nose["predicted"][0] - near[0]) < 8 and abs(nose["predicted"][1] - near[1]) < 8, (nose, near)
+    # A checkpoint, a variant, back again in one step; a batch of calls in one request.
+    c.call("checkpoint", dict(f, name="grown"))
+    c.call("set_params", dict(f, node="color", params={"melanin": 0.1}))
+    restored, _ = c.call("restore", dict(f, name="grown"))
+    assert "graph" in restored["changed"], restored
+    ran, _ = c.call("batch", {"calls": [{"tool": "evaluate", "arguments": f}, {"tool": "compare_to_photo", "arguments": f}]})
+    assert ran["ran"] == 2 and all(x["ok"] for x in ran["calls"]), ran
 
     # A root tube drawn round the crown, cut into cells, then split a level down.
     drawn, _ = c.call("root_tube", dict(g, op="draw", center="crown", radius=3, length=12))
@@ -368,7 +388,7 @@ def main():
                        "set_tube", "add_script_node", "save_node", "undo", "evaluate", "render_preview", "save_groom", "export",
                        "redo", "history", "scalp_landmarks", "brush_stroke", "select_guides", "guide_op", "paint_map",
                        "measure_guides", "add_photo", "photo_view", "mesh_landmarks", "align_photo", "photo_edit",
-                       "guides_from_photos", "compare_to_photo", "root_tube", "tube_levels", "tube_shape", "check_expression", "import_animation",
+                       "guides_from_photos", "compare_to_photo", "checkpoint", "restore", "batch", "show_map", "suggest_pairs", "root_tube", "tube_levels", "tube_shape", "check_expression", "import_animation",
                        "animate_scalp", "simulate", "sim_cache", "export_cards", "export_game", "stats"]:
             assert wanted in names, wanted
         assert c.request("tools/call", {"name": "no_such_tool", "arguments": {}})["error"]["code"] == -32602

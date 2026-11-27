@@ -21,6 +21,8 @@
 #include "groomlab/card_files.h"
 #include "groomlab/display.h"
 #include "groomlab/editor/agent_align.h"
+#include "groomlab/editor/agent_canvas.h"
+#include "groomlab/png.h"
 #include "groomlab/editor/agent_expressions.h"
 #include "groomlab/editor/agent_face.h"
 #include "groomlab/editor/agent_grooming.h"
@@ -58,6 +60,10 @@ constexpr std::size_t kMaxGuidePoints = 200;
 constexpr std::size_t kMaxScriptBytes = 64u << 10;
 constexpr std::size_t kMaxExportFrames = 1000;
 constexpr std::size_t kMaxPreviewGuides = 20000;
+constexpr std::size_t kMaxLabelledGuides = 400;  // render_preview label_guides
+constexpr std::size_t kMaxCheckpoints = 32;      // a groom's, checkpoint
+constexpr std::size_t kMaxBatchCalls = 64;       // batch
+constexpr std::size_t kMaxPairCrops = 12;        // suggest_pairs' pictures
 constexpr std::size_t kMaxStrokePoints = 4000;
 constexpr int kPhotoShown = 768;  // a photo's picture at most this many pixels across (default)
 constexpr int kMaxSimFrames = 1000;    // frames one simulate or sim_cache call steps
@@ -1759,6 +1765,7 @@ struct AgentTools::Impl {
 
     // ---- see ----
     // The groom drawn as it is now: its strands (and guides) at its frame.
+    std::size_t lastLabelled = 0;  // the guides drawGroom labelled last
     PreviewImage drawGroom(AgentGroom& g, const json& a, PreviewOptions o, json& errors) {
         const double density = num(a, "density", 1.0);
         if (density < 0.0 || density > 1.0) throw ToolError("density must be 0 to 1");
@@ -1770,11 +1777,37 @@ struct AgentTools::Impl {
         const StrandsPtr strands = view.placed();
         const MeshPtr scalp = view.scalp ? view.scalp : g.session().rawScalp();
         const HierarchyPtr guides = view.hierarchy;
-        if (flag(a, "guides", false) && guides) {
+        if (flag(a, "guides", false) && guides && !a.contains("label_guides")) {
             for (const HierarchyGuide& guide : guides->guides()) {
                 if (guide.points.size() < 2) continue;
                 if (o.guides.size() >= kMaxPreviewGuides) break;
                 o.guides.push_back(guide.points);
+            }
+        }
+        // Guides labelled with their IDs at their tips: all, a group's, or the selection's.
+        if (a.contains("label_guides") && guides) {
+            const json& which = a["label_guides"];
+            GroupId group = kNoGroup;
+            bool selected = false;
+            if (which.is_string()) {
+                if (which.get<std::string>() == "selection") {
+                    selected = true;
+                } else {
+                    group = guides->findGroup(which.get<std::string>());
+                    if (group == kNoGroup) throw ToolError("label_guides: no guide group '" + which.get<std::string>() + "'");
+                }
+            } else if (!which.is_boolean()) {
+                throw ToolError("label_guides is true, a group's name or \"selection\"");
+            }
+            if (!which.is_boolean() || which.get<bool>()) {
+                for (const HierarchyGuide& guide : guides->guides()) {
+                    if (guide.points.size() < 2) continue;
+                    if (group != kNoGroup && guide.group != group) continue;
+                    if (selected && std::find(g.selection.begin(), g.selection.end(), guide.id) == g.selection.end()) continue;
+                    if (o.guides.size() >= kMaxLabelledGuides) break;
+                    o.guides.push_back(guide.points);
+                    o.guideLabels.push_back(std::to_string(guide.id));
+                }
             }
         }
         if (flag(a, "tubes", false) && guides) {
@@ -1786,6 +1819,7 @@ struct AgentTools::Impl {
             }
         }
         errors = view.errors;
+        lastLabelled = o.guideLabels.size();
         try {
             return target.preview(g, scalp.get(), strands.get(), o);
         } catch (const std::invalid_argument& e) {
@@ -1813,6 +1847,16 @@ struct AgentTools::Impl {
             for (int i = 0; i < n; ++i) o.views.push_back("turn:" + json(360.0 * i / n).dump());
         }
         o.look = str(a, "look", "studio");
+        // Beside a photo: through its camera, at its size.
+        std::optional<AgentPhoto> besidePhoto;
+        if (a.contains("beside")) {
+            if (a.contains("camera") || a.contains("views") || a.contains("turntable")) throw ToolError("beside draws through the photo's own camera: give no camera, views or turntable");
+            std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+            const AgentPhoto& p = photoNamed(photos, str(a, "beside"));
+            if (!p.camera) throw ToolError("the photo '" + p.name + "' is not lined up yet (align_photo)");
+            besidePhoto = p;
+            o.camera = *p.camera;
+        }
         if (a.contains("camera")) {
             const json& c = a["camera"];
             checkArguments(objectSchema(cameraProperties()), c);
@@ -1901,7 +1945,362 @@ struct AgentTools::Impl {
             writeText(path, std::string(image.png.begin(), image.png.end()));
             info["saved"] = files().shown(path);
         }
-        r.content.push_back({{"type", "image"}, {"data", base64Encode(image.png)}, {"mimeType", "image/png"}});
+        if (lastLabelled) info["guidesLabelled"] = {{"count", lastLabelled}, {"about", "each guide yellow-orange, its ID beside its tip (where the scalp does not hide it)"}};
+        if (besidePhoto) {
+            if (image.rgb.empty()) throw ToolError("beside: this host's preview gives no pixels to set beside the photo");
+            const RefImage photo = loadImage(besidePhoto->image, 3).resized(image.width, image.height);
+            const bool blended = a.contains("blend");
+            const double blend = std::clamp(num(a, "blend", 0.5), 0.0, 1.0);
+            const int w = image.width, h = image.height, outW = blended ? w : 2 * w;
+            std::vector<std::uint8_t> rgb(static_cast<std::size_t>(outW) * static_cast<std::size_t>(h) * 3);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                    for (int c = 0; c < 3; ++c) {
+                        const float pv = photo.at(x, y, c) * 255.0f;
+                        const float gv = static_cast<float>(image.rgb[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 3 + static_cast<std::size_t>(c)]);
+                        if (blended) {
+                            rgb[(static_cast<std::size_t>(y) * static_cast<std::size_t>(outW) + static_cast<std::size_t>(x)) * 3 + static_cast<std::size_t>(c)] =
+                                static_cast<std::uint8_t>(std::lround(std::clamp((1.0 - blend) * pv + blend * gv, 0.0, 255.0)));
+                        } else {
+                            rgb[(static_cast<std::size_t>(y) * static_cast<std::size_t>(outW) + static_cast<std::size_t>(x)) * 3 + static_cast<std::size_t>(c)] =
+                                static_cast<std::uint8_t>(std::lround(std::clamp(pv, 0.0f, 255.0f)));
+                            rgb[(static_cast<std::size_t>(y) * static_cast<std::size_t>(outW) + static_cast<std::size_t>(x + w)) * 3 + static_cast<std::size_t>(c)] =
+                                static_cast<std::uint8_t>(gv);
+                        }
+                    }
+            const std::vector<std::uint8_t> png = encodePng(outW, h, 3, rgb);
+            info["beside"] = besidePhoto->name;
+            info["width"] = outW;
+            info["images"] = blended ? json("the groom through the photo's camera blended over the photo (blend " + json(r4(blend)).dump() + ": 0 the photo, 1 the groom)")
+                                     : json("left: the photo; right: the groom through its camera, the same size");
+            if (a.contains("save_to")) {
+                const std::string path = files().resolveForWrite(str(a, "save_to"));
+                writeText(path, std::string(png.begin(), png.end()));
+            }
+            r.content.push_back({{"type", "image"}, {"data", base64Encode(png)}, {"mimeType", "image/png"}});
+        } else {
+            r.content.push_back({{"type", "image"}, {"data", base64Encode(image.png)}, {"mimeType", "image/png"}});
+        }
+        r.content.push_back({{"type", "text"}, {"text", info.dump()}});
+        return r;
+    }
+
+    // ---- checkpoints ----
+    struct Snapshot {
+        std::array<std::string, kStrokeFields> texts;
+        std::string photos;
+        std::shared_ptr<const ScalpMesh> scalp;
+        int order = 0;
+    };
+    std::map<std::string, std::map<std::string, Snapshot>> checkpoints;  // groom -> name -> its state
+    int checkpointOrder = 0;
+
+    json checkpointNames(const std::string& groom) const {
+        json names = json::array();
+        const auto it = checkpoints.find(groom);
+        if (it == checkpoints.end()) return names;
+        std::vector<std::pair<int, std::string>> ordered;
+        for (const auto& [name, s] : it->second) ordered.push_back({s.order, name});
+        std::sort(ordered.begin(), ordered.end());
+        for (const auto& [order, name] : ordered) names.push_back(name);
+        return names;
+    }
+
+    ToolResult checkpointTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const std::string name = str(a, "name");
+        if (name.empty()) return textResult({{"groom", g.name()}, {"checkpoints", checkpointNames(g.name())}});
+        if (name.size() > 64) throw ToolError("a checkpoint's name is at most 64 characters");
+        Snapshot s;
+        AgentStrokeHost& host = g.strokeHost();
+        for (std::size_t i = 0; i < kStrokeFields; ++i) {
+            const StrokeField field = static_cast<StrokeField>(i);
+            if (field == StrokeField::ShotLayer) continue;
+            s.texts[i] = host.storedText(field);
+        }
+        s.photos = g.referencePhotos;
+        s.scalp = g.session().rawScalp();
+        s.order = ++checkpointOrder;
+        auto& mine = checkpoints[g.name()];
+        if (mine.size() >= kMaxCheckpoints && !mine.count(name)) throw ToolError("at most " + std::to_string(kMaxCheckpoints) + " checkpoints a groom: restore or reuse a name");
+        const bool replaced = mine.count(name) != 0;
+        mine[name] = std::move(s);
+        return textResult({{"groom", g.name()}, {"saved", name}, {"replaced", replaced}, {"checkpoints", checkpointNames(g.name())},
+                           {"about", "the groom's graph, guides, parts, flow, correctives, maps, sculpts, reference photos and scalp, "
+                                     "kept in this session (not saved with the groom): restore puts them back as one undo step"}});
+    }
+
+    ToolResult restoreTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const std::string name = str(a, "name");
+        const auto mine = checkpoints.find(g.name());
+        if (mine == checkpoints.end() || !mine->second.count(name)) {
+            throw ToolError("no checkpoint '" + name + "' for this groom (checkpoints: " + checkpointNames(g.name()).dump() + ")");
+        }
+        const Snapshot& s = mine->second.at(name);
+        AgentStrokeHost& host = g.strokeHost();
+        auto stroke = std::make_shared<StrokeEdit>();
+        stroke->mode = "agent";
+        json changed = json::array();
+        for (std::size_t i = 0; i < kStrokeFields; ++i) {
+            const StrokeField field = static_cast<StrokeField>(i);
+            if (field == StrokeField::ShotLayer) continue;
+            const std::string now = host.storedText(field);
+            if (now == s.texts[i]) continue;
+            stroke->set(field, s.texts[i]);
+            stroke->text(field).before = now;
+            stroke->text(field).hasBefore = true;
+            changed.push_back(strokeFieldName(field));
+        }
+        GroomEdit step;
+        step.label = "restore " + name;
+        if (!changed.empty()) step.stroke = std::move(stroke);
+        if (g.referencePhotos != s.photos) {
+            step.side = true;
+            step.referencePhotos = std::make_pair(g.referencePhotos, s.photos);
+            changed.push_back("referencePhotos");
+        }
+        const std::shared_ptr<const ScalpMesh> scalpNow = g.session().rawScalp();
+        if (s.scalp && scalpNow != s.scalp) {
+            step.side = true;
+            step.scalp = std::make_pair(scalpNow, s.scalp);
+            changed.push_back("scalp");
+        }
+        if (changed.empty()) return textResult(withSummary(g, {{"restored", name}, {"changed", changed}, {"note", "the groom is as the checkpoint already"}}));
+        g.commit(std::move(step));
+        return textResult(withSummary(g, {{"restored", name}, {"changed", changed}, {"undo", "one step: undo takes the restore back"}}));
+    }
+
+    // ---- batch ----
+    ToolResult batchTool(const json& a) {
+        if (!a.contains("calls") || !a["calls"].is_array()) throw ToolError("calls is a list of {\"tool\": name, \"arguments\": {...}}");
+        const json& calls = a["calls"];
+        if (calls.empty() || calls.size() > kMaxBatchCalls) throw ToolError("calls holds 1 to " + std::to_string(kMaxBatchCalls) + " tool calls");
+        const bool images = flag(a, "images", false);
+        ToolResult r;
+        json answers = json::array();
+        int stopped = -1;
+        for (std::size_t i = 0; i < calls.size(); ++i) {
+            const json& c = calls[i];
+            if (!c.is_object() || !c.contains("tool") || !c["tool"].is_string()) throw ToolError("calls[" + std::to_string(i) + "] needs a \"tool\" name");
+            const std::string name = c["tool"].get<std::string>();
+            if (name == "batch") throw ToolError("a batch cannot hold a batch");
+            const ToolResult one = runTool(name, c.value("arguments", json::object()));
+            json texts = json::array();
+            int pictures = 0;
+            for (const json& item : one.content) {
+                if (item.value("type", std::string()) == "text") {
+                    const std::string text = item.value("text", std::string());
+                    const json parsed = json::parse(text, nullptr, false);
+                    texts.push_back(parsed.is_discarded() ? json(text) : parsed);
+                } else if (item.value("type", std::string()) == "image") {
+                    ++pictures;
+                    if (images) r.content.push_back(item);
+                }
+            }
+            json entry = {{"call", i}, {"tool", name}, {"ok", !one.isError}, {"answer", texts.size() == 1 ? texts[0] : texts}};
+            if (pictures) entry["images"] = images ? json(pictures) : json(std::to_string(pictures) + " left out (images: true sends them)");
+            answers.push_back(entry);
+            if (one.isError) {
+                stopped = static_cast<int>(i);
+                break;
+            }
+        }
+        json info = {{"calls", answers}, {"ran", answers.size()}, {"of", calls.size()}};
+        if (stopped >= 0) {
+            info["stoppedAt"] = stopped;
+            info["note"] = "stopped at the first error: the calls after it did not run (the ones before it did)";
+        }
+        r.isError = stopped >= 0;
+        r.content.push_back({{"type", "text"}, {"text", info.dump(-1, ' ', false, json::error_handler_t::replace)}});
+        return r;
+    }
+
+    // ---- maps over the scalp ----
+    ToolResult showMapTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        std::string text;
+        if (a.contains("map")) {
+            if (a.contains("expression")) throw ToolError("give map or expression, not both");
+            const std::string component = str(a, "component", "luminance");
+            text = "map(\"" + str(a, "map") + "\", \"" + component + "\")";
+        } else if (a.contains("expression")) {
+            text = str(a, "expression");
+        } else {
+            throw ToolError("give a map (its name) or an expression");
+        }
+        std::vector<std::pair<std::string, float>> constants;
+        if (a.contains("variables")) {
+            try {
+                constants = parseExpressionVariables(a["variables"].dump());
+            } catch (const std::exception& e) {
+                throw ToolError(std::string("variables: ") + e.what());
+            }
+        }
+        return scalpHeatmap(g, a, text, constants);
+    }
+
+    ToolResult scalpHeatmap(AgentGroom& g, const json& a, const std::string& text, const std::vector<std::pair<std::string, float>>& constants) {
+        ViewRequest request;
+        request.viewNode = str(a, "node");
+        request.time = frameToSeconds(g.frame, g.framesPerSecond());
+        const ViewResult& view = g.view(request);
+        const MeshPtr scalp = view.scalp ? view.scalp : g.session().scalp();
+        if (!scalp || scalp->triangleCount() == 0) throw ToolError("the groom has no scalp");
+        std::vector<float> values;
+        try {
+            values = expressionFaceValues(text, constants, view.strands.get(), *scalp);
+        } catch (const ExpressionError& e) {
+            throw ToolError(std::string("the expression: ") + e.what());
+        }
+        float lo = values.empty() ? 0.0f : *std::min_element(values.begin(), values.end());
+        float hi = values.empty() ? 1.0f : *std::max_element(values.begin(), values.end());
+        const float shownLo = a.contains("min") ? static_cast<float>(num(a, "min", 0.0)) : lo;
+        const float shownHi = a.contains("max") ? static_cast<float>(num(a, "max", 1.0)) : (hi > lo ? hi : lo + 1.0f);
+        // A perceptual ramp (dark blue, teal, yellow), linear for the preview's shading.
+        auto ramp = [](float t) {
+            t = std::clamp(t, 0.0f, 1.0f);
+            const float stops[5][3] = {{0.05f, 0.03f, 0.30f}, {0.10f, 0.25f, 0.55f}, {0.05f, 0.55f, 0.50f}, {0.50f, 0.80f, 0.20f}, {1.0f, 0.95f, 0.20f}};
+            const float f = t * 4.0f;
+            const int i = std::min(3, static_cast<int>(f));
+            const float u = f - static_cast<float>(i);
+            std::array<float, 3> c{};
+            for (int k = 0; k < 3; ++k) c[static_cast<std::size_t>(k)] = std::pow(stops[i][k] + (stops[i + 1][k] - stops[i][k]) * u, 2.2f);
+            return c;
+        };
+        PreviewOptions o;
+        o.look = "flat";
+        o.size = static_cast<int>(num(a, "size", 512.0));
+        o.zUp = g.upAxis() == "Z";
+        o.views = {"front", "left", "back", "top"};
+        if (a.contains("views")) {
+            o.views.clear();
+            for (const json& v : a["views"]) o.views.push_back(v.get<std::string>());
+        }
+        o.faceColors.resize(values.size());
+        for (std::size_t i = 0; i < values.size(); ++i) o.faceColors[i] = ramp((values[i] - shownLo) / std::max(1e-9f, shownHi - shownLo));
+        PreviewImage image;
+        try {
+            image = renderPreview(scalp.get(), nullptr, o);
+        } catch (const std::invalid_argument& e) {
+            throw ToolError(e.what());
+        }
+        // The legend: the ramp along the bottom, its ends' values.
+        RefImage shown;
+        shown.width = image.width;
+        shown.height = image.height;
+        shown.channels = 3;
+        shown.pixels.resize(image.rgb.size());
+        for (std::size_t i = 0; i < image.rgb.size(); ++i) shown.pixels[i] = static_cast<float>(image.rgb[i]) / 255.0f;
+        Canvas canvas = Canvas::ofImage(shown);
+        const int barY = canvas.height() - 22, barX0 = 60, barX1 = canvas.width() - 60;
+        for (int x = barX0; x < barX1; ++x) {
+            const std::array<float, 3> c = ramp(static_cast<float>(x - barX0) / static_cast<float>(std::max(1, barX1 - barX0 - 1)));
+            const Rgb shownColor{std::pow(c[0], 1.0f / 2.2f), std::pow(c[1], 1.0f / 2.2f), std::pow(c[2], 1.0f / 2.2f)};
+            for (int y = barY; y < barY + 10; ++y) canvas.set(x, y, shownColor);
+        }
+        auto label = [](float v) {
+            char buf[32];
+            std::snprintf(buf, sizeof buf, "%.3g", static_cast<double>(v));
+            return std::string(buf);
+        };
+        canvas.text(4, barY, label(shownLo), {1.0f, 1.0f, 1.0f});
+        canvas.text(barX1 + 4, barY, label(shownHi), {1.0f, 1.0f, 1.0f});
+        ToolResult r;
+        r.content.push_back({{"type", "image"}, {"data", base64Encode(canvas.png())}, {"mimeType", "image/png"}});
+        double mean = 0.0;
+        for (float v : values) mean += v;
+        if (!values.empty()) mean /= static_cast<double>(values.size());
+        json info = {{"groom", g.name()}, {"shown", text}, {"views", o.views}, {"values", {{"min", r4(lo)}, {"mean", r4(mean)}, {"max", r4(hi)}}},
+                     {"legend", {{"min", r4(shownLo)}, {"max", r4(shownHi)}, {"colors", "dark blue (min), teal, green, yellow (max)"}}},
+                     {"about", "the scalp from each view, each triangle colored by the value over it (the mean over the strands "
+                               "rooted there, else its value at the triangle's middle)"}};
+        r.content.push_back({{"type", "text"}, {"text", info.dump()}});
+        return r;
+    }
+
+    // ---- photo pairs ----
+    ToolResult suggestPairsTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const MeshPtr scalp = scalpOf(g);
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        const AgentPhoto& p = photoNamed(photos, str(a, "photo"));
+        const RefImage image = loadImage(p.image, 3);
+        RefCamera camera;
+        std::string from;
+        if (a.contains("view")) {
+            try {
+                camera = viewCamera(*scalp, g.upAxis(), str(a, "view"), image.width, image.height, num(a, "focal_mm", 50.0));
+            } catch (const std::invalid_argument& e) {
+                throw ToolError(e.what());
+            }
+            from = "the view hint '" + str(a, "view") + "' (a guess: confirm each pick)";
+        } else if (p.camera) {
+            camera = *p.camera;
+            if (camera.width > 0.0 && std::abs(camera.width - image.width) > 0.5) camera = camera.scaled(image.width / camera.width);
+            from = "the photo's camera as lined up";
+        } else {
+            throw ToolError("the photo '" + p.name + "' is not lined up: give view (front, right, three_quarter_front_left...) to predict from");
+        }
+        const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalp);
+        if (!face->head) throw ToolError("no face found on the mesh (" + face->why + "): suggest_pairs names the face's landmarks");
+        std::vector<std::string> names;
+        if (a.contains("landmarks")) {
+            for (const json& n : a["landmarks"]) names.push_back(n.get<std::string>());
+        } else {
+            for (const FaceLandmark& l : face->points) names.push_back(l.name);
+        }
+        const float diagonal = std::hypot(static_cast<float>(image.width), static_cast<float>(image.height));
+        const float window = static_cast<float>(num(a, "window", a.contains("view") ? 0.06 * diagonal : 0.025 * diagonal));
+        const int zoom = static_cast<int>(std::clamp(num(a, "zoom", 4.0), 1.0, 8.0));
+        const Vec3f eye = camera.eye();
+        ToolResult r;
+        json pairs = json::array();
+        for (const std::string& name : names) {
+            const FaceLandmark* l = face->find(name);
+            if (!l) throw ToolError("no landmark '" + name + "' (mesh_landmarks names them)");
+            float u = 0, v = 0;
+            json e = {{"landmark", name}, {"point", vec(l->point)}};
+            // (hidden: the mesh in front of it from the camera)
+            bool facing = true;
+            {
+                const Vec3f toPoint = l->point - eye;
+                const float distance = toPoint.length();
+                SurfacePoint hit;
+                float t = 0.0f;
+                if (distance > 1e-6f && scalp->intersectRay(eye, toPoint / distance, &hit, &t) && t < distance - 0.02f * distance) facing = false;
+            }
+            if (!camera.project(l->point, u, v) || u < 0.0f || v < 0.0f || u >= static_cast<float>(image.width) || v >= static_cast<float>(image.height)) {
+                e["seen"] = false;
+                e["why"] = "outside the photo from this camera";
+                pairs.push_back(e);
+                continue;
+            }
+            e["predicted"] = {r4(u), r4(v)};
+            if (!facing) {
+                e["seen"] = false;
+                e["why"] = "the mesh hides it from this camera";
+                pairs.push_back(e);
+                continue;
+            }
+            const PairSnap snap = snapToFeature(image, u, v, window);
+            e["seen"] = true;
+            e["pixel"] = {r4(snap.u), r4(snap.v)};
+            e["confidence"] = r4(snap.confidence);
+            e["moved"] = r4(snap.moved);
+            e["landmarkConfidence"] = r4(l->confidence);
+            if (r.content.size() < kMaxPairCrops) {
+                e["image"] = static_cast<int>(r.content.size());
+                r.content.push_back({{"type", "image"}, {"data", base64Encode(pairCropPng(image, u, v, snap, window, zoom))}, {"mimeType", "image/png"}});
+            }
+            pairs.push_back(e);
+        }
+        json info = {{"groom", g.name()}, {"photo", p.name}, {"from", from}, {"window", r4(window)}, {"pairs", pairs},
+                     {"about", "predicted: where the landmark lands through the camera; pixel: the strongest corner within the "
+                               "window (nearer preferred), confidence how much it stands out (0: none, the prediction kept). Each "
+                               "image: the photo round it zoomed, the prediction a yellow ring, the pick a green cross, a 10-pixel "
+                               "grid labelled from the corner's pixel. Confirm or correct each, then align_photo with "
+                               "{\"pixel\": pixel, \"point\": landmark}."}};
         r.content.push_back({{"type", "text"}, {"text", info.dump()}});
         return r;
     }
@@ -3306,6 +3705,11 @@ struct AgentTools::Impl {
         options.maxLength = static_cast<float>(num(a, "max_length", 0.0));
         options.symmetry = referenceSymmetryFromName(str(a, "symmetry", "auto"));
         options.lockCurls = flag(a, "locks", true);
+        if (a.contains("volume")) {
+            const double volume = num(a, "volume", 0.75);
+            if (volume < 0.0 || volume > 1.5) throw ToolError("volume is 0 to 1.5 (a share of the hair's thickness the photos show)");
+            options.volume = static_cast<float>(volume);
+        }
         options.up = upOf(g);
         const HairScalp hair = hairScalpOf(g);
         if (hair.head) options.occluders.push_back(hair.head);
@@ -3360,9 +3764,12 @@ struct AgentTools::Impl {
         LockLook locks;
         if (result.locksTraced > 0) {
             locks = {true, result.lockRadius, result.lockWavelength};
-            out["locks"] = {{"traced", result.locksTraced}, {"filled", result.locksFilled}, {"radius", r4(result.lockRadius)},
+            out["locks"] = {{"detected", result.locksDetected}, {"rootsAtLocks", result.lockRoots},
+                            {"traced", result.locksTraced}, {"filled", result.locksFilled}, {"radius", r4(result.lockRadius)},
                             {"turnLength", r4(result.lockWavelength)},
-                            {"about", "each guide follows a lock: traced, the curl a photo shows along it (moved onto the lock, "
+                            {"about", "detected: the locks the photos show (streamlines curling clearly); rootsAtLocks: the roots "
+                                      "taken where they grow from (the rest spread evenly); each guide follows a lock: traced, the "
+                                      "curl a photo shows along it (moved onto the lock, "
                                       "its turn, size, phase and handedness); filled, its traced neighbours' curl where no "
                                       "photo shows one. Scene units. apply_look clumps each guide's strands onto it "
                                       "(Clump centersFrom inputCurves, strength per lock from the guides' lockStrength) "
@@ -3666,7 +4073,13 @@ struct AgentTools::Impl {
             out["strandChannels"] = channels;
         }
         out["available"] = available;
-        return textResult(out);
+        ToolResult r = textResult(out);
+        if (c.ok && flag(a, "image", false)) {
+            const ToolResult map = scalpHeatmap(g, a, str(a, "expression"), constants);
+            for (const json& item : map.content)
+                if (item.value("type", std::string()) == "image") r.content.insert(r.content.begin(), item);
+        }
+        return r;
     }
 
     // ---- simulation ----
@@ -4450,8 +4863,60 @@ struct AgentTools::Impl {
                           {"tubes", prop("boolean", "Draw the guides' tubes as cyan wires (as tube_levels view shows them).")},
                           {"viewport", prop("boolean", "Live in a host (Maya...): its own viewport as the artist sees it now, "
                                                        "instead of the CPU preview (the other options aside from size are not read).")},
-                          {"save_to", prop("string", "Also write the PNG to this file inside the server's folder.")}}),
+                          {"save_to", prop("string", "Also write the PNG to this file inside the server's folder.")},
+                          {"beside", prop("string", "A lined-up photo's name: the groom through that photo's camera next to the "
+                                                    "photo itself, the same size (left the photo, right the groom), to judge the look.")},
+                          {"blend", prop("number", "With beside: one image, the groom blended over the photo instead (0 the photo, "
+                                                   "1 the groom; 0.5 halfway).")},
+                          {"label_guides", {{"description", "Draw guides labelled with their IDs at their tips, to pick them by "
+                                                            "number (guide_op, brush_stroke): true (all, at most 400), a group's "
+                                                            "name, or \"selection\" (select_guides')."},
+                                            {"type", json::array({"boolean", "string"})}}}}),
             &Impl::renderPreviewTool);
+        add("checkpoint", "Checkpoint a groom",
+            "Keeps the groom's whole state under a name (graph, guides, parts, flow, maps, sculpts, reference photos, scalp) for "
+            "this session, to try a variant and come back with restore instead of undoing step by step. No name: lists them.",
+            objectSchema({{"groom", groom}, {"name", prop("string", "The checkpoint's name (a name used already is replaced).")}}),
+            &Impl::checkpointTool);
+        add("restore", "Restore a checkpoint",
+            "Puts the groom back as a checkpoint kept it: one undo step (undo takes the restore back). Says what changed.",
+            objectSchema({{"groom", groom}, {"name", prop("string", "The checkpoint's name.")}}, {"name"}),
+            &Impl::restoreTool);
+        add("batch", "Run tool calls in a row",
+            "Runs a list of tool calls in order in one request, stopping at the first error, and answers with each call's answer "
+            "(their images too with images: true). Each call is its own undo step as alone. Use it to iterate in fewer round "
+            "trips: set_params, then evaluate, then compare_to_photo.",
+            objectSchema({{"calls", {{"type", "array"}, {"description", "[{\"tool\": \"set_params\", \"arguments\": {...}}, ...] (1-64)."},
+                                     {"items", {{"type", "object"}}}}},
+                          {"images", prop("boolean", "Send the calls' images too (default false: their count only).")}},
+                         {"calls"}),
+            &Impl::batchTool);
+        add("show_map", "Show a map over the scalp",
+            "Draws the scalp from a few views colored by a map's values or an expression's (a heatmap with a legend), to see "
+            "where a density, length or clump map is high or low before using it.",
+            objectSchema({{"groom", groom}, {"map", prop("string", "A map's name (as map(\"name\") reads it: a vertex map, a guide layer...).")},
+                          {"component", enumProp({"r", "g", "b", "a", "luminance"}, "Which of the map's channels (default luminance).")},
+                          {"expression", prop("string", "An expression instead (as check_expression takes it).")},
+                          {"variables", prop("object", "The expression's own constants.")},
+                          {"node", prop("string", "The strands this node gives (default the output) for strand variables.")},
+                          {"views", views}, {"size", prop("integer", "The image's width (64-1024, default 512).")},
+                          {"min", prop("number", "The legend's low end (default the values' least).")},
+                          {"max", prop("number", "The legend's high end (default the values' most).")}}),
+            &Impl::showMapTool);
+        add("suggest_pairs", "Suggest landmark pairs on a photo",
+            "For the face's named landmarks (all, or the ones listed), where each lands in a photo through its camera (or a view "
+            "hint's guess when it is not lined up yet), snapped to the strongest image feature nearby, with a confidence and a "
+            "zoomed picture of each: confirm or correct the picks, then align_photo with them.",
+            objectSchema({{"groom", groom}, {"photo", prop("string", "The photo's name.")},
+                          {"landmarks", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Landmark names (default all the face's)."}}},
+                          {"view", prop("string", "Predict from this side's camera instead of the photo's (front, right, "
+                                                  "three_quarter_front_left...): for a photo not lined up yet.")},
+                          {"focal_mm", prop("number", "With view: the lens (default 50).")},
+                          {"window", prop("number", "How far round the prediction to look, pixels (default 2.5% of the photo's "
+                                                    "diagonal lined up, 6% from a view hint).")},
+                          {"zoom", prop("integer", "The pictures' zoom, 1-8 (default 4).")}},
+                         {"photo"}),
+            &Impl::suggestPairsTool);
         // The host's own renderers, where it has any (live in Maya, the app, Blender).
         if (const std::vector<RendererInfo> offered = target.renderers(); !offered.empty()) {
             std::vector<std::string> names;
@@ -4593,6 +5058,8 @@ struct AgentTools::Impl {
                           {"max_length", prop("number", "The longest guide (scene units; default 0: what the photos show).")},
                           {"symmetry", enumProp({"auto", "none", "x", "topology"}, "Mirror what one side shows (default auto).")},
                           {"group", prop("string", "The guide group (default fromReference).")},
+                          {"volume", prop("number", "How far the guides lift off the scalp: a share of the hair's thickness the "
+                                                    "photos' outlines show over each spot (default 0.75; 0 as grown, along the scalp).")},
                           {"locks", prop("boolean", "On curly hair, each guide follows its lock's curl (default true; false: smooth "
                                                     "guides and a Curl node over every strand).")},
                           {"apply_look", prop("boolean", "Also set the look the photos suggest (HairColor melanin and redness, Clump, "
@@ -4684,7 +5151,8 @@ struct AgentTools::Impl {
                           {"node", prop("string", "Sample the strands this node gives (default the output).")},
                           {"variables", prop("object", "Its own constants, as an Expression node's: {\"amount\": 0.5, \"center\": [0, 1, 0]}.")},
                           {"type", enumProp({"any", "number", "vector"}, "What it must give (default any).")},
-                          {"samples", prop("integer", "Strands sampled (default 2000).")}},
+                          {"samples", prop("integer", "Strands sampled (default 2000).")},
+                          {"image", prop("boolean", "Also a heatmap of it over the scalp (as show_map draws it).")}},
                          {"expression"}),
             &Impl::checkExpressionTool);
 
@@ -4775,6 +5243,9 @@ struct AgentTools::Impl {
             &Impl::exportTool);
     }
 
+    // One tool run (AgentTools::call, batch): never throws, an error result instead.
+    ToolResult runTool(const std::string& name, const json& arguments);
+
     const Tool* find(const std::string& name) const {
         for (const Tool& t : tools) {
             if (t.name == name) return &t;
@@ -4808,8 +5279,10 @@ json AgentTools::list() const {
 
 bool AgentTools::has(const std::string& name) const { return impl_->find(name) != nullptr; }
 
-ToolResult AgentTools::call(const std::string& name, const json& arguments) {
-    const Impl::Tool* tool = impl_->find(name);
+ToolResult AgentTools::call(const std::string& name, const json& arguments) { return impl_->runTool(name, arguments); }
+
+ToolResult AgentTools::Impl::runTool(const std::string& name, const json& arguments) {
+    const Impl::Tool* tool = find(name);
     auto failure = [](const std::string& message) {
         ToolResult r = textResult({{"error", message}});
         r.isError = true;
@@ -4818,7 +5291,7 @@ ToolResult AgentTools::call(const std::string& name, const json& arguments) {
     if (!tool) return failure("unknown tool '" + name + "'");
     try {
         const json args = checkArguments(tool->schema, arguments.is_object() ? arguments : json::object());
-        return tool->run(*impl_, args);
+        return tool->run(*this, args);
     } catch (const ToolError& e) {
         return failure(e.what());
     } catch (const GraphError& e) {
