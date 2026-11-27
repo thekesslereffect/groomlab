@@ -195,6 +195,17 @@ class AgentLinkTest(unittest.TestCase):
         call("undo", {})
         self.assertNotIn(curl, [n["name"] for n in hcall(head, "get_graph")["graph"]["nodes"]])
 
+        # The lock tools: a haircut combed in (one step of the groom's stack), a guide reshaped in place.
+        depth = head.groomlab_tools.undo_depth
+        blocked = call("comb_guides", {"count": 30, "volume": 2.0})
+        self.assertGreater(blocked["guides"], 10)
+        self.assertEqual(head.groomlab_tools.undo_depth, depth + 1)
+        one = call("get_guides", {"group": "combed", "with_points": True, "limit": 1})["guides"][0]
+        moved = [[p[0], p[1], p[2] + 1.0] for p in one["positions"]]
+        self.assertEqual(call("reshape_guides", {"guides": [{"id": one["id"], "points": moved}]})["reshaped"], [one["id"]])
+        self.assertEqual(head.groomlab_tools.undo_depth, depth + 2)
+        self.assertEqual(call("undo", {})["undone"], ["reshape guides"])
+
         # What Blender does its own way: said, nothing changed.
         refused = request("tools/call", {"name": "new_groom", "arguments": {"name": "another", "mesh": "nika"}})
         self.assertTrue(refused["result"]["isError"])

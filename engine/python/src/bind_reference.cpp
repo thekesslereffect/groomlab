@@ -731,6 +731,13 @@ void bindReference(py::module_& m) {
             py::list lines;
             for (const auto& l : p.flowLines) lines.append(py::make_tuple(l[0], l[1], l[2], l[3]));
             d["lines"] = lines;
+            py::list locks;
+            for (const auto& lock : p.locks) {
+                py::list line;
+                for (const auto& q : lock) line.append(py::make_tuple(q[0], q[1]));
+                locks.append(line);
+            }
+            d["locks"] = locks;
             return d;
         },
         py::arg("scalp"), py::arg("view"), py::arg("line_spacing") = 0.0f, py::arg("max_length") = 0.0f,
@@ -738,7 +745,8 @@ void bindReference(py::module_& m) {
         py::arg("refine_mask") = -1,
         "What a Reference window shows over one photo (a view dict as guides_from_reference takes, mask_strokes too): "
         "{mask: bytes (uint8, width x height, rows top-down), width, height, crop (x0, y0, w, h photo pixels the mask "
-        "covers), lines: the orientation field as segments (x0, y0, x1, y1) in photo pixels}.");
+        "covers), lines: the orientation field as segments (x0, y0, x1, y1) in photo pixels, locks: on wavy hair the "
+        "locks traced in the photo, each a list of (x, y) photo pixels root end first}.");
 }
 
 }  // namespace groomlab::py_bind

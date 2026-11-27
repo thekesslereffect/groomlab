@@ -35,6 +35,18 @@
 //    lockGain times the swing the photo shows, which reads about half a lock's);
 //    kept when the photos agree with it better than with the smooth guide. The rest take their
 //    traced neighbours' curl.
+//    Wavy hair (lockPaths): locks as objects, two scales. The fine directions follow each wave (at a
+//    crest the strands run across the lock: the back of loose curls reads as sideways bands), so the
+//    paths and lengths come from a coarse flow: in each view the locks' lines traced from seed roots
+//    over the scalp along the fine directions averaged over half a wave, each holding its own way (a
+//    lock turns slowly; a flow across it is a crest, not a turn; where the flow says little it falls),
+//    the clearest kept as locks and all of them laid into the view's coarse flow, which the grower and
+//    the lengths then read. A lock two views trace from the same root is triangulated (where each
+//    point's ray crosses the other view's line: its epipolar line); one seen once lies on the hair's
+//    surface (its thickness off the scalp under it). A lock's centreline takes the nearest root's
+//    place where the views agree with it at least as well as with the guide grown there. The fine
+//    scale gives the texture inside: each guide's wave as a view shows it along it (fitLock), baked
+//    in at waveGain times its swing; guides no view shows one for take their neighbours'.
 // 4. Symmetry (world X or the scalp's topology, scalp_mirror.h): every photo also judges each
 //    point's mirror image, so one three-quarter view covers both sides; the guides come in
 //    mirrored pairs (one grown, the other its mirror, as Mirror Group makes them).
@@ -99,6 +111,8 @@ struct RefCamera {
     Vec3f axis(int i) const;  // the camera's X (right), Y (up), Z (back: it looks down -Z) in world space
     // The point in pixels and its depth along the view; false behind the camera.
     bool project(const Vec3f& p, float& u, float& v, float* depth = nullptr) const;
+    // The ray through pixel (u, v) (pixels from the top-left; a pixel's middle at +0.5): unit, from the eye.
+    Vec3f ray(float u, float v) const;
     // The same camera for an image `scale` times the size.
     RefCamera scaled(double scale) const;
     // The same camera for the part of its image from (x0, y0), `w` x `h` pixels.
@@ -284,6 +298,14 @@ struct ReferenceGuideOptions {
     float lockGain = 2.4f;              // the curl's radius from the swing the photo shows (strands of a lock
                                         // out of phase and the field's smoothing read it about half: the
                                         // synthetic locks' calibration)
+    // Locks as objects (wavy hair, where the fine directions follow each wave, not the lock): in each
+    // view the locks' paths traced from their roots along the coarse flow (laid into it), matched across
+    // views and triangulated, their centrelines in roots' places where the views agree with them as well
+    // as with the grown guides, each guide carrying the fine wave a view shows (lockPaths, see 3. above).
+    // -1 on wavy hair (curly hair keeps lockCurls' tracing), 0 off, 1 on.
+    int lockPaths = -1;
+    float waveGain = 1.2f;              // the fine wave's size on a guide from the swing the photo shows (larger
+                                        // reads as frizz on the loose curls tried: IoU and flow fall)
 };
 
 struct ReferenceGuide {
@@ -355,6 +377,16 @@ struct ReferenceGuidesResult {
     // where they grow from (their root ends' rays onto the scalp), before the even spread fills in.
     int locksDetected = 0, lockRoots = 0;
     float lockRadius = 0.0f, lockWavelength = 0.0f;
+    // Lock paths (lockPaths), each view's: the locks traced (detected: lines from the roots along the
+    // coarse flow, none running along a clearer one), those another view traces from the same root
+    // (matched), of those the ones whose rays meet (triangulated: a 3D centreline), the rest placed
+    // from that view alone (on the hair's surface, the hair's thickness off the scalp).
+    struct LockViewCounts {
+        int detected = 0, matched = 0, triangulated = 0, singleView = 0;
+    };
+    std::vector<LockViewCounts> lockViews;
+    int lockGuides = 0;  // guides on lock centrelines (each in a root's place, where the views agree with it at
+                         // least as well as with the guide grown there)
     float rimLength = 0.0f;  // how far the hair reaches past the scalp's outline in the views (scene units, its rim)
     float reachLength = 0.0f;  // the same, its 90th percentile (what an automatic length starts from)
     float strandLength = 0.0f; // the strands' paths in the photos, their upper quartile (strandPathLength): long
@@ -381,11 +413,13 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
 // (the same crop, working size, mask and orientation field): the hair mask (automatic and refined,
 // or the given one, the touch-up strokes applied) at the working size, the part of the photo it
 // covers, and the orientation field as short line segments in the photo's pixels (one every
-// `lineSpacing` photo pixels where the field is confident inside the mask: x0, y0, x1, y1).
+// `lineSpacing` photo pixels where the field is confident inside the mask: x0, y0, x1, y1). On wavy
+// hair (lockPaths) the locks traced in the photo (root end first, photo pixels) and their flow.
 struct ReferenceViewPreview {
     RefImage mask;                    // one channel 0-1, `crop`'s part of the photo at the working size
     std::array<int, 4> crop{0, 0, 0, 0};  // x0, y0, w, h in photo pixels
     std::vector<std::array<float, 4>> flowLines;
+    std::vector<std::vector<std::array<float, 2>>> locks;
 };
 ReferenceViewPreview previewReferenceView(const ScalpMesh& scalp, const ReferenceView& view,
                                           const ReferenceGuideOptions& options = {}, float lineSpacing = 0.0f);
@@ -465,6 +499,13 @@ struct PhotoComparison {
     double flowAgreement = 0.0, flowAligned = 0.0;
     int flowPixels = 0;
 };
+// The photo's hair mask at the photo's own size (previewReferenceView's mask over its crop: 1 hair,
+// 0 backdrop, skin or outside the crop), rows top to bottom.
+std::vector<std::uint8_t> photoHairMask(const ScalpMesh& scalp, const ReferenceView& view, const ReferenceGuideOptions& options = {});
+// The depth along the view of a mesh's nearest surface through `camera`, `width` x `height`
+// pixels (infinity where it is not).
+std::vector<float> meshDepthMap(const ScalpMesh& mesh, const RefCamera& camera, int width, int height);
+
 PhotoComparison compareToPhoto(const ScalpMesh& scalp, const StrandSet& strands, const ReferenceView& view,
                                const ReferenceGuideOptions& options = {});
 

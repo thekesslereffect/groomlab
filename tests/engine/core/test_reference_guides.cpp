@@ -374,11 +374,11 @@ TEST(ReferenceGuidesEndToEnd, AKnownGroomGrowsBackFromItsPhotos) {
     for (const ReferenceView& v : shoot.views) {
         const PhotoComparison c = compareToPhoto(shoot.cap, strands, v, options);
         EXPECT_GT(c.photoPixels, 2000);
-        EXPECT_GT(c.iou, 0.68) << c.missedShare << " " << c.extraShare;
+        EXPECT_GT(c.iou, 0.7) << c.missedShare << " " << c.extraShare;
         EXPECT_NEAR(c.photoMelanin, 0.6f, 0.08f);
         sum += c.iou;
     }
-    EXPECT_GT(sum / static_cast<double>(shoot.views.size()), 0.72);
+    EXPECT_GT(sum / static_cast<double>(shoot.views.size()), 0.74);
 }
 
 // The same groom curling: its photos read as curly, with about the curls' period.
@@ -532,9 +532,9 @@ TEST(ReferenceGuidesEndToEnd, LongSweptBackWavesGrowBackFullLength) {
     }
     grown /= static_cast<double>(r.guides.size());
     near /= static_cast<double>(r.guides.size());
-    // (most of their length: where a lock falls away from the head below its middle the grower
-    // leaves it early; within a third for now)
-    EXPECT_GT(grown, 0.6 * truthLength);
+    // (as long as the locks, within a fifth: the hair hanging over the neck and down the back is
+    // hair, and a photo whose hair runs past its crop is worked on wider)
+    EXPECT_GT(grown, 0.8 * truthLength);
     EXPECT_LT(grown, 1.2 * truthLength);
     EXPECT_LT(near, 0.2);
     double following = 0.0, smoothed = 0.0, iou = 0.0;
@@ -546,6 +546,69 @@ TEST(ReferenceGuidesEndToEnd, LongSweptBackWavesGrowBackFullLength) {
     }
     EXPECT_GE(following, smoothed);
     EXPECT_GT(iou / 4.0, 0.6);
+}
+
+// Long hair in deep waves (each lock swinging side to side by about its own width): its crests run
+// across the locks for a moment, so the fine directions read sideways bands down the back. With the
+// locks' paths (lockPaths: traced along the coarse flow from their roots, holding their way through
+// the crests, matched across the views) the guides fall down the back where the hair hangs, clearly
+// more than without, about as long as the locks.
+TEST(ReferenceGuidesEndToEnd, DeepWavesFallThroughTheirCrests) {
+    const SyntheticShoot shoot = sweptBackShoot(0.6f, 150, 0.45f, 0.1f);
+    ReferenceGuideOptions options;
+    options.symmetry = ReferenceSymmetry::None;
+    options.occluders.push_back(shoot.head);
+    options.guideCount = 80;
+    double truthLength = 0.0;
+    for (const auto& axis : shoot.lockAxes) truthLength += arcLength(axis);
+    truthLength /= static_cast<double>(shoot.lockAxes.size());
+    // (how long the guides are, and below the ball's middle how much of their way past the curls falls)
+    auto measure = [](const ReferenceGuidesResult& r, double& length, double& fall) {
+        double down = 0.0, along = 0.0;
+        length = 0.0;
+        for (const ReferenceGuide& g : r.guides) {
+            length += arcLength(g.points);
+            std::vector<Vec3f> pts = resampleByArcLength(g.points.data(), g.points.size(), 64);
+            for (int it = 0; it < 100; ++it) {
+                std::vector<Vec3f> next = pts;
+                for (std::size_t k = 1; k + 1 < pts.size(); ++k) next[k] = pts[k] * 0.5f + (pts[k - 1] + pts[k + 1]) * 0.25f;
+                pts.swap(next);
+            }
+            for (std::size_t i = 1; i < pts.size(); ++i) {
+                if (pts[i].y > -0.2f) continue;
+                const Vec3f d = pts[i] - pts[i - 1];
+                down += -d.y;
+                along += d.length();
+            }
+        }
+        length /= static_cast<double>(std::max<std::size_t>(1, r.guides.size()));
+        fall = along > 0.0 ? down / along : 0.0;
+    };
+    options.lockPaths = 1;
+    const ReferenceGuidesResult r = guidesFromReference(shoot.cap, shoot.views, options);
+    options.lockPaths = 0;
+    const ReferenceGuidesResult plain = guidesFromReference(shoot.cap, shoot.views, options);
+    ASSERT_GT(r.guides.size(), 40u);
+    ASSERT_EQ(r.lockViews.size(), shoot.views.size());
+    int detected = 0, matched = 0, triangulated = 0;
+    for (const auto& c : r.lockViews) {
+        detected += c.detected;
+        matched += c.matched;
+        triangulated += c.triangulated;
+        EXPECT_EQ(c.triangulated + c.singleView, c.detected);
+    }
+    EXPECT_GT(detected, 20);
+    EXPECT_GT(matched, detected / 2);
+    EXPECT_GT(triangulated, 5);
+    EXPECT_GT(r.lockGuides, 5);
+    EXPECT_TRUE(plain.lockViews.empty());
+    double length = 0.0, fall = 0.0, plainLength = 0.0, plainFall = 0.0;
+    measure(r, length, fall);
+    measure(plain, plainLength, plainFall);
+    EXPECT_GT(length, 0.8 * truthLength);
+    EXPECT_LT(length, 1.2 * truthLength);
+    EXPECT_GT(fall, 0.7);
+    EXPECT_GT(fall, plainFall + 0.1);
 }
 
 TEST(ReferenceLook, ClumpsAreTheBrightnessPeriodAcrossTheFlow) {

@@ -17,6 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/hair_shell.h"
 #include "groomlab/reference_edit.h"
 #include "groomlab/reference_guides.h"
 #include "groomlab/transfer_markers_edit.h"
@@ -122,5 +123,14 @@ std::vector<std::uint8_t> comparisonPng(const RefImage& image, const PhotoCompar
 // photo point (green) and its mesh point through the camera (red) joined by a line: how well it
 // lines up.
 std::vector<std::uint8_t> photoOverlayPng(const RefImage& image, const ScalpMesh& scalp, const AgentPhoto& photo, int maxSize);
+
+// hair_shell's picture over a lined-up photo: the photo dimmed, the head's outline (cyan) and the
+// hair shell's points the camera sees (not behind the head), thin blue to thick yellow.
+std::vector<std::uint8_t> shellOverlayPng(const RefImage& image, const RefCamera& camera, const HairShell& shell, int maxSize);
+// guides_from_strokes' picture over a photo: the strokes as read (red, the root a ring) and the
+// guides made from them through the photo's camera (yellow, the root a dot).
+std::vector<std::uint8_t> strokesOverlayPng(const RefImage& image, const RefCamera& camera,
+                                            const std::vector<std::vector<std::array<float, 2>>>& strokes,
+                                            const std::vector<std::vector<Vec3f>>& guides, int maxSize);
 
 }  // namespace groomlab::agent

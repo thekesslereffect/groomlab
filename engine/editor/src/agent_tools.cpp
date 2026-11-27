@@ -41,6 +41,9 @@
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/guide_hierarchy.h"
+#include "groomlab/hair_shell.h"
+#include "groomlab/lock_guides.h"
+#include "groomlab/random.h"
 #include "groomlab/node_library.h"
 #include "groomlab/presets.h"
 #include "groomlab/schema.h"
@@ -1599,6 +1602,11 @@ struct AgentTools::Impl {
         const GuideHierarchy& h = live ? *live : stored;
         const std::string only = str(a, "group");
         const std::size_t limit = static_cast<std::size_t>(std::clamp(num(a, "limit", 100.0), 1.0, 2000.0));
+        const bool withPoints = a.value("with_points", false);
+        std::set<GuideId> onlyIds;
+        if (a.contains("ids") && a["ids"].is_array()) {
+            for (const json& id : a["ids"]) onlyIds.insert(id.get<GuideId>());
+        }
         json groups = json::array();
         for (const GuideGroup& gr : h.groups()) {
             json e = {{"name", gr.name}, {"depth", h.groupDepth(gr.id)}, {"guides", h.guidesInGroup(gr.id).size()}};
@@ -1610,6 +1618,7 @@ struct AgentTools::Impl {
         for (const HierarchyGuide& guide : h.guides()) {
             const GuideGroup* gr = h.group(guide.group);
             if (!only.empty() && (!gr || gr->name != only)) continue;
+            if (!onlyIds.empty() && !onlyIds.count(guide.id)) continue;
             ++total;
             if (guides.size() >= limit || guide.points.empty()) continue;
             float length = 0.0f;
@@ -1624,6 +1633,11 @@ struct AgentTools::Impl {
             json e = {{"id", guide.id}, {"group", gr ? gr->name : std::string()}, {"root", vec(guide.points.front())},
                       {"tip", vec(guide.points.back())}, {"length", r4(length)}, {"points", guide.points.size()}, {"tube", t}};
             if (guide.isChild()) e["parent"] = guide.parent;
+            if (withPoints) {
+                json positions = json::array();
+                for (const Vec3f& q : guide.points) positions.push_back(vec(q));
+                e["positions"] = positions;
+            }
             guides.push_back(e);
         }
         json out = {{"groom", g.name()}, {"groups", groups}, {"guides", guides}, {"count", total}};
@@ -2369,64 +2383,90 @@ struct AgentTools::Impl {
                            {"ms", static_cast<long long>(report.milliseconds + 0.5)}});
     }
 
+    // Points spread evenly over the scalp: candidates over its area (a fixed seed), those `keep`
+    // takes, then the farthest apart of them, the highest first, `count` or until the next is nearer
+    // than `minSpacing` to the ones taken.
+    struct ScalpSpot {
+        StrandRoot root;
+        Vec3f p, n;
+    };
+    std::vector<ScalpSpot> spreadOnScalp(const ScalpMesh& scalp, std::size_t count, float minSpacing, const Vec3f& up,
+                                         const std::function<bool(const ScalpSpot&)>& keep) {
+        std::vector<double> cumulative;
+        double total = 0.0;
+        const auto& pts = scalp.points();
+        for (const auto& t : scalp.triangles()) {
+            const Vec3f& p0 = pts[static_cast<std::size_t>(t[0])];
+            total += 0.5 * static_cast<double>((pts[static_cast<std::size_t>(t[1])] - p0).cross(pts[static_cast<std::size_t>(t[2])] - p0).length());
+            cumulative.push_back(total);
+        }
+        Random rng{0x67726F6F6D6C6162ull};
+        std::vector<ScalpSpot> candidates;
+        const std::size_t tries = std::max<std::size_t>(count * 12, minSpacing > 0.0f ? 6000 : 0);
+        for (std::size_t i = 0; i < tries && total > 0.0; ++i) {
+            const double pick = rng.unit() * total;
+            const std::size_t face = static_cast<std::size_t>(std::lower_bound(cumulative.begin(), cumulative.end(), pick) - cumulative.begin());
+            float su = static_cast<float>(std::sqrt(rng.unit())), v = static_cast<float>(rng.unit());
+            ScalpSpot spot;
+            spot.root.face = static_cast<std::int32_t>(std::min(face, cumulative.size() - 1));
+            spot.root.u = su * (1.0f - v);
+            spot.root.v = su * v;
+            spot.p = scalp.position(spot.root);
+            spot.n = scalp.normal(spot.root);
+            if (keep && !keep(spot)) continue;
+            candidates.push_back(spot);
+        }
+        std::vector<ScalpSpot> chosen;
+        if (candidates.empty()) return chosen;
+        std::vector<float> nearest(candidates.size(), 1e30f);
+        std::size_t next = 0;  // the highest candidate first
+        for (std::size_t i = 1; i < candidates.size(); ++i) {
+            if (candidates[i].p.dot(up) > candidates[next].p.dot(up)) next = i;
+        }
+        while (chosen.size() < std::min(count, candidates.size())) {
+            chosen.push_back(candidates[next]);
+            const Vec3f last = candidates[next].p;
+            float farthest = -1.0f;
+            for (std::size_t i = 0; i < candidates.size(); ++i) {
+                nearest[i] = std::min(nearest[i], (candidates[i].p - last).length());
+                if (nearest[i] > farthest) {
+                    farthest = nearest[i];
+                    next = i;
+                }
+            }
+            if (farthest <= 0.0f || farthest < minSpacing) break;
+        }
+        return chosen;
+    }
+
     ToolResult sampleScalp(const json& a) {
         AgentGroom& g = target.groom(str(a, "groom"));
         const MeshPtr scalp = scalpOf(g);
         const std::size_t count = static_cast<std::size_t>(std::clamp(num(a, "count", 40.0), 1.0, 500.0));
         const bool facing = a.contains("min_up");
         const float minUp = static_cast<float>(num(a, "min_up", -1.0));
+        const float minSpacing = static_cast<float>(num(a, "min_spacing", 0.0));
+        if (!(minSpacing >= 0.0f)) throw ToolError("min_spacing must be 0 or more (scene units)");
+        const std::string region = str(a, "region", "all");
         const Vec3f up = upOf(g);
         Vec3f boxLo(-1e30f, -1e30f, -1e30f), boxHi(1e30f, 1e30f, 1e30f);
         if (a.contains("box_min")) boxLo = toPoint(a["box_min"], "box_min");
         if (a.contains("box_max")) boxHi = toPoint(a["box_max"], "box_max");
-        // Candidates spread over the area, then the farthest apart of them: an even spread.
-        std::vector<double> cumulative;
-        double total = 0.0;
-        const auto& pts = scalp->points();
-        for (const auto& t : scalp->triangles()) {
-            const Vec3f& p0 = pts[static_cast<std::size_t>(t[0])];
-            total += 0.5 * static_cast<double>((pts[static_cast<std::size_t>(t[1])] - p0).cross(pts[static_cast<std::size_t>(t[2])] - p0).length());
-            cumulative.push_back(total);
-        }
-        Random rng{0x67726F6F6D6C6162ull};
-        std::vector<std::pair<Vec3f, Vec3f>> candidates;
-        for (std::size_t i = 0; i < count * 12 && total > 0.0; ++i) {
-            const double pick = rng.unit() * total;
-            const std::size_t face = static_cast<std::size_t>(std::lower_bound(cumulative.begin(), cumulative.end(), pick) - cumulative.begin());
-            float su = static_cast<float>(std::sqrt(rng.unit())), v = static_cast<float>(rng.unit());
-            StrandRoot root;
-            root.face = static_cast<std::int32_t>(std::min(face, cumulative.size() - 1));
-            root.u = su * (1.0f - v);
-            root.v = su * v;
-            const Vec3f p = scalp->position(root), n = scalp->normal(root);
-            if (facing && n.dot(up) < minUp) continue;
-            if (p.x < boxLo.x || p.y < boxLo.y || p.z < boxLo.z || p.x > boxHi.x || p.y > boxHi.y || p.z > boxHi.z) continue;
-            candidates.emplace_back(p, n);
-        }
-        if (candidates.empty()) throw ToolError("no scalp area matches (loosen min_up or the box)");
-        std::vector<std::size_t> chosen;
-        std::vector<float> nearest(candidates.size(), 1e30f);
-        std::size_t next = 0;  // the highest candidate first
-        for (std::size_t i = 1; i < candidates.size(); ++i) {
-            if (candidates[i].first.dot(up) > candidates[next].first.dot(up)) next = i;
-        }
-        while (chosen.size() < std::min(count, candidates.size())) {
-            chosen.push_back(next);
-            const Vec3f last = candidates[next].first;
-            float farthest = -1.0f;
-            for (std::size_t i = 0; i < candidates.size(); ++i) {
-                nearest[i] = std::min(nearest[i], (candidates[i].first - last).length());
-                if (nearest[i] > farthest) {
-                    farthest = nearest[i];
-                    next = i;
-                }
-            }
-            if (farthest <= 0.0f) break;
-        }
+        const std::vector<float> hair = region == "hair" ? hairWeightsOf(g, scalp) : std::vector<float>{};
+        const std::vector<ScalpSpot> spots = spreadOnScalp(*scalp, count, minSpacing, up, [&](const ScalpSpot& s) {
+            if (facing && s.n.dot(up) < minUp) return false;
+            const Vec3f& p = s.p;
+            if (p.x < boxLo.x || p.y < boxLo.y || p.z < boxLo.z || p.x > boxHi.x || p.y > boxHi.y || p.z > boxHi.z) return false;
+            return hair.empty() || weightAt(*scalp, hair, s.root) >= 0.5f;
+        });
+        if (spots.empty()) throw ToolError(region == "hair" ? "no scalp area matches in the hair region (loosen min_up or the box)"
+                                                            : "no scalp area matches (loosen min_up or the box)");
         json points = json::array();
-        for (const std::size_t i : chosen) points.push_back({{"p", vec(candidates[i].first)}, {"n", vec(candidates[i].second)}});
-        return textResult({{"groom", g.name()}, {"points", points}, {"upAxis", g.upAxis()},
-                           {"hint", "add_guides takes these as roots: {\"root\": p, \"length\": ..., \"droop\": 0.5} grows a guide along n."}});
+        for (const ScalpSpot& s : spots) points.push_back({{"p", vec(s.p)}, {"n", vec(s.n)}});
+        json out = {{"groom", g.name()}, {"points", points}, {"upAxis", g.upAxis()}, {"region", region},
+                    {"hint", "add_guides takes these as roots: {\"root\": p, \"length\": ..., \"droop\": 0.5} grows a guide along n."}};
+        if (spots.size() < count) out["note"] = "fewer points than asked: the area (or min_spacing) holds no more";
+        return textResult(out);
     }
 
     // ---- groom by hand ----
@@ -2700,6 +2740,13 @@ struct AgentTools::Impl {
                 if (!id.is_number_integer()) throw ToolError("guides are guide ids (get_guides, select_guides)");
                 given.push_back(id.get<GuideId>());
             }
+        } else if (opName == "delete_guides" && a.contains("group")) {
+            // (a whole group's guides; the group stays)
+            const GuideHierarchy h = hierarchyOf(g);
+            const GroupId group = h.findGroup(str(a, "group"));
+            if (group == kNoGroup) throw ToolError("no guide group '" + str(a, "group") + "'");
+            given = h.guidesInGroup(group);
+            if (given.empty()) return textResult(withSummary(g, {{"op", opName}, {"group", str(a, "group")}, {"count", 0}}));
         } else {
             given = g.selection;
         }
@@ -3027,8 +3074,8 @@ struct AgentTools::Impl {
 
     static json cameraInfo(const RefCamera& c) {
         const Vec3f look = -c.axis(2);
-        return {{"eye", vec(c.eye())}, {"looking", vec(look)}, {"focal_mm", r4(focalPixelsToMm(c.focalPx, c.width))},
-                {"width", c.width}, {"height", c.height}};
+        return {{"eye", vec(c.eye())}, {"looking", vec(look)}, {"up", vec(c.axis(1))},
+                {"focal_mm", r4(focalPixelsToMm(c.focalPx, c.width))}, {"width", c.width}, {"height", c.height}};
     }
 
     ToolResult addPhoto(const json& a) {
@@ -3107,7 +3154,10 @@ struct AgentTools::Impl {
             analysisOptions.up = upOf(g);
             if (hair.head) analysisOptions.occluders.push_back(hair.head);
             preview = previewReferenceView(*hair.scalp, view, analysisOptions);
-            info["analysis"] = "pink: the hair mask guides_from_photos reads; cyan: the strands' flow it reads";
+            info["analysis"] = "pink: the hair mask guides_from_photos reads; cyan: the strands' flow it reads (on wavy hair the "
+                               "locks' flow); yellow: the locks it traces (wavy hair: from their roots along the flow, root end "
+                               "first)";
+            info["locks"] = preview->locks.size();
         }
         int shownW = 0, shownH = 0;
         const auto png = photoGridPng(image, p, step, size, preview ? &*preview : nullptr, &shownW, &shownH);
@@ -3543,8 +3593,17 @@ struct AgentTools::Impl {
         HairScalp out{scalp, nullptr};
         const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalp);
         if (!face->head) return out;
-        // The region per vertex: the density map's (it is on the raw scalp, the refined one's points
-        // first) when its count fits, else the landmarks' hairline.
+        const MeshPtr cap = capOf(*scalp, hairWeightsOf(g, scalp));
+        if (!cap) return out;
+        out.scalp = cap;
+        out.head = scalp;
+        return out;
+    }
+
+    // Where hair grows, a weight per point of `scalp` (0-1, 0.5 the edge): the map Scatter's density
+    // reads (on the raw scalp, the refined one's points first) when its count fits, else on a whole
+    // head the face's landmarks' hairline, else 1.
+    std::vector<float> hairWeightsOf(AgentGroom& g, const MeshPtr& scalp) {
         std::vector<float> weight(scalp->pointCount(), -1.0f);
         try {
             const std::string graph = graphText(g);
@@ -3563,15 +3622,23 @@ struct AgentTools::Impl {
             }
         } catch (const std::exception&) {
         }
+        const std::shared_ptr<const FaceLandmarks> face = faceOf(g, scalp);
         const ScalpLandmarks marks = scalpLandmarks(*scalp, g.upAxis());
         for (std::size_t i = 0; i < weight.size(); ++i) {
-            if (weight[i] < 0.0f) weight[i] = hairRegionWeight(*face, marks, scalp->points()[i]);
+            if (weight[i] < 0.0f) weight[i] = face->head ? hairRegionWeight(*face, marks, scalp->points()[i]) : 1.0f;
         }
-        const MeshPtr cap = capOf(*scalp, weight);
-        if (!cap) return out;
-        out.scalp = cap;
-        out.head = scalp;
-        return out;
+        return weight;
+    }
+
+    // A weight per point at a spot on the scalp (its triangle's corners blended).
+    static float weightAt(const ScalpMesh& scalp, const std::vector<float>& weight, const StrandRoot& root) {
+        if (root.face < 0 || static_cast<std::size_t>(root.face) >= scalp.triangleCount()) return 0.0f;
+        const auto& t = scalp.triangles()[static_cast<std::size_t>(root.face)];
+        auto w = [&](int k) {
+            const std::size_t i = static_cast<std::size_t>(t[static_cast<std::size_t>(k)]);
+            return i < weight.size() ? weight[i] : 1.0f;
+        };
+        return w(0) * (1.0f - root.u - root.v) + w(1) * root.u + w(2) * root.v;
     }
 
     ToolResult compareToPhotoTool(const json& a) {
@@ -3714,6 +3781,7 @@ struct AgentTools::Impl {
         options.maxLength = static_cast<float>(num(a, "max_length", 0.0));
         options.symmetry = referenceSymmetryFromName(str(a, "symmetry", "auto"));
         options.lockCurls = flag(a, "locks", true);
+        if (a.contains("lock_paths")) options.lockPaths = flag(a, "lock_paths", true) ? 1 : 0;
         if (a.contains("volume")) {
             const double volume = num(a, "volume", 0.75);
             if (volume < 0.0 || volume > 1.5) throw ToolError("volume is 0 to 1.5 (a share of the hair's thickness the photos show)");
@@ -3770,6 +3838,22 @@ struct AgentTools::Impl {
                     {"rootsTried", result.rootsTried}, {"rootsBald", result.rootsBald}, {"rootsUnseen", result.rootsUnseen},
                     {"rootsShort", result.rootsShort}, {"maxLength", r4(result.maxLength)}, {"strandLength", r4(result.strandLength)},
                     {"seconds", r4(result.seconds)}};
+        if (!result.lockViews.empty()) {
+            // (each lined-up photo's locks, in the order the views were given)
+            json perPhoto = json::array();
+            for (std::size_t k = 0; k < result.lockViews.size() && k < used.size(); ++k) {
+                const auto& c = result.lockViews[k];
+                perPhoto.push_back({{"photo", used[k]}, {"detected", c.detected}, {"matched", c.matched},
+                                    {"triangulated", c.triangulated}, {"singleView", c.singleView}});
+            }
+            out["lockPaths"] = {{"photos", perPhoto}, {"lockGuides", result.lockGuides},
+                                {"about", "Wavy hair: in each photo the locks' paths traced from their roots along the coarse flow "
+                                          "(detected), those another photo traces from the same root (matched), of those the ones "
+                                          "whose rays meet (triangulated: a 3D centreline), the rest placed from one photo on the "
+                                          "hair's surface (singleView). lockGuides: lock centrelines that took a root's place where "
+                                          "the photos agree with them at least as well as with the guide grown there; the other "
+                                          "guides grow along the locks' flow. photo_view analysis shows the locks (yellow)."}};
+        }
         const ReferenceLookFit& look = result.look;
         LockLook locks;
         locks.waves = look.wavy;
@@ -3781,12 +3865,12 @@ struct AgentTools::Impl {
             out["locks"] = {{"detected", result.locksDetected}, {"rootsAtLocks", result.lockRoots},
                             {"traced", result.locksTraced}, {"filled", result.locksFilled}, {"radius", r4(result.lockRadius)},
                             {"turnLength", r4(result.lockWavelength)},
-                            {"about", "detected: the locks the photos show (streamlines curling clearly); rootsAtLocks: the roots "
-                                      "taken where they grow from (the rest spread evenly); each guide follows a lock: traced, the "
-                                      "curl a photo shows along it (moved onto the lock, "
-                                      "its turn, size, phase and handedness); filled, its traced neighbours' curl where no "
-                                      "photo shows one. Scene units. apply_look clumps each guide's strands onto it "
-                                      "(Clump centersFrom inputCurves, strength per lock from the guides' lockStrength) "
+                            {"about", "detected: the locks the photos show (curly hair: streamlines curling clearly; wavy hair: "
+                                      "the locks lockPaths traced); rootsAtLocks: the roots taken where they grow from (the rest "
+                                      "spread evenly); each guide follows a lock: traced, the curl or wave a photo shows along it "
+                                      "(curly: moved onto the lock; its turn, size, phase and handedness); filled, its traced "
+                                      "neighbours' where no photo shows one. Scene units. apply_look clumps each guide's strands "
+                                      "onto it (Clump centersFrom inputCurves, strength per lock from the guides' lockStrength) "
                                       "instead of a Curl node over every strand."}};
         }
         if (look.ok) {
@@ -3844,6 +3928,708 @@ struct AgentTools::Impl {
                                "from the priors). Line up a photo from each (align_photo with view), then grow again.";
         }
         return textResult(withSummary(g, out));
+    }
+
+    // ---- lock guides: strokes on photos, combing, the hair's shell (lock_guides.h, hair_shell.h) ----
+    // What the lock tools work round: where hair grows (and the whole head), the head's frame (a
+    // sphere fitted to the hair region), and the hair's shell (from the lined-up photos, else a
+    // guessed volume over the head), kept while the scalp and photos stay as they are.
+    struct LockSetup {
+        HairScalp hair;
+        HeadFrame frame;
+        std::shared_ptr<const HairShell> shell;
+        bool photos = false;
+    };
+    std::map<std::string, std::shared_ptr<const HairShell>> shells;
+
+    // `depth`: "auto" (the photos when some are lined up), "photos", "volume"; `volume` > 0: the
+    // guessed hair's thickness over the head (scene units).
+    LockSetup lockSetup(AgentGroom& g, const std::string& depth, double volume) {
+        if (depth != "auto" && depth != "photos" && depth != "volume") throw ToolError("depth is auto, photos or volume");
+        if (volume < 0.0) throw ToolError("volume must be positive (scene units)");
+        LockSetup s;
+        s.hair = hairScalpOf(g);
+        const ScalpFrame sf = ScalpFrame::of(g.upAxis());
+        s.frame = headFrameOf(*s.hair.scalp, sf.up, sf.front);
+        const ScalpMesh& head = s.hair.head ? *s.hair.head : *s.hair.scalp;
+        HairShellOptions o;
+        if (volume > 0.0) o.volume = static_cast<float>(volume);
+        std::vector<ReferenceView> views;
+        if (depth != "volume") views = linedUpViews(g);
+        if (depth == "photos" && views.empty()) throw ToolError("depth photos: no photo is lined up yet (align_photo)");
+        std::uint64_t key = hashCombine(head.contentHash(), s.hair.scalp->contentHash());
+        key = hashDouble(key, volume);
+        key = hashString(key, g.upAxis());
+        if (!views.empty()) key = hashString(key, g.referencePhotos);
+        const std::string k = std::to_string(key) + (views.empty() ? "v" : "p");
+        auto it = shells.find(k);
+        if (it != shells.end()) {
+            s.shell = it->second;
+        } else {
+            if (shells.size() > 8) shells.clear();
+            if (views.empty()) {
+                s.shell = std::make_shared<const HairShell>(HairShell::fromVolume(head, s.frame, o));
+            } else {
+                ReferenceGuideOptions viewOptions;
+                viewOptions.up = upOf(g);
+                viewOptions.lockPaths = 0;  // (the masks alone: no locks traced)
+                if (s.hair.head) viewOptions.occluders.push_back(s.hair.head);
+                s.shell = std::make_shared<const HairShell>(HairShell::fromPhotos(head, *s.hair.scalp, s.frame, views, viewOptions, o));
+            }
+            shells[k] = s.shell;
+        }
+        s.photos = s.shell->photoCount() > 0;
+        return s;
+    }
+
+    static json frameJson(const HeadFrame& f) {
+        return {{"center", vec(f.center)}, {"radius", r4(f.radius)}, {"up", vec(f.up)}, {"front", vec(f.front)}, {"left", vec(f.left)}};
+    }
+
+    // The comb's settings (comb_guides' arguments, guides_from_strokes' comb), their schema.
+    static json combProperties() {
+        return {
+            {"part", {{"type", json::array({"string", "number", "array"})},
+                      {"description", "The part: \"center\" (default), \"none\" (the front sweeps straight back), a number (its offset "
+                                      "toward the character's left from the head's middle, scene units), or two points it runs through, "
+                                      "front first ([x, y, z] or landmark names, e.g. [\"front_hairline\", \"crown\"])."}}},
+            {"sweep", objectSchema({{"front", enumProp({"back", "out", "forward"}, "The front: back over the top (default), out to the sides, forward (a fringe).")},
+                                    {"sides", enumProp({"back", "down"}, "The sides: back over the ears (default) or down.")},
+                                    {"back", enumProp({"down"}, "The back falls down.")}})},
+            {"lengths", objectSchema({{"top", prop("number", "Scene units.")}, {"front", prop("number", "Scene units.")},
+                                      {"sides", prop("number", "Scene units.")}, {"back", prop("number", "Scene units.")},
+                                      {"nape", prop("number", "Scene units.")}})},
+            {"length_random", prop("number", "Each guide's length times 1 +- this (default 0.2).")},
+            {"ride", prop("number", "How far off the head the guides ride: a share of the hair shell's thickness (default 0.8).")},
+            {"wave", objectSchema({{"amplitude", prop("number", "The S-wave across the flow, scene units (default 0.08 head radii; 0 none).")},
+                                   {"wavelength", prop("number", "Its period along the guide, scene units (default half a head radius).")},
+                                   {"coherence", prop("number", "0-1: 1 neighbours' waves in step (locks band together), 0 random (default 0.8).")}})},
+            {"flip", prop("number", "The tips' flip out and up, scene units (default 0.12 head radii; 0 none).")},
+            {"rise", prop("number", "0-1: how far roots high on the head stand up before lying down (default 1).")},
+            {"clip", prop("boolean", "Cut guides where the lined-up photos show the hair end (default true).")},
+            {"seed", prop("integer", "The random seed (lengths, waves).")}};
+    }
+
+    CombOptions combOptionsOf(AgentGroom& g, const json& c, const HeadFrame& frame) {
+        CombOptions o;
+        const std::string part = !c.contains("part") ? std::string("center") : c["part"].is_string() ? c["part"].get<std::string>() : std::string();
+        if (part == "center") {
+            o.part = {true, frame.center, frame.left};
+        } else if (part == "none") {
+            o.part.on = false;
+        } else if (c["part"].is_number()) {
+            const float x = c["part"].get<float>();
+            if (!std::isfinite(x) || std::abs(x) > 2.0f * frame.radius) throw ToolError("part's offset must be within the head");
+            o.part = {true, frame.center + frame.left * x, frame.left};
+        } else if (c["part"].is_array() && c["part"].size() == 2) {
+            const ScalpLandmarks marks = landmarksOf(g);
+            const Vec3f a = pointOrLandmark(c["part"][0], marks, "part"), b = pointOrLandmark(c["part"][1], marks, "part");
+            Vec3f n = (b - a).cross(frame.up);
+            if (n.length() < 1e-6f * frame.radius) throw ToolError("part's two points must not lie along up");
+            n = n.normalized();
+            if (n.dot(frame.left) < 0.0f) n = -n;
+            o.part = {true, a, n};
+        } else {
+            throw ToolError("part is \"center\", \"none\", an offset (scene units) or two points");
+        }
+        if (c.contains("sweep")) {
+            const json sw = checkArguments(combProperties()["sweep"], c["sweep"]);
+            const std::string front = str(sw, "front", "back"), sides = str(sw, "sides", "back");
+            o.front = front == "out" ? FrontSweep::Out : front == "forward" ? FrontSweep::Forward : FrontSweep::Back;
+            o.sides = sides == "down" ? SideSweep::Down : SideSweep::Back;
+        }
+        if (c.contains("lengths")) {
+            const json l = checkArguments(combProperties()["lengths"], c["lengths"]);
+            auto len = [&](const char* k) {
+                const double v = num(l, k, 0.0);
+                if (v < 0.0 || v > 20.0 * frame.radius) throw ToolError(std::string("lengths.") + k + " must be positive and within 20 head radii");
+                return static_cast<float>(v);
+            };
+            o.lengths.top = len("top");
+            o.lengths.front = len("front");
+            o.lengths.sides = len("sides");
+            o.lengths.back = len("back");
+            o.lengths.nape = len("nape");
+        }
+        o.lengthRandom = static_cast<float>(std::clamp(num(c, "length_random", 0.2), 0.0, 0.9));
+        o.ride = static_cast<float>(num(c, "ride", 0.8));
+        if (o.ride < 0.0f || o.ride > 1.5f) throw ToolError("ride is 0 to 1.5 (a share of the shell's thickness)");
+        if (c.contains("wave")) {
+            const json w = checkArguments(combProperties()["wave"], c["wave"]);
+            o.amplitude = static_cast<float>(num(w, "amplitude", -1.0));
+            o.wavelength = static_cast<float>(num(w, "wavelength", 0.0));
+            o.coherence = static_cast<float>(std::clamp(num(w, "coherence", 0.8), 0.0, 1.0));
+            if (w.contains("amplitude") && (o.amplitude < 0.0f || o.amplitude > frame.radius)) throw ToolError("wave.amplitude must be 0 to a head radius");
+            if (w.contains("wavelength") && !(o.wavelength > 0.0f)) throw ToolError("wave.wavelength must be positive");
+        }
+        if (c.contains("flip")) {
+            o.flip = static_cast<float>(num(c, "flip", 0.0));
+            if (o.flip < 0.0f || o.flip > frame.radius) throw ToolError("flip must be 0 to a head radius");
+        }
+        o.rise = static_cast<float>(std::clamp(num(c, "rise", 1.0), 0.0, 1.0));
+        o.clip = flag(c, "clip", true);
+        o.seed = static_cast<std::uint64_t>(std::max(0.0, num(c, "seed", 1.0)));
+        return o;
+    }
+
+    // Roots over the hair region: `count` spread evenly (or as many as `spacing` apart allows), on
+    // the head's outside (not in a mouth or throat a head mesh holds: closed in along its normal and
+    // outward from the head's middle), less those the photos show bare (dropBare: a view sees skin
+    // or backdrop just over them).
+    std::vector<Vec3f> lockRoots(AgentGroom& g, const LockSetup& s, int count, double spacing, bool dropBare, int* dropped) {
+        const MeshPtr scalp = scalpOf(g);
+        const std::vector<float> weight = hairWeightsOf(g, scalp);
+        const float R = s.frame.radius;
+        auto inside = [&](const ScalpSpot& sp) {
+            SurfacePoint hit;
+            float t = 0.0f;
+            const Vec3f u = (sp.p - s.frame.center).normalized();
+            return scalp->intersectRay(sp.p + sp.n * (0.01f * R), sp.n, &hit, &t) && scalp->intersectRay(sp.p + u * (0.01f * R), u, &hit, &t);
+        };
+        const std::size_t want = spacing > 0.0 ? std::size_t{4000} : static_cast<std::size_t>(count);
+        const std::vector<ScalpSpot> spots = spreadOnScalp(*scalp, want, static_cast<float>(spacing), upOf(g), [&](const ScalpSpot& sp) {
+            return weightAt(*scalp, weight, sp.root) >= 0.5f && !inside(sp);
+        });
+        std::vector<Vec3f> roots;
+        int bare = 0;
+        for (const ScalpSpot& sp : spots) {
+            if (dropBare && s.photos && s.shell->seenBare(sp.p + sp.n * (0.05f * R))) {
+                ++bare;
+                continue;
+            }
+            roots.push_back(sp.p);
+        }
+        if (dropped) *dropped = bare;
+        return roots;
+    }
+
+    // The lock look (guides as locks): the guides the clumps' centers (Clump centersFrom
+    // inputCurves, strong, the tips fitted, volumized), finer clumps inside them (subClump), the
+    // tips trimmed unevenly (tipTrim), no hair below the lowest guide roots (a hairline Cull), a Curl
+    // over every strand removed. On `graph` (nodes added where missing, kept where there).
+    json applyLockLook(AgentGroom& g, std::string& graph, float headRadius, float hairline) {
+        json done = json::object();
+        auto nodes = [&]() { return json::parse(graph).value("nodes", json::array()); };
+        auto firstOf = [&](const std::string& type, const std::string& notNamed) {
+            for (const json& n : nodes())
+                if (n.value("type", std::string()) == type && n.value("name", std::string()) != notNamed) return n.value("name", std::string());
+            return std::string();
+        };
+        auto named = [&](const std::string& name) {
+            for (const json& n : nodes())
+                if (n.value("name", std::string()) == name) return true;
+            return false;
+        };
+        auto setParams = [&](const std::string& node, const json& values) {
+            const json spec = json::parse(GraphEdit(graph).nodeSpecJson(node));
+            json gj = json::parse(graph);
+            json set = json::object(), skipped = json::array();
+            for (json& n : gj["nodes"]) {
+                if (n.value("name", std::string()) != node) continue;
+                if (!n.contains("params") || !n["params"].is_object()) n["params"] = json::object();
+                for (const auto& [param, value] : values.items()) {
+                    if (paramSpecOf(spec, param).is_null()) {
+                        skipped.push_back(param);
+                        continue;
+                    }
+                    n["params"][param] = value;
+                    set[param] = value;
+                }
+            }
+            graph = gj.dump();
+            json out = {{"node", node}, {"set", set}};
+            if (!skipped.empty()) out["skipped"] = skipped;
+            return out;
+        };
+        auto addAfter = [&](const std::string& type, const std::string& name, const std::string& after) {
+            GraphEdit e(graph);
+            const std::string made = e.addNode(type, name, std::string(), std::nullopt, std::nullopt, fitSize(g));
+            insertAfter(e, made, after);
+            graph = e.toJson();
+            return made;
+        };
+        const std::string curl = firstOf("Curl", "");
+        if (!curl.empty()) {
+            GraphEdit e(graph);
+            e.removeNode(curl);
+            graph = e.toJson();
+            done["Curl"] = {{"node", curl}, {"removed", true}};
+        }
+        std::string clump = firstOf("Clump", "subClump");
+        bool added = false;
+        if (clump.empty()) {
+            GraphEdit e(graph);
+            clump = e.addNode("Clump", "", std::string(), std::nullopt, std::nullopt, fitSize(g));
+            const std::string anchor = firstOf("HairColor", "").empty() ? firstOf("Width", "") : firstOf("HairColor", "");
+            if (!anchor.empty()) insertBefore(e, clump, anchor);
+            graph = e.toJson();
+            added = true;
+        }
+        done["clump"] = setParams(clump, {{"centersFrom", "inputCurves"}, {"strength", 0.92}, {"pastTip", "fit"}, {"strengthRandom", 0.2},
+                                          {"volumize", 0.6}, {"volumizeRandom", 0.4},
+                                          {"profile", json::array({json::array({0.0, 0.0}), json::array({0.25, 0.75}), json::array({1.0, 1.0})})}});
+        done["clump"]["added"] = added;
+        const std::string guides = firstOf("Guides", "");
+        if (!guides.empty()) {
+            GraphEdit e(graph);
+            try {
+                e.connect(guides, clump, "centers");
+                graph = e.toJson();
+                done["clump"]["centers"] = guides;
+            } catch (const std::exception& error) {
+                done["clump"]["centersError"] = error.what();
+            }
+        }
+        const bool hadSub = named("subClump");
+        const std::string sub = hadSub ? std::string("subClump") : addAfter("Clump", "subClump", clump);
+        done["subClump"] = setParams(sub, {{"count", 1500}, {"strength", 0.4}, {"clumpChannel", "subClumpId"}, {"strengthRandom", 0.4}});
+        done["subClump"]["added"] = !hadSub;
+        const std::string length = firstOf("Length", "tipTrim");
+        if (!length.empty()) done["length"] = setParams(length, {{"randomness", 0.0}});
+        const bool hadTrim = named("tipTrim");
+        const std::string trim = hadTrim ? std::string("tipTrim") : addAfter("Length", "tipTrim", sub);
+        done["tipTrim"] = setParams(trim, {{"randomness", 0.3}});
+        done["tipTrim"]["added"] = !hadTrim;
+        const std::string scatter = firstOf("Scatter", "");
+        if (std::isfinite(hairline) && !scatter.empty()) {
+            const std::string axis = g.upAxis() == "Z" ? "$z" : "$y";
+            const float band = 0.06f * headRadius;
+            const std::string expression = "smoothstep(" + axis + ", " + json(r4(hairline - band)).dump() + ", " + json(r4(hairline + band)).dump() + ")";
+            const bool hadCull = named("hairline");
+            const std::string cull = hadCull ? std::string("hairline") : addAfter("Cull", "hairline", scatter);
+            done["hairline"] = setParams(cull, {{"keep", {{"expression", expression}}}});
+            done["hairline"]["added"] = !hadCull;
+        }
+        return done;
+    }
+
+    // The lowest guide roots' height along up (their 3rd percentile): where the lock look's Cull keeps
+    // hair from.
+    float hairlineOf(AgentGroom& g, const std::vector<std::vector<Vec3f>>& guides) {
+        std::vector<float> h;
+        for (const auto& gd : guides)
+            if (!gd.empty()) h.push_back(gd.front().dot(upOf(g)));
+        if (h.empty()) return std::numeric_limits<float>::quiet_NaN();
+        std::sort(h.begin(), h.end());
+        return h[std::min(h.size() - 1, h.size() * 3 / 100)];
+    }
+
+    // A group emptied (replace) or found, made when missing; checked as a root group.
+    static GroupId lockGroup(GuideHierarchy& h, const std::string& name, bool replace) {
+        GroupId group = h.findGroup(name);
+        if (group != kNoGroup && replace) {
+            const std::vector<GuideId> old = h.guidesInGroup(group);
+            if (!old.empty()) h.removeGuides(old);
+        }
+        if (group == kNoGroup) group = h.addGroup(name);
+        if (h.groupDepth(group) != 0) throw ToolError("'" + name + "' is a child group: guides go into a root group");
+        return group;
+    }
+
+    // A stroke as given: [[u, v], ...] or {"points": [[u, v], ...]}, root first.
+    static std::vector<std::array<float, 2>> strokePixels(const json& item, const std::string& where) {
+        const json list = item.is_object() ? item.value("points", json()) : item;
+        if (!list.is_array() || list.size() < 2 || list.size() > kMaxStrokePoints) {
+            throw ToolError(where + " needs 2 to " + std::to_string(kMaxStrokePoints) + " points [u, v] (the photo's pixels, root first)");
+        }
+        std::vector<std::array<float, 2>> out;
+        for (const json& q : list) {
+            if (!q.is_array() || q.size() != 2 || !q[0].is_number() || !q[1].is_number()) throw ToolError(where + ": points are [u, v] pixels");
+            out.push_back({q[0].get<float>(), q[1].get<float>()});
+        }
+        return out;
+    }
+
+    static json strokeSetProperties() {
+        return {{"photo", prop("string", "The lined-up photo the strokes are drawn on (default: the only one).")},
+                {"strokes", {{"type", "array"}, {"items", {{"type", json::array({"object", "array"})}}},
+                             {"description", "The strokes: each [[u, v], ...] or {\"points\": [[u, v], ...]} in the photo's pixels, the root "
+                                             "end first (see root)."}}},
+                {"strokes_image", prop("string", "Or an image with the strokes drawn on it in one color (PNG, JPEG...): the photo's size or a "
+                                                 "uniform scale of it, or placed by image_transform. Each stroke's root is the end with a dot.")},
+                {"image_transform", objectSchema({{"scale", prop("number", "Image pixels a photo pixel (default: the image's width over the photo's).")},
+                                                  {"offset", {{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 2}, {"maxItems", 2},
+                                                              {"description", "Where the photo's corner is in the image, image pixels (default [0, 0])."}}}})},
+                {"color", {{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3},
+                           {"description", "strokes_image: the strokes' color, 0-1 (default red [1, 0, 0])."}}},
+                {"root", enumProp({"first", "last", "dot", "top", "bottom"},
+                                  "Which end is the root: strokes first (default) or last; strokes_image dot (default: the end with more "
+                                  "stroke round it), top or bottom.")},
+                {"mirror", enumProp({"none", "x", "auto"}, "Mirror these strokes' guides to the other side: x (the world X plane at "
+                                                           "symmetry_center), auto (x when the head is symmetric), none (default).")}};
+    }
+
+    ToolResult guidesFromStrokes(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        json sets = json::array();
+        const json setSchema = objectSchema(strokeSetProperties());
+        if (a.contains("sets")) {
+            for (const json& s : a["sets"]) {
+                if (!s.is_object()) throw ToolError("sets are objects {photo, strokes or strokes_image, mirror...}");
+                sets.push_back(checkArguments(setSchema, s));
+            }
+        }
+        if (a.contains("strokes") || a.contains("strokes_image")) {
+            json s = json::object();
+            const json keys = strokeSetProperties();
+            for (const auto& [key, value] : keys.items())
+                if (a.contains(key)) s[key] = a[key];
+            sets.push_back(s);
+        }
+        if (sets.empty()) throw ToolError("give the strokes: \"strokes\" (lines in a photo's pixels) or \"strokes_image\", with \"photo\"; or \"sets\"");
+        const std::string defaultMirror = str(a, "mirror", "none");
+        const LockSetup setup = lockSetup(g, str(a, "depth", "auto"), num(a, "volume", 0.0));
+        const HairShell& shell = *setup.shell;
+        const ScalpMesh& rootScalp = *setup.hair.scalp;
+        const ScalpMesh& head = setup.hair.head ? *setup.hair.head : rootScalp;
+        const bool clip = flag(a, "clip", true);
+        const float center = static_cast<float>(num(a, "symmetry_center", 0.0));
+        std::vector<std::vector<Vec3f>> keys;
+        json strokeInfo = json::array();
+        ToolResult r;
+        std::size_t total = 0;
+        for (std::size_t si = 0; si < sets.size(); ++si) {
+            const json& s = sets[si];
+            AgentPhoto& photo = photoNamed(photos, str(s, "photo"));
+            if (!photo.camera) throw ToolError("the photo '" + photo.name + "' is not lined up yet (align_photo)");
+            std::vector<std::vector<std::array<float, 2>>> lines;
+            if (s.contains("strokes") == s.contains("strokes_image")) throw ToolError("each set gives strokes or strokes_image (one of them)");
+            const std::string root = str(s, "root", s.contains("strokes_image") ? "dot" : "first");
+            if (s.contains("strokes")) {
+                if (root != "first" && root != "last") throw ToolError("root for strokes is first or last");
+                for (std::size_t k = 0; k < s["strokes"].size(); ++k) {
+                    auto px = strokePixels(s["strokes"][k], "strokes[" + std::to_string(k) + "]");
+                    if (root == "last") std::reverse(px.begin(), px.end());
+                    lines.push_back(std::move(px));
+                }
+            } else {
+                if (root != "dot" && root != "top" && root != "bottom") throw ToolError("root for strokes_image is dot, top or bottom");
+                const RefImage image = loadImage(files().resolve(str(s, "strokes_image")), 3);
+                StrokeImageOptions io;
+                io.root = root;
+                io.photoWidth = photo.width;
+                io.photoHeight = photo.height;
+                if (s.contains("color")) io.color = {s["color"][0].get<float>(), s["color"][1].get<float>(), s["color"][2].get<float>()};
+                if (s.contains("image_transform")) {
+                    const json& t = s["image_transform"];
+                    io.scale = static_cast<float>(num(t, "scale", static_cast<double>(image.width) / std::max(1, photo.width)));
+                    if (t.contains("offset")) io.offset = {t["offset"][0].get<float>(), t["offset"][1].get<float>()};
+                    if (!(io.scale > 0.0f)) throw ToolError("image_transform.scale must be positive");
+                } else {
+                    io.scale = static_cast<float>(image.width) / static_cast<float>(std::max(1, photo.width));
+                    if (std::abs(static_cast<float>(image.height) / io.scale - static_cast<float>(photo.height)) > 0.02f * static_cast<float>(photo.height) + 1.0f) {
+                        throw ToolError("strokes_image is " + std::to_string(image.width) + " x " + std::to_string(image.height) + ", not the photo's " +
+                                        std::to_string(photo.width) + " x " + std::to_string(photo.height) +
+                                        " or a uniform scale of it: give image_transform {scale, offset}");
+                    }
+                }
+                for (const ImageStroke& is : strokesFromImage(image, io)) lines.push_back(is.points);
+                if (lines.empty()) throw ToolError("no strokes of that color found in " + str(s, "strokes_image"));
+            }
+            const std::string mirror = str(s, "mirror", defaultMirror);
+            if (mirror != "x" && mirror != "auto" && mirror != "none") throw ToolError("mirror is none, x or auto");
+            const bool mirrorOn = mirror == "x" || (mirror == "auto" && scalpLooksSymmetric(head));
+            std::vector<std::vector<Vec3f>> made;
+            for (std::size_t k = 0; k < lines.size(); ++k) {
+                if (++total > 400) throw ToolError("at most 400 strokes a call");
+                const LiftedStroke lifted = liftStroke(*photo.camera, lines[k], shell, rootScalp);
+                std::vector<Vec3f> pts = clip ? clippedToPhotos(lifted.points, shell) : lifted.points;
+                // (the photos disagreeing with most of a drawn stroke say its depth is off, not that the hair ends: kept)
+                const bool clipKept = clip && guideLength(pts) < 0.5f * lifted.length;
+                if (clipKept) pts = lifted.points;
+                json e = {{"photo", photo.name}, {"stroke", k + 1}, {"points", pts.size()},
+                          {"hitShare", r4(static_cast<double>(lifted.hits) / std::max(1, lifted.hits + lifted.misses))},
+                          {"length", r4(guideLength(pts))}, {"root", vec(pts.front())}};
+                if (pts.size() < lifted.points.size()) e["clippedFrom"] = r4(lifted.length);
+                if (clipKept) e["clipIgnored"] = "the photos show most of it off the hair (its depth is likely off): kept whole";
+                keys.push_back(pts);
+                made.push_back(pts);
+                if (mirrorOn) {
+                    keys.push_back(mirroredGuide(pts, Vec3f(center, 0.0f, 0.0f), Vec3f(1.0f, 0.0f, 0.0f), &rootScalp));
+                    e["mirrored"] = true;
+                }
+                strokeInfo.push_back(e);
+            }
+            if (r.content.size() < 4) {
+                const RefImage image = loadImage(photo.image, 3);
+                r.content.push_back({{"type", "image"}, {"data", base64Encode(strokesOverlayPng(image, *photo.camera, lines, made, 512))}, {"mimeType", "image/png"}});
+            }
+        }
+        // The fill: the hair region's roots from their nearest keys, combed where none is near.
+        const bool fill = flag(a, "fill", false);
+        std::vector<std::vector<Vec3f>> filled;
+        json fillInfo;
+        if (fill) {
+            const int count = static_cast<int>(std::clamp(num(a, "fill_count", 200.0), 1.0, 2000.0));
+            const double spacing = num(a, "fill_spacing", 0.0);
+            if (spacing < 0.0) throw ToolError("fill_spacing must be positive (scene units)");
+            int bare = 0;
+            const std::vector<Vec3f> roots = lockRoots(g, setup, count, spacing, flag(a, "fill_drop_bare", true), &bare);
+            const json combArgs = a.contains("comb") ? checkArguments(objectSchema(combProperties()), a["comb"]) : json::object();
+            CombOptions co = combOptionsOf(g, combArgs, setup.frame);
+            const bool combClip = co.clip;
+            co.clip = false;
+            FillOptions fo;
+            if (a.contains("fill_reach")) {
+                fo.reach = static_cast<float>(num(a, "fill_reach", 0.0));
+                if (!(fo.reach > 0.0f)) throw ToolError("fill_reach must be positive (scene units)");
+            }
+            std::vector<std::vector<Vec3f>> keysN;
+            for (const auto& k : keys) keysN.push_back(resampledGuide(k, static_cast<std::size_t>(fo.points)));
+            double shareSum = 0.0;
+            int fromKeys = 0;
+            for (std::size_t i = 0; i < roots.size(); ++i) {
+                const std::vector<Vec3f> base = combGuide(roots[i], combLength(setup.frame, roots[i], co, i), shell, co, i);
+                const FilledGuide fg = fillGuide(roots[i], keysN, resampledGuide(base, static_cast<std::size_t>(fo.points)), shell, fo);
+                filled.push_back(combClip && clip ? clippedToPhotos(fg.points, shell) : fg.points);
+                shareSum += fg.keyShare;
+                if (fg.keyShare > 0.5f) ++fromKeys;
+            }
+            fillInfo = {{"guides", filled.size()}, {"fromKeys", fromKeys},
+                        {"meanKeyShare", r4(roots.empty() ? 0.0 : shareSum / static_cast<double>(roots.size()))},
+                        {"reach", r4(fo.reach > 0.0f ? fo.reach : 0.4f * setup.frame.radius)}};
+            if (bare) fillInfo["rootsBare"] = bare;
+        }
+        const std::string groupName = str(a, "group", "strokes"), fillName = str(a, "fill_group", "strokeFill");
+        checkName(groupName, "a group's name");
+        checkName(fillName, "a group's name");
+        if (fill && fillName == groupName) throw ToolError("fill_group must differ from group");
+        const bool replace = flag(a, "replace", true);
+        std::vector<GuideId> ids, fillIds;
+        json look;
+        const MeshPtr scalp = scalpOf(g);
+        edit(g, "guides from strokes", [&](std::string& graph, std::string& hierarchy) {
+            GuideHierarchy h = hierarchyOf(g);
+            const GroupId group = lockGroup(h, groupName, replace);
+            for (const auto& k : keys)
+                if (k.size() >= 2) ids.push_back(h.addGuide(group, k));
+            if (fill) {
+                const GroupId fg = lockGroup(h, fillName, replace);
+                for (const auto& k : filled)
+                    if (k.size() >= 2) fillIds.push_back(h.addGuide(fg, k));
+            }
+            h.evaluate(scalp.get());
+            hierarchy = h.toJson();
+            if (flag(a, "apply_look", false)) {
+                std::vector<std::vector<Vec3f>> all = keys;
+                all.insert(all.end(), filled.begin(), filled.end());
+                look = applyLockLook(g, graph, setup.frame.radius, hairlineOf(g, all));
+            }
+        });
+        json out = {{"group", groupName}, {"ids", ids}, {"strokes", strokeInfo},
+                    {"shell", {{"from", setup.photos ? "photos" : "volume"}, {"photos", setup.shell->photoCount()}}},
+                    {"head", frameJson(setup.frame)}, {"units", g.units()}};
+        if (fill) {
+            fillInfo["group"] = fillName;
+            fillInfo["ids"] = fillIds;
+            out["fill"] = fillInfo;
+        }
+        if (!look.is_null()) out["lookApplied"] = look;
+        out["about"] = "Each stroke's points lifted through its photo's camera onto the hair's shell (hitShare: the share whose ray met "
+                       "it; the rest took the point nearest it), the root on the scalp under its first point; clippedFrom: its length "
+                       "before the tail the photos show past the hair was cut; mirrored: a mirror guide was made too. The images: each "
+                       "photo with its strokes (red, the root a ring) and the guides made from them (yellow).";
+        out["hint"] = "Check the guides with render_preview camera={\"photo\": ...} guides=true (and views front, right, back), then "
+                      "compare_to_photo. reshape_guides fixes one in place; calling again replaces the groups.";
+        r.content.push_back({{"type", "text"}, {"text", withSummary(g, out).dump(-1, ' ', false, json::error_handler_t::replace)}});
+        return r;
+    }
+
+    ToolResult combGuides(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        double volume = 0.0;
+        std::string depth = str(a, "depth", "auto");
+        if (a.contains("volume")) {
+            if (a["volume"].is_number()) {
+                volume = a["volume"].get<double>();
+                if (!(volume > 0.0)) throw ToolError("volume must be positive (scene units) or \"auto\"");
+                depth = "volume";
+            } else if (str(a, "volume") != "auto") {
+                throw ToolError("volume is \"auto\" (the photos' hair shell) or a thickness in scene units");
+            }
+        }
+        const LockSetup setup = lockSetup(g, depth, volume);
+        const CombOptions co = combOptionsOf(g, a, setup.frame);
+        const int count = static_cast<int>(std::clamp(num(a, "count", 200.0), 1.0, 2000.0));
+        const double spacing = num(a, "spacing", 0.0);
+        if (spacing < 0.0) throw ToolError("spacing must be positive (scene units)");
+        int bare = 0;
+        const std::vector<Vec3f> roots = lockRoots(g, setup, count, spacing, flag(a, "drop_bare", true), &bare);
+        if (roots.empty()) throw ToolError("no roots in the hair region");
+        std::vector<std::vector<Vec3f>> guides;
+        std::map<std::string, std::vector<float>> lengths;
+        for (std::size_t i = 0; i < roots.size(); ++i) {
+            std::vector<Vec3f> pts = combGuide(roots[i], combLength(setup.frame, roots[i], co, i), *setup.shell, co, i);
+            if (pts.size() < 2) continue;
+            lengths[headRegion(setup.frame, roots[i] - setup.frame.center)].push_back(guideLength(pts));
+            guides.push_back(std::move(pts));
+        }
+        const std::string groupName = str(a, "group", "combed");
+        checkName(groupName, "a group's name");
+        std::vector<GuideId> ids;
+        json look;
+        const MeshPtr scalp = scalpOf(g);
+        edit(g, "comb guides", [&](std::string& graph, std::string& hierarchy) {
+            GuideHierarchy h = hierarchyOf(g);
+            const GroupId group = lockGroup(h, groupName, flag(a, "replace", true));
+            for (const auto& k : guides) ids.push_back(h.addGuide(group, k));
+            h.evaluate(scalp.get());
+            hierarchy = h.toJson();
+            if (flag(a, "apply_look", false)) look = applyLockLook(g, graph, setup.frame.radius, hairlineOf(g, guides));
+        });
+        json byRegion = json::object();
+        for (auto& [region, l] : lengths) {
+            std::sort(l.begin(), l.end());
+            byRegion[region] = {{"guides", l.size()}, {"medianLength", r4(l[l.size() / 2])}};
+        }
+        json out = {{"group", groupName}, {"guides", ids.size()}, {"regions", byRegion},
+                    {"part", co.part.on ? json{{"point", vec(co.part.point)}, {"normal", vec(co.part.normal)}} : json("none")},
+                    {"shell", {{"from", setup.photos ? "photos" : "volume"}, {"photos", setup.shell->photoCount()}}},
+                    {"head", frameJson(setup.frame)}, {"units", g.units()}};
+        if (ids.size() <= 400) out["ids"] = ids;
+        if (bare) out["rootsBare"] = bare;
+        if (!look.is_null()) out["lookApplied"] = look;
+        out["hint"] = "Look with render_preview views [front, right, back, three_quarter] guides=true (density 0 for the guides alone); "
+                      "with photos, compare_to_photo.";
+        return textResult(withSummary(g, out));
+    }
+
+    ToolResult hairShellTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const LockSetup setup = lockSetup(g, str(a, "depth", "auto"), num(a, "volume", 0.0));
+        const HairShell& shell = *setup.shell;
+        json regions = json::object();
+        for (const ShellRegionStats& s : shellStats(shell, *setup.hair.scalp)) {
+            regions[s.region] = {{"thickness", {{"mean", r4(s.mean)}, {"p90", r4(s.p90)}, {"max", r4(s.max)}}}, {"covered", r4(s.covered)},
+                                 {"directions", s.directions}};
+        }
+        json out = {{"groom", g.name()}, {"from", setup.photos ? "photos" : "volume"}, {"photos", shell.photoCount()},
+                    {"head", frameJson(setup.frame)}, {"regions", regions}, {"units", g.units()},
+                    {"about", "The hair's outer surface over the head by direction from its middle (head: a sphere fitted to the hair "
+                              "region), carved from the lined-up photos' hair masks (a point is hair until a photo that sees it shows "
+                              "backdrop or skin; what no photo sees takes a guessed volume), smoothed. thickness: off the head over the "
+                              "hair region by part (scene units); covered: the share of the region with hair over it. "
+                              "guides_from_strokes lifts strokes onto it; comb_guides rides it."}};
+        ToolResult r;
+        if (flag(a, "image", false)) {
+            int shown = 0;
+            for (const AgentPhoto& p : photosFromJson(g.referencePhotos)) {
+                if (!p.camera || shown++ >= 6) continue;
+                const RefImage image = loadImage(p.image, 3);
+                r.content.push_back({{"type", "image"}, {"data", base64Encode(shellOverlayPng(image, *p.camera, shell, 384))}, {"mimeType", "image/png"}});
+            }
+            out["images"] = "each lined-up photo dimmed, the head (cyan) and the shell's surface where the camera sees it (blue thin to yellow thick)";
+        }
+        r.content.push_back({{"type", "text"}, {"text", out.dump(-1, ' ', false, json::error_handler_t::replace)}});
+        return r;
+    }
+
+    ToolResult photoProject(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        std::vector<AgentPhoto> photos = photosFromJson(g.referencePhotos);
+        const AgentPhoto& photo = photoNamed(photos, str(a, "photo"));
+        if (!photo.camera) throw ToolError("the photo '" + photo.name + "' is not lined up yet (align_photo)");
+        if (!a.contains("pixels") && !a.contains("points")) {
+            throw ToolError("give pixels ([[u, v], ...]) to cast onto the head, or points ([[x, y, z], ...]) to project");
+        }
+        const RefCamera& cam = *photo.camera;
+        const MeshPtr scalp = scalpOf(g);
+        const std::vector<float> weight = hairWeightsOf(g, scalp);
+        std::optional<LockSetup> setup;
+        if (str(a, "onto", "head") == "shell") setup = lockSetup(g, "auto", 0.0);
+        const Vec3f eye = cam.eye();
+        json out = {{"groom", g.name()}, {"photo", photo.name}, {"units", g.units()}};
+        if (a.contains("pixels")) {
+            if (a["pixels"].size() > 2000) throw ToolError("at most 2000 pixels a call");
+            json hits = json::array();
+            for (const json& q : a["pixels"]) {
+                if (!q.is_array() || q.size() != 2 || !q[0].is_number() || !q[1].is_number()) throw ToolError("pixels are [u, v]");
+                const float u = q[0].get<float>(), v = q[1].get<float>();
+                const Vec3f d = cam.ray(u, v);
+                SurfacePoint sp;
+                float t = 0.0f;
+                json e = {{"pixel", {r4(u), r4(v)}}};
+                if (scalp->intersectRay(eye, d, &sp, &t)) {
+                    const float w = weightAt(*scalp, weight, sp.root);
+                    e["hit"] = true;
+                    e["p"] = vec(sp.position);
+                    e["n"] = vec(scalp->normal(sp.root));
+                    e["distance"] = r4(t);
+                    e["hairRegion"] = w >= 0.5f;
+                    e["hairWeight"] = r4(w);
+                } else {
+                    e["hit"] = false;
+                }
+                if (setup) {
+                    const HairShell::Hit sh = setup->shell->raycast(eye, d);
+                    e["shell"] = {{"p", vec(sh.point)}, {"hit", sh.hit}, {"distance", r4(sh.t)}};
+                    if (!sh.hit) e["shell"]["gap"] = r4(sh.gap);
+                }
+                hits.push_back(e);
+            }
+            out["hits"] = hits;
+        }
+        if (a.contains("points")) {
+            if (a["points"].size() > 2000) throw ToolError("at most 2000 points a call");
+            json shots = json::array();
+            for (const json& q : a["points"]) {
+                const Vec3f p = toPoint(q, "points");
+                float u = 0.0f, v = 0.0f, z = 0.0f;
+                json e = {{"p", vec(p)}};
+                if (!cam.project(p, u, v, &z)) {
+                    e["inFront"] = false;
+                } else {
+                    e["pixel"] = {r4(u), r4(v)};
+                    e["depth"] = r4(z);
+                    e["inFrame"] = u >= 0.0f && v >= 0.0f && u < cam.width && v < cam.height;
+                    // Seen: nothing of the mesh between the eye and it.
+                    const float dist = (p - eye).length();
+                    SurfacePoint sp;
+                    float t = 0.0f;
+                    e["visible"] = !(scalp->intersectRay(eye, (p - eye) / dist, &sp, &t) && t < dist - 1e-3f * dist);
+                }
+                shots.push_back(e);
+            }
+            out["projected"] = shots;
+        }
+        return textResult(out);
+    }
+
+    ToolResult reshapeGuides(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const json& list = a["guides"];
+        if (list.empty() || list.size() > kMaxGuidesPerCall) throw ToolError("give 1 to " + std::to_string(kMaxGuidesPerCall) + " guides");
+        const bool snap = flag(a, "snap", true);
+        const MeshPtr scalp = scalpOf(g);
+        std::vector<GuideId> ids;
+        edit(g, "reshape guides", [&](std::string&, std::string& hierarchy) {
+            GuideHierarchy h = hierarchyOf(g);
+            for (std::size_t i = 0; i < list.size(); ++i) {
+                const std::string where = "guides[" + std::to_string(i) + "]";
+                const json& item = list[i];
+                if (!item.is_object() || !item.contains("id") || !item["id"].is_number_integer() || !item.contains("points")) {
+                    throw ToolError(where + " is {\"id\": a guide id, \"points\": [[x, y, z], ...]}");
+                }
+                const GuideId id = item["id"].get<GuideId>();
+                if (!h.guide(id)) throw ToolError(where + ": no guide " + std::to_string(id));
+                const json& pts = item["points"];
+                if (!pts.is_array() || pts.size() < 2 || pts.size() > kMaxGuidePoints) {
+                    throw ToolError(where + ".points needs 2 to " + std::to_string(kMaxGuidePoints) + " points");
+                }
+                std::vector<Vec3f> points;
+                for (const json& p : pts) points.push_back(toPoint(p, (where + ".points").c_str()));
+                if (snap) {
+                    const Vec3f shift = scalp->closestPoint(points.front()).position - points.front();
+                    for (Vec3f& p : points) p += shift;
+                }
+                h.setPoints(id, std::move(points));
+                ids.push_back(id);
+            }
+            h.evaluate(scalp.get());
+            hierarchy = h.toJson();
+        });
+        return textResult(withSummary(g, {{"reshaped", ids}, {"count", ids.size()}}));
     }
 
     // ---- roots and tubes ----
@@ -4651,9 +5437,13 @@ struct AgentTools::Impl {
             &Impl::setParams);
         add("sample_scalp", "Sample scalp points",
             "Gives points spread evenly over the scalp with their normals, to place guide roots on. Filter by how much the "
-            "surface faces up (min_up: 0.3 keeps the top of a head) or a box.",
+            "surface faces up (min_up: 0.3 keeps the top of a head), a box, or the hair region (region \"hair\": where the "
+            "groom grows hair, the map Scatter's density reads, else on a whole head the face's hairline); min_spacing stops "
+            "when the next point would be nearer than that.",
             objectSchema({{"groom", groom}, {"count", prop("integer", "How many points (1-500, default 40).")},
                           {"min_up", prop("number", "Keep points whose normal points up at least this much (-1 to 1).")},
+                          {"region", enumProp({"all", "hair"}, "all: the whole scalp (default); hair: where hair grows.")},
+                          {"min_spacing", prop("number", "No two points nearer than this (scene units; fewer points then).")},
                           {"box_min", point3()}, {"box_max", point3()}}),
             &Impl::sampleScalp);
         add("add_guides", "Add guides",
@@ -4670,8 +5460,11 @@ struct AgentTools::Impl {
                          {"guides"}),
             &Impl::addGuides);
         add("get_guides", "List guides",
-            "Lists the groom's guide groups and guides: each guide's id, root and tip, length, points and tube.",
+            "Lists the groom's guide groups and guides: each guide's id, root and tip, length, point count and tube; "
+            "with_points their points as well (world space, root first: reshape_guides changes them in place).",
             objectSchema({{"groom", groom}, {"group", prop("string", "Only this group's guides.")},
+                          {"ids", {{"type", "array"}, {"items", {{"type", "integer"}}}, {"description", "Only these guides."}}},
+                          {"with_points", prop("boolean", "Each guide's points too (positions).")},
                           {"limit", prop("integer", "List at most this many guides (default 100).")}}),
             &Impl::getGuides);
         {
@@ -4814,7 +5607,7 @@ struct AgentTools::Impl {
             &Impl::selectGuides);
         add("guide_op", "Edit guides",
             "Edits guides as Groom Tools' Edit Guides menu does, one undo step, on guides (ids) or the selection "
-            "(select_guides). Ops: delete_guides, lock / unlock (children follow their parents), freeze / unfreeze, unfreeze_all, "
+            "(select_guides). Ops: delete_guides (guides, or every guide of group), lock / unlock (children follow their parents), freeze / unfreeze, unfreeze_all, "
             "set_attribute (name, value), mirror_all / mirror_group (axis, center, from_positive), mirror_shapes (symmetry; side "
             "0 the guides given, 1 / -1 a whole side over the other, with group), move_to_group / duplicate_to_group (group), "
             "new_group_from (name), add_group (name, parent), remove_group, promote_group, demote_group (group under parent), "
@@ -5097,7 +5890,9 @@ struct AgentTools::Impl {
             "with the guides made, the roots that were bald or unseen, the scalp's sides no photo sees (unseenShare, alignMore: "
             "line up a photo from there), and the look the photos suggest (melanin, curls, clumps; apply_look sets it). On curly "
             "hair each guide follows a lock (locks: traced in a photo, or filled from its neighbours) with its curl in its points; "
-            "apply_look then clumps each guide's strands onto it instead of a Curl node over every strand.",
+            "apply_look then clumps each guide's strands onto it instead of a Curl node over every strand. On wavy hair the "
+            "locks' paths are traced in each photo from their roots and matched across them (lockPaths: per photo detected, "
+            "matched, triangulated, single-view), the guides follow them and carry the photos' fine waves.",
             objectSchema({{"groom", groom}, {"guide_count", prop("integer", "Roots tried, spread over the scalp (default 300).")},
                           {"max_length", prop("number", "The longest guide (scene units; default 0: what the photos show).")},
                           {"symmetry", enumProp({"auto", "none", "x", "topology"}, "Mirror what one side shows (default auto).")},
@@ -5106,6 +5901,9 @@ struct AgentTools::Impl {
                                                     "photos' outlines show over each spot (default 0.75; 0 as grown, along the scalp).")},
                           {"locks", prop("boolean", "On curly hair, each guide follows its lock's curl (default true; false: smooth "
                                                     "guides and a Curl node over every strand).")},
+                          {"lock_paths", prop("boolean", "Trace the locks as objects: in each photo along the coarse flow from their "
+                                                         "roots (through the crests where the fine strands run across them), matched "
+                                                         "across photos and triangulated (default: on wavy hair).")},
                           {"apply_look", prop("boolean", "Also set the look the photos suggest (HairColor melanin and redness, Clump, "
                                                          "Curl, Flyaway; nodes added where missing): a second undo step.")}}),
             &Impl::guidesFromPhotos);
@@ -5116,6 +5914,93 @@ struct AgentTools::Impl {
             "the top ends on the face (the hairline), and the hair's color (the photo's and the groom's, each's nearest melanin). "
             "With a picture of both outlines a photo. Use it after guides_from_photos and each change to judge by numbers.",
             objectSchema({{"groom", groom}, {"photo", photoName}}), &Impl::compareToPhotoTool);
+        {
+            json p = {{"groom", groom},
+                      {"sets", {{"type", "array"}, {"items", {{"type", "object"}}},
+                                {"description", "Strokes from several photos in one call: each {photo, strokes or strokes_image, image_transform, "
+                                                "color, root, mirror} as the arguments of the same names."}}},
+                      {"symmetry_center", prop("number", "mirror x: the mirror plane's place on X (default 0).")},
+                      {"depth", enumProp({"auto", "photos", "volume"}, "What the strokes are lifted onto: the hair's shell from the lined-up "
+                                                                       "photos (auto when there are some; photos insists), or the head and a "
+                                                                       "guessed volume over it (volume).")},
+                      {"volume", prop("number", "The guessed hair's thickness over the head where no photo sees it (scene units; default 0.3 head radii).")},
+                      {"clip", prop("boolean", "Cut each guide's tail where the photos show the hair end (default true).")},
+                      {"group", prop("string", "The stroke guides' group (default strokes).")},
+                      {"replace", prop("boolean", "Empty the groups first (default true).")},
+                      {"fill", prop("boolean", "Also fill the hair region with guides from the stroke guides: each root takes its nearest "
+                                               "strokes' shapes, blended by distance (fill_reach), combed (comb) where none is near.")},
+                      {"fill_group", prop("string", "The fill's group (default strokeFill).")},
+                      {"fill_count", prop("integer", "Fill roots spread over the hair region (default 200).")},
+                      {"fill_spacing", prop("number", "Or fill roots this far apart (scene units).")},
+                      {"fill_reach", prop("number", "How far a stroke's shape carries (scene units; default 0.4 head radii).")},
+                      {"fill_drop_bare", prop("boolean", "Leave out fill roots a photo shows bare skin over (default true).")},
+                      {"comb", objectSchema(combProperties())},
+                      {"apply_look", prop("boolean", "Also set up the lock look: the guides as clump centers (Clump centersFrom inputCurves, "
+                                                     "strength 0.92, tips fitted), finer clumps inside (subClump), tips trimmed unevenly "
+                                                     "(tipTrim), no hair below the lowest guide roots (Cull hairline). Same undo step.")}};
+            p.update(strokeSetProperties());
+            add("guides_from_strokes", "Guides from strokes on photos",
+                "Turns strokes drawn on lined-up photos into guides, one undo step: each stroke (a line in the photo's pixels, root "
+                "end first, or strokes drawn in a color on an image of the photo, the root the end with a dot) is lifted through the "
+                "photo's camera onto the hair's shell the photos show (hair_shell), its root on the scalp under its first point, its "
+                "tail cut where the photos show the hair end; mirrored to the other side on request. Several photos at once with "
+                "sets. fill grows guides over the rest of the hair region from them (and the comb where none is near); apply_look "
+                "sets the lock look. Answers with the ids, per stroke its points, the share of its rays that met the shell and its "
+                "length, and a picture per photo of the strokes and the guides made.",
+                objectSchema(p), &Impl::guidesFromStrokes);
+        }
+        {
+            json p = combProperties();
+            p["groom"] = groom;
+            p["count"] = prop("integer", "Guides spread over the hair region (default 200).");
+            p["spacing"] = prop("number", "Or roots this far apart (scene units).");
+            p["drop_bare"] = prop("boolean", "Leave out roots a lined-up photo shows bare skin over (default true).");
+            p["volume"] = {{"type", json::array({"string", "number"})},
+                           {"description", "\"auto\" (default): the guides ride the hair's shell from the lined-up photos (hair_shell), "
+                                           "else a guessed volume; a number: that thickness over the head (scene units), fuller on top."}};
+            p["depth"] = enumProp({"auto", "photos", "volume"}, "The shell: auto, photos (insist on them), volume (the guess).");
+            p["group"] = prop("string", "The group (default combed).");
+            p["replace"] = prop("boolean", "Empty the group first (default true).");
+            p["apply_look"] = prop("boolean", "Also set up the lock look (as guides_from_strokes'). Same undo step.");
+            add("comb_guides", "Comb guides",
+                "Blocks a haircut in with guides grown root out over the hair region, one undo step: combed away from a part and "
+                "back over the top (sweep front: back, out, forward), the sides back over the ears or down, the back falling; each "
+                "rises off the scalp first (the forehead's hairline up and back), rides the hair's shell (from the photos, else a "
+                "guessed volume), carries an S-wave across the flow (in step with its neighbours) and flips at the tip; cut where "
+                "the photos show the hair end. Lengths by part of the head (top, front, sides, back, nape; default shares of the "
+                "head's size). Everything scales with the head. Answers with the guides per region and their median length.",
+                objectSchema(p), &Impl::combGuides);
+        }
+        add("hair_shell", "The hair's shell",
+            "The hair's outer surface round the head as the lined-up photos show it: along each direction from the head's middle, "
+            "hair until a photo that sees the point shows backdrop or skin there (what no photo sees: a guessed volume), smoothed. "
+            "Answers with the head's frame (a sphere fitted to the hair region) and the thickness off the head by part (top, "
+            "front, sides, back, nape: mean, 90th percentile, max, scene units; covered: the share with hair over it); image: the "
+            "shell over each photo. guides_from_strokes and comb_guides use it.",
+            objectSchema({{"groom", groom},
+                          {"depth", enumProp({"auto", "photos", "volume"}, "From the photos (auto when there are some) or the guess.")},
+                          {"volume", prop("number", "The guessed volume's thickness (scene units; default 0.3 head radii).")},
+                          {"image", prop("boolean", "Pictures: each lined-up photo with the shell over it (default false).")}}),
+            &Impl::hairShellTool);
+        add("photo_project", "Photo pixels to the head and back",
+            "Through a lined-up photo's camera: pixels cast onto the groom's head as it is now (morphed), each hit's point, normal, "
+            "distance and whether it is in the hair region (onto shell: also where the ray meets the hair's shell); and points "
+            "projected to the photo's pixels, with their depth and whether the head hides them.",
+            objectSchema({{"groom", groom}, {"photo", photoName},
+                          {"pixels", {{"type", "array"}, {"items", {{"type", "array"}}}, {"description", "[[u, v], ...] in the photo's pixels."}}},
+                          {"points", {{"type", "array"}, {"items", point3()}, {"description", "[[x, y, z], ...] world points to project."}}},
+                          {"onto", enumProp({"head", "shell"}, "head (default), or the hair's shell too.")}}),
+            &Impl::photoProject);
+        add("reshape_guides", "Reshape guides",
+            "Replaces guides' points in place, one undo step: each keeps its id, group, tube and attributes. Points in world space, "
+            "root first; the root moved onto the scalp (the whole guide with it) unless snap is false. get_guides with_points "
+            "gives the points to start from.",
+            objectSchema({{"groom", groom},
+                          {"guides", {{"type", "array"}, {"items", {{"type", "object"}}},
+                                      {"description", "[{\"id\": guide id, \"points\": [[x, y, z], ...]}, ...]"}}},
+                          {"snap", prop("boolean", "Move each guide so its root lies on the scalp (default true).")}},
+                         {"guides"}),
+            &Impl::reshapeGuides);
         add("morph_to_photos", "Morph the scalp to the photos",
             "Shapes the scalp so every lined-up photo's landmark pairs land on their photo points (KeenTools-style pins: one photo "
             "slides a pair across its view, two or more set its depth too), the rest of the mesh following smoothly; always from "

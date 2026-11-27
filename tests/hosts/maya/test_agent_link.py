@@ -140,6 +140,25 @@ class AgentLink(unittest.TestCase):
         self.call("measure_guides")
         self.assertEqual(cmds.undoInfo(q=True, undoName=True), top)
 
+    def test_lock_tools_are_maya_undo_steps(self):
+        # comb_guides blocks guides in over the sphere (no photos: a guessed volume), reshape_guides
+        # moves one in place (its id kept), guides_from_strokes needs a photo: each change
+        # one Maya undo step.
+        combed = self.call("comb_guides", {"count": 30, "volume": 2.0})
+        self.assertGreater(combed["guides"], 10)
+        self.assertEqual(self.guide_count(), combed["guides"])
+        self.assertEqual(cmds.undoInfo(q=True, undoName=True), "Agent: comb_guides")
+        combed_text = cmds.getAttr(self.shape + ".guideData")
+        one = self.call("get_guides", {"with_points": True, "limit": 1})["guides"][0]
+        moved = [[p[0], p[1], p[2] + 1.0] for p in one["positions"]]
+        self.assertEqual(self.call("reshape_guides", {"guides": [{"id": one["id"], "points": moved}]})["reshaped"], [one["id"]])
+        self.assertNotEqual(cmds.getAttr(self.shape + ".guideData"), combed_text)
+        self.assertEqual(self.guide_count(), combed["guides"])
+        cmds.undo()
+        self.assertEqual(cmds.getAttr(self.shape + ".guideData"), combed_text)
+        self.assertIn("no photos", json.dumps(self.call("guides_from_strokes", {"strokes": [[[1, 1], [5, 5]]]}, error=True)))
+        self.assertEqual(self.call("hair_shell", {})["from"], "volume")
+
     def test_photos_are_the_scenes_reference_cameras(self):
         # Through the link's own answering (agent_link.Answerer, the listener's without a socket):
         # a photo the agent adds is a reference camera of the scene, as Maya's Photos window makes

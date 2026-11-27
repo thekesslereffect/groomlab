@@ -12,7 +12,8 @@ hand: scalp_landmarks, guides placed along the scalp, combed from the crown to t
 density painted, measure_guides, previews from two cameras (guides drawn, before and after), undo,
 redo and history, saved and opened again. Then everything else an artist does: a photo rendered from
 a known camera added, lined up (the solved camera checked against the truth) and guides grown from
-it; a root tube drawn, subdivided and split a level down; an expression checked and set; a head turn
+it; lock guides from strokes drawn on the photo (the hair's shell, filled in, reshaped, a haircut
+combed in); a root tube drawn, subdivided and split a level down; an expression checked and set; a head turn
 written as an animated scalp and simulated, the frames baked; a turntable in another look; hair cards
 exported for glTF and Unreal. Standard library only.
 """
@@ -247,7 +248,7 @@ def everything_else(c, root):
     assert len([x for x in result["content"] if x["type"] == "image"]) == 1
     c.call("photo_edit", dict(g, op="add_flow", points=[[240, 120], [250, 300]]))
     viewed, result = c.call("photo_view", dict(g, analysis=True))
-    assert viewed["linedUp"] and viewed["flowArrows"] == 1, viewed
+    assert viewed["linedUp"] and viewed["flowArrows"] == 1 and viewed["locks"] >= 0, viewed
     grown, _ = c.call("guides_from_photos", dict(g, guide_count=120))
     assert grown["guides"] > 20 and grown["group"] == "fromReference", grown
     compared, result = c.call("render_preview", dict(g, camera={"photo": "front"}, size=240))
@@ -314,6 +315,33 @@ def everything_else(c, root):
     assert "graph" in restored["changed"], restored
     ran, _ = c.call("batch", {"calls": [{"tool": "evaluate", "arguments": f}, {"tool": "compare_to_photo", "arguments": f}]})
     assert ran["ran"] == 2 and all(x["ok"] for x in ran["calls"]), ran
+
+    # Lock guides: the hair's shell from the photo, strokes drawn on it lifted to guides (filled in,
+    # the lock look), a guide reshaped in place, a haircut combed in, pixels cast onto the head.
+    shell, result = c.call("hair_shell", dict(f, image=True))
+    assert shell["from"] == "photos" and shell["photos"] == 1 and shell["head"]["radius"] > 0, shell
+    assert set(shell["regions"]) == {"top", "front", "sides", "back", "nape"}, shell
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 1
+    spots, _ = c.call("sample_scalp", dict(f, region="hair", count=50, min_spacing=2.0))
+    assert spots["region"] == "hair" and 5 < len(spots["points"]) <= 50, spots
+    cast, _ = c.call("photo_project", dict(f, pixels=[project(names["nose_tip"]["p"])], points=[names["nose_tip"]["p"]]))
+    assert cast["hits"][0]["hit"] and not cast["hits"][0]["hairRegion"], cast
+    assert abs(cast["projected"][0]["pixel"][0] - project(names["nose_tip"]["p"])[0]) < 1.5 and cast["projected"][0]["visible"], cast
+    listed, _ = c.call("get_guides", dict(f, group="fromReference", with_points=True, limit=3))
+    strokes = [[project(q) for q in gd["positions"]] for gd in listed["guides"][:2]]
+    lifted, result = c.call("guides_from_strokes", dict(f, photo="front", strokes=strokes, mirror="x", fill=True, fill_count=40, apply_look=True))
+    assert len(lifted["ids"]) == 4 and all(0.0 <= s["hitShare"] <= 1.0 for s in lifted["strokes"]), lifted
+    assert lifted["fill"]["guides"] > 10 and "subClump" in lifted["lookApplied"], lifted
+    assert len([x for x in result["content"] if x["type"] == "image"]) == 1
+    one = c.call("get_guides", dict(f, ids=[lifted["ids"][0]], with_points=True))[0]["guides"][0]
+    moved = [[p[0], p[1] + 1.0, p[2]] for p in one["positions"]]
+    reshaped, _ = c.call("reshape_guides", dict(f, guides=[{"id": one["id"], "points": moved}]))
+    again = c.call("get_guides", dict(f, ids=[one["id"]]))[0]["guides"][0]
+    assert reshaped["count"] == 1 and again["group"] == "strokes" and again["id"] == one["id"], (reshaped, again)
+    combed, _ = c.call("comb_guides", dict(f, count=40, part="none", sweep={"front": "back", "sides": "down"}))
+    assert combed["guides"] > 10 and combed["shell"]["from"] == "photos", combed
+    gone, _ = c.call("guide_op", dict(f, op="delete_guides", group="combed"))
+    assert gone["count"] == combed["guides"], gone
 
     # A root tube drawn round the crown, cut into cells, then split a level down.
     drawn, _ = c.call("root_tube", dict(g, op="draw", center="crown", radius=3, length=12))
@@ -389,7 +417,8 @@ def main():
                        "redo", "history", "scalp_landmarks", "brush_stroke", "select_guides", "guide_op", "paint_map",
                        "measure_guides", "add_photo", "photo_view", "mesh_landmarks", "align_photo", "photo_edit",
                        "guides_from_photos", "compare_to_photo", "checkpoint", "restore", "batch", "show_map", "suggest_pairs", "root_tube", "tube_levels", "tube_shape", "check_expression", "import_animation",
-                       "animate_scalp", "simulate", "sim_cache", "export_cards", "export_game", "stats"]:
+                       "animate_scalp", "simulate", "sim_cache", "export_cards", "export_game", "stats", "guides_from_strokes", "comb_guides",
+                       "hair_shell", "photo_project", "reshape_guides"]:
             assert wanted in names, wanted
         assert c.request("tools/call", {"name": "no_such_tool", "arguments": {}})["error"]["code"] == -32602
         assert c.request("no/such/method")["error"]["code"] == -32601
