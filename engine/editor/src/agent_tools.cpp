@@ -40,6 +40,7 @@
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
+#include "groomlab/guide_field.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/hair_shell.h"
 #include "groomlab/lock_guides.h"
@@ -68,6 +69,10 @@ constexpr std::size_t kMaxCheckpoints = 32;      // a groom's, checkpoint
 constexpr std::size_t kMaxBatchCalls = 64;       // batch
 constexpr std::size_t kMaxPairCrops = 12;        // suggest_pairs' pictures
 constexpr std::size_t kMaxStrokePoints = 4000;
+// How guides_from_strokes and comb_guides fill (field: grown through the guide field, guide_field.h;
+// blend: the nearest keys' shapes copied / combed) when not told.
+constexpr const char* kDefaultFillMode = "field";
+constexpr const char* kDefaultCombMode = "field";
 constexpr int kPhotoShown = 768;  // a photo's picture at most this many pixels across (default)
 constexpr int kMaxSimFrames = 1000;    // frames one simulate or sim_cache call steps
 // A stroke's radius when none is given, and a placed guide's length (where no guides are near to
@@ -4337,6 +4342,114 @@ struct AgentTools::Impl {
         return roots;
     }
 
+    // The field fill (guide_field.h): `roots` grown root first through the field of `keys`. Where no
+    // key's root is within `reach` (uncovered: the comb), smooth combed guides (no wave, no flip, the
+    // comb's part) hold the field there as weaker keys (half weight). The field's part (its seam):
+    // `partMode` "comb" (the comb's), "auto" (the one the keys show, partFromGuides, if any) or "none"
+    // (the part the keys show is answered either way). On top: the comb's S-wave (wave), cut where the
+    // photos show the hair end (clip). Answers the guides (one a root, fewer than 2 points: nothing
+    // grew) and what it did.
+    struct FieldFillRun {
+        std::vector<std::vector<Vec3f>> guides;
+        json info;
+    };
+    FieldFillRun fieldFillRun(const LockSetup& setup, const std::vector<Vec3f>& roots, const std::vector<std::vector<Vec3f>>& keys,
+                              const CombOptions& co, const std::string& partMode, bool uncoveredComb, float reach, bool wave, bool clip,
+                              double cell) {
+        const HairShell& shell = *setup.shell;
+        FieldFillRun run;
+        int votes = 0;
+        const PartLine seen = partFromGuides(setup.frame, keys, &votes);
+        const PartLine fieldPart = partMode == "comb" ? co.part : partMode == "auto" ? seen : PartLine{};
+        std::vector<FieldGuide> fieldKeys;
+        for (const auto& k : keys)
+            if (k.size() >= 2) fieldKeys.push_back({k, 1.0f});
+        int support = 0;
+        if (uncoveredComb) {
+            CombOptions cs = co;
+            cs.amplitude = 0.0f;
+            cs.flip = 0.0f;
+            cs.clip = clip;
+            int candidates = 0;
+            for (std::size_t i = 0; i < roots.size(); ++i) {
+                float nearest = std::numeric_limits<float>::infinity();
+                for (const auto& k : keys)
+                    if (!k.empty()) nearest = std::min(nearest, (k.front() - roots[i]).length());
+                if (nearest <= reach || (candidates++ % 2) != 0) continue;
+                std::vector<Vec3f> pts = combGuide(roots[i], combLength(setup.frame, roots[i], cs, i), shell, cs, i);
+                if (pts.size() < 2) continue;
+                fieldKeys.push_back({std::move(pts), 0.5f});
+                ++support;
+            }
+        }
+        if (fieldKeys.empty()) throw ToolError("no guides to fill between");
+        FieldFillOptions fo;
+        fo.field.part = fieldPart;
+        if (cell > 0.0) fo.field.cell = static_cast<float>(cell);
+        fo.seed = co.seed;
+        const FieldFill fill = fieldFill(roots, fieldKeys, shell, fo, setup.hair.scalp.get());
+        CombOptions cw = co;
+        cw.flip = 0.0f;
+        for (std::size_t i = 0; i < fill.guides.size(); ++i) {
+            std::vector<Vec3f> pts = fill.guides[i];
+            if (pts.size() >= 2 && wave) pts = wavedGuide(pts, setup.frame, cw, i);
+            if (pts.size() >= 2 && clip) pts = clippedToPhotos(pts, shell);
+            run.guides.push_back(std::move(pts));
+        }
+        const GuideField::Stats& st = fill.field;
+        run.info = {{"mode", "field"},
+                    {"stopped", {{"length", fill.byLength}, {"faded", fill.byFade}, {"hull", fill.byHull}, {"turn", fill.byTurn}, {"nothing", fill.empty}}},
+                    {"field", {{"grid", {st.nx, st.ny, st.nz}}, {"cell", r4(st.cell)}, {"cells", st.cells}, {"guideCells", st.guideCells},
+                               {"ringCells", st.ringCells}, {"partSeams", st.partSeams}, {"iterations", st.iterations},
+                               {"residual", r4(st.residual)}, {"seconds", r4(st.seconds)}}},
+                    {"part", fieldPart.on ? json{{"from", partMode}, {"offset", r4((fieldPart.point - setup.frame.center).dot(fieldPart.normal))},
+                                                 {"normal", vec(fieldPart.normal)}}
+                                          : json{{"from", partMode}, {"on", false}}},
+                    {"partSeen", seen.on ? json{{"offset", r4((seen.point - setup.frame.center).dot(seen.normal))}, {"votes", votes}}
+                                         : json{{"on", false}, {"votes", votes}}},
+                    {"combedKeys", support},
+                    {"reach", r4(reach)},
+                    {"wave", wave}};
+        return run;
+    }
+
+    // The guides' score against the lined-up photos (score_guides' scorer): the mean and each photo's
+    // mean over the guides it sees; null without photos.
+    json photoScoreOf(AgentGroom& g, const std::vector<std::vector<Vec3f>>& guides) {
+        std::vector<ReferenceView> views;
+        std::vector<std::string> names;
+        for (const AgentPhoto& p : photosFromJson(g.referencePhotos)) {
+            if (!p.camera) continue;
+            ReferenceView view;
+            view.camera = *p.camera;
+            view.image = loadImage(p.image, 3);
+            if (!p.mask.empty()) view.mask = loadImage(p.mask, 1);
+            view.maskStrokes = p.state.maskStrokes;
+            views.push_back(std::move(view));
+            names.push_back(p.name);
+        }
+        std::vector<std::vector<Vec3f>> pts;
+        for (const auto& k : guides)
+            if (k.size() >= 2) pts.push_back(k);
+        if (views.empty() || pts.empty()) return nullptr;
+        const HairScalp hair = hairScalpOf(g);
+        ReferenceGuideOptions o;
+        o.up = upOf(g);
+        if (hair.head) o.occluders.push_back(hair.head);
+        const std::vector<GuideScore> scores = PhotoScorer(*hair.scalp, views, o).score(pts);
+        double mean = 0.0;
+        for (const GuideScore& s : scores) mean += s.score;
+        json perPhoto = json::array();
+        for (std::size_t k = 0; k < views.size(); ++k) {
+            double sc = 0.0;
+            int seen = 0;
+            for (const GuideScore& s : scores)
+                if (s.photos[k].samples > 0) sc += s.photos[k].score, ++seen;
+            perPhoto.push_back({{"photo", names[k]}, {"seen", seen}, {"score", seen ? r4(sc / seen) : 0.0}});
+        }
+        return {{"mean", r4(mean / static_cast<double>(scores.size()))}, {"guides", scores.size()}, {"photos", perPhoto}};
+    }
+
     // The lock look (guides as locks): the guides the clumps' centers (Clump centersFrom
     // inputCurves, strong, the tips fitted, volumized), finer clumps inside them (subClump), the
     // tips trimmed unevenly (tipTrim), no hair below the lowest guide roots (a hairline Cull), a Curl
@@ -4625,24 +4738,36 @@ struct AgentTools::Impl {
                 fo.reach = static_cast<float>(num(a, "fill_reach", 0.0));
                 if (!(fo.reach > 0.0f)) throw ToolError("fill_reach must be positive (scene units)");
             }
-            std::vector<std::vector<Vec3f>> keysN;
-            for (const auto& k : keys) keysN.push_back(resampledGuide(k, static_cast<std::size_t>(fo.points)));
-            double shareSum = 0.0;
-            int fromKeys = 0;
-            for (std::size_t i = 0; i < roots.size(); ++i) {
-                const std::vector<Vec3f> base = combGuide(roots[i], combLength(setup.frame, roots[i], co, i), shell, co, i);
-                const FilledGuide fg = fillGuide(roots[i], keysN, resampledGuide(base, static_cast<std::size_t>(fo.points)), shell, fo);
-                filled.push_back(combClip && clip ? clippedToPhotos(fg.points, shell) : fg.points);
-                shareSum += fg.keyShare;
-                if (fg.keyShare > 0.5f) ++fromKeys;
+            const float reach = fo.reach > 0.0f ? fo.reach : 0.4f * setup.frame.radius;
+            const std::string mode = str(a, "fill_mode", kDefaultFillMode);
+            if (mode != "field" && mode != "blend") throw ToolError("fill_mode is field or blend");
+            if (mode == "field") {
+                const double cell = num(a, "fill_cell", 0.0);
+                if (cell < 0.0) throw ToolError("fill_cell must be positive (scene units)");
+                FieldFillRun run = fieldFillRun(setup, roots, keys, co, combArgs.contains("part") ? "comb" : str(a, "fill_part", "none"), true, reach, flag(a, "fill_wave", true),
+                                                combClip && clip, cell);
+                filled = std::move(run.guides);
+                fillInfo = run.info;
+            } else {
+                std::vector<std::vector<Vec3f>> keysN;
+                for (const auto& k : keys) keysN.push_back(resampledGuide(k, static_cast<std::size_t>(fo.points)));
+                double shareSum = 0.0;
+                int fromKeys = 0;
+                for (std::size_t i = 0; i < roots.size(); ++i) {
+                    const std::vector<Vec3f> base = combGuide(roots[i], combLength(setup.frame, roots[i], co, i), shell, co, i);
+                    const FilledGuide fg = fillGuide(roots[i], keysN, resampledGuide(base, static_cast<std::size_t>(fo.points)), shell, fo);
+                    filled.push_back(combClip && clip ? clippedToPhotos(fg.points, shell) : fg.points);
+                    shareSum += fg.keyShare;
+                    if (fg.keyShare > 0.5f) ++fromKeys;
+                }
+                fillInfo = {{"mode", "blend"}, {"fromKeys", fromKeys},
+                            {"meanKeyShare", r4(roots.empty() ? 0.0 : shareSum / static_cast<double>(roots.size()))}, {"reach", r4(reach)}};
             }
             GuideRootingOptions fro;
             fro.headRadius = setup.frame.radius;
             fro.up = setup.frame.up;
             fillInfo["rooting"] = rootingJson(rootGuides(filled, rootScalp, &head, fro));
-            fillInfo.update({{"guides", filled.size()}, {"fromKeys", fromKeys},
-                        {"meanKeyShare", r4(roots.empty() ? 0.0 : shareSum / static_cast<double>(roots.size()))},
-                        {"reach", r4(fo.reach > 0.0f ? fo.reach : 0.4f * setup.frame.radius)}});
+            fillInfo["guides"] = filled.size();
             if (bare) fillInfo["rootsBare"] = bare;
         }
         {
@@ -4723,13 +4848,39 @@ struct AgentTools::Impl {
         int bare = 0;
         const std::vector<Vec3f> roots = lockRoots(g, setup, count, spacing, flag(a, "drop_bare", true), &bare);
         if (roots.empty()) throw ToolError("no roots in the hair region");
+        const std::string mode = str(a, "mode", kDefaultCombMode);
+        if (mode != "comb" && mode != "field") throw ToolError("mode is comb or field");
         std::vector<std::vector<Vec3f>> guides;
         std::map<std::string, std::vector<float>> lengths;
-        for (std::size_t i = 0; i < roots.size(); ++i) {
-            std::vector<Vec3f> pts = combGuide(roots[i], combLength(setup.frame, roots[i], co, i), *setup.shell, co, i);
-            if (pts.size() < 2) continue;
-            lengths[headRegion(setup.frame, roots[i] - setup.frame.center)].push_back(guideLength(pts));
-            guides.push_back(std::move(pts));
+        json fieldInfo;
+        if (mode == "field") {
+            // Every third root combed (smooth: no wave, no flip) as the field's keys; every root grown
+            // through it, the comb's wave on top.
+            CombOptions ks = co;
+            ks.amplitude = 0.0f;
+            ks.flip = 0.0f;
+            std::vector<std::vector<Vec3f>> keys;
+            for (std::size_t i = 0; i < roots.size(); i += 3) {
+                std::vector<Vec3f> pts = combGuide(roots[i], combLength(setup.frame, roots[i], ks, i), *setup.shell, ks, i);
+                if (pts.size() >= 2) keys.push_back(std::move(pts));
+            }
+            const double cell = num(a, "cell", 0.0);
+            if (cell < 0.0) throw ToolError("cell must be positive (scene units)");
+            FieldFillRun run = fieldFillRun(setup, roots, keys, co, "comb", false, 0.4f * setup.frame.radius, co.amplitude != 0.0f, co.clip, cell);
+            for (std::size_t i = 0; i < run.guides.size(); ++i) {
+                if (run.guides[i].size() < 2) continue;
+                lengths[headRegion(setup.frame, roots[i] - setup.frame.center)].push_back(guideLength(run.guides[i]));
+                guides.push_back(std::move(run.guides[i]));
+            }
+            fieldInfo = run.info;
+            fieldInfo["keys"] = keys.size();
+        } else {
+            for (std::size_t i = 0; i < roots.size(); ++i) {
+                std::vector<Vec3f> pts = combGuide(roots[i], combLength(setup.frame, roots[i], co, i), *setup.shell, co, i);
+                if (pts.size() < 2) continue;
+                lengths[headRegion(setup.frame, roots[i] - setup.frame.center)].push_back(guideLength(pts));
+                guides.push_back(std::move(pts));
+            }
         }
         GuideRootingOptions cro;
         cro.headRadius = setup.frame.radius;
@@ -4759,10 +4910,126 @@ struct AgentTools::Impl {
                     {"shell", {{"from", setup.photos ? "photos" : "volume"}, {"photos", setup.shell->photoCount()}}},
                     {"head", frameJson(setup.frame)}, {"units", g.units()}};
         if (ids.size() <= 400) out["ids"] = ids;
+        out["mode"] = mode;
+        if (!fieldInfo.is_null()) out["field"] = fieldInfo;
         if (bare) out["rootsBare"] = bare;
         if (!look.is_null()) out["lookApplied"] = look;
         out["hint"] = "Look with render_preview views [front, right, back, three_quarter] guides=true (density 0 for the guides alone); "
                       "with photos, compare_to_photo.";
+        return textResult(withSummary(g, out));
+    }
+
+    // Fills the hair region between a group's guides (or every guide) with guides grown through the
+    // field they make (guide_field.h).
+    ToolResult fillGuidesTool(const json& a) {
+        AgentGroom& g = target.groom(str(a, "groom"));
+        const LockSetup setup = lockSetup(g, str(a, "depth", "auto"), num(a, "volume", 0.0));
+        const std::string from = str(a, "group");
+        const std::string fillName = str(a, "fill_group", "fill");
+        checkName(fillName, "a group's name");
+        if (!from.empty() && from == fillName) throw ToolError("fill_group must differ from group");
+        std::vector<std::vector<Vec3f>> keys;
+        {
+            const GuideHierarchy stored = GuideHierarchy::fromJson(hierarchyText(g));
+            const HierarchyPtr live = g.session().hierarchy();
+            const GuideHierarchy& h = live ? *live : stored;
+            bool found = from.empty();
+            for (const HierarchyGuide& guide : h.guides()) {
+                const GuideGroup* gr = h.group(guide.group);
+                if (gr && gr->name == from) found = true;
+                if (gr && gr->name == fillName) continue;  // (not the fill being replaced)
+                if (!from.empty() && (!gr || gr->name != from)) continue;
+                if (guide.points.size() >= 2) keys.push_back(guide.points);
+            }
+            if (!found) throw ToolError("no group named '" + from + "'");
+        }
+        if (keys.empty()) throw ToolError(from.empty() ? "no guides to fill between: make some first (guides_from_strokes, comb_guides)"
+                                                       : "the group '" + from + "' has no guides");
+        const int count = static_cast<int>(std::clamp(num(a, "count", 200.0), 1.0, 2000.0));
+        const double spacing = num(a, "spacing", 0.0);
+        if (spacing < 0.0) throw ToolError("spacing must be positive (scene units)");
+        double reachIn = num(a, "reach", 0.0);
+        if (reachIn < 0.0) throw ToolError("reach must be positive (scene units)");
+        const float reach = reachIn > 0.0 ? static_cast<float>(reachIn) : 0.4f * setup.frame.radius;
+        const std::string uncovered = str(a, "uncovered", "comb");
+        if (uncovered != "comb" && uncovered != "skip") throw ToolError("uncovered is comb or skip");
+        int bare = 0;
+        std::vector<Vec3f> roots = lockRoots(g, setup, count, spacing, flag(a, "drop_bare", true), &bare);
+        int skipped = 0;
+        if (uncovered == "skip") {
+            std::vector<Vec3f> near;
+            for (const Vec3f& r : roots) {
+                float d = std::numeric_limits<float>::infinity();
+                for (const auto& k : keys) d = std::min(d, (k.front() - r).length());
+                if (d <= reach) near.push_back(r);
+                else ++skipped;
+            }
+            roots = std::move(near);
+        }
+        if (roots.empty()) throw ToolError("no roots to fill (the hair region, within reach of the guides)");
+        // The comb's settings (uncovered roots, the wave). The field's part: part (none, auto: the one
+        // the guides show; else as the comb's), else the comb's when given, else none.
+        json combArgs = a.contains("comb") ? checkArguments(objectSchema(combProperties()), a["comb"]) : json::object();
+        std::string partMode = combArgs.contains("part") ? "comb" : "none";
+        if (a.contains("part")) {
+            const std::string named = a["part"].is_string() ? a["part"].get<std::string>() : std::string();
+            if (named == "auto" || named == "none") {
+                partMode = named;
+            } else {
+                combArgs["part"] = a["part"];
+                partMode = "comb";
+            }
+        }
+        const CombOptions co = combOptionsOf(g, combArgs, setup.frame);
+        const double cell = num(a, "cell", 0.0);
+        if (cell < 0.0) throw ToolError("cell must be positive (scene units)");
+        const bool clip = flag(a, "clip", true);
+        FieldFillRun run = fieldFillRun(setup, roots, keys, co, partMode, uncovered == "comb", reach, flag(a, "wave", true), clip, cell);
+        GuideRootingOptions fro;
+        fro.headRadius = setup.frame.radius;
+        fro.up = setup.frame.up;
+        const ScalpMesh& head = setup.hair.head ? *setup.hair.head : *setup.hair.scalp;
+        json rooting = rootingJson(rootGuides(run.guides, *setup.hair.scalp, &head, fro));
+        std::vector<std::vector<Vec3f>> made;
+        for (auto& k : run.guides)
+            if (k.size() >= 2) made.push_back(std::move(k));
+        std::vector<GuideId> ids;
+        json look;
+        const MeshPtr scalp = scalpOf(g);
+        edit(g, "fill guides", [&](std::string& graph, std::string& hierarchy) {
+            GuideHierarchy h = hierarchyOf(g);
+            const GroupId group = lockGroup(h, fillName, flag(a, "replace", true));
+            for (const auto& k : made) ids.push_back(h.addGuide(group, k));
+            h.evaluate(scalp.get());
+            hierarchy = h.toJson();
+            if (flag(a, "apply_look", false)) {
+                std::vector<std::vector<Vec3f>> all = keys;
+                all.insert(all.end(), made.begin(), made.end());
+                look = applyLockLook(g, graph, setup.frame.radius, hairlineOf(g, all));
+            }
+        });
+        json out = run.info;
+        out.update({{"group", fillName}, {"from", from.empty() ? json("all") : json(from)}, {"keys", keys.size()}, {"roots", roots.size()},
+                    {"guides", ids.size()}, {"rooting", rooting},
+                    {"shell", {{"from", setup.photos ? "photos" : "volume"}, {"photos", setup.shell->photoCount()}}},
+                    {"head", frameJson(setup.frame)}, {"units", g.units()}});
+        if (ids.size() <= 400) out["ids"] = ids;
+        if (bare) out["rootsBare"] = bare;
+        if (skipped) out["rootsUncovered"] = skipped;
+        if (!look.is_null()) out["lookApplied"] = look;
+        if (flag(a, "score", true) && setup.photos) {
+            const json sc = photoScoreOf(g, made);
+            if (!sc.is_null()) out["score"] = sc;
+        }
+        out["about"] = "A field of hair directions solved through the hair's shell (a grid of cells between the head and the hull the "
+                       "photos carve): it keeps to each guide's direction root to tip, carries on a few cells past each tip fading out, "
+                       "near the scalp leans out of it, and is the smoothest such field between them (not blended across the part). "
+                       "Each fill root grows through it root first in half-cell steps; stopped: length (its nearest guides' length, "
+                       "+15%), faded (past the guides' tips), hull (left the shell), turn (a turn over 150 degrees). combedKeys: combed "
+                       "guides holding the field where no guide is within reach (uncovered comb). score: the new guides against the "
+                       "photos (score_guides' mean).";
+        out["hint"] = "Look with render_preview views [front, right, back] guides=true density=0; score_guides group=" + fillName +
+                      "; calling again replaces the group.";
         return textResult(withSummary(g, out));
     }
 
@@ -6221,8 +6488,21 @@ struct AgentTools::Impl {
                       {"clip", prop("boolean", "Cut each guide's tail where the photos show the hair end (default true).")},
                       {"group", prop("string", "The stroke guides' group (default strokes).")},
                       {"replace", prop("boolean", "Empty the groups first (default true).")},
-                      {"fill", prop("boolean", "Also fill the hair region with guides from the stroke guides: each root takes its nearest "
-                                               "strokes' shapes, blended by distance (fill_reach), combed (comb) where none is near.")},
+                      {"fill", prop("boolean", "Also fill the hair region with guides from the stroke guides (fill_mode): grown root "
+                                               "first through the field of directions the strokes make, or each root taking its nearest "
+                                               "strokes' shapes; combed (comb) where no stroke is within fill_reach.")},
+                      {"fill_mode", enumProp({"field", "blend"}, "field (default): a smooth field of directions solved through the hair's "
+                                                                 "shell from the strokes (root to tip, fading past their tips, not across "
+                                                                 "a part: comb.part or fill_part), each fill guide "
+                                                                 "grown through it from its root, ending where the field fades, the shell "
+                                                                 "ends or about its nearest strokes' length; blend: the nearest strokes' "
+                                                                 "shapes copied from each root, blended by distance.")},
+                      {"fill_part", enumProp({"none", "auto"}, "fill_mode field without comb.part: the field blended across the top "
+                                                               "(none, default) or not across the part the strokes show (auto: strokes over "
+                                                               "the top front heading left and right; a seam leaves the scalp bare along "
+                                                               "it). comb.part gives one.")},
+                      {"fill_wave", prop("boolean", "fill_mode field: the comb's S-wave on the grown guides (comb.wave; default true).")},
+                      {"fill_cell", prop("number", "fill_mode field: the field's cell (scene units; default a 14th of the head's radius).")},
                       {"fill_group", prop("string", "The fill's group (default strokeFill).")},
                       {"fill_count", prop("integer", "Fill roots spread over the hair region (default 200).")},
                       {"fill_spacing", prop("number", "Or fill roots this far apart (scene units).")},
@@ -6256,21 +6536,63 @@ struct AgentTools::Impl {
             p["group"] = prop("string", "The group (default combed).");
             p["replace"] = prop("boolean", "Empty the group first (default true).");
             p["apply_look"] = prop("boolean", "Also set up the lock look (as guides_from_strokes'). Same undo step.");
+            p["mode"] = enumProp({"field", "comb"}, "field (default): every third root combed smooth as keys, a field of directions "
+                                                    "solved through the shell from them (not blended across the part), every guide "
+                                                    "grown through it root first (ending where the shell ends or about its keys' "
+                                                    "length), the S-wave on top; comb: each guide combed on its own.");
+            p["cell"] = prop("number", "mode field: the field's cell (scene units; default a 14th of the head's radius).");
             add("comb_guides", "Comb guides",
                 "Blocks a haircut in with guides grown root out over the hair region, one undo step: combed away from a part and "
                 "back over the top (sweep front: back, out, forward), the sides back over the ears or down, the back falling; each "
                 "rises off the scalp first (the forehead's hairline up and back), rides the hair's shell (from the photos, else a "
                 "guessed volume), carries an S-wave across the flow (in step with its neighbours) and flips at the tip; cut where "
                 "the photos show the hair end. Lengths by part of the head (top, front, sides, back, nape; default shares of the "
-                "head's size). Everything scales with the head. Answers with the guides per region and their median length.",
+                "head's size). mode field (default) combs every third guide so and grows them all through the field of "
+                "directions those make (as fill_guides): no blending across the part, ends where the shell ends. Everything "
+                "scales with the head. Answers with the guides per region and their median length.",
                 objectSchema(p), &Impl::combGuides);
+        }
+        {
+            json p = combProperties();
+            json fp = {{"groom", groom},
+                       {"group", prop("string", "The guides to fill between: this group's (default: every guide but fill_group's).")},
+                       {"fill_group", prop("string", "The new guides' group (default fill).")},
+                       {"count", prop("integer", "Fill roots spread over the hair region (default 200).")},
+                       {"spacing", prop("number", "Or fill roots this far apart (scene units).")},
+                       {"reach", prop("number", "A guide's reach (scene units; default 0.4 head radii): roots farther from every guide's "
+                                                "root are uncovered.")},
+                       {"uncovered", enumProp({"comb", "skip"}, "Uncovered roots: comb (default: combed guides hold the field there, "
+                                                                "comb's settings) or skip (no guide grown there).")},
+                       {"part", {{"type", json::array({"string", "number", "array"})},
+                                 {"description", "The part the field is not blended across: \"none\" (default, or comb.part when "
+                                                 "given), \"auto\" (the one the guides show: those over the top front heading left and "
+                                                 "right), \"center\", an offset toward the character's left (scene units) or two points "
+                                                 "it runs through, front first. A part leaves the scalp bare along it."}}},
+                       {"comb", objectSchema(p)},
+                       {"wave", prop("boolean", "The comb's S-wave on the grown guides (comb.wave; default true).")},
+                       {"cell", prop("number", "The field's cell (scene units; default a 14th of the head's radius).")},
+                       {"clip", prop("boolean", "Cut guides where the lined-up photos show the hair end (default true).")},
+                       {"drop_bare", prop("boolean", "Leave out roots a lined-up photo shows bare skin over (default true).")},
+                       {"depth", enumProp({"auto", "photos", "volume"}, "The shell: auto, photos (insist on them), volume (the guess).")},
+                       {"volume", prop("number", "The guessed volume's thickness (scene units; default 0.3 head radii).")},
+                       {"replace", prop("boolean", "Empty fill_group first (default true).")},
+                       {"score", prop("boolean", "Score the new guides against the lined-up photos (score_guides; default true).")},
+                       {"apply_look", prop("boolean", "Also set up the lock look (as guides_from_strokes'). Same undo step.")}};
+            add("fill_guides", "Fill between guides",
+                "Fills the hair region between existing guides (a group's, or every guide), one undo step: a smooth field of hair "
+                "directions is solved through the hair's shell (from the lined-up photos, else a guessed volume) that keeps to each "
+                "guide's direction root to tip, fades out past their tips, leans out of the scalp near it and is not blended across "
+                "the part; guides are grown through it root first from roots spread over the hair region, ending where the field "
+                "fades, the shell ends or about their nearest guides' length; the comb's S-wave on top. Answers with the counts, "
+                "why the guides stopped, the field's grid, the part and, with photos, the new guides' score against them.",
+                objectSchema(fp), &Impl::fillGuidesTool);
         }
         add("hair_shell", "The hair's shell",
             "The hair's outer surface round the head as the lined-up photos show it: along each direction from the head's middle, "
             "hair until a photo that sees the point shows backdrop or skin there (what no photo sees: a guessed volume), smoothed. "
             "Answers with the head's frame (a sphere fitted to the hair region) and the thickness off the head by part (top, "
             "front, sides, back, nape: mean, 90th percentile, max, scene units; covered: the share with hair over it); image: the "
-            "shell over each photo. guides_from_strokes and comb_guides use it.",
+            "shell over each photo. guides_from_strokes, comb_guides and fill_guides use it.",
             objectSchema({{"groom", groom},
                           {"depth", enumProp({"auto", "photos", "volume"}, "From the photos (auto when there are some) or the guess.")},
                           {"volume", prop("number", "The guessed volume's thickness (scene units; default 0.3 head radii).")},

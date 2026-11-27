@@ -347,6 +347,18 @@ def everything_else(c, root):
     assert lifted["rooting"]["flipped"] == 0 and lifted["rooting"]["dropped"] == 0 and "rooting" in lifted["fill"], lifted
     assert lifted["rooting"]["thresholds"]["maxRootGap"] == "none", lifted  # (a drawn stroke is never dropped for its gap)
     assert lifted["fill"]["guides"] > 10 and "subClump" in lifted["lookApplied"], lifted
+    assert lifted["fill"]["mode"] == "field" and lifted["fill"]["field"]["cells"] > 0, lifted["fill"]
+    # The region filled between the stroke guides through their field, scored against the photo.
+    filled, _ = c.call("fill_guides", dict(f, group="strokes", count=40))
+    assert filled["group"] == "fill" and filled["keys"] == 4 and filled["guides"] > 10, filled
+    stops = filled["stopped"]
+    assert stops["length"] + stops["faded"] + stops["hull"] + stops["turn"] + stops["nothing"] == filled["roots"], filled
+    assert 0.0 <= filled["score"]["mean"] <= 1.0 and filled["score"]["photos"][0]["photo"] == "front", filled
+    old_fill, _ = c.call("guides_from_strokes", dict(f, photo="front", strokes=strokes, fill=True, fill_count=20, fill_mode="blend",
+                                                    group="strokes2", fill_group="strokeFill2"))
+    assert old_fill["fill"]["mode"] == "blend" and old_fill["fill"]["guides"] > 5, old_fill["fill"]
+    c.call("guide_op", dict(f, op="delete_guides", group="strokes2"))
+    c.call("guide_op", dict(f, op="delete_guides", group="strokeFill2"))
     assert len([x for x in result["content"] if x["type"] == "image"]) == 1
     one = c.call("get_guides", dict(f, ids=[lifted["ids"][0]], with_points=True))[0]["guides"][0]
     moved = [[p[0], p[1] + 1.0, p[2]] for p in one["positions"]]
@@ -355,6 +367,7 @@ def everything_else(c, root):
     assert reshaped["count"] == 1 and again["group"] == "strokes" and again["id"] == one["id"], (reshaped, again)
     combed, _ = c.call("comb_guides", dict(f, count=40, part="none", sweep={"front": "back", "sides": "down"}))
     assert combed["guides"] > 10 and combed["shell"]["from"] == "photos" and combed["rooting"]["flipped"] == 0, combed
+    assert combed["mode"] == "field" and combed["field"]["keys"] > 5, combed
     gone, _ = c.call("guide_op", dict(f, op="delete_guides", group="combed"))
     assert gone["count"] == combed["guides"], gone
 
@@ -433,7 +446,7 @@ def main():
                        "measure_guides", "add_photo", "photo_view", "mesh_landmarks", "align_photo", "photo_edit",
                        "guides_from_photos", "compare_to_photo", "checkpoint", "restore", "batch", "show_map", "suggest_pairs", "root_tube", "tube_levels", "tube_shape", "check_expression", "import_animation",
                        "animate_scalp", "simulate", "sim_cache", "export_cards", "export_game", "stats", "guides_from_strokes", "comb_guides",
-                       "hair_shell", "photo_project", "reshape_guides", "score_guides"]:
+                       "hair_shell", "photo_project", "reshape_guides", "score_guides", "fill_guides"]:
             assert wanted in names, wanted
         assert c.request("tools/call", {"name": "no_such_tool", "arguments": {}})["error"]["code"] == -32602
         assert c.request("no/such/method")["error"]["code"] == -32601

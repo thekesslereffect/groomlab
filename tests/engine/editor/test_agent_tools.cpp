@@ -689,6 +689,51 @@ TEST(AgentTools, LockToolsStrokesCombShellAndReshape) {
     EXPECT_TRUE(names.count("subClump") && names.count("tipTrim") && names.count("hairline")) << graph.dump();
     call(tools, "comb_guides", {{"part", json::array({1, 2})}}, true);  // not two points
     call(tools, "comb_guides", {{"sweep", {{"front", "sideways"}}}}, true);
+    EXPECT_EQ(combed["mode"], "field");
+    EXPECT_GT(combed["field"]["field"]["cells"].get<int>(), 100);
+    EXPECT_EQ(combed["field"]["part"]["from"], "comb");
+    EXPECT_TRUE(combed["field"]["part"].contains("offset"));  // (the center part)
+    // The comb on its own, each guide combed alone.
+    const json alone = call(tools, "comb_guides", {{"count", 60}, {"volume", 2.0}, {"mode", "comb"}, {"group", "combAlone"}});
+    EXPECT_EQ(alone["mode"], "comb");
+    EXPECT_GT(alone["guides"].get<int>(), 40);
+    call(tools, "comb_guides", {{"mode", "blend"}}, true);
+    call(tools, "guide_op", {{"op", "delete_guides"}, {"group", "combAlone"}});
+
+    // fill_guides: the hair region filled between a group's guides through their field, one undo
+    // step; the new guides rooted on the head, off it; again: the group replaced.
+    {
+        const std::size_t keyCount = g.session().authoredHierarchy()->guidesInGroup(g.session().authoredHierarchy()->findGroup("combed")).size();
+        const std::size_t steps0 = g.history().size();
+        const json filled = call(tools, "fill_guides", {{"group", "combed"}, {"count", 80}, {"volume", 2.0}});
+        EXPECT_EQ(g.history().size(), steps0 + 1);
+        EXPECT_EQ(filled["group"], "fill");
+        EXPECT_EQ(filled["mode"], "field");
+        EXPECT_EQ(filled["keys"].get<std::size_t>(), keyCount);
+        EXPECT_GT(filled["guides"].get<int>(), 50);
+        const json& st = filled["stopped"];
+        EXPECT_EQ(st["length"].get<int>() + st["faded"].get<int>() + st["hull"].get<int>() + st["turn"].get<int>() + st["nothing"].get<int>(),
+                  filled["roots"].get<int>());
+        EXPECT_EQ(filled["part"]["from"], "none");
+        EXPECT_FALSE(filled.contains("score"));  // (no photos)
+        const auto h = g.session().authoredHierarchy();
+        const GroupId fill = h->findGroup("fill");
+        ASSERT_NE(fill, kNoGroup);
+        EXPECT_EQ(h->guidesInGroup(fill).size(), filled["guides"].get<std::size_t>());
+        for (const GuideId id : h->guidesInGroup(fill)) {
+            const HierarchyGuide* gd = h->guide(id);
+            EXPECT_NEAR(gd->points.front().length(), 10.0f, 0.1f);
+            for (const Vec3f& p : gd->points) EXPECT_GE(p.length(), 9.9f);
+        }
+        const json again = call(tools, "fill_guides", {{"group", "combed"}, {"count", 40}, {"volume", 2.0}, {"part", "center"}, {"wave", false}});
+        EXPECT_EQ(again["part"]["from"], "comb");
+        EXPECT_EQ(g.session().authoredHierarchy()->guidesInGroup(g.session().authoredHierarchy()->findGroup("fill")).size(),
+                  again["guides"].get<std::size_t>());
+        call(tools, "fill_guides", {{"group", "nothing"}}, true);
+        call(tools, "fill_guides", {{"group", "combed"}, {"fill_group", "combed"}}, true);
+        call(tools, "fill_guides", {{"group", "combed"}, {"uncovered", "maybe"}}, true);
+        call(tools, "guide_op", {{"op", "delete_guides"}, {"group", "fill"}});
+    }
 
     // A photo lined up from pairs a known camera gives (as above).
     writePhoto(fs::u8path(target.folders().root) / "shot.png", 320, 240);

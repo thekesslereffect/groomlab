@@ -288,13 +288,25 @@ would: a few key locks drawn on the photos, the rest combed and filled in from t
   photo's camera onto the hair's outer surface the photos show, rooted on the scalp under its
   root end (a stroke drawn tip first is turned round: the end nearer the scalp is the root), and
   cut where it passes through the head or the photos show the hair end. A stroke on a side photo can be mirrored
-  to the other side. With `fill`, the rest of the hair region gets guides from the strokes (each
-  takes its nearest strokes' shapes), combed where no stroke is near.
+  to the other side. With `fill`, the rest of the hair region gets guides grown through the flow
+  the strokes make (below), combed where no stroke is near; `fill_mode blend` copies each root's
+  nearest strokes' shapes instead.
+- **Filling between guides** (`fill_guides`, and the fill of the two tools above): a smooth field of
+  hair directions is solved through the hair's shell that follows each guide root to tip, fades out
+  a little past each guide's tip and leans out of the scalp near it; new guides grow through it root
+  first from roots spread over the scalp, riding about as high as the guides near them, and end where
+  the field fades, where the photos show the hair end, or about their neighbours' length. The flow
+  between a few drawn locks stays coherent, the back ends where the photos show it end instead of at
+  one length, and nothing hangs below the hair. A part (`part`, or `comb.part`) is a seam the flow is
+  not blended across; leave it out when the hair has no clear part, since a seam leaves the scalp
+  bare along it. The new guides get the comb's wave on top (`wave`), then the lock look.
 - **The hair's shell** (`hair_shell`): the hair's outer surface round the head from every lined-up
   photo's hair mask, and how thick the hair is over each part of the head.
 - **Combing** (`comb_guides`): a haircut blocked in without strokes: a part, the front swept back
   (or out, or forward), the sides back over the ears, the back falling, each guide riding the hair's
-  shell with a wave across the flow.
+  shell with a wave across the flow. By default every third guide is combed so and all of them grow
+  through the field those make (as above), which keeps the flow from blending across the part and
+  ends the hair at the shell instead of hanging by the ears and nape; `mode comb` combs each one alone.
 - The lock look (`apply_look`): the guides as the clumps' centers, finer clumps inside them, the tips
   trimmed unevenly and no hair below the lowest guide roots.
 
