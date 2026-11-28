@@ -169,6 +169,50 @@ TEST(RootSubdivision, ARootIsCutIntoCellsInTheLevelBelowThatSealAndAreRemembered
     }
 }
 
+TEST(RootSubdivision, EachCellsGuideLeavesTheMiddleOfItsRoot) {
+    // A cut's cells: each guide starts at its root's middle (the Tube tool's middle point), also
+    // after the root it was cut from is combed over.
+    GuideHierarchy h;
+    const auto scalp = head();
+    const GuideId root = bigRoot(h, *scalp);
+    const SubdivisionResult cut = subdivideRootTubes(h, *scalp, {root});
+    ASSERT_GE(cut.cells.size(), 4u);
+    auto check = [&](const char* when) {
+        for (const GuideId c : cut.cells) {
+            // (The middle of its outline on the scalp, as the Tube tool draws it; its size: its
+            // CVs' farthest reach from it.)
+            std::vector<Vec3f> cvs;
+            for (const StrandRoot& r : h.guide(c)->rootOutline) cvs.push_back(scalp->position(r));
+            ASSERT_GE(cvs.size(), 3u) << c;
+            const Vec3f middle = rootOutlineCenter(*scalp, cvs).point;
+            float size = 0.0f;
+            for (const Vec3f& p : cvs) size = std::max(size, (p - middle).length());
+            EXPECT_LT((h.guide(c)->points.front() - middle).length(), 0.1f * size) << when << " " << c;
+        }
+    };
+    check("as cut");
+    // A cell's shape keeps its middle as its origin (CustomTubeShape::origin), saved with it.
+    for (const GuideId c : cut.cells) {
+        ASSERT_TRUE(h.guide(c)->tube.custom) << c;
+        EXPECT_TRUE(h.guide(c)->tube.custom->origin) << c;
+    }
+    {
+        GuideHierarchy loaded = GuideHierarchy::fromJson(h.toJson());
+        loaded.evaluate(scalp.get());
+        for (const GuideId c : cut.cells) {
+            ASSERT_TRUE(loaded.guide(c) && loaded.guide(c)->tube.custom) << c;
+            EXPECT_TRUE(loaded.guide(c)->tube.custom->origin) << c;
+            EXPECT_EQ(loaded.guide(c)->tube.custom->hash, h.guide(c)->tube.custom->hash) << c;
+            EXPECT_LT((loaded.guide(c)->points.front() - h.guide(c)->points.front()).length(), 1e-4f) << c;
+        }
+    }
+    std::vector<Vec3f> leaning = h.guide(root)->points;
+    for (std::size_t i = 1; i < leaning.size(); ++i) leaning[i] = leaning[0] + Vec3f(0.3f * i, 0.05f * i, 0.0f);
+    h.setPoints(root, leaning);
+    h.evaluate(scalp.get());
+    check("combed over");
+}
+
 TEST(RootSubdivision, ThePaintedDensityMakesMoreSmallerCells) {
     const ScalpMesh flat = painted([](const Vec3f&) { return 0.0f; });
     const ScalpMesh dense = painted([](const Vec3f&) { return 1.0f; });

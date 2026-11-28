@@ -480,15 +480,15 @@ def linkable(node):
 
 # ---- Drawing -------------------------------------------------------------------------------------
 
-def _wire_points(a, b, k, below=None, through=False):
+def _wire_points(a, b, k, below=None, through=False, gap=None):
     """A wire from the output at `a` to the input at `b` (region pixels) in the user's wire style
     (the core's wireRoute, graph_arrange.WIRE_STYLES): forward a level S-curve or square runs;
-    backwards, down under the cards and back along under them. `through`: a piece between pins or
-    dots (no loop)."""
+    backwards, back between the cards (`gap`, one above the other: issue 131) or down under them
+    (`below`) and back along. `through`: a piece between pins or dots (no loop)."""
     k = max(k, 1e-6)
-    # In graph units, y down (the route is the same wherever it starts; `below` is region pixels).
+    # In graph units, y down (the route is the same wherever it starts; `below` and `gap` are region pixels).
     steps = graph_arrange.wire_route(graph_arrange.wire_style(), a[0] / k, -a[1] / k, b[0] / k, -b[1] / k,
-                                     None if below is None else -below / k, through)
+                                     None if below is None else -below / k, through, None if gap is None else -gap / k)
     pts = graph_arrange.route_points((a[0] / k, -a[1] / k), steps, 20)
     return [(x * k, -y * k) for x, y in pts]
 
@@ -683,7 +683,20 @@ def _draw_wires(p, g, t):
         color = with_alpha(_port_color(t, kind), 220 / 255.0)
         if link.is_muted:
             color = with_alpha(color, 0.45)
-        p.lines(_wire_points(a, b, g.k), color, 2.0)
+        p.lines(_wire_points(a, b, g.k, *_wire_cards(g, link)), color, 2.0)
+
+
+def _wire_cards(g, link):
+    """A wire's cards as wireRoute takes them (region pixels): (below: their lower edge, None, gap:
+    the clear space between them one above the other, else None), Maya's EdgeItem's."""
+    ra = g.by_name.get(link.from_node.name)
+    rb = g.by_name.get(link.to_node.name)
+    if ra is None or rb is None:
+        return None, False, None
+    (_xa, ya, _wa, ha), (_xb, yb, _wb, hb) = ra.rect, rb.rect
+    below = min(ya, yb)  # (region y up: the lower edge)
+    gap = graph_arrange.wire_gap(-(ya + ha), -ya, -(yb + hb), -yb, 16.0 * g.k)  # (y down, then back)
+    return below, False, None if gap is None else -gap
 
 
 def _dot_kind(g, d):

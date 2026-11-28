@@ -52,6 +52,7 @@ add_executable(groomlab_tests
     engine/core/test_grooming.cpp
     engine/core/test_hierarchy.cpp
     engine/core/test_tubes.cpp
+    engine/core/test_tube_braids.cpp
     engine/core/test_root_tubes.cpp
     engine/core/test_root_tube_tool.cpp
     engine/core/test_tube_mesh.cpp

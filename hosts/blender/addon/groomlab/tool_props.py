@@ -309,7 +309,8 @@ def stop_off_layer(context):
     from . import tool_ops, tools
     t = context.scene.groomlab_tools
     kind, _name = tools.picked_corrective(context.scene)
-    if kind in ("layer", "node") and t.tool and not tools.edits_layers(t.tool):
+    if kind in ("layer", "node") and t.tool and not (tools.edits_sculpt_nodes(t.tool) if kind == "node"
+                                                     else tools.edits_layers(t.tool)):
         tool_ops.stop_tool(context)
 
 
@@ -800,6 +801,21 @@ class GroomLabTools(bpy.types.PropertyGroup):
     tube_base: StringProperty()
     tube_levels: StringProperty()
     tube_level: IntProperty(default=1)
+    # Tubes made braids (issue 129): the graph's tube Braid ("" none) and whether the brushes shape
+    # its sections (the level row's Braid, Sculpt Sections on it).
+    tube_braid: StringProperty()
+    tube_has_tubes: BoolProperty()  # tube levels or root tubes: Comb's levels' row (#132)
+    tube_braid_sculpting: BoolProperty()
+    # The Tube brush's Fill (issue #135): the value each channel's Fill sets (width in scene units,
+    # twist in degrees as the card shows it).
+    tube_fill_width: FloatProperty(name="Value", default=0.1, min=0.0, soft_max=1.0, subtype="DISTANCE",
+                                   description="The width Fill gives the tubes: each scaled so its widest section is "
+                                               "this half-width, its taper and what the brush painted kept")
+    tube_fill_flatness: FloatProperty(name="Value", default=0.0, min=0.0, max=0.99,
+                                      description="The flatness Fill gives the tubes root to tip: 0 as the shape is "
+                                                  "drawn, toward 1 a ribbon")
+    tube_fill_twist: FloatProperty(name="Value", default=0.0, min=-3.14159265, max=3.14159265, subtype="ANGLE",
+                                   description="The twist Fill gives the tubes root to tip")
     # The level whose tubes stay in view while others' guides are picked (its group; "": the tubes
     # follow their guides): one setting, read and written by the Roots card's Lock view and a Guide
     # groups row's tube. Mixed view: working on a level (the level view), the levels above show

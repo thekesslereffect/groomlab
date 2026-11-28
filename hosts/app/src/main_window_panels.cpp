@@ -151,6 +151,10 @@ void MainWindow::buildPanels() {
         groomTools_->showTab(QStringLiteral("paint"));
         if (!maps_->paintSelected()) report(tr("The density map could not be painted."));
     });
+    // The Tube card's Braid level (issue 129): Sculpt Sections on the tube Braid, or the guides again.
+    connect(groomTools_->tubePanel(), &TubePanel::braidSectionsRequested, this,
+            [this](const std::string& braid) { sculptBraidSections(braid); });
+    connect(groomTools_->tubePanel(), &TubePanel::braidSectionsLeft, this, [this] { leaveSculptNode(); });
     connect(groomTools_->tubePanel(), &TubePanel::paintDensityFinished, this, [this] {
         groomTools_->showTab(QStringLiteral("tools"));
         chooseTool(QStringLiteral("roots"));

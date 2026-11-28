@@ -1312,13 +1312,16 @@ class GraphEditorTest(unittest.TestCase):
 
         # The port drawn every frame: the core's wireRoute, through the helper.
         for style in arrange.WIRE_STYLES:
-            for a, b, below, through in (((0, 0), (300, 80), None, False), ((300, 0), (0, 40), None, False),
-                                         ((300, 0), (0, 40), 120.0, False), ((0, 0), (10, 90), None, True)):
+            for a, b, below, through, gap in (((0, 0), (300, 80), None, False, None), ((300, 0), (0, 40), None, False, None),
+                                              ((300, 0), (0, 40), 120.0, False, None), ((0, 0), (10, 90), None, True, None),
+                                              ((0, 0), (12, 4), None, False, None), ((300, 0), (0, 200), 260.0, False, 110.0)):
                 args = {"style": style, "ax": a[0], "ay": a[1], "bx": b[0], "by": b[1], "through": through}
                 if below is not None:
                     args["below"] = below
+                if gap is not None:
+                    args["gap"] = gap
                 want = [tuple(s) for s in process.call("wire_route", **args)["steps"]]
-                got = arrange.wire_route(style, a[0], a[1], b[0], b[1], below, through)
+                got = arrange.wire_route(style, a[0], a[1], b[0], b[1], below, through, gap)
                 self.assertEqual(len(got), len(want), style)
                 for s, w in zip(got, want):
                     for u, v in zip(s, w):

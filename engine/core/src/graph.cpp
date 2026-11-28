@@ -569,6 +569,8 @@ void takeTube(Guide& g, const Guide& from) {
     g.depth = from.depth;
     g.baseRoot = from.baseRoot;
     g.baseId = from.baseId;
+    g.parentId = from.parentId;  // (its place in the hierarchy: fillTubes gathers by it, braids find their tubes)
+    g.braid = from.braid;
 }
 
 }  // namespace

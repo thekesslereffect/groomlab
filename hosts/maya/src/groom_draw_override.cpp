@@ -561,7 +561,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
         giveBack();
         return;
     }
-    const HierarchyPtr hierarchy = shape_->evaluatedHierarchy();
+    const HierarchyPtr hierarchy = shape_->drawnHierarchy();
     if (!hierarchy) {
         giveBack();
         return;
@@ -877,7 +877,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
     in.clumpCenters = shape_->clumpCenters();  // a Clump shown: its centers as dots
     in.movingGuides = shape_->movingGuides();  // over the groomed guides, in their own color
     in.scalp = shape_->evaluatedScalp();
-    in.hierarchy = shape_->evaluatedHierarchy();
+    in.hierarchy = shape_->drawnHierarchy();
     in.parts = shape_->evaluatedParts();
     in.flow = shape_->evaluatedFlow();
     in.cards = shape_->evaluatedCards();

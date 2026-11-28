@@ -211,6 +211,26 @@ TEST(TubeSections, JsonScalesTheWidthsAsAWhole) {
     EXPECT_THROW(editedTube(tube, R"({"scaleWidth": -1})"), std::invalid_argument);
 }
 
+TEST(TubeSections, JsonFitsTheWidestSectionToAWidth) {
+    // The Tube tool's Fill (issue #135): each tube scaled to the width at its widest, taper kept.
+    TubeProfile tube;
+    tube.width = {0.2f, 0.1f};
+    const TubeProfile fitted = editedTube(tube, R"({"fitWidth": 0.5})");
+    EXPECT_NEAR(fitted.width[0], 0.5f, 1e-6f);
+    EXPECT_NEAR(fitted.width[1], 0.25f, 1e-6f);
+    EXPECT_NEAR(editedTube(tube, R"({"fitWidth": 0.5})", 2.0f).width[0], 0.25f, 1e-6f);  // shown over stored
+    EXPECT_THROW(editedTube(tube, R"({"fitWidth": -1})"), std::invalid_argument);
+    // Fill's edit, every host's: one channel each.
+    EXPECT_NEAR(editedTube(tube, tubeFillEdit("width", 0.5f)).width[0], 0.5f, 1e-6f);
+    const TubeProfile flat = editedTube(tube, tubeFillEdit("flatness", 0.75f));
+    ASSERT_FALSE(flat.aspect.empty());
+    EXPECT_NEAR(flat.aspect[0], tubeAspectOfFlatness(0.75f), 1e-6f);
+    EXPECT_EQ(flat.width, tube.width);
+    EXPECT_NEAR(editedTube(tube, tubeFillEdit("twist", 0.3f)).twist.at(0), 0.3f, 1e-6f);
+    EXPECT_THROW(tubeFillEdit("shape", 1.0f), std::invalid_argument);
+    EXPECT_THROW(tubeFillEdit("width", -1.0f), std::invalid_argument);
+}
+
 TEST(TubeSections, JsonEditsAndRoundTrips) {
     TubeProfile base;
     TubeProfile t = editedTube(base, R"({"width": 0.4, "aspect": [1, 0.2], "shape": "blade"})", 2.0f);

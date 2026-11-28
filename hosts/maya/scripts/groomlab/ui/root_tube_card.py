@@ -20,7 +20,13 @@ Tube hierarchy (#62)    + splits the selected tubes (or every tube of the base g
                         level deeper; - undoes a split (the selected tubes', else the deepest
                         level); then a row of level buttons, 1 (the base) always there, shows and
                         picks a level to work on (the Tube tool and the brushes then edit that
-                        level's tubes; the others hidden).
+                        level's tubes; the others hidden). Make braid (#129) marks the selected
+                        tubes (any level) as braids: each is braided with the tubes under it by
+                        the graph's Braid joining by tube (added the first time), the other
+                        tubes' hair left as it is; Unbraid takes the mark off. With a braid,
+                        the level row ends in Braid: its sections, a level under the tubes, as
+                        Sculpt Sections brushes them (their curves, and with the Tube brush their
+                        width, flatness and twist, kept on top of the braid); a level goes back.
 
 The viewport side is groomlab.ui.root_tube_tool; the work, groomlab.root_tubes.
 """
@@ -119,7 +125,8 @@ class RootTubeCard(QtCore.QObject):
         self.edit_root.clicked.connect(self.toggle_edit)
         self.select_root = widgets.chip("Select root", "Show every root's middle: click one to select its root, drag "
                                         "it to move the root over the scalp (with Snap, its CVs sealed onto a "
-                                        "neighbour stay put). Again: leave", False, "rootTubeSelect")
+                                        "neighbour stay put). Again: leave. Shift+click this button: every root of the level in view "
+                                        "selected", False, "rootTubeSelect")
         self.select_root.clicked.connect(self.toggle_select)
         self.root_block.add(widgets.chip_row((self.draw_root, self.edit_root, self.select_root)))
         self.undo_cv = widgets.chip("Undo CV", "Take back the last CV (or the drawn path); in Edit roots, the last "
@@ -275,6 +282,17 @@ class RootTubeCard(QtCore.QObject):
         self.mixed_view.row.setVisible(False)
         for switch in (self.lock_view, self.mixed_view):
             switch.row.setParent(self.hierarchy_block)
+        # Tubes made braids (#129): Make braid | Unbraid, on the selected tubes of any level.
+        self.make_braid = widgets.chip("Make braid", "Braid the selected tubes (any level; Select root's root too): "
+                                       "each is braided with the tubes under it, the other tubes' hair left as it "
+                                       "is. The first time, a Braid node joining by tube goes after the "
+                                       "Interpolate (fillTubes on); its Sculpt Sections brushes the braids", None,
+                                       "tubeMakeBraid")
+        self.make_braid.clicked.connect(lambda: self.braid_clicked(True))
+        self.unbraid = widgets.chip("Unbraid", "Take the braid mark off the selected tubes: their hair is plain "
+                                    "again (a tube under another braid stays in that one)", None, "tubeUnbraid")
+        self.unbraid.clicked.connect(lambda: self.braid_clicked(False))
+        self.hierarchy_block.add(widgets.chip_row((self.make_braid, self.unbraid)))
         self._locked = 0  # Lock view: the level kept in view (0: none), of hierarchy _locked_base
         self._locked_base = None
         self._current = 1  # the level picked
@@ -299,15 +317,19 @@ class RootTubeCard(QtCore.QObject):
 
     # -- Showing ---------------------------------------------------------------------------
 
-    def show(self, on, roots=False):
-        """The levels' row (`on`: the Tube and Roots brushes) and the root block (`roots`: Roots)."""
-        self.hierarchy_block.setVisible(on)
+    def show(self, on, roots=False, tubes_only=False):
+        """The levels' row (`on`: the Tube and Roots brushes, Comb) and the root block (`roots`:
+        Roots). `tubes_only` (Comb, issue #132): the levels' row only on a groom with tube roots or
+        tube levels, so combing a level needs no trip to the Tube tool."""
+        self._tubes_only = bool(on and tubes_only)
+        self.hierarchy_block.setVisible(on and not tubes_only)
         self.root_block.setVisible(on and roots)
         if on:
             self.refresh(self.owner.groom())
 
     def visible(self):
-        return any(b.isVisible() for b in self.blocks)
+        # (Comb's row hidden for want of tubes still reads the groom now and then: tubes drawn since show it.)
+        return getattr(self, "_tubes_only", False) or any(b.isVisible() for b in self.blocks)
 
     def start(self, mode="place"):
         """The Roots brush picked: the root tool in `mode` ("place": Draw root, "edit", "select")."""
@@ -352,8 +374,16 @@ class RootTubeCard(QtCore.QObject):
             self.paint_density.setEnabled(getattr(self, "_has_map", False) or self._painting is not None)
         painting = self._painting is not None
         self.paint_density.setChecked(painting)
+        if not heavy and groom and getattr(self, "_braid", {}).get("sculpt"):
+            # (Esc in the brush tool, or the Graph Editor's Done, leaves the braid's level: a cheap read)
+            from groomlab import sculpts
+            if (sculpts.target(groom) == self._braid["sculpt"]) != bool(self._braid.get("sculpting")):
+                heavy = True
+                self._levels = None
         if heavy:
             self.fill_levels(groom)
+        if getattr(self, "_tubes_only", False):
+            self.hierarchy_block.setVisible(bool(getattr(self, "_has_tubes", False)))
 
     def fill_levels(self, groom):
         info = {"base": None, "levels": []}
@@ -364,12 +394,26 @@ class RootTubeCard(QtCore.QObject):
                 pass
         base, levels = info["base"], info["levels"]
         self._base = base
+        # (Comb shows the levels' row only on a groom with tube levels or tube roots: #132.)
+        self._has_tubes = len(levels) > 1
+        if groom and not self._has_tubes:
+            try:
+                self._has_tubes = bool(root_tubes.root_tubes(groom))
+            except (RuntimeError, ValueError):
+                pass
         picked = self.owner.current_group()
         current = levels.index(picked) + 1 if picked in levels else 1
         self._current = current
         if self._locked and (base != self._locked_base or self._locked > len(levels)):
             self._unlock()  # (another hierarchy, or its locked level gone)
-        state = (base, tuple(levels), current)
+        braid = {"braid": None, "sculpt": None, "sculpting": False}
+        if groom:
+            try:
+                braid = root_tubes.tube_braid(groom)
+            except (RuntimeError, ValueError):
+                pass
+        self._braid = braid
+        state = (base, tuple(levels), current, braid["braid"], braid["sculpting"])
         if state == self._levels:
             return
         self._levels = state
@@ -387,6 +431,19 @@ class RootTubeCard(QtCore.QObject):
             b.setFixedWidth(theme.px(28))
             self.level_group.addButton(b, k + 1)
             self.level_layout.addWidget(b)
+        # The braid's sections, a level under the tubes (#129): Sculpt Sections on the tube Braid.
+        self.braid_level = None
+        if braid["braid"]:
+            self.braid_level = widgets.chip("Braid", "The braid's sections, a level under its tubes: brush their "
+                                            "curves, and with the Tube brush their width, flatness and twist, kept "
+                                            "on top of the braid (Sculpt Sections on %s). A level button (or Esc in "
+                                            "the brush tool) goes back to the guides" % braid["braid"],
+                                            braid["sculpting"], "tubeBraidLevel")
+            self.braid_level.clicked.connect(self.braid_level_clicked)
+            self.level_layout.addWidget(self.braid_level)
+            if braid["sculpting"]:
+                for b in self.level_group.buttons():  # (the braid's level is the one shown)
+                    b.setChecked(False)
         self.level_row.layout().invalidate()
         self.add_level.setEnabled(bool(base) and len(levels) < root_tubes.MAX_LEVELS)
         self.remove_level.setEnabled(len(levels) > 1)
@@ -486,6 +543,14 @@ class RootTubeCard(QtCore.QObject):
         self._enter("edit", self.edit_root)
 
     def toggle_select(self, _on=None):
+        if QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ShiftModifier:
+            # Shift+click: every root of the level in view selected (Select root entered if need be).
+            if self._mode() not in ("select", "duplicate"):
+                self._enter("select", self.select_root)
+            if self._mode() in ("select", "duplicate"):
+                self._run(self.tool.select_shown)
+            self.select_root.setChecked(self._mode() in ("select", "duplicate"))
+            return
         if self._mode() in ("select", "duplicate"):  # again: back to Draw
             return self.back_to_brush()
         self._enter("select", self.select_root)
@@ -732,10 +797,67 @@ class RootTubeCard(QtCore.QObject):
                                           (info["removed"], "" if info["removed"] == 1 else "s", info["base"],
                                            len(info["levels"])))
 
+    # -- Tubes made braids (#129) -------------------------------------------------------------
+
+    def _braid_targets(self, groom):
+        """The tubes Make braid works on: the selected guides, else Select root's root."""
+        picked = list(groomlab.selected_guides(groom) or [])
+        if not picked and self._mode() in ("select", "duplicate"):
+            picked = list(self.tool.picked or [])
+        return [int(g) for g in picked]
+
+    def braid_clicked(self, on):
+        groom = self.owner.groom()
+        if not groom:
+            self.owner.status.setText("Select a groom first.")
+            return
+        tubes = self._braid_targets(groom)
+        if not tubes:
+            self.owner.status.setText("Select tubes, then %s." % ("Make braid" if on else "Unbraid"))
+            return
+        info = self._run(root_tubes.make_braid, groom, tubes, on)
+        if not info:
+            return
+        count = info["changed"]
+        text = "%d tube%s %s" % (count, "" if count == 1 else "s", "made braids" if on else "unbraided")
+        if on and info.get("made"):
+            text += "; Braid node %s added" % info["braid"]
+        if on:
+            try:  # (a mark under another braid is covered by it)
+                covered = sum(1 for g, b in zip(tubes, root_tubes.braid_of(groom, tubes)) if b and b != g)
+            except RuntimeError:
+                covered = 0
+            if covered:
+                text += "; %d inside another braid (its mark waits)" % covered
+        self.owner.status.setText(text + ".")
+        self._redraw()
+
+    def braid_level_clicked(self, _on=None):
+        groom = self.owner.groom()
+        if not groom:
+            return
+        sculpting = bool(getattr(self, "_braid", {}).get("sculpting"))
+        info = self._run(root_tubes.braid_sections, groom, not sculpting)
+        self._levels = None  # (the row again: the Braid level checked or not)
+        self.fill_levels(groom)
+        if info and info.get("sculpting"):
+            self.owner.status.setText("Braid sections: brush them (the Tube brush shapes their width, flatness and "
+                                      "twist); a level goes back to the guides.")
+        elif info:
+            self.owner.status.setText("Back to the guides.")
+        self._redraw()
+
     def level_clicked(self, button):
         groom = self.owner.groom()
         if not groom or not self._base:
             return
+        if getattr(self, "_braid", {}).get("sculpting"):  # (out of the braid's level first)
+            try:
+                root_tubes.braid_sections(groom, on=False)
+            except (RuntimeError, ValueError):
+                pass
+            self._levels = None
+            self.fill_levels(groom)
         level = self.level_group.id(button)
         try:
             self._after_levels(groom, self._base, level)

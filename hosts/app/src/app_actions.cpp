@@ -292,6 +292,15 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
     b["tube.editRoot"] = {run([tubeRoots] { tubeRoots(false); }),
                           [rootMode](const json&) { return rootMode(RootTubeTool::Mode::Edit, RootTubeTool::Mode::Edit); }, groomOpen,
                           {}, {}, QStringLiteral("tubeEditRoot")};
+    // Make Braid / Unbraid (issue 129): the Tube card's, on the selected tubes.
+    b["tube.makeBraid"] = {run([m] {
+                               if (TubePanel* tubes = m->groomTools_->tubePanel()) tubes->makeBraid(true);
+                           }),
+                           {}, groomOpen};
+    b["tube.unbraid"] = {run([m] {
+                             if (TubePanel* tubes = m->groomTools_->tubePanel()) tubes->makeBraid(false);
+                         }),
+                         {}, groomOpen};
 
     // ---- The GroomLab menu ----
     // Groom Tools: the dock shown and raised (Groom mode, where it lives).

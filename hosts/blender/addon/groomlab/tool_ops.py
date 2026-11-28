@@ -681,7 +681,8 @@ class GROOMLAB_OT_tool(bpy.types.Operator):
                                      "GroomLab's tools work on grooms made with Create Groom from Selection")
             return {"CANCELLED"}
         kind, _name = tools.picked_corrective(context.scene)
-        if s is not None and kind in ("layer", "node") and not tools.edits_layers(self.tool):
+        if s is not None and kind in ("layer", "node") and not (tools.edits_sculpt_nodes(self.tool) if kind == "node"
+                                                                else tools.edits_layers(self.tool)):
             # (its tile is greyed: Maya's palette stops such a tool on a corrective)
             info = tools.tool_info(self.tool) or {}
             self.report({"WARNING"}, "%s doesn't edit a corrective: pick Base groom under Correctives to use it" %
@@ -1796,7 +1797,8 @@ ROOT_TIPS = {
     "EDIT": "Show the root tubes' outlines with their CVs, the guides hidden; drag CVs on the scalp (Ctrl+click an "
             "edge: a new CV there; a CV: taken out), then Finish edit (back to Draw root)",
     "SELECT": "Show every root's middle: click one to select its root (Shift: several), drag it to move the root "
-              "over the scalp. Again: back to Draw root",
+              "over the scalp. Again: back to Draw root. Shift+click this button: every root of the level in view "
+              "selected",
     "UNDO_CV": "Take back the last CV (or the drawn path); in Edit roots, the last CV move",
     "DELETE": "Delete the selected roots: their tubes and the tube hierarchy under them",
     "DUPLICATE": "Copy the selected roots: the copies follow the cursor over the scalp, a click sets them down. "
@@ -1828,6 +1830,12 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
             return "Stop painting the density (Apply cuts by it)"
         return ROOT_TIPS.get(properties.action, cls.__doc__)
 
+    shift = False  # (Select root's Shift+click: every root of the level in view)
+
+    def invoke(self, context, event):
+        self.shift = bool(event.shift)
+        return self.execute(context)
+
     def execute(self, context):
         scalp = active(context)
         t = context.scene.groomlab_tools
@@ -1843,6 +1851,10 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
                         self.begin(context, scalp, "place")
                 else:
                     self.begin(context, scalp, "edit")
+            elif self.action == "SELECT" and self.shift:
+                if mode not in ("select", "duplicate"):
+                    self.begin(context, scalp, "select")
+                tools.root_edit(scalp, "selectShown")
             elif self.action == "SELECT":
                 self.begin(context, scalp, "place" if mode in ("select", "duplicate") else "select")
             elif self.action == "UNDO_CV":
@@ -2097,6 +2109,78 @@ class GROOMLAB_OT_tube_smooth(TubeOperator):
             tools.smooth_tube(scalp, channel=t.tube_channel if t.tube_smooth_what == "current" else "all", guides=guides)
         except HelperError as e:
             return _fail(self, e)
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_tube_fill(TubeOperator):
+    """Set the channel picked above to the value on the selected tubes, else on the picked level's tubes
+    (every tube with no level picked). One undo step"""
+    bl_idname = "groomlab.tube_fill"
+    bl_label = "Fill"
+
+    def execute(self, context):
+        scalp = active(context)
+        t = context.scene.groomlab_tools
+        channel = t.tube_channel
+        value = {"width": t.tube_fill_width, "flatness": t.tube_fill_flatness, "twist": t.tube_fill_twist}.get(channel)
+        if value is None:
+            self.report({"ERROR"}, "Pick Width, Flatness or Twist to fill")
+            return {"CANCELLED"}
+        _level, group = tools.group_target(context.scene)
+        try:  # (the selection first: the helper's; else the picked level's group; else every tube)
+            r = tools.fill_tube_channel(scalp, channel, value, group=None if t.selected_count else (group or None))
+        except HelperError as e:
+            return _fail(self, e)
+        n = int(r.get("changed") or 0)
+        tools.status(context.scene, "Filled %s on %d tube%s." % (channel, n, "" if n == 1 else "s"))
+        return {"FINISHED"}
+
+
+BRAID_TIPS = {
+    "MAKE": "Braid the selected tubes (any level; Select root's roots too): each is braided with the tubes under it, "
+            "the other tubes' hair left as it is. The first time, a Braid node joining by tube goes after the "
+            "Interpolate (fillTubes on); its Sculpt Sections brushes the braids",
+    "UNBRAID": "Take the braid mark off the selected tubes: their hair is plain again (a tube under another braid "
+               "stays in that one)",
+    "LEVEL": "The braid's sections, a level under its tubes: brush their curves (and with the Tube brush their "
+             "width, flatness and twist), kept on top of the braid. Again (or a level): back to the guides",
+}
+
+
+class GROOMLAB_OT_tube_braid(GroomToolOperator):
+    """Tubes made braids (issue 129): Make braid, Unbraid, the Braid level"""
+    bl_idname = "groomlab.tube_braid"
+    bl_label = "Tube Braids"
+    bl_options = {"REGISTER", "UNDO"}
+
+    action: bpy.props.EnumProperty(items=[(k, k.title(), v) for k, v in BRAID_TIPS.items()], options={"SKIP_SAVE"})
+
+    @classmethod
+    def description(cls, context, properties):
+        return BRAID_TIPS[properties.action]
+
+    def execute(self, context):
+        scalp = active(context)
+        t = context.scene.groomlab_tools
+        try:
+            if self.action == "LEVEL":
+                tools.braid_sections(scalp, on=not t.tube_braid_sculpting)
+                tools.status(context.scene, "Brushing the braid's sections." if not t.tube_braid_sculpting
+                             else "Brushing the guides again.")
+            else:
+                r = tools.make_braid(scalp, on=self.action == "MAKE")
+                n = r["changed"]
+                said = "%s %d tube%s" % ("Braided" if self.action == "MAKE" else "Unbraided", n, "" if n == 1 else "s")
+                if r.get("made"):
+                    said += "; %s added after the Interpolate" % r["braid"]
+                tools.status(context.scene, said + ".")
+            tools.tube_levels(scalp)  # (the level row's Braid as the graph has it now)
+        except HelperError as e:
+            return _fail(self, e)
+        except ValueError as e:  # (the Braid level with no braid yet)
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        display.redraw()
         return {"FINISHED"}
 
 
@@ -2640,7 +2724,8 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_guides_reparent, GROOMLAB_OT_guides_regroup, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_overlay_mirror, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
            GROOMLAB_OT_curves_to_guides, GROOMLAB_OT_strands_to_curves, GROOMLAB_OT_flow_clear, GROOMLAB_OT_clone_pick_source, GROOMLAB_OT_clone_reset,
            GROOMLAB_OT_length_edit, GROOMLAB_OT_root_tube, GROOMLAB_OT_tube_level, GROOMLAB_OT_tube_view,
-           GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,
+           GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_fill, GROOMLAB_OT_tube_braid,
+           GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,
            GROOMLAB_OT_tube_shape_rename, GROOMLAB_OT_tube_shape_remove, GROOMLAB_OT_corrective_new,
            GROOMLAB_OT_corrective_move, GROOMLAB_OT_corrective_solo, GROOMLAB_OT_corrective_enable,
            GROOMLAB_OT_corrective_delete,

@@ -223,8 +223,22 @@ Pts gaussian(const Pts& pts, double sigma) {
 }
 
 Pts smoothPath(const Pts& path, const V& root, const V& normal, double size) {
+    // A stroke started off the root's middle eased onto it: moved by its start's offset at the root,
+    // less and less (a smoothstep) to none halfway along it, so the curve keeps its own way and the
+    // guide still leaves the middle of its root (before, only its first point moved: a kink there).
     Pts drawn = path;
-    drawn[0] = root;
+    {
+        const V offset = root - path[0];
+        std::vector<double> along(path.size(), 0.0);
+        for (std::size_t i = 1; i < path.size(); ++i) along[i] = along[i - 1] + dist(path[i - 1], path[i]);
+        const double fade = 0.5 * along.back();
+        for (std::size_t i = 0; i < drawn.size(); ++i) {
+            const double x = fade > 0.0 ? std::min(along[i] / fade, 1.0) : (i == 0 ? 0.0 : 1.0);
+            const double k = 1.0 - x * x * (3.0 - 2.0 * x);
+            drawn[i] = path[i] + offset * k;
+        }
+        drawn[0] = root;
+    }
     if (polylineLength(drawn) <= 1e-9) throw std::invalid_argument("the tube needs a length");
     double sigma = std::max(kPathSmoothing * size, 1e-6);
     // Thinned first: a point nearer the last one kept than half the smoothing dropped.
@@ -399,6 +413,61 @@ std::pair<V, V> patchApex(const ScalpMesh& scalp, const Pts& outline) {
     const V from = c + n * (2.0 * extent + 1e-3);
     if (!scalp.intersectRay(from.f(), (n * -1.0).f(), &hit, &d) || hit.root.face < 0) return {surface(c).first, n};
     return {V(hit.position), n};
+}
+
+// A drawn root's middle on the scalp: the middle of the scalp's area inside it (each part by its
+// own area on the scalp, its steep sides as much as its top: not the middle of the loop seen flat
+// along the patch's way out, which leans toward where the patch is flattest), found from the
+// patch's apex way (patchApex): the loop's inside sampled on a grid across that way, each sample
+// taken in onto the scalp along it and weighed by the scalp's area there. Its normal: the patch's
+// way out (patchApex's).
+std::pair<V, V> patchMiddle(const ScalpMesh& scalp, const Pts& outline) {
+    const auto apex = patchApex(scalp, outline);
+    const V n = apex.second;
+    if (outline.size() < 3 || scalp.triangleCount() == 0 || !(n.length() > 0.5)) return apex;
+    const V c = centroidOf(outline);
+    const V u = unit(n.cross(sideAxis(n)));
+    const V w = n.cross(u);
+    std::vector<P2> flat;
+    double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300}, reach = 0.0;
+    for (const V& p : outline) {
+        const P2 q = toPlane(p, c, u, w);
+        flat.push_back(q);
+        lo[0] = std::min(lo[0], q.x), hi[0] = std::max(hi[0], q.x);
+        lo[1] = std::min(lo[1], q.y), hi[1] = std::max(hi[1], q.y);
+        reach = std::max(reach, dist(c, p));
+    }
+    auto inside = [&](double x, double y) {
+        bool in = false;
+        for (std::size_t i = 0, j = flat.size() - 1; i < flat.size(); j = i++) {
+            const P2& a = flat[i];
+            const P2& b = flat[j];
+            if ((a.y > y) != (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) in = !in;
+        }
+        return in;
+    };
+    // (In from outside the patch along its way: the first hit, its side of the scalp.)
+    const double far = 2.0 * reach + (apex.first - c).length() + 1e-3;
+    constexpr int kSamples = 24;
+    V sum(0, 0, 0);
+    double total = 0.0;
+    for (int i = 0; i < kSamples; ++i) {
+        for (int j = 0; j < kSamples; ++j) {
+            const double x = lo[0] + (hi[0] - lo[0]) * (i + 0.5) / kSamples;
+            const double y = lo[1] + (hi[1] - lo[1]) * (j + 0.5) / kSamples;
+            if (!inside(x, y)) continue;
+            SurfacePoint hit;
+            const V from = fromPlane({x, y}, c, u, w) + n * far;
+            if (!scalp.intersectRay(from.f(), (n * -1.0).f(), &hit) || hit.root.face < 0) continue;
+            const double facing = std::abs(n.dot(unit(V(scalp.normal(hit.root)))));
+            const double area = 1.0 / std::max(facing, 0.125);  // (the scalp's area over this sample's)
+            sum = sum + V(hit.position) * area;
+            total += area;
+        }
+    }
+    if (!(total > 0.0)) return apex;
+    const Surface surface{&scalp};
+    return {surface(sum * (1.0 / total)).first, n};
 }
 
 Pts clearOfScalp(Pts pts, const Surface* surface, double size) {
@@ -626,7 +695,9 @@ std::vector<SectionPoint> toSection(const std::vector<P2>& pts) {
 Section fitShape(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id, const std::string& shape, const Pts& outline) {
     Footprint fp;
     const std::vector<P2> pts = shapePoints(rootFit(h, scalp, id, outline, &fp));
-    h.setOwnedTubeShape(shape, toSection(pts), false);
+    // (Its origin the guide's root, the root's middle (patchMiddle): the guide leaves the middle of
+    // the scalp drawn round, not of the outline's box; the recentring below then holds at once.)
+    h.setOwnedTubeShape(shape, toSection(pts), false, true);
     Section s;
     if (!bestSection(pts, libraryPoints(h, shape), &s)) {
         throw std::runtime_error("the root outline's shape " + shape + " does not match its CVs");
@@ -757,7 +828,7 @@ std::vector<Vec3f> rootTubeGuidePath(const Vec3f& root, const Vec3f& normal, con
 
 ScalpPointNormal rootOutlineCenter(const ScalpMesh& scalp, const std::vector<Vec3f>& outline) {
     if (outline.empty()) return {};
-    const auto [q, n] = patchApex(scalp, toV(outline));
+    const auto [q, n] = patchMiddle(scalp, toV(outline));
     return {q.f(), n.f()};
 }
 
@@ -772,7 +843,7 @@ GuideId makeRootTube(GuideHierarchy& h, const ScalpMesh& scalp, const std::vecto
                      const RootTubeOptions& o) {
     const Surface surface{&scalp};
     const Pts outline = projectAll(scalp, checkedOutline(given));
-    auto [root, normal] = patchApex(scalp, outline);
+    auto [root, normal] = patchMiddle(scalp, outline);
     double radius = 0.0;
     for (const V& p : outline) radius = std::max(radius, dist(root, p));
     Pts path = toV(drawnPath);
@@ -828,7 +899,7 @@ void editRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id, const s
     }
     outline = projectAll(scalp, outline);
     const Pts old = toV(h.guide(id)->points);
-    auto [root, normal] = patchApex(scalp, outline);
+    auto [root, normal] = patchMiddle(scalp, outline);
     // (The guide keeps the lean it had: an edit moves its root, it never stands it up.)
     const double had = old.size() >= 2 ? std::max(kMaxLean, lean(old[1] - old[0], surface(old[0]).second)) : kMaxLean;
     V move = root - old[0];
@@ -1086,7 +1157,7 @@ GuideId duplicateRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id,
     if (!g || !isRootTubeGuide(*g)) throw std::invalid_argument("guide " + std::to_string(id) + " is not a root tube");
     const Surface surface{&scalp};
     const std::vector<Vec3f> outline = rootTubeOutline(h, scalp, id);
-    const auto [start, n0] = startAt ? surface(V(*startAt)) : patchApex(scalp, toV(outline));
+    const auto [start, n0] = startAt ? surface(V(*startAt)) : patchMiddle(scalp, toV(outline));
     const auto [c1, n1] = surface(V(to));
     auto move = [&, start = start, n0 = n0, c1 = c1, n1 = n1](const V& p) { return c1 + turn(p - start, n0, n1); };
     const Pts newOutline = toV(carryOutline(scalp, outline, start.f(), to));
@@ -1163,7 +1234,7 @@ GuideId duplicateRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id,
                 kidTube.tipShape = old->tube.tipShape;
                 if (old->tube.custom && isRootTube(old->tube, 0)) {  // a slice: its half, a shape of its own
                     const std::string name = newShapeName(h);
-                    h.setOwnedTubeShape(name, old->tube.custom->points, old->tube.custom->smooth);
+                    h.setOwnedTubeShape(name, old->tube.custom->points, old->tube.custom->smooth, old->tube.custom->origin);
                     kidTube.custom = h.tubeShape(name);
                     kidTube.rollOnScalp = old->tube.rollOnScalp;
                 }
@@ -1797,6 +1868,21 @@ std::vector<SectionPoint> gapInside(const std::vector<SectionPoint>& polygon, co
     return out;
 }
 
+// Whether (u, v) lies inside `poly` farther than `inset` from its edges.
+bool polygonInsideBy(const std::vector<SectionPoint>& poly, float u, float v, float inset) {
+    bool in = false;
+    float edge = std::numeric_limits<float>::max();
+    for (std::size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
+        const SectionPoint& a = poly[i];
+        const SectionPoint& b = poly[j];
+        if ((a.v > v) != (b.v > v) && u < (b.u - a.u) * (v - a.v) / (b.v - a.v) + a.u) in = !in;
+        const float du = b.u - a.u, dv = b.v - a.v, span = du * du + dv * dv;
+        const float f = span > 0.0f ? std::clamp(((u - a.u) * du + (v - a.v) * dv) / span, 0.0f, 1.0f) : 0.0f;
+        edge = std::min(edge, std::hypot(u - (a.u + du * f), v - (a.v + dv * f)));
+    }
+    return in && edge > inset;
+}
+
 }  // namespace
 
 GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& source, const std::vector<SectionPoint>& polygon,
@@ -1807,27 +1893,48 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
     // outline), none along the source's outline, so the slices keep the source's outer shape at every
     // level (slices of slices never shrink) with a slight gap only between them.
     const std::vector<SectionPoint> gapped = gapInside(polygon, tubeOutline(source.tube), static_cast<float>(kSliceGap));
-    // The polygon's box in the source's section coordinates, and its points fitted to it as its
-    // shape (the gapped polygon's, else the polygon's as cut: a slice is never lost to a shape no
-    // library takes).
+    // The polygon's middle in the source's section coordinates (its area's centroid, so its guide
+    // leaves the middle of its root; its box's for a polygon whose centroid falls outside it) and
+    // its reach from there each way, and its points fitted to them as its shape, that middle its
+    // origin (CustomTubeShape::origin) (the gapped polygon's, else the polygon's as cut: a slice is
+    // never lost to a shape no library takes).
     double cu = 0.0, cv = 0.0, su = 0.0, sv = 0.0;
     std::string name;
     auto fit = [&](const std::vector<SectionPoint>& poly) {
         double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
         std::vector<P2> unit;
-        for (const SectionPoint& q : poly) {
+        double area = 0.0, au = 0.0, av = 0.0;
+        for (std::size_t i = 0; i < poly.size(); ++i) {
+            const SectionPoint& q = poly[i];
+            const SectionPoint& r = poly[(i + 1) % poly.size()];
             unit.push_back({q.u, q.v});
             lo[0] = std::min(lo[0], static_cast<double>(q.u)), lo[1] = std::min(lo[1], static_cast<double>(q.v));
             hi[0] = std::max(hi[0], static_cast<double>(q.u)), hi[1] = std::max(hi[1], static_cast<double>(q.v));
+            const double cross = static_cast<double>(q.u) * r.v - static_cast<double>(r.u) * q.v;
+            area += cross;
+            au += (static_cast<double>(q.u) + r.u) * cross;
+            av += (static_cast<double>(q.v) + r.v) * cross;
         }
+        if (!(hi[0] - lo[0] > 2e-6) || !(hi[1] - lo[1] > 2e-6)) return false;  // (a sliver)
         cu = 0.5 * (lo[0] + hi[0]), cv = 0.5 * (lo[1] + hi[1]);
-        su = 0.5 * (hi[0] - lo[0]), sv = 0.5 * (hi[1] - lo[1]);
-        if (!(su > 1e-6) || !(sv > 1e-6)) return false;  // (a sliver)
+        std::vector<SectionPoint> polyF(poly.begin(), poly.end());
+        // (Inside the polygon, well in from its edge: the guide must run through its shape.)
+        const float inset = 0.05f * static_cast<float>(std::min(hi[0] - lo[0], hi[1] - lo[1]));
+        bool placed = false;
+        if (outline.size() >= 3) {  // a cut's cell: the middle of its outline on the scalp (the Tube tool's)
+            const SectionPoint m = sourceSpine(source, h.scale()).rootCoords(rootOutlineCenter(scalp, outline).point);
+            if (polygonInsideBy(polyF, m.u, m.v, inset)) cu = m.u, cv = m.v, placed = true;
+        }
+        if (!placed && std::abs(area) > 1e-12) {  // else the polygon's area centroid
+            const double mu = au / (3.0 * area), mv = av / (3.0 * area);
+            if (polygonInsideBy(polyF, static_cast<float>(mu), static_cast<float>(mv), inset)) cu = mu, cv = mv;
+        }
+        su = std::max(hi[0] - cu, cu - lo[0]), sv = std::max(hi[1] - cv, cv - lo[1]);
         std::vector<SectionPoint> fitted;
         for (const P2& q : capPoints(unit)) fitted.push_back({static_cast<float>((q.x - cu) / su), static_cast<float>((q.y - cv) / sv)});
         name = newShapeName(h);
         try {
-            h.setOwnedTubeShape(name, fitted, false);
+            h.setOwnedTubeShape(name, fitted, false, true);
         } catch (const std::invalid_argument&) {
             return false;
         }

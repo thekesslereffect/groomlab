@@ -587,6 +587,17 @@ def smooth_tube(groom, guides=None, channel=None, passes=3, group=None, level=No
     return cmds.groomLabGuides(groom, setTube=edit, **_targets(guides, group, level))
 
 
+def fill_tube_channel(groom, channel, value, guides=None, group=None, level=None):
+    """The Tube tool's Fill (issue #135): one channel of guides' tubes set to `value`, root to tip.
+    `channel`: "width" (each tube scaled so its widest section is `value`, scene units, its taper
+    and what the brush painted kept), "flatness" (0 as drawn, toward 1 a ribbon) or "twist"
+    (radians). Targets as in set_tube (else the selected guides). One undo step. Returns how many
+    guides changed."""
+    import groomlab_core
+    edit = groomlab_core.tube_fill_edit(str(channel), float(value))  # (every host's: tube.h tubeFillEdit)
+    return cmds.groomLabGuides(groom, setTube=edit, **_targets(guides, group, level))
+
+
 def _interpolate_nodes(graph):
     return [n for n in graph.get("nodes", []) if n.get("type") == "Interpolate"]
 

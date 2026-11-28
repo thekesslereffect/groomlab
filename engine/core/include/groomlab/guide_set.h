@@ -56,6 +56,12 @@ struct Guide {
     // That guide's ID (its own at level 0; 0 when it has none): fillTubes fills a strand rooted in a
     // level-0 tube only with that tube's own deeper tubes, never a neighbour's.
     std::uint64_t baseId = 0;
+    // From a hierarchy: its parent guide's ID (0: a primary, or not from a hierarchy), so a node
+    // can tell a tube's ancestors at any level (tube_braids.h). Not saved.
+    std::uint64_t parentId = 0;
+    // Its tube marked as a braid (HierarchyGuide::braid, its own mark, never inherited): the Braid
+    // node's join tube braids it with every tube under it (tube_braids.h).
+    bool braid = false;
 };
 
 // Whether a curve was drawn tip-first: its last point nearer the mesh than its

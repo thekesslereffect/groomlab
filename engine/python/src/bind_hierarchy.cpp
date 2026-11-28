@@ -17,6 +17,7 @@
 #include "groomlab/root_tubes.h"
 #include "groomlab/transfer.h"
 #include "groomlab/transfer_markers_edit.h"
+#include "groomlab/tube_braids.h"
 
 namespace groomlab::py_bind {
 
@@ -280,6 +281,8 @@ void bindHierarchy(py::module_& m) {
           "The aspect the Tube card's Flatness sets (tube.h).");
     m.def("tube_smooth_edit", &tubeSmoothEdit, py::arg("channel"), py::arg("passes") = 3,
           "The Tube card's Smooth as a tube edit's JSON (tube.h tubeSmoothEdit); ValueError for no such channel.");
+    m.def("tube_fill_edit", &tubeFillEdit, py::arg("channel"), py::arg("value"),
+          "The Tube tool's Fill as a tube edit's JSON (tube.h tubeFillEdit); ValueError for no such channel.");
     m.def("free_tube_shape_name", &freeTubeShapeName, py::arg("base"), py::arg("library"),
           "A new library shape's name: \"<base> 1\", \"<base> 2\"... no built-in or `library` shape has (tube.h).");
     m.def(
@@ -322,6 +325,7 @@ void bindHierarchy(py::module_& m) {
         .def_readwrite("id", &HierarchyGuide::id)
         .def_readwrite("group", &HierarchyGuide::group)
         .def_readwrite("own_segments", &HierarchyGuide::ownSegments)
+        .def_readwrite("braid", &HierarchyGuide::braid)
         .def_readwrite("parent", &HierarchyGuide::parent)
         .def_readwrite("locked", &HierarchyGuide::locked)
         .def_readwrite("root", &HierarchyGuide::root)
@@ -662,6 +666,10 @@ void bindHierarchy(py::module_& m) {
              "Every guide of the group (frozen ones kept) back to the group's segments, those with their own "
              "too. Returns the segments.")
         .def("set_tube", &GuideHierarchy::setTube, py::arg("id"), py::arg("tube"))
+        .def("set_braid", &GuideHierarchy::setBraid, py::arg("ids"), py::arg("braid") = true,
+             "Mark (or unmark) these guides' tubes as braids (tube_braids.h). Returns how many changed.")
+        .def("braid_tube_of", [](const GuideHierarchy& h, GuideId id) { return braidTubeOf(h, id); }, py::arg("id"),
+             "The marked tube whose braid guide `id` lies in (tube_braids.h braidTubeOf), 0 none.")
         .def(
             "tube_shapes",
             [](const GuideHierarchy& h) {

@@ -366,8 +366,8 @@ void GroomShape::setRootOverlay(std::vector<RootTubeTool::Item> items, float pix
 }
 
 bool GroomShape::displayTubes() const {
-    const MObject self = thisMObject();
-    return MPlug(self, aDisplayTubes).asBool() && MPlug(self, aDisplayGuides).asBool();
+    // The Tubes switch alone (issue #139): hiding the guides (Comb, any tool) leaves the tubes in view.
+    return MPlug(thisMObject(), aDisplayTubes).asBool();
 }
 
 void GroomShape::setTubesAlwaysVisible(bool always) {
@@ -2769,6 +2769,11 @@ std::string GroomShape::hairLookJson() {
 HierarchyPtr GroomShape::evaluatedHierarchy() {
     const FramePtr f = frame();
     return f ? f->view.hierarchy : nullptr;
+}
+
+HierarchyPtr GroomShape::drawnHierarchy() {
+    const FramePtr f = frame();
+    return f ? f->view.drawn() : nullptr;
 }
 
 HierarchyPtr GroomShape::authoredHierarchy() {

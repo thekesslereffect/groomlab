@@ -2903,6 +2903,150 @@ TEST(Braid, FollowGuidesCarriesASculptedSectionsHair) {
     }
 }
 
+TEST(Braid, ResampleSetsBraidedStrandsOwnSegments) {
+    // Issue 133: a Resample after a Braid resamples the woven hair by a mode and controls of its
+    // own (braidMode: keep the weave's points; even, braidSegments each; curvature thins the
+    // straight runs, never past them), whatever the other strands' mode.
+    BraidScene scene("three");
+    scene.setParam("region", 0.45);
+    const StrandsPtr hair = scene.lg.eval(scene.braid);
+    ASSERT_TRUE(hair && hair->strandCount() > 0);
+    const std::vector<float>* braid = hair->strandChannel("braidId");
+    ASSERT_TRUE(braid);
+    auto resampled = [&](std::int64_t braidSegments, const std::string& braidMode) {
+        auto op = OperatorRegistry::instance().create(op::kResample);
+        op->params().set("segments", std::int64_t{8});
+        op->params().set("braidMode", braidMode);
+        op->params().set("braidSegments", braidSegments);
+        op->params().set("braidMaxAngle", 30.0);
+        EvalContext ctx;
+        return valueAs<StrandsPtr>(op->evaluate(ctx, {Value(hair)}));
+    };
+    const StrandsPtr kept = resampled(0, "keep");
+    const StrandsPtr set = resampled(40, "even");
+    const StrandsPtr curved = resampled(0, "curvature");
+    ASSERT_TRUE(kept && set && curved);
+    std::size_t braided = 0;
+    for (std::size_t s = 0; s < hair->strandCount(); ++s) {
+        if ((*braid)[s] < 0.0f) {
+            EXPECT_EQ(set->strandPointCount(s), 9u);
+            continue;
+        }
+        ++braided;
+        EXPECT_EQ(kept->strandPointCount(s), hair->strandPointCount(s)) << s;
+        EXPECT_EQ(set->strandPointCount(s), 41u) << s;
+        EXPECT_LE(curved->strandPointCount(s), hair->strandPointCount(s)) << s;
+    }
+    EXPECT_GT(braided, 0u);
+}
+
+TEST(Resample, MorePointsLieOnTheSmoothCurveThroughTheStrand) {
+    // A coarse strand (a quarter circle in 4 spans) resampled to 33 points: a version 2 Resample
+    // lays them on the smooth curve through its points (round, close to the circle), not on the
+    // straight spans (whose middles sit well inside it); a version 1 node keeps the spans.
+    auto strands = std::make_shared<StrandSet>();
+    std::vector<Vec3f> coarse;
+    for (int k = 0; k <= 4; ++k) {
+        const float a = 0.5f * 3.14159265f * static_cast<float>(k) / 4.0f;
+        coarse.push_back({1.0f - std::cos(a), std::sin(a), 0.0f});  // (center (1, 0, 0), radius 1)
+    }
+    strands->addStrand(1, coarse);
+    auto run = [&](int version) {
+        auto op = OperatorRegistry::instance().create(op::kResample);
+        op->params().set("segments", std::int64_t{32});
+        if (version) op->setNodeVersion(version);
+        EvalContext ctx;
+        return valueAs<StrandsPtr>(op->evaluate(ctx, {Value(StrandsPtr(strands))}));
+    };
+    auto worst = [](const StrandsPtr& out) {
+        float most = 0.0f;
+        for (std::size_t i = 0; i < out->strandPointCount(0); ++i) {
+            most = std::max(most, std::abs((out->strandPoints(0)[i] - Vec3f{1.0f, 0.0f, 0.0f}).length() - 1.0f));
+        }
+        return most;
+    };
+    const StrandsPtr smooth = run(0), straight = run(1);
+    ASSERT_EQ(smooth->strandPointCount(0), 33u);
+    ASSERT_EQ(straight->strandPointCount(0), 33u);
+    EXPECT_EQ(smooth->strandPoints(0)[0], coarse.front()) << "the root stays";
+    EXPECT_GT(worst(straight), 0.015f) << "the straight spans' middles, inside the circle";
+    EXPECT_LT(worst(smooth), 0.004f) << "on the smooth curve: round";
+}
+
+TEST(Braid, SectionGuidesCarryTheirSectionsTubes) {
+    // Issue 129: each section guide carries its section's tube (the ellipse the weave lays it in),
+    // so the Tube tool shows it and a Sculpt node keeps its width, flatness and twist.
+    BraidScene scene("three");
+    scene.setParam("region", 0.45);
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    const GuidesPtr sections = valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 3, ctx));
+    ASSERT_TRUE(sections && sections->size() == 3u);
+    for (const Guide& g : sections->guides()) {
+        EXPECT_TRUE(g.hasTube);
+        EXPECT_FALSE(g.tube.rollOnScalp) << "its sections turn with the weave, not with the scalp";
+        ASSERT_GE(g.tube.width.size(), 2u);
+        float widest = 0.0f;
+        for (const float w : g.tube.width) widest = std::max(widest, w);
+        EXPECT_GT(widest, 0.0f);
+        EXPECT_LT(widest, 0.25f) << "a section is narrower than the braid";
+        for (const float a : g.tube.aspect) EXPECT_GT(a, 0.0f);
+    }
+}
+
+TEST(Braid, FollowGuidesSpreadsAWidenedSectionsHair) {
+    // A section's tube made twice as wide (a Sculpt node's tube edit): its woven hair lies about
+    // twice as far across the section from its curve; the other sections' hair stays.
+    BraidScene scene("three");
+    scene.setParam("region", 0.45);
+    scene.setParam("end", std::string("bound"));
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    const StrandsPtr hair = scene.lg.eval(scene.braid);
+    const GuidesPtr rest = valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 3, ctx));
+    ASSERT_TRUE(hair && rest && rest->size() == 3u);
+    auto wider = std::make_shared<GuideSet>(*rest);
+    const Guide* widened = nullptr;
+    for (Guide& g : wider->guides()) {
+        if (g.attributes.at("braidSection") != 1.0f) continue;
+        for (float& w : g.tube.width) w *= 2.0f;
+        widened = &g;
+    }
+    ASSERT_TRUE(widened);
+    auto follow = OperatorRegistry::instance().create(op::kFollowGuides);
+    const StrandsPtr out =
+        valueAs<StrandsPtr>(follow->evaluate(ctx, {Value(hair), Value(GuidesPtr(rest)), Value(GuidesPtr(wider))}));
+    ASSERT_TRUE(out && out->strandCount() == hair->strandCount());
+    const std::vector<float>* section = hair->strandChannel("braidSection");
+    const std::vector<float>* woven = hair->pointChannel("braidWoven");
+    ASSERT_TRUE(section && woven);
+    auto off = [&](const Vec3f& p) {  // how far from the section's curve
+        float best = 1e30f;
+        for (std::size_t k = 0; k + 1 < widened->points.size(); ++k) {
+            const Vec3f a = widened->points[k], ab = widened->points[k + 1] - a;
+            const float t = std::clamp((p - a).dot(ab) / std::max(ab.dot(ab), 1e-20f), 0.0f, 1.0f);
+            best = std::min(best, (p - (a + ab * t)).length());
+        }
+        return best;
+    };
+    double before = 0.0, after = 0.0;
+    for (std::size_t s = 0; s < hair->strandCount(); ++s) {
+        const std::size_t begin = hair->strandBegin(s), n = hair->strandPointCount(s);
+        for (std::size_t i = 1; i < n; ++i) {
+            if ((*section)[s] != 1.0f) {
+                EXPECT_EQ((out->strandPoints(s)[i] - hair->strandPoints(s)[i]).length(), 0.0f) << s << " " << i;
+                continue;
+            }
+            if ((*woven)[begin + i] < 0.999f) continue;
+            before += off(hair->strandPoints(s)[i]);
+            after += off(out->strandPoints(s)[i]);
+        }
+    }
+    ASSERT_GT(before, 0.0);
+    EXPECT_GT(after / before, 1.6) << "spread across the wider section";
+    EXPECT_LT(after / before, 2.4);
+}
+
 TEST(Braid, SculptSectionsShowsACurvedBraidsSectionsWhereTheyAre) {
     // A path rising from the plane and bending over to +x (an arc): the sections output weaves
     // round it all along, and Sculpt Sections shows and brushes them where the Braid has them

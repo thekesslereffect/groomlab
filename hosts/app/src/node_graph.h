@@ -501,10 +501,12 @@ private:
     QPointF outputPos(const Node& node, int port) const;
     // A wire from an output to an input; one running backwards loops under `below` (scene y:
     // the lowest edge of the nodes it joins; NaN: a little under its ends).
-    QPainterPath wirePath(const QPointF& from, const QPointF& to, qreal below = std::numeric_limits<qreal>::quiet_NaN()) const;
+    QPainterPath wirePath(const QPointF& from, const QPointF& to, qreal below = std::numeric_limits<qreal>::quiet_NaN(),
+                          qreal gap = std::numeric_limits<qreal>::quiet_NaN()) const;
     QPainterPath wirePathFor(const Wire& wire) const;
     // A wire's piece in the wire style (graph_arrange.h wireRoute); `through`: between pins or dots.
-    QPainterPath routed(const QPointF& from, const QPointF& to, qreal below, bool through) const;
+    QPainterPath routed(const QPointF& from, const QPointF& to, qreal below, bool through,
+                        qreal gap = std::numeric_limits<qreal>::quiet_NaN()) const;
     QPointF wireStart(const Wire& wire) const;  // its source port, or the folded backdrop hiding it
     QPointF wireEnd(const Wire& wire) const;
     int portalAt(const QPointF& scene, bool* nub = nullptr) const;  // a portal dot, -1 none

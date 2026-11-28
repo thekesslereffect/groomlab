@@ -69,9 +69,12 @@ struct ScalpPointNormal {
     Vec3f point, normal;
 };
 ScalpPointNormal scalpPointNormal(const ScalpMesh& scalp, const Vec3f& p);
-// A drawn root's middle on the scalp (where its guide starts, the Tube tool's green point): the apex
-// of the patch `outline` draws, the scalp's outermost point along the patch's mean normal through its
-// centroid, so a root drawn over much of a head starts on its top, not inside.
+// A drawn root's middle on the scalp (where its guide starts, the Tube tool's green point): the
+// middle of the scalp's area inside `outline`, each part weighed by its own area on the scalp (its
+// steep sides as much as its top), the patch found as the side of the loop holding less of the
+// scalp, so a root drawn over much of a head starts on its top, not inside. Its normal: the
+// patch's way out. A drawn root's and a cut cell's guide start here (their shapes keep it as
+// their origin: CustomTubeShape::origin).
 ScalpPointNormal rootOutlineCenter(const ScalpMesh& scalp, const std::vector<Vec3f>& outline);
 
 // ---- Root tubes --------------------------------------------------------------------------------------

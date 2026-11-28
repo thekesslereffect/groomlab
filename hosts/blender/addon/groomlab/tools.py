@@ -91,6 +91,13 @@ def edits_layers(tool):
     return tool == "paint" or bool(info and info.get("corrective"))
 
 
+def edits_sculpt_nodes(tool):
+    """Whether a tool can edit a Sculpt node's guides (the catalog's "sculptNode": the corrective
+    ones and the Tube brush, a Braid's sections' tubes; issue 129)."""
+    info = tool_info(tool)
+    return tool == "paint" or bool(info and info.get("sculptNode"))
+
+
 def sections():
     """[(category, [tool, ...])] in the catalog's order: the palette's tile groups."""
     cat = _catalog
@@ -936,6 +943,62 @@ def scale_tube(scalp, factor, guides=None, group=None, level=None):
     return _tube_edit(scalp, "tube_scale", factor=float(factor), **_targets(guides, group, level))
 
 
+def fill_tube_channel(scalp, channel, value, guides=None, group=None, level=None):
+    """The Tube tool's Fill (issue #135, Maya's fill_tube_channel): one channel of guides' tubes set
+    root to tip: "width" (each tube scaled so its widest section is `value`, scene units, its taper
+    kept), "flatness" (0 as drawn, toward 1 a ribbon) or "twist" (radians). Targets: the guides, a
+    group or a level, else the selected guides, else every guide. One undo step: {changed}."""
+    return _tube_edit(scalp, "tube_fill", channel=str(channel), value=float(value), **_targets(guides, group, level))
+
+
+def make_braid(scalp, guides=None, on=True):
+    """Make Braid (Unbraid with `on` False; issue 129, Maya's root_tubes.make_braid): the tubes of
+    `guides` (any level; none: the selection, else Select root's roots) marked as braids, each
+    braided with the tubes under it by the graph's Braid joining by tube, added after the
+    Interpolate filling tubes the first time (graph_inserts.h insertTubeBraid). Returns
+    {"changed", "braid", "made"}."""
+    from . import pipeline
+    args = {"on": bool(on)}
+    if guides:
+        args["guides"] = [int(g) for g in guides]
+    r = _tube_edit(scalp, "tube_braid", **args)
+    out = {"changed": int(r.get("changed") or 0), "braid": "", "made": False}
+    g = pipeline.GraphEdits(scalp)
+    if on:
+        made = g.edit(op="insert_tube_braid")  # (the core's kTubeBraidParams)
+        out["braid"], out["made"] = made.get("braid") or "", bool(made.get("made"))
+        g.finish()
+    else:
+        out["braid"] = tube_braid_node(g)
+    return out
+
+
+def tube_braid_node(g):
+    """The graph's Braid joining by tube (graph_inserts.h tubeBraidNode) in GraphEdits `g`, "" none."""
+    for name in g.of_type("Braid"):
+        if g.param(name, "join") == "tube" and g.source_of(name, "braids"):
+            return name
+    return ""
+
+
+def braid_of(scalp, guides):
+    """Each guide's braid tube (the outermost marked tube of its lineage), 0 when in no braid."""
+    return [int(b) for b in call(scalp, "braid_of", guides=[int(g) for g in guides])["braids"]]
+
+
+def braid_sections(scalp, on=True):
+    """The Tube card's Braid level (issue 129, Maya's root_tubes.braid_sections): Sculpt Sections on
+    the graph's tube Braid (made the first time), the brushes then shaping its sections; `on`
+    False: back to the guides. ValueError when the graph has no tube Braid (Make braid first)."""
+    from . import pipeline
+    if not on:
+        return pipeline.done_sculpt_sections(scalp)
+    braid = tube_braid_node(pipeline.GraphEdits(scalp))
+    if not braid:
+        raise ValueError("no braid among the tubes yet: select tubes and Make braid first")
+    return pipeline.sculpt_braid_sections(scalp, braid)
+
+
 def smooth_tube(scalp, channel="all", passes=3, guides=None, group=None, level=None):
     """Smooth guides' tubes along each guide: channel width, flatness, twist or all. One undo step."""
     return _tube_edit(scalp, "tube_smooth", channel=channel, passes=int(passes), **_targets(guides, group, level))
@@ -1315,6 +1378,10 @@ def _take_levels(scene, r):
     with props.quiet():
         t.tube_base = r.get("base") or ""
         t.tube_levels = ",".join(levels)
+        t.tube_has_tubes = bool(r.get("hasTubes", len(levels) > 1))
+        if "braid" in r:  # (tube_levels' answer: the graph's tube Braid, the level row's Braid)
+            t.tube_braid = r.get("braid") or ""
+            t.tube_braid_sculpting = bool(r.get("braidSculpting"))
         t.tube_level = levels.index(group) + 1 if group in levels else 1
 
 
@@ -1325,6 +1392,8 @@ def tube_level_show(scalp, level):
     t = scene.groomlab_tools
     if not t.tube_base:
         tube_levels(scalp)
+    if t.tube_braid_sculpting:  # (a level picked while brushing the braid's sections: the guides again)
+        braid_sections(scalp, on=False)
     r = call(scalp, "tube_level_show", base=t.tube_base, level=int(level))
     picked = next((name for name, visible in (r.get("shown") or {}).items() if visible), None)
     from . import display

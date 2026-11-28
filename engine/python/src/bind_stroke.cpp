@@ -410,6 +410,7 @@ void bindStroke(py::module_& m) {
                 d["hint"] = e.hint;
                 d["settings"] = e.settings;
                 d["corrective"] = e.corrective;
+                d["sculpt_node"] = e.sculptNode;
                 out.append(d);
             }
             return out;

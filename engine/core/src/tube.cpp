@@ -718,11 +718,11 @@ std::vector<SectionPoint> sampleTubeShapeCurve(const std::vector<SectionPoint>& 
 namespace {
 
 CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vector<SectionPoint>& given,
-                                        bool smooth);
+                                        bool smooth, bool origin);
 
 }  // namespace
 
-CustomTubeShapePtr makeCustomTubeShape(const std::string& name, const std::vector<SectionPoint>& given, bool smooth) {
+CustomTubeShapePtr makeCustomTubeShape(const std::string& name, const std::vector<SectionPoint>& given, bool smooth, bool origin) {
     // Made once per name, points and smoothness and shared after: a host command reads the groom's
     // guides (their library with them) at every call, and sampling, checking and measuring each
     // shape again made every such call slow on a groom with a few library shapes (a panel polling
@@ -730,6 +730,7 @@ CustomTubeShapePtr makeCustomTubeShape(const std::string& name, const std::vecto
     // one), so the same inputs may share it.
     std::string key = name;
     key.push_back(smooth ? 's' : 'c');  // (smooth or corners)
+    key.push_back(origin ? 'o' : 'b');  // (its origin kept, or its box's middle)
     key.append(reinterpret_cast<const char*>(given.data()), given.size() * sizeof(SectionPoint));
     static std::mutex mutex;
     static std::unordered_map<std::string, CustomTubeShapePtr> made;
@@ -738,7 +739,7 @@ CustomTubeShapePtr makeCustomTubeShape(const std::string& name, const std::vecto
         const auto it = made.find(key);
         if (it != made.end()) return it->second;
     }
-    CustomTubeShapePtr shape = buildCustomTubeShape(name, given, smooth);  // (throws: nothing kept)
+    CustomTubeShapePtr shape = buildCustomTubeShape(name, given, smooth, origin);  // (throws: nothing kept)
     const std::lock_guard<std::mutex> lock(mutex);
     if (made.size() >= 512) made.clear();  // (shapes edited many times over: start again)
     made.emplace(std::move(key), shape);
@@ -748,7 +749,7 @@ CustomTubeShapePtr makeCustomTubeShape(const std::string& name, const std::vecto
 namespace {
 
 CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vector<SectionPoint>& given,
-                                        bool smooth) {
+                                        bool smooth, bool origin) {
     checkTubeShapeName(name);
     if (given.size() > kMaxTubeShapePoints) {
         throw std::invalid_argument("tube shape '" + name + "': " + std::to_string(kMaxTubeShapePoints) + " points at most");
@@ -779,7 +780,11 @@ CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vect
         if (!(hu - lu > 1e-3f * size) || !(hv - lv > 1e-3f * size)) {
             throw std::invalid_argument("tube shape '" + name + "': the points lie on a line; give the outline width and height");
         }
-        const float cu = 0.5f * (lu + hu), cv = 0.5f * (lv + hv), su = 2.0f / (hu - lu), sv = 2.0f / (hv - lv);
+        float cu = 0.5f * (lu + hu), cv = 0.5f * (lv + hv), su = 2.0f / (hu - lu), sv = 2.0f / (hv - lv);
+        if (origin) {  // (about its own (0, 0): the farthest each way at 1)
+            cu = cv = 0.0f;
+            su = 1.0f / std::max(std::max(-lu, hu), 1e-6f), sv = 1.0f / std::max(std::max(-lv, hv), 1e-6f);
+        }
         for (SectionPoint& p : pts) p = {(p.u - cu) * su, (p.v - cv) * sv};
         size = 2.0f;
     }
@@ -797,7 +802,9 @@ CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vect
     shape->name = name;
     shape->points = pts;
     shape->smooth = smooth;
+    shape->origin = origin;
     std::uint64_t h = hashCombine(hash64(pts.size()), smooth ? 1 : 2);
+    if (origin) h = hashCombine(h, 0x0815u);  // (a box-centered shape's hash as before)
     for (const SectionPoint& p : pts) h = hashFloat(hashFloat(h, p.u), p.v);
     shape->hash = h;
     // The outline evenly along the curve; the corners (where the points turn sharply: 20 degrees
@@ -1106,6 +1113,22 @@ std::string tubeSmoothEdit(const std::string& channel, int passes) {
     return edit.dump();
 }
 
+std::string tubeFillEdit(const std::string& channel, float value) {
+    if (!std::isfinite(value)) throw std::invalid_argument("the fill value is a number");
+    nlohmann::json edit;
+    if (channel == "width") {
+        if (!(value >= 0.0f)) throw std::invalid_argument("width: 0 or more");
+        edit["fitWidth"] = value;
+    } else if (channel == "flatness" || channel == "aspect") {
+        edit["aspect"] = tubeAspectOfFlatness(value);
+    } else if (channel == "twist") {
+        edit["twist"] = value;
+    } else {
+        throw std::invalid_argument("the channel is width, flatness or twist");
+    }
+    return edit.dump();
+}
+
 TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, float scale, std::size_t points,
                        const TubeShapeLibrary* library) {
     json j;
@@ -1186,6 +1209,21 @@ TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, flo
             throw std::invalid_argument("tube scaleWidth: a number, 0 or more");
         }
         tube.scaleWidth(j["scaleWidth"].get<float>());
+    }
+    if (j.contains("fitWidth")) {
+        // (The Tube tool's Fill, issue #135: each tube as wide as the value at its widest, its taper
+        // and what the brush painted kept.)
+        if (!j["fitWidth"].is_number() || !(j["fitWidth"].get<double>() >= 0.0)) {
+            throw std::invalid_argument("tube fitWidth: a number, 0 or more");
+        }
+        float widest = 0.0f;
+        for (const float w : tube.width) widest = std::max(widest, w);
+        const float want = j["fitWidth"].get<float>() / (scale > 0.0f ? scale : 1.0f);
+        if (widest > 0.0f) {
+            tube.scaleWidth(want / widest);
+        } else {
+            tube.width = {want};
+        }
     }
     if (j.contains("samples")) {
         if (!j["samples"].is_number_integer() || j["samples"].get<int>() < 2 || j["samples"].get<int>() > 1024) {

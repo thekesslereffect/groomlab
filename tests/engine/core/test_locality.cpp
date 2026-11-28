@@ -56,8 +56,9 @@ constexpr float kDensity = 0.015f;
 // change clump (everyday_sim's Simulate carries that on: its far strands move). (At randomness 1,
 // no relaxing, hair_basics' far strands stay within 2e-6.
 // EvenRootsTheirPreviewAndOwnClumpsChangeOnlyNearTheEdit holds the small clumps.)
-const std::set<std::string> kLargeClumps = {"blend_two_looks", "braids_free_ends", "curly",        "everyday_sim",   "game_cards",
-                                            "hair_basics",     "merge_layers",     "parted_style", "wind_and_jiggle"};
+const std::set<std::string> kLargeClumps = {"blend_two_looks", "braids_and_tubes", "braids_free_ends", "curly",
+                                            "everyday_sim",    "game_cards",       "hair_basics",      "merge_layers",
+                                            "parted_style",    "wind_and_jiggle"};
 
 // Presets whose far strands may change with the edit, and why.
 const std::map<std::string, std::string> kGlobal = {

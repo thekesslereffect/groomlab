@@ -24,6 +24,7 @@ namespace {
 
 constexpr float kMoved = 1e-4f;      // a move that counts as sculpted, as a share of the guide's length
 constexpr float kIdentity = 1e-6f;   // a turn (radians) or length factor this close to none is none
+constexpr float kTubeIdentity = 1e-4f;  // a tube's factor or twist this close to none is none
 constexpr float kMinStrength = 1e-3f;
 
 // The segment frames of a polyline (tangent along each segment), rotation-minimizing from a root
@@ -94,15 +95,79 @@ Vec3f turnedZ(float ax, float ay) {
 json guideJson(const GuideSculpt& g) {
     json flat = json::array();
     for (const SculptSample& s : g.samples) flat.insert(flat.end(), {s.t, s.ax, s.ay, s.scale});
-    return flat;
+    if (g.tube.empty()) return flat;  // (as it always was)
+    json tube = json::array();
+    for (const TubeSculptSample& s : g.tube) tube.insert(tube.end(), {s.t, s.width, s.aspect, s.twist});
+    return {{"bend", std::move(flat)}, {"tube", std::move(tube)}};
+}
+
+std::size_t tubeSamples(const TubeProfile& a, const TubeProfile& b) {
+    std::size_t n = 2;
+    for (const TubeProfile* p : {&a, &b}) n = std::max({n, p->width.size(), p->aspect.size(), p->twist.size()});
+    return n;
 }
 
 }  // namespace
 
-bool GuideSculpt::identity() const {
+bool GuideSculpt::bendsIdentity() const {
     return std::all_of(samples.begin(), samples.end(), [](const SculptSample& s) {
         return std::abs(s.ax) <= kIdentity && std::abs(s.ay) <= kIdentity && std::abs(s.scale - 1.0f) <= kIdentity;
     });
+}
+
+bool GuideSculpt::tubeIdentity() const {
+    return std::all_of(tube.begin(), tube.end(), [](const TubeSculptSample& s) {
+        return std::abs(s.width - 1.0f) <= kTubeIdentity && std::abs(s.aspect - 1.0f) <= kTubeIdentity &&
+               std::abs(s.twist) <= kTubeIdentity;
+    });
+}
+
+bool GuideSculpt::identity() const { return bendsIdentity() && tubeIdentity(); }
+
+TubeSculptSample GuideSculpt::tubeAt(float t) const {
+    if (tube.empty()) return {t, 1.0f, 1.0f, 0.0f};
+    if (t <= tube.front().t) return tube.front();
+    if (t >= tube.back().t) return tube.back();
+    const auto next = std::upper_bound(tube.begin(), tube.end(), t, [](float x, const TubeSculptSample& s) { return x < s.t; });
+    const TubeSculptSample& b = *next;
+    const TubeSculptSample& a = *(next - 1);
+    const float span = b.t - a.t;
+    const float w = span > 0.0f ? (t - a.t) / span : 0.0f;
+    return {t, a.width + (b.width - a.width) * w, a.aspect + (b.aspect - a.aspect) * w, a.twist + (b.twist - a.twist) * w};
+}
+
+TubeProfile applyTubeSculpt(const TubeProfile& fed, const std::vector<TubeSculptSample>& edit, float strength) {
+    if (edit.empty() || strength == 0.0f) return fed;
+    GuideSculpt g;
+    g.tube = edit;
+    const std::size_t n = std::max(tubeSamples(fed, fed), edit.size());
+    TubeProfile out = fed;
+    out.width.resize(n);
+    out.aspect.resize(n);
+    out.twist.resize(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        const TubeSculptSample e = g.tubeAt(t);
+        out.width[i] = std::max(fed.widthAt(t) * (1.0f + (e.width - 1.0f) * strength), 0.0f);
+        out.aspect[i] = std::clamp(fed.aspectAt(t) * (1.0f + (e.aspect - 1.0f) * strength), kMinTubeAspect, kMaxTubeAspect);
+        out.twist[i] = fed.twistAt(t) + e.twist * strength;
+    }
+    return out;
+}
+
+std::vector<TubeSculptSample> recordTubeSculpt(const TubeProfile& fed, const TubeProfile& sculpted, float strength) {
+    if (std::abs(strength) < kMinStrength) throw std::invalid_argument("the Sculpt node's strength is 0: raise it to sculpt");
+    const std::size_t n = tubeSamples(fed, sculpted);
+    std::vector<TubeSculptSample> out(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        const float w0 = fed.widthAt(t), a0 = fed.aspectAt(t);
+        const float wf = w0 > 1e-12f ? sculpted.widthAt(t) / w0 : 1.0f;
+        const float af = a0 > 1e-12f ? sculpted.aspectAt(t) / a0 : 1.0f;
+        out[i] = {t, 1.0f + (wf - 1.0f) / strength, 1.0f + (af - 1.0f) / strength,
+                  (sculpted.twistAt(t) - fed.twistAt(t)) / strength};
+    }
+    return out;
 }
 
 SculptSample GuideSculpt::at(float t) const {
@@ -125,6 +190,10 @@ std::uint64_t SculptEdits::contentHash() const {
         h = hashCombine(h, id);
         h = hashCombine(h, g.samples.size());
         for (const SculptSample& s : g.samples) h = hashFloat(hashFloat(hashFloat(hashFloat(h, s.t), s.ax), s.ay), s.scale);
+        if (!g.tube.empty()) {  // (none: as it always was)
+            h = hashCombine(h, g.tube.size() + 0x70BEu);
+            for (const TubeSculptSample& s : g.tube) h = hashFloat(hashFloat(hashFloat(hashFloat(h, s.t), s.width), s.aspect), s.twist);
+        }
     }
     for (const auto& [id, v] : frozen) h = hashFloat(hashCombine(hashCombine(h, 0xF0F0), id), v);
     for (const auto& [id, s] : strands) {
@@ -181,7 +250,8 @@ SculptSet SculptSet::fromJson(const std::string& text) {
             SculptEdits edits;
             const json guides = node.value().value("guides", json::object());
             for (auto it = guides.begin(); it != guides.end(); ++it) {
-                const json& flat = it.value();
+                const json& value = it.value();
+                const json flat = value.is_object() ? value.value("bend", json::array()) : value;
                 GuideSculpt g;
                 for (std::size_t i = 0; i + 3 < flat.size(); i += 4) {
                     g.samples.push_back({flat[i].get<float>(), flat[i + 1].get<float>(), flat[i + 2].get<float>(),
@@ -189,7 +259,15 @@ SculptSet SculptSet::fromJson(const std::string& text) {
                 }
                 std::sort(g.samples.begin(), g.samples.end(),
                           [](const SculptSample& a, const SculptSample& b) { return a.t < b.t; });
-                if (!g.samples.empty()) edits.guides[std::stoull(it.key())] = std::move(g);
+                if (value.is_object()) {  // (its tube edited too)
+                    const json tube = value.value("tube", json::array());
+                    for (std::size_t i = 0; i + 3 < tube.size(); i += 4) {
+                        g.tube.push_back({tube[i].get<float>(), tube[i + 1].get<float>(), tube[i + 2].get<float>(),
+                                          tube[i + 3].get<float>()});
+                    }
+                    std::sort(g.tube.begin(), g.tube.end(), [](const TubeSculptSample& a, const TubeSculptSample& b) { return a.t < b.t; });
+                }
+                if (!g.samples.empty() || !g.tube.empty()) edits.guides[std::stoull(it.key())] = std::move(g);
             }
             const json frozen = node.value().value("frozen", json::object());
             for (auto it = frozen.begin(); it != frozen.end(); ++it) {
@@ -294,17 +372,108 @@ const char* const kPathFrameLayers[10] = {"braidPathAt",  "braidPathX",    "brai
 namespace {
 
 // A guide's path frame per point (kPathFrameLayers): the arc length, the point and the frame.
+//
+// The straightened space is the path's own: a point there is (across the frame's normal, along its
+// binormal, arc length), laid back on the path at that arc length with the frame there (between
+// two points' frames, blended), the inverse finding the arc length whose frame's plane holds the
+// point (nearest the point's own). So a stroke that slides a section along its braid, carried onto
+// a path bent much more (its tube combed), follows the bend: before issue 129's fix each point
+// went back with its own point's frame, straight off along that tangent, and a sculpted section
+// on a sharply bent braid broke into steps.
 struct PathFrames {
     std::vector<float> at;
     std::vector<Vec3f> center;
     std::vector<Frame> frames;
 
-    // A point (of index j) in the path's straightened space, and back.
-    Vec3f straight(std::size_t j, const Vec3f& p) const {
-        const Vec3f l = frames[j].toLocal(p - center[j]);
-        return {l.x, l.y, at[j] + l.z};
+    // The path's point and frame at arc length s (past an end: carried on along the end's tangent).
+    void at_(float s, Vec3f* c, Frame* f) const {
+        const std::size_t n = at.size();
+        if (n == 1 || s <= at.front()) {
+            *f = frames.front();
+            *c = center.front() + f->tangent * (s - at.front());
+            return;
+        }
+        if (s >= at.back()) {
+            *f = frames.back();
+            *c = center.back() + f->tangent * (s - at.back());
+            return;
+        }
+        const std::size_t k = static_cast<std::size_t>(std::upper_bound(at.begin(), at.end(), s) - at.begin()) - 1;
+        const float span = at[k + 1] - at[k];
+        const float w = span > 0.0f ? (s - at[k]) / span : 0.0f;
+        *c = center[k] + (center[k + 1] - center[k]) * w;
+        Vec3f t = frames[k].tangent * (1.0f - w) + frames[k + 1].tangent * w;
+        if (!(t.length() > 1e-6f)) t = frames[w < 0.5f ? k : k + 1].tangent;
+        t = t.normalized();
+        Vec3f nrm = frames[k].normal * (1.0f - w) + frames[k + 1].normal * w;
+        nrm = nrm - t * nrm.dot(t);
+        if (!(nrm.length() > 1e-6f)) nrm = anyPerpendicular(t);
+        f->tangent = t;
+        f->normal = nrm.normalized();
+        f->binormal = t.cross(f->normal);
     }
-    Vec3f onPath(std::size_t j, const Vec3f& q) const { return center[j] + frames[j].toWorld({q.x, q.y, q.z - at[j]}); }
+    // How far p lies ahead of the plane square to the path at s.
+    float ahead(float s, const Vec3f& p) const {
+        Vec3f c;
+        Frame f;
+        at_(s, &c, &f);
+        return (p - c).dot(f.tangent);
+    }
+
+    // A point (of index j) in the straightened space, and back. Its arc length: where p lies in the
+    // path's plane, the nearest such to its own point's (searched outward from there, by bisection
+    // between two points' arc lengths); a point on its own point's plane (the guide as fed) at once.
+    Vec3f straight(std::size_t j, const Vec3f& p) const {
+        const std::size_t n = at.size();
+        float best = at[j];
+        const float own = ahead(at[j], p);
+        if (n >= 2 && std::abs(own) > 1e-6f * (1.0f + std::abs(at.back() - at.front()))) {
+            auto root = [&](std::size_t k, float* out) {  // in [at[k], at[k + 1]]?
+                float flo = ahead(at[k], p);
+                const float fhi = ahead(at[k + 1], p);
+                if ((flo <= 0.0f) == (fhi <= 0.0f) && flo != 0.0f) return false;
+                float lo = at[k], hi = at[k + 1];
+                for (int it = 0; it < 30; ++it) {
+                    const float mid = 0.5f * (lo + hi);
+                    const float fm = ahead(mid, p);
+                    if ((fm <= 0.0f) == (flo <= 0.0f)) {
+                        lo = mid;
+                        flo = fm;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                *out = 0.5f * (lo + hi);
+                return true;
+            };
+            bool found = false;
+            for (std::size_t d = 0; d < n && !found; ++d) {
+                float r = 0.0f;
+                // Ahead of its point (p past its plane) first, then behind.
+                if (own > 0.0f) {
+                    if (j + d + 1 < n && root(j + d, &r)) found = true, best = r;
+                    else if (j >= d + 1 && root(j - d - 1, &r)) found = true, best = r;
+                } else {
+                    if (j >= d + 1 && root(j - d - 1, &r)) found = true, best = r;
+                    else if (j + d + 1 < n && root(j + d, &r)) found = true, best = r;
+                }
+            }
+            if (!found) {  // (past an end: along the end's tangent)
+                best = own < 0.0f ? at.front() + ahead(at.front(), p) : at.back() + ahead(at.back(), p);
+            }
+        }
+        Vec3f c;
+        Frame f;
+        at_(best, &c, &f);
+        const Vec3f l = f.toLocal(p - c);
+        return {l.x, l.y, best + l.z};
+    }
+    Vec3f onPath(const Vec3f& q) const {
+        Vec3f c;
+        Frame f;
+        at_(q.z, &c, &f);
+        return c + f.toWorld({q.x, q.y, 0.0f});
+    }
 };
 
 bool pathFramesOf(const Guide& g, PathFrames& out) {
@@ -417,7 +586,7 @@ std::vector<Vec3f> applySculpt(const Guide& input, const GuideSculpt& edit, floa
     PathFrames path;
     if (edit.samples.empty() || strength == 0.0f || !pathFramesOf(input, path)) return applySculptIn(input, edit, strength, scalp);
     std::vector<Vec3f> out = applySculptIn(straightened(input, path, input.points), edit, strength, nullptr);
-    for (std::size_t j = 1; j < out.size(); ++j) out[j] = path.onPath(j, out[j]);
+    for (std::size_t j = 1; j < out.size(); ++j) out[j] = path.onPath(out[j]);
     if (!out.empty()) out[0] = input.points[0];  // (the root to the bit)
     return out;
 }
@@ -447,7 +616,9 @@ std::shared_ptr<const GuideSet> applySculpts(const std::shared_ptr<const GuideSe
         const auto it = edits.guides.find(g.id);
         if (it == edits.guides.end()) continue;
         if (!out) out = std::make_shared<GuideSet>(*input);
-        out->guides()[i].points = applySculpt(g, it->second, strength, scalp);
+        Guide& to = out->guides()[i];
+        if (!it->second.samples.empty()) to.points = applySculpt(g, it->second, strength, scalp);
+        if (g.hasTube && !it->second.tube.empty()) to.tube = applyTubeSculpt(g.tube, it->second.tube, strength);
     }
     return out ? std::shared_ptr<const GuideSet>(out) : input;
 }
@@ -455,10 +626,34 @@ std::shared_ptr<const GuideSet> applySculpts(const std::shared_ptr<const GuideSe
 namespace {
 
 // One guide of a stroke's result recorded into `edits` (recordSculptStroke); whether it was.
-bool recordStrokeGuide(SculptEdits& edits, const Guide& g, const HierarchyGuide* s, float strength, const ScalpMesh* scalp) {
+// The sculpted guide's tube at the size the node's guides have (a hierarchy shows its tubes at its scale).
+TubeProfile shownTube(const HierarchyGuide& s, float scale) {
+    TubeProfile t = s.tube;
+    t.scaleWidth(scale);
+    return t;
+}
+
+// Whether two tubes' sections differ along them (width by more than a ten-thousandth of it,
+// aspect or twist by more than 1e-4).
+bool tubeChanged(const TubeProfile& a, const TubeProfile& b) {
+    const std::size_t n = tubeSamples(a, b);
+    for (std::size_t i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        const float w = std::max(a.widthAt(t), b.widthAt(t));
+        if (std::abs(a.widthAt(t) - b.widthAt(t)) > kMoved * w || std::abs(a.aspectAt(t) - b.aspectAt(t)) > 1e-4f ||
+            std::abs(a.twistAt(t) - b.twistAt(t)) > 1e-4f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool recordStrokeGuide(SculptEdits& edits, const Guide& g, const HierarchyGuide* s, float strength, const ScalpMesh* scalp,
+                       float scale) {
     if (!s || s->points.size() != g.points.size() || g.points.size() < 2) return false;
     const auto it = edits.guides.find(g.id);
-    const std::vector<Vec3f> now = it == edits.guides.end() ? g.points : applySculpt(g, it->second, strength, scalp);
+    const std::vector<Vec3f> now = it == edits.guides.end() || it->second.samples.empty()
+                                       ? g.points : applySculpt(g, it->second, strength, scalp);
     // Compared segment by segment (the root is the input's: a stroke never moves it).
     const float moved = kMoved * arcLength(now);
     bool changed = false;
@@ -466,9 +661,21 @@ bool recordStrokeGuide(SculptEdits& edits, const Guide& g, const HierarchyGuide*
         const Vec3f d = (s->points[k] - s->points[0]) - (now[k] - now[0]);
         changed = d.dot(d) > moved * moved;
     }
-    if (!changed) return false;
-    GuideSculpt edit = recordSculpt(g, s->points, strength, scalp);
-    if (edit.identity()) {
+    // Its tube (the Tube brush on a guide fed with one: a Braid's section).
+    bool tubeMoved = false;
+    TubeProfile sculptedTube;
+    if (g.hasTube) {
+        sculptedTube = shownTube(*s, scale);
+        const TubeProfile nowTube = it == edits.guides.end() ? g.tube : applyTubeSculpt(g.tube, it->second.tube, strength);
+        tubeMoved = tubeChanged(nowTube, sculptedTube);
+    }
+    if (!changed && !tubeMoved) return false;
+    GuideSculpt edit = it == edits.guides.end() ? GuideSculpt{} : it->second;
+    if (changed) edit.samples = recordSculpt(g, s->points, strength, scalp).samples;
+    if (tubeMoved) edit.tube = recordTubeSculpt(g.tube, sculptedTube, strength);
+    if (edit.bendsIdentity()) edit.samples.clear();
+    if (edit.tubeIdentity()) edit.tube.clear();
+    if (edit.samples.empty() && edit.tube.empty()) {
         edits.guides.erase(g.id);
     } else {
         edits.guides[g.id] = std::move(edit);
@@ -490,13 +697,14 @@ std::vector<GuideId> recordSculptStroke(SculptEdits& edits, const GuideSet& inpu
     }
     std::vector<GuideId> recorded;
     for (const Guide& g : input.guides()) {
-        if (recordStrokeGuide(edits, g, sculpted.guide(g.id), strength, scalp)) recorded.push_back(g.id);
+        if (recordStrokeGuide(edits, g, sculpted.guide(g.id), strength, scalp, sculpted.scale())) recorded.push_back(g.id);
     }
     return recorded;
 }
 
 void SculptStrokeRecord::clear() {
     seen_.clear();
+    seenTubes_.clear();
     started_ = false;
 }
 
@@ -511,15 +719,21 @@ void SculptStrokeRecord::record(SculptEdits& edits, const SculptEdits& stored, c
         const HierarchyGuide* s = sculpted.guide(g.id);
         return s ? s->points : none;
     };
+    const auto shownTubeOf = [&](const Guide& g) {
+        const HierarchyGuide* s = g.hasTube ? sculpted.guide(g.id) : nullptr;
+        return s ? s->tube : TubeProfile{};
+    };
     if (!started_ || seen_.size() != guides.size()) {
         // The first dab: every guide, from the stored edits.
         edits = stored;
         seen_.assign(guides.size(), {});
+        seenTubes_.assign(guides.size(), {});
         started_ = true;
         try {
             for (std::size_t i = 0; i < guides.size(); ++i) {
-                recordStrokeGuide(edits, guides[i], sculpted.guide(guides[i].id), strength, scalp);
+                recordStrokeGuide(edits, guides[i], sculpted.guide(guides[i].id), strength, scalp, sculpted.scale());
                 seen_[i] = shown(guides[i]);
+                seenTubes_[i] = shownTubeOf(guides[i]);
             }
         } catch (...) {
             clear();
@@ -532,7 +746,7 @@ void SculptStrokeRecord::record(SculptEdits& edits, const SculptEdits& stored, c
     // edits and in the input's order (guides sharing an ID change together, and record in turn).
     std::vector<std::size_t> changed;
     for (std::size_t i = 0; i < guides.size(); ++i) {
-        if (!samePoints(seen_[i], shown(guides[i]))) changed.push_back(i);
+        if (!samePoints(seen_[i], shown(guides[i])) || seenTubes_[i] != shownTubeOf(guides[i])) changed.push_back(i);
     }
     try {
         for (const std::size_t i : changed) {
@@ -544,8 +758,9 @@ void SculptStrokeRecord::record(SculptEdits& edits, const SculptEdits& stored, c
             }
         }
         for (const std::size_t i : changed) {
-            recordStrokeGuide(edits, guides[i], sculpted.guide(guides[i].id), strength, scalp);
+            recordStrokeGuide(edits, guides[i], sculpted.guide(guides[i].id), strength, scalp, sculpted.scale());
             seen_[i] = shown(guides[i]);
+            seenTubes_[i] = shownTubeOf(guides[i]);
         }
     } catch (...) {
         clear();

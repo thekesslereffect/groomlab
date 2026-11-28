@@ -58,7 +58,7 @@ std::vector<BrushEntry> makeCatalog() {
         // Shape.
         {"comb", "Comb", C::Shape, 0, "comb", 1.0f, false,
          "Drag guides along the stroke, roots pinned (Stretch: they get longer or shorter as you pull).",
-         with(kShaping, {"stretch", "targets"})},
+         with(kShaping, {"stretch", "targets", "tubeLevels"})},  // (the levels' row: a groom with tube levels, #132)
         {"slide", "Slide", C::Shape, 0, "slide", 1.0f, false,
          "Move roots along the scalp; guides keep their shape (fix a root without redrawing). Strength along the "
          "guide: how much of each guide follows its root (Root Only: the root alone moves, the rest stays put)",
@@ -93,7 +93,7 @@ std::vector<BrushEntry> makeCatalog() {
          "Remove what the brush touches: guides (with their children), parts and flow arrows (choose below). Not the "
          "scattered hair itself: to take hair away, paint the density map holding Ctrl (Paint tab > + New Map > for a "
          "setting > Density).",
-         with(kBrushCommon, {"erases"})},
+         with(kBrushCommon, {"erases", "tubeLevels"})},  // (the levels' row: a groom with tube levels, #132)
         // Paint.
         {"paint", "Paint", C::Paint, 0, "paint", 0.5f, false,
          "Paint the map picked in the list toward the value, or a color map toward the color in the channels ticked "
@@ -115,6 +115,7 @@ std::vector<BrushEntry> makeCatalog() {
         static const std::set<std::string> kCorrective = {"comb", "slide", "smooth", "lift", "twist", "attract",
                                                          "cut", "length", "select"};
         e.corrective = kCorrective.count(e.id) > 0;
+        e.sculptNode = e.corrective || e.id == "shape";
     }
     return entries;
 }

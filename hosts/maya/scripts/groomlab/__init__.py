@@ -65,7 +65,7 @@ from groomlab.guides import (  # noqa: F401
     select_guides, select_tool,
     selected_guides, set_group_segments, set_guide_attribute, set_guide_group_color, set_sculpt_display, set_soft_selection,
     show_guide_group, symmetry_sync, unlock_guides, set_tube, get_tube, TUBE_SHAPES, _group_list,
-    scale_tube, smooth_tube, fill_tubes, set_fill_tubes, tube_shapes, add_tube_shape, set_tube_shape_points,
+    scale_tube, smooth_tube, fill_tube_channel, fill_tubes, set_fill_tubes, tube_shapes, add_tube_shape, set_tube_shape_points,
     rename_tube_shape, remove_tube_shape, preview_tube_shape, tube_targets)
 from groomlab.brushes import (BRUSH_CONTEXT, BRUSH_MODES, TUBE_CHANNELS, add_brush_alpha, brush_alpha_folder,  # noqa: F401
                               brush_alphas, brush_stroke, brush_tool, clone_pick_source, clone_reset, clone_source_size,

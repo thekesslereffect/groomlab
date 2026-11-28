@@ -433,24 +433,39 @@ std::vector<WireStep> polylineSteps(std::vector<Point> points, double radius) {
 
 }  // namespace
 
-std::vector<WireStep> wireRoute(const std::string& style, double ax, double ay, double bx, double by, double below, bool through) {
-    const bool forward = through || bx >= ax + 30.0;
+double wireGap(double topA, double bottomA, double topB, double bottomB, double margin) {
+    if (bottomA + margin <= topB) return 0.5 * (bottomA + topB);
+    if (bottomB + margin <= topA) return 0.5 * (bottomB + topA);
+    return std::nan("");
+}
+
+std::vector<WireStep> wireRoute(const std::string& style, double ax, double ay, double bx, double by, double below, bool through,
+                                double gap) {
+    // (Its input right of its output, however little: straight across. Before issue 131, within 30
+    // units it looped under the cards, a knot between cards side by side.)
+    const bool forward = through || bx >= ax;
+    // Where a backwards wire runs back: between the cards when there is room, else under them.
+    const double back = !std::isnan(gap) ? gap : std::isnan(below) ? std::max(ay, by) + 60.0 : below + 24.0;
     if (style == "square" || style == "rounded") {
         const double radius = style == "rounded" ? 14.0 : 0.0;
         if (forward) {
             const double mid = (ax + bx) * 0.5;
             return polylineSteps({{ax, ay}, {mid, ay}, {mid, by}, {bx, by}}, radius);
         }
-        // Backwards: out to the right, down under both cards, back along under them, up into the input.
-        const double y = std::isnan(below) ? std::max(ay, by) + 60.0 : below + 24.0;
+        // Backwards: out to the right, down (between the cards, or under both), back along, into the input.
+        const double y = back;
         constexpr double out = 24.0;
         return polylineSteps({{ax, ay}, {ax + out, ay}, {ax + out, y}, {bx - out, y}, {bx - out, by}, {bx, by}}, radius);
     }
     if (forward) {
-        const double dx = std::max(through ? 50.0 : 60.0, std::abs(bx - ax) * 0.5);
+        // Its handles half the way across, and longer by the drop between its ends (up to 50 or 60):
+        // a wide or steep wire curves as it did, a short level one runs straight (handles past the
+        // other end double back: the knot of issue 131).
+        const double across = std::abs(bx - ax) * 0.5;
+        const double dx = std::max(across, std::min(through ? 50.0 : 60.0, across + std::abs(by - ay) * 0.5));
         return {{true, ax + dx, ay, bx - dx, by, bx, by}};
     }
-    const double y = std::isnan(below) ? std::max(ay, by) + 60.0 : below + 24.0;
+    const double y = back;
     constexpr double r = 40.0;
     return {{true, ax + r, ay, ax + r, y, ax, y}, {false, 0, 0, 0, 0, bx, y}, {true, bx - r, y, bx - r, by, bx, by}};
 }

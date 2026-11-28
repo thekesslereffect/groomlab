@@ -51,16 +51,41 @@ struct SculptSample {
     bool operator==(const SculptSample& o) const { return t == o.t && ax == o.ax && ay == o.ay && scale == o.scale; }
 };
 
-// One guide's edit: samples by increasing t (one per segment of the guide it was recorded on).
+// One sample of a guide's tube edit (issue 129: a Braid's sections brushed with the Tube brush): at
+// normalized t along the guide (by point, as the tube's lists), the factor its width takes, the
+// factor its aspect takes and the twist added (radians), all relative to the tube it is fed, so
+// they stay on top when the tube above changes (a section 1.5 times wider stays 1.5 times wider).
+struct TubeSculptSample {
+    float t = 0.0f;
+    float width = 1.0f, aspect = 1.0f, twist = 0.0f;
+
+    bool operator==(const TubeSculptSample& o) const {
+        return t == o.t && width == o.width && aspect == o.aspect && twist == o.twist;
+    }
+};
+
+// One guide's edit: samples by increasing t (one per segment of the guide it was recorded on), and
+// its tube's (none: its tube as fed), also by increasing t.
 struct GuideSculpt {
     std::vector<SculptSample> samples;
+    std::vector<TubeSculptSample> tube;
 
-    // Whether it changes nothing (every turn and length factor within 1e-6 of none).
+    // Whether it changes nothing (every turn and length factor within 1e-6 of none, and the tube's
+    // factors and twist within 1e-4 of none); the bends' and the tube's alone.
     bool identity() const;
+    bool bendsIdentity() const;
+    bool tubeIdentity() const;
     // The sample at t: linear between the two around it, the end ones held past them.
     SculptSample at(float t) const;
-    bool operator==(const GuideSculpt& o) const { return samples == o.samples; }
+    TubeSculptSample tubeAt(float t) const;
+    bool operator==(const GuideSculpt& o) const { return samples == o.samples && tube == o.tube; }
 };
+
+// A guide's tube with a tube edit at `strength` (0: as fed; between, that share of each factor and
+// twist), and the tube edit taking `fed` to `sculpted` at `strength` (as many samples as the two
+// tubes' lists hold, 2 at least). recordTubeSculpt throws std::invalid_argument for strength about 0.
+TubeProfile applyTubeSculpt(const TubeProfile& fed, const std::vector<TubeSculptSample>& edit, float strength);
+std::vector<TubeSculptSample> recordTubeSculpt(const TubeProfile& fed, const TubeProfile& sculpted, float strength);
 
 // One strand's edit in a SculptStrands node (sculpt_strands.h): the guides' relative form, plus
 // where the strand grew and how far apart the strands were there when it was recorded, so strands
@@ -92,7 +117,8 @@ struct SculptEdits {
 using SculptPtr = std::shared_ptr<const SculptEdits>;
 
 // The groom's sculpts by Sculpt node name ("compound/inner" inside a compound):
-// {"<node>": {"guides": {"<guide id>": [t, ax, ay, scale, t, ax, ay, scale, ...]}}}; a SculptStrands
+// {"<node>": {"guides": {"<guide id>": [t, ax, ay, scale, t, ax, ay, scale, ...]}}} (a guide whose tube
+// is edited too: {"bend": [t, ax, ay, scale, ...], "tube": [t, width, aspect, twist, ...]}); a SculptStrands
 // node's under "strands": {"<strand id>": [face, u, v, spacing, t, ax, ay, scale, ...]}; what is
 // frozen for its brushes under "frozen": {"<id>": value} (builds before read the guides alone and
 // leave the others out). Empty text: none. A node with no
@@ -147,14 +173,16 @@ std::vector<Vec3f> applySculptFramed(const std::vector<Vec3f>& points, const Gui
                                      const Vec3f& across);
 GuideSculpt recordSculptFramed(const std::vector<Vec3f>& points, const std::vector<Vec3f>& sculpted, float strength, const Vec3f& normal,
                                const Vec3f& across);
-// Every guide of `input` with its edit applied (by ID), the others as they are; `input` itself
-// when no edit reaches it.
+// Every guide of `input` with its edit applied (by ID; a guide with a tube, its tube edit too), the
+// others as they are; `input` itself when no edit reaches it.
 std::shared_ptr<const GuideSet> applySculpts(const std::shared_ptr<const GuideSet>& input, const SculptEdits& edits,
                                              float strength, const ScalpMesh* scalp);
 
 // A stroke's result recorded into `edits`: each guide of `sculpted` (by ID) whose points differ
 // from the node's output now (`input` with `edits` at `strength`) by more than a ten-thousandth
-// of its length gets its edit recorded again (an edit back to none goes); the others keep theirs.
+// of its length gets its bends recorded again, and each whose tube differs from the output's (a
+// guide fed with a tube: the Tube brush) its tube edit (an edit back to none goes); the others
+// keep theirs.
 // Returns the IDs recorded. Throws std::invalid_argument when strength is about 0.
 std::vector<GuideId> recordSculptStroke(SculptEdits& edits, const GuideSet& input, const GuideHierarchy& sculpted,
                                         float strength, const ScalpMesh* scalp);
@@ -173,6 +201,7 @@ public:
 
 private:
     std::vector<std::vector<Vec3f>> seen_;  // per guide of the input, the sculpted points last recorded (none: not there)
+    std::vector<TubeProfile> seenTubes_;    // and its tube (a guide fed with one)
     bool started_ = false;
 };
 

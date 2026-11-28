@@ -42,11 +42,20 @@ const char* strokeFieldName(StrokeField field) {
 // The freeze layer a Sculpt or SculptStrands node's brushes skip (SculptEdits::frozen).
 std::string sculptFreezeName(const BrushToolSettings& s) { return s.brush.freeze.empty() ? std::string("freeze") : s.brush.freeze; }
 
+// The Tube brush on a SculptStrands node: strands have no tubes to shape.
+static std::string sculptTubeRefusal(const BrushToolSettings& s, const SculptInput& in) {
+    if (in.strands && s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::ShapeTube) {
+        return "GroomLab sculpt: the Tube brush shapes a Sculpt node's tubes (a Braid's sections), not a SculptStrands "
+               "node's strands";
+    }
+    return {};
+}
+
 std::string sculptRefusal(const BrushToolSettings& s) {
     using Tool = BrushToolSettings::Tool;
     const char* why = "GroomLab sculpt: only shaping brushes (comb, smooth, lift, length, twist, straighten, attract, "
-                      "cut) and Freeze shape a Sculpt node's guides or a SculptStrands node's strands (pick no such "
-                      "node to place, draw, erase, paint or part)";
+                      "cut, and the Tube brush on a Sculpt node's guides) and Freeze shape a Sculpt node's guides or a "
+                      "SculptStrands node's strands (pick no such node to place, draw, erase, paint or part)";
     if (s.tool != Tool::Brush) return why;
     // Freeze: painting the node's own freeze (its brushes skip what it holds).
     if (!s.paintsScalp() && s.brush.mode == BrushMode::Attribute && s.brush.attribute == sculptFreezeName(s)) return {};
@@ -59,8 +68,8 @@ std::string sculptRefusal(const BrushToolSettings& s) {
         case BrushMode::Twist:
         case BrushMode::Straighten:
         case BrushMode::Attract:
-        case BrushMode::Cut: return {};
-        case BrushMode::ShapeTube:
+        case BrushMode::Cut:
+        case BrushMode::ShapeTube: return {};  // (a guide's tube: its tube edit, issue 129; strands have none: sculptTubeRefusal)
         case BrushMode::Attribute:
         case BrushMode::Erase:
         case BrushMode::Slide: break;
@@ -613,6 +622,11 @@ bool BrushTool::startStroke(StrokeHost& host, const ToolView& view, float x, flo
         try {
             sculptIn_ = host.sculptInput(sculptNode);
             if (std::abs(sculptIn_.strength) < 1e-3f) throw std::invalid_argument("its strength is 0: raise it to sculpt");
+            const std::string tubes = sculptTubeRefusal(settings, sculptIn_);
+            if (!tubes.empty()) {
+                host.warn(tubes);
+                return false;
+            }
         } catch (const std::exception& e) {
             host.warn("GroomLab sculpt: " + sculptNode + ": " + e.what());
             return false;
@@ -1562,6 +1576,7 @@ std::size_t scriptedStroke(StrokeHost& host, BrushToolSettings s, const std::vec
         if (!refusal.empty()) throw std::invalid_argument(refusal);
         requireScalp();
         const SculptInput in = host.sculptInput(sculptNode);
+        if (const std::string tubes = sculptTubeRefusal(s, in); !tubes.empty()) throw std::invalid_argument(tubes);
         StrandStrokeRecord strands;
         std::shared_ptr<GuideHierarchy> h;
         if (in.strands) {  // a SculptStrands node's: its strands as they show now, one guide a strand

@@ -472,8 +472,10 @@ TEST(AppLists, MapsBarMenuAndOperations) {
     EXPECT_EQ(doc->mapUsers(map), (std::vector<std::pair<std::string, std::string>>{{scatter, "density"}}));
     EXPECT_NE(panel->usersText().indexOf(QString::fromStdString(scatter + ".density")), -1) << panel->usersText().toStdString();
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"map", "map.scalp"}));
-    // One line per map: its ⓘ (kind, Read by, Use for, Show on) and its menu on the row.
-    EXPECT_TRUE(panel->findChild<QToolButton*>(QStringLiteral("mapInfo_") + QString::fromStdString(map)));
+    // One line per map, its menu on the row; the picked map's info (Read by, Use for, Show on)
+    // under the list, no ⓘ to open (issue #138).
+    EXPECT_FALSE(panel->findChild<QToolButton*>(QStringLiteral("mapInfo_") + QString::fromStdString(map)));
+    EXPECT_TRUE(panel->infoBlock()->isVisibleTo(panel));
     EXPECT_TRUE(panel->findChild<QToolButton*>(QStringLiteral("mapMenu_") + QString::fromStdString(map)));
     std::unique_ptr<QMenu> menu(panel->contextMenu(panel->list()->visualItemRect(panel->list()->currentItem()).center()));
     EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"Rename...", "Convert to", "Make Color (r g b a)", "-", "Relink Image...", "-", "Delete"}));

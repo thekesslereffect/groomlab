@@ -289,6 +289,17 @@ TEST(RootTubeTool, SelectCarriesRootsDuplicatesAndDeletesThem) {
     std::array<float, 2> s = px(view, mb);
     tool.press(*head.host, view, s[0], s[1], kStrokeShift);
     EXPECT_EQ(tool.selected(), (std::vector<GuideId>{a, b}));
+    tool.release(*head.host, view);
+    // Shift+click on the Select root button: every root shown (from Place too) selected.
+    tool.start(*head.host, RootTubeTool::Mode::Place);
+    EXPECT_EQ(tool.selectShown(*head.host), 2) << tool.message();
+    EXPECT_EQ(tool.mode(), RootTubeTool::Mode::Select);
+    std::vector<GuideId> all = tool.selected();
+    std::sort(all.begin(), all.end());
+    EXPECT_EQ(all, (std::vector<GuideId>{std::min(a, b), std::max(a, b)}));
+    tool.press(*head.host, view, s[0], s[1], kStrokeShift);  // (b out, then in again: a, b as before)
+    tool.release(*head.host, view);
+    tool.press(*head.host, view, s[0], s[1], kStrokeShift);
     const std::size_t steps = head.host->edits().size();
     tool.drag(*head.host, view, s[0] - 60.0f, s[1] + 30.0f);
     tool.release(*head.host, view);

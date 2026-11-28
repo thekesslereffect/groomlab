@@ -273,6 +273,37 @@ TEST(GraphArrange, WireStylesRouteForwardAndBackward) {
     EXPECT_EQ(wireRoute("square", 300, 0, 0, 40, 80.0, true).size(), 3u);
 }
 
+TEST(GraphArrange, WiresBetweenCloseCardsRunStraightAndBackwardsOnesPassBetweenThem) {
+    // Issue 131: cards side by side, the input a little right of the output, level: one straight
+    // curve, never a loop under the cards; its handles stay between its ends.
+    auto close = wireRoute("smooth", 100, 50, 120, 50, 200.0);
+    ASSERT_EQ(close.size(), 1u);
+    EXPECT_TRUE(close[0].cubic);
+    EXPECT_GE(close[0].c1x, 100.0);
+    EXPECT_LE(close[0].c1x, 120.0);
+    EXPECT_GE(close[0].c2x, 100.0);
+    EXPECT_LE(close[0].c2x, 120.0);
+    EXPECT_EQ(close[0].c1y, 50.0);
+    // A steep one still curves out (handles up to 60).
+    auto steep = wireRoute("smooth", 100, 0, 120, 300);
+    EXPECT_EQ(steep[0].c1x, 160.0);
+    // Backwards to a card below: between the two cards (the gap), not under the lower one.
+    const double gap = wireGap(0, 120, 200, 320);
+    EXPECT_EQ(gap, 160.0);
+    EXPECT_TRUE(std::isnan(wireGap(0, 120, 100, 220))) << "overlapping in height: no gap";
+    for (const char* style : {"smooth", "square", "rounded"}) {
+        auto back = wireRoute(style, 300, 50, 0, 250, 320.0, false, gap);
+        double lowest = 0;
+        for (const WireStep& s : back) lowest = std::max(lowest, s.y);
+        EXPECT_LE(lowest, 250.0) << style << ": never below the input";
+        bool runs = false;
+        for (const WireStep& s : back) runs = runs || s.y == gap;
+        EXPECT_TRUE(runs) << style << ": back along the gap";
+        EXPECT_EQ(back.back().x, 0.0) << style;
+        EXPECT_EQ(back.back().y, 250.0) << style;
+    }
+}
+
 TEST(GraphEditByHand, DuplicateKeepsWhatFedTheNodes) {
     GraphEdit edit(defaultGraphJson());
     const auto made = edit.duplicateNodes({"noise", "color"}, 40, 60);

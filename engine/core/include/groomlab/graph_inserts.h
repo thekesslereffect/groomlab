@@ -197,6 +197,26 @@ std::string renameGroupReaders(const std::string& graphJson, const std::string& 
 std::string insertBraid(GraphEdit& edit, const std::string& group = "braids", const std::string& paramsJson = {},
                         const std::string& after = {}, std::optional<double> groomSize = std::nullopt);
 
+// Root tubes made braids (issue 129, tube_braids.h; the Tube tool's Make Braid in every host): the
+// Braid joining by tube (join tube) that braids the hair of the tubes marked as braids. The graph's
+// tube Braid (a Braid joining by tube reading the braids of an Interpolate that fills tubes) when
+// it has one; else a new one (its params from `paramsJson`, an object, "" none, over join tube)
+// right after the Interpolate filling tubes (the first that does, else "interpolate" or the first
+// Interpolate feeding something, fillTubes then turned on), before what it fed first, placed as
+// insertBraid places it, its "braids" input reading the guides that Interpolate reads (the same
+// tubes: both number the braids alike). GraphError for no Interpolate, or one reading no guides.
+struct TubeBraidNode {
+    std::string braid;
+    bool made = false;  // whether it is new
+};
+TubeBraidNode insertTubeBraid(GraphEdit& edit, const std::string& paramsJson = {}, std::optional<double> groomSize = std::nullopt);
+// Make Braid's new Braid when no params are given (every host's): a three-strand braid as wide as
+// each tube, eased in where the hair leaves the scalp, finished in a fan.
+constexpr const char* kTubeBraidParams =
+    R"({"style": "three", "tubeWidth": 1.0, "gather": 0.08, "gatherSmoothness": 0.3, "end": "fan", "tail": 0.1, "clumpChannel": "tubeId"})";
+// The graph's tube Braid (insertTubeBraid's), "" none.
+std::string tubeBraidNode(const GraphEdit& edit);
+
 // Add > Bun: the paths of buns braided from the hair. A Braid (insertBraid: after the
 // Interpolate, `style` one of its styles, rope for a twisted bun) whose braids input is a Bun node
 // reading the first Guides node of `group` (each guide a bun: its root where the bun sits, its way

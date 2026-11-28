@@ -421,9 +421,10 @@ json runArrangeCommand(const std::string& cmd, const json& args, const std::func
         // The core's wire (graph_arrange.h wireRoute): the add-on draws its own port of it, checked
         // against this.
         const double below = args.contains("below") && args["below"].is_number() ? args["below"].get<double>() : std::nan("");
+        const double gap = args.contains("gap") && args["gap"].is_number() ? args["gap"].get<double>() : std::nan("");
         json steps = json::array();
         for (const WireStep& w : wireRoute(optString(args, "style", "smooth"), numberOf(args, "ax"), numberOf(args, "ay"),
-                                           numberOf(args, "bx"), numberOf(args, "by"), below, optBool(args, "through", false))) {
+                                           numberOf(args, "bx"), numberOf(args, "by"), below, optBool(args, "through", false), gap)) {
             steps.push_back(w.cubic ? json{w.c1x, w.c1y, w.c2x, w.c2y, w.x, w.y} : json{w.x, w.y});
         }
         return {{"steps", steps}};

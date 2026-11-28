@@ -935,17 +935,26 @@ void bindGraph(py::module_& m) {
           "While a node on a backdrop is dragged: whether the backdrop keeps it (grows round it) or the node leaves it.");
     m.attr("BACKDROP_ESCAPE_SPEED") = kBackdropEscapeSpeed;
     m.def("wire_route",
-          [](const std::string& style, double ax, double ay, double bx, double by, std::optional<double> below, bool through) {
+          [](const std::string& style, double ax, double ay, double bx, double by, std::optional<double> below, bool through,
+             std::optional<double> gap) {
               py::list out;
-              for (const WireStep& s : wireRoute(style, ax, ay, bx, by, below ? *below : std::nan(""), through)) {
+              for (const WireStep& s :
+                   wireRoute(style, ax, ay, bx, by, below ? *below : std::nan(""), through, gap ? *gap : std::nan(""))) {
                   if (s.cubic) out.append(py::make_tuple(s.c1x, s.c1y, s.c2x, s.c2y, s.x, s.y));
                   else out.append(py::make_tuple(s.x, s.y));
               }
               return out;
           },
           py::arg("style"), py::arg("ax"), py::arg("ay"), py::arg("bx"), py::arg("by"), py::arg("below") = py::none(),
-          py::arg("through") = false,
-          "A wire's steps from (ax, ay): (x, y) a line, (c1x, c1y, c2x, c2y, x, y) a cubic.");
+          py::arg("through") = false, py::arg("gap") = py::none(),
+          "A wire's steps from (ax, ay): (x, y) a line, (c1x, c1y, c2x, c2y, x, y) a cubic; `gap`: a backwards wire "
+          "runs back between the cards there (wire_gap).");
+    m.def("wire_gap", [](double topA, double bottomA, double topB, double bottomB, double margin) -> std::optional<double> {
+              const double g = wireGap(topA, bottomA, topB, bottomB, margin);
+              return std::isnan(g) ? std::nullopt : std::optional<double>(g);
+          },
+          py::arg("top_a"), py::arg("bottom_a"), py::arg("top_b"), py::arg("bottom_b"), py::arg("margin") = 16.0,
+          "The middle of the clear space between two cards one above the other, or None (graph_arrange.h wireGap).");
     m.def("compound_graph_json", &compoundGraphJson, py::arg("graph_json"), py::arg("path"),
           "The graph a Compound holds (at its path, \"outer/inner\"), as a graph of its own.");
     m.def("with_compound_graph", &withCompoundGraph, py::arg("graph_json"), py::arg("path"), py::arg("inner_json"),
@@ -1022,6 +1031,19 @@ void bindGraph(py::module_& m) {
              py::arg("group") = std::string("braids"), py::arg("params_json") = std::string(), py::arg("after") = std::string(),
              py::arg("groom_size") = py::none(),
              "Add > Braid (graph_inserts.h): a Braid node after the Interpolate, its paths the group's Guides node.")
+        .def("insert_tube_braid",
+             [](GraphEdit& e, const std::string& paramsJson, std::optional<double> groomSize) {
+                 const TubeBraidNode made = insertTubeBraid(e, paramsJson, groomSize);
+                 py::dict out;
+                 out["braid"] = made.braid;
+                 out["made"] = made.made;
+                 return out;
+             },
+             py::arg("params_json") = std::string(), py::arg("groom_size") = py::none(),
+             "Make Braid (graph_inserts.h insertTubeBraid): the graph's Braid joining by tube, added after the "
+             "Interpolate filling tubes when it has none. {braid, made}.")
+        .def("tube_braid_node", [](const GraphEdit& e) { return tubeBraidNode(e); },
+             "The graph's Braid joining by tube (graph_inserts.h tubeBraidNode), '' none.")
         .def("insert_bun",
              [](GraphEdit& e, const std::string& group, const std::string& style, const std::string& bunParamsJson,
                 const std::string& after, std::optional<double> groomSize) {

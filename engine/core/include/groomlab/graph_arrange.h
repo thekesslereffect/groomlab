@@ -155,12 +155,19 @@ struct WireStep {
     double c1x = 0.0, c1y = 0.0, c2x = 0.0, c2y = 0.0;
     double x = 0.0, y = 0.0;
 };
-// A wire from an output at (ax, ay) to an input at (bx, by), as steps from (ax, ay). A wire that
-// runs backwards (the input left of the output) loops under `below` (the lower edge of the two
-// cards; NaN: a little under its ends) so it never crosses them. `through`: the wire runs through
-// a pin there (a piece between pins): it leaves and arrives level, no loop. An unknown style is
-// drawn smooth.
+// A wire from an output at (ax, ay) to an input at (bx, by), as steps from (ax, ay). A wire whose
+// input lies right of its output (however little: cards side by side) runs straight across, its
+// curve as tight as the drop between its ends asks (level ends: a straight line; issue 131). One
+// that runs backwards (the input left of the output) loops through `gap` when given (the middle of
+// the clear space between the two cards, one above the other: the wire passes between them, never
+// under the lower card; issue 131), else under `below` (the lower edge of the two cards; NaN: a
+// little under its ends) so it never crosses them. `through`: the wire runs through a pin there (a
+// piece between pins): it leaves and arrives level, no loop. An unknown style is drawn smooth.
 std::vector<WireStep> wireRoute(const std::string& style, double ax, double ay, double bx, double by,
-                                double below = std::nan(""), bool through = false);
+                                double below = std::nan(""), bool through = false, double gap = std::nan(""));
+// The middle of the clear space between two cards one above the other (their top and bottom
+// edges), at least `margin` of it; NaN when they overlap in height or the space is narrower: what
+// a backwards wire passes through (wireRoute's `gap`).
+double wireGap(double topA, double bottomA, double topB, double bottomB, double margin = 16.0);
 
 }  // namespace groomlab

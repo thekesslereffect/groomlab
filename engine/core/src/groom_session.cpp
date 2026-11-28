@@ -107,6 +107,65 @@ GuidesPtr movingGuidesOf(Graph& graph, NodeId shown, const EvalContext& ctx) {
     return nullptr;
 }
 
+// Issue 130: the guides each Interpolate feeding `shown` takes after nodes that shape them (a Curl,
+// a Noise, a Sculpt... between it and the Guides node it reads: a Guides node set to one level's
+// group, piped into a Curl), each set once: what the viewport draws those guides as (their tubes
+// with them), so the guides and tubes of that level show the graph's shapes, and follow when a
+// level above is combed (the graph runs again). A chain with a node moving the guides (a cache, a
+// simulation: movingGuidesOf's) is left to movingGuidesOf; one reaching no Guides node (a Braid's
+// sections), or shaping nothing (bypassed nodes alone), gives none. Every value read is the
+// evaluation's own (cached): no extra work.
+std::vector<GuidesPtr> shapedGuidesOf(Graph& graph, NodeId shown, const EvalContext& ctx) {
+    std::vector<GuidesPtr> out;
+    auto guidesSlot = [&](NodeId id) -> std::ptrdiff_t {
+        const std::vector<PortSpec> specs = graph.inputSpecs(id);
+        for (std::size_t slot = 0; slot < specs.size(); ++slot) {
+            if (specs[slot].name == "guides") return static_cast<std::ptrdiff_t>(slot);
+        }
+        return -1;
+    };
+    std::vector<NodeId> stack{shown}, seen;
+    while (!stack.empty()) {
+        const NodeId id = stack.back();
+        stack.pop_back();
+        if (std::find(seen.begin(), seen.end(), id) != seen.end()) continue;
+        seen.push_back(id);
+        if (graph.node(id).typeName() == "Interpolate" && !graph.bypassed(id)) {
+            const std::ptrdiff_t slot = guidesSlot(id);
+            NodeId source = 0;
+            std::size_t output = 0;
+            if (slot >= 0 && graph.inputSource(id, static_cast<std::size_t>(slot), &source, &output)) {
+                // Up the chain (each node's first input) to its Guides node, counting what shapes.
+                NodeId at = source;
+                bool shapes = false, reached = false;
+                for (int steps = 0; at && steps < 64; ++steps) {
+                    const std::string type = graph.node(at).typeName();
+                    if (type == "Guides") {
+                        reached = true;
+                        break;
+                    }
+                    if (type == "GuideCache" || type == "Simulate" || type == "DriveGuides") break;  // (moving guides)
+                    const PortType kind = graph.node(at).output().type;
+                    if (kind != PortType::Curves && kind != PortType::Guides) break;
+                    if (!graph.bypassed(at)) shapes = true;
+                    NodeId next = 0;
+                    if (graph.inputSpecs(at).empty() || !graph.inputSource(at, 0, &next)) break;
+                    at = next;
+                }
+                if (reached && shapes) {
+                    const GuidesPtr shaped = valueAs<GuidesPtr>(graph.evaluateOutput(source, output, ctx));
+                    if (shaped && !shaped->empty() && std::find(out.begin(), out.end(), shaped) == out.end()) out.push_back(shaped);
+                }
+            }
+        }
+        for (std::size_t slot = 0; slot < graph.inputSpecs(id).size(); ++slot) {
+            NodeId from = 0;
+            if (graph.inputSource(id, slot, &from)) stack.push_back(from);
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 namespace {
@@ -1760,9 +1819,11 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     phase.next("session.simulations");
     stepSimulations(request, errors);
     phase.next("session.setup");
+    shapedGuides_.clear();  // (the evaluation below finds them again)
     // A live brush stroke edits the preview in place: every stamp is a change.
     bool hierarchyChanged = activeHierarchy_.get() != previousActive.get() || previewHierarchy_ != nullptr;
     const HierarchyPtr previousShown = view_.hierarchy;
+    const HierarchyPtr previousDrawn = view_.drawnHierarchy;
     if (!correctiveError_.empty()) errors.push_back(correctiveError_);
     if (!partError_.empty()) errors.push_back(partError_);
     if (!flowError_.empty()) errors.push_back(flowError_);
@@ -1829,6 +1890,22 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
                 std::size_t output = 0;
                 if (viewed->graph.inputSource(stopAt, slot, &source, &output)) viewed->graph.evaluateOutput(source, output, ctx);
             }
+            // Guides the graph shapes (issue 130) are still drawn shaped with no strands asked for
+            // (the strands hidden): their chains alone run (a Curl on a level's guides), never the
+            // Interpolate, so a comb of a level above still carries them.
+            if (sculptTarget_.empty()) {
+                NodeId shown = viewed->output;
+                const auto it = viewed->nodesByName.find(flat_.result(request.viewNode));
+                if (!request.viewNode.empty() && it != viewed->nodesByName.end() &&
+                    viewed->graph.outputType(it->second) == PortType::Strands) {
+                    shown = it->second;
+                }
+                try {
+                    shapedGuides_ = shapedGuidesOf(viewed->graph, shown, ctx);
+                } catch (const std::exception&) {  // (drawn as stored)
+                    shapedGuides_.clear();
+                }
+            }
             out.strands = previousStrands;
             out.follow = previousFollow;
         } catch (const std::exception& e) {
@@ -1857,6 +1934,7 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
             const StrandsPtr evaluated = strands;  // the node's result (before pinning or carrying)
             StrandsPtr pinned;  // it with its instances pinned to rest (the same points)
             out.movingGuides = movingGuidesOf(viewed->graph, shown, ctx);
+            shapedGuides_ = shapedGuidesOf(viewed->graph, shown, ctx);
             if (centersOf) {
                 const std::shared_ptr<const std::vector<Vec3f>> dots = clumpCenterDots(*viewed, centersOf, evaluated, ctx);
                 if (!previousCenters || *previousCenters != *dots) out.clumpCenters = dots;  // the same: kept
@@ -2039,7 +2117,32 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
             if (sculptShown_) shownHierarchy = sculptShown_;
         }
     }
-    if (shownHierarchy != previousShown) hierarchyChanged = true;
+    // Guides the graph shapes (issue 130: a Curl on a level's guides): drawn as it shapes them
+    // (ViewResult::drawnHierarchy).
+    if (sculptTarget_.empty() && !shapedGuides_.empty() && shownHierarchy) {
+        std::uint64_t key = hashCombine(hash64(0x5A9ED), reinterpret_cast<std::uintptr_t>(shownHierarchy.get()));
+        for (const GuidesPtr& g : shapedGuides_) key = hashCombine(key, g->contentHash());
+        if (key != shapedShownKey_ || !shapedShown_) {
+            auto made = std::make_shared<GuideHierarchy>(*shownHierarchy);
+            for (const GuidesPtr& set : shapedGuides_) {
+                for (const Guide& g : set->guides()) {
+                    const HierarchyGuide* was = made->guide(g.id);
+                    if (!was || g.points.size() < 2 || was->points == g.points) continue;
+                    try {
+                        made->setPoints(g.id, g.points);
+                    } catch (const std::exception&) {  // (drawn as stored)
+                    }
+                }
+            }
+            shapedShown_ = made;
+            shapedShownKey_ = key;
+        }
+    } else {
+        shapedShown_.reset();
+        shapedShownKey_ = 0;
+    }
+    out.drawnHierarchy = shapedShown_;  // (drawing only: hover, pick and shot sculpts read the guides shown)
+    if (shownHierarchy != previousShown || shapedShown_ != previousDrawn) hierarchyChanged = true;
 
     // What changed, for drawing: the same cached results (a static groom at another frame)
     // leave the versions alone.

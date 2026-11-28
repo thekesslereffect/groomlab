@@ -279,6 +279,46 @@ std::string GroomDocument::sculptBraidSections(const std::string& braid, BraidSc
     return error;
 }
 
+std::string GroomDocument::insertTubeBraid(TubeBraidNode* made) {
+    const MeshPtr& scalp = file().data.scalp;
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
+    TubeBraidNode node;
+    try {
+        GraphEdit trial(graph_.dump());
+        node = groomlab::insertTubeBraid(trial, {}, size);
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+    std::string error;
+    if (node.made) {
+        error = editGraph("make braid", [&](json& g) {
+            GraphEdit edit(g.dump());
+            node = groomlab::insertTubeBraid(edit, {}, size);
+            g = json::parse(edit.toJson());
+        });
+    }
+    if (error.empty() && made) *made = node;
+    return error;
+}
+
+std::string GroomDocument::tubeBraid() const {
+    try {
+        return tubeBraidNode(GraphEdit(graph_.dump()));
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
+std::string GroomDocument::tubeBraidSculpt() const {
+    try {
+        const GraphEdit edit(graph_.dump());
+        const std::string braid = tubeBraidNode(edit);
+        return braid.empty() ? std::string() : braidSculptNode(edit, braid);
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 // ---- Import and Utilities ---------------------------------------------------------------------------
 
 std::string GroomDocument::importAlembicCurves(const std::string& path, const std::string& object, int samples, std::size_t* curves) {

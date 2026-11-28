@@ -384,8 +384,10 @@ bool MainWindow::setUiMenu(const QString& name) {
         } else if (n == QStringLiteral("mapinfo")) {
             groomTools_->showTab(QStringLiteral("paint"));
             QApplication::processEvents();
-            if (!clickNamed(QStringLiteral("mapInfo_"))) return false;
-            keep(maps_->infoPopup());
+            // (The picked map's info shows under the list, issue #138: a map picked.)
+            if (maps_->list()->count() == 0) return false;
+            maps_->list()->setCurrentRow(0);
+            QApplication::processEvents();
         } else if (n == QStringLiteral("photosettings")) {
             groomTools_->showTab(QStringLiteral("photos"));
             QApplication::processEvents();

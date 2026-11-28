@@ -928,6 +928,18 @@ void RootTubeTool::placeCopy(StrokeHost& host) {
         " (tubes and hierarchies with them); the copies are selected.");
 }
 
+int RootTubeTool::selectShown(StrokeHost& host) {
+    if (mode_ != Mode::Select && mode_ != Mode::Duplicate) start(host, Mode::Select);
+    endDuplicate();
+    reloadRoots(host);  // (the roots shown now: the level in view)
+    move_.reset();
+    picked_.clear();
+    for (const auto& [g, middle] : middles_) picked_.push_back(g);
+    say(picked_.empty() ? std::string("No roots shown to select.")
+                        : std::to_string(picked_.size()) + plural(picked_.size(), " root", " roots") + " selected (the level in view).");
+    return static_cast<int>(picked_.size());
+}
+
 int RootTubeTool::deleteSelected(StrokeHost& host) {
     sync(host);
     if ((mode_ != Mode::Select && mode_ != Mode::Duplicate) || picked_.empty()) {

@@ -1366,9 +1366,14 @@ class EdgeItem(QtWidgets.QGraphicsPathItem):
         points = self.points()
         path = QtGui.QPainterPath(points[0])
         if len(points) == 2 and self.portal_item is None:
-            # Straight from port to port: one running backwards loops under both cards.
-            below = max(self.src_item.scenePos().y() + self.src_item.height, self.dst_item.scenePos().y() + self.dst_item.height)
-            route(path, points[0], points[1], False, below)
+            # Straight from port to port: one running backwards passes between the cards when one is
+            # above the other (issue 131), else loops under both.
+            import groomlab_core
+            src_top, dst_top = self.src_item.scenePos().y(), self.dst_item.scenePos().y()
+            src_bottom, dst_bottom = src_top + self.src_item.height, dst_top + self.dst_item.height
+            below = max(src_bottom, dst_bottom)
+            gap = groomlab_core.wire_gap(src_top, src_bottom, dst_top, dst_bottom)
+            route(path, points[0], points[1], False, below, gap)
         else:
             for a, b in zip(points, points[1:]):
                 curve(path, a, b)
@@ -1577,12 +1582,13 @@ WIRE_STYLE = ["smooth"]
 WIRE_STYLE_VAR = "groomLabGraphWireStyle"
 
 
-def route(path, a, b, through=True, below=None):
+def route(path, a, b, through=True, below=None, gap=None):
     """A link's piece from a to b onto `path` (at a), in the wire style (the core's wire_route,
     every host's): `through` between pins or portal dots (no loop under the cards); `below`, a
-    backwards link's lowest card edge to loop under."""
+    backwards link's lowest card edge to loop under; `gap`, the clear space between its cards one
+    above the other to pass through instead (wire_gap)."""
     import groomlab_core
-    for s in groomlab_core.wire_route(WIRE_STYLE[0], a.x(), a.y(), b.x(), b.y(), below, through):
+    for s in groomlab_core.wire_route(WIRE_STYLE[0], a.x(), a.y(), b.x(), b.y(), below, through, gap):
         if len(s) == 2:
             path.lineTo(s[0], s[1])
         else:

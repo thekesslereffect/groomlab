@@ -840,6 +840,13 @@ public:
     // carrying its hair along them, every host's (graph_inserts.h insertBraidSculpt; a Braid that has
     // them keeps them, no undo step then). `made` gets the nodes. Returns an error, or "".
     std::string sculptBraidSections(const std::string& braid, BraidSculptNodes* made = nullptr);
+    // Make Braid's graph edit (issue 129): the graph's Braid joining by tube, added after the
+    // Interpolate filling tubes when it has none (graph_inserts.h insertTubeBraid, its params the
+    // core's kTubeBraidParams; one undo step then). `made` gets it. Returns an error, or "".
+    std::string insertTubeBraid(TubeBraidNode* made = nullptr);
+    // The graph's tube Braid ("" none) and its sections' Sculpt node ("" none).
+    std::string tubeBraid() const;
+    std::string tubeBraidSculpt() const;
     // The Braid node's styles, in the core spec's order (three, four, five, fishtail, rope, cornrow).
     std::vector<std::string> braidStyles() const;
     // A root guide group of that name, made when missing (one undo step then).

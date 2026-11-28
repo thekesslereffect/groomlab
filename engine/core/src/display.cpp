@@ -2001,7 +2001,7 @@ DisplayInputs DisplayInputs::fromView(const ViewResult& view, bool stroke) {
     in.clumpCenters = view.clumpCenters;
     in.movingGuides = view.movingGuides;
     in.scalp = view.scalp;
-    in.hierarchy = view.hierarchy;
+    in.hierarchy = view.drawn();  // (issue 130: guides the graph shapes, as shaped)
     in.parts = view.parts;
     in.flow = view.flow;
     in.cards = view.cards;
@@ -2656,9 +2656,9 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
     item(DisplayItemId::SelectedTubeWires).lineWidth = 2.0f;
     item(DisplayItemId::TubeSurfaces).color = s.theme.tubeSurfaces;
     const HierarchyPtr& hierarchy = in.hierarchy;
-    // (Shown with every tool, the Tubes switch, with the guides (their eye hides them too), or with
-    // the Tube or Roots tool up; drawn as the look says.)
-    const bool on = hierarchy && ((s.tubes && s.guides) || s.toolTubes) && (s.tubeWires || s.tubeShaded);
+    // (Shown with every tool, the Tubes switch alone: hiding the guides leaves them, issue #139; or
+    // with the Tube or Roots tool up; drawn as the look says.)
+    const bool on = hierarchy && (s.tubes || s.toolTubes) && (s.tubeWires || s.tubeShaded);
     const bool colors = on && s.tubeColors;
     if (colors) item(DisplayItemId::TubeWires).color = {0.62f, 0.62f, 0.62f, s.theme.tubeWires[3]};  // (buildTubeDisplay's gray)
     std::uint64_t key = on ? hashCombine(hashCombine(hash64(in.hierarchyVersion), in.selectionHash),

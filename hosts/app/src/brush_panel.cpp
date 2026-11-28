@@ -384,6 +384,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         refreshers_.push_back([this] {
             const QString current = QString::fromLatin1(tubeChannelName(session_->settings().brush.tubeChannel));
             for (QToolButton* c : tubeChannels_) c->setChecked(c->property("channel").toString() == current);
+            if (tubes_) tubes_->showFillChannel();
         });
     }
     // Over the brush (Maya's Tube card: the levels' row, then what it paints), untitled.
@@ -901,6 +902,7 @@ void BrushPanel::setSession(BrushSession* session) {
 void BrushPanel::setTubes(TubePanel* tubes) {
     tubes_ = tubes;
     tubeSlot_->addWidget(tubes);
+    paints_->rows()->addWidget(tubes->fillRow());  // (Fill under what the Tube brush paints: issue #135)
     setTool(tool_);
 }
 
@@ -1001,8 +1003,10 @@ void BrushPanel::setTool(const std::string& id) {
     // The Tube and Roots brushes (the levels' row, "tubeLevels"): the tubes' blocks on the card
     // (Tube: Profile and Selected tubes; Roots: the root block); Place's and Draw's new-guide tube
     // in More.
-    const bool tubeTool = uses("tubeLevels");
     const bool roots = uses("rootTubes");
+    const bool tubeTool = uses("tubeLevels") && (uses("tubeChannel") || roots);  // (the Tube and Roots brushes)
+    // Comb: the levels' row alone, on a groom with tube levels or root tubes (#132).
+    const bool levelsOnly = uses("tubeLevels") && !tubeTool && tubes_ && tubes_->hasTubes();
     if (tubes_) {
         const bool edits = tubeTool;
         QVBoxLayout* home = edits ? tubeSlot_ : moreRows_;
@@ -1019,14 +1023,15 @@ void BrushPanel::setTool(const std::string& id) {
         // tubes' panel otherwise.
         QWidget* levels = tubes_->levelsBlock();
         auto* tubeColumn = qobject_cast<QVBoxLayout*>(tubes_->layout());
-        if (edits && card_->indexOf(levels) < 0) {
+        const bool onCard = edits || levelsOnly;
+        if (onCard && card_->indexOf(levels) < 0) {
             if (tubeColumn) tubeColumn->removeWidget(levels);
             card_->insertWidget(card_->indexOf(toolHint_) + 1, levels);
-        } else if (!edits && card_->indexOf(levels) >= 0 && tubeColumn) {
+        } else if (!onCard && card_->indexOf(levels) >= 0 && tubeColumn) {
             card_->removeWidget(levels);
             tubeColumn->insertWidget(1, levels);
         }
-        levels->setVisible(edits);
+        levels->setVisible(onCard);
     }
     // The toggles row (Mirror first) and More: what the tool uses.
     symmetry_->setVisible(uses("symmetry"));

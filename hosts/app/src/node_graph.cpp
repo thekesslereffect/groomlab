@@ -511,17 +511,19 @@ QPointF NodeGraphView::outputPos(const Node& node, int port) const {
     return QPointF(node.pos.x() + node.size.width(), node.pos.y() + kHeader + kBodyPadding + kRow * (port + 0.5));
 }
 
-QPainterPath NodeGraphView::routed(const QPointF& from, const QPointF& to, qreal below, bool through) const {
+QPainterPath NodeGraphView::routed(const QPointF& from, const QPointF& to, qreal below, bool through, qreal gap) const {
     // The wire style's route (the core's, every host's): smooth, square or rounded.
     QPainterPath path(from);
-    for (const WireStep& s : wireRoute(wireStyle_, from.x(), from.y(), to.x(), to.y(), below, through)) {
+    for (const WireStep& s : wireRoute(wireStyle_, from.x(), from.y(), to.x(), to.y(), below, through, gap)) {
         if (s.cubic) path.cubicTo(QPointF(s.c1x, s.c1y), QPointF(s.c2x, s.c2y), QPointF(s.x, s.y));
         else path.lineTo(s.x, s.y);
     }
     return path;
 }
 
-QPainterPath NodeGraphView::wirePath(const QPointF& from, const QPointF& to, qreal below) const { return routed(from, to, below, false); }
+QPainterPath NodeGraphView::wirePath(const QPointF& from, const QPointF& to, qreal below, qreal gap) const {
+    return routed(from, to, below, false, gap);
+}
 
 QPointF NodeGraphView::wireStart(const Wire& wire) const {
     const Node& from = nodes_[wire.from];
@@ -567,7 +569,9 @@ QPainterPath NodeGraphView::wirePathFor(const Wire& wire) const {
         return path;
     }
     const qreal below = std::max(from.pos.y() + from.size.height(), to.pos.y() + to.size.height());
-    return wirePath(wireStart(wire), wireEnd(wire), below);
+    // (One card above the other: a backwards wire passes between them, issue 131.)
+    const qreal gap = wireGap(from.pos.y(), from.pos.y() + from.size.height(), to.pos.y(), to.pos.y() + to.size.height());
+    return wirePath(wireStart(wire), wireEnd(wire), below, gap);
 }
 
 int NodeGraphView::pinAt(const QPointF& scene, bool* nub) const {

@@ -2215,7 +2215,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         static const std::set<std::string> kWhole = {
             "insert_scalp",  "insert_simulate", "remove_scalp_nodes", "remove_collider_nodes", "insert_part",
             "insert_cards",  "insert_motion",   "insert_drive_guides", "insert_guide_cache",   "insert_collider",
-            "insert_braid",  "insert_bun",      "insert_braid_sculpt", "insert_feathers",      "update_library_node",
+            "insert_braid",  "insert_bun",      "insert_braid_sculpt", "insert_tube_braid", "insert_feathers",      "update_library_node",
             "add_control",   "link_control",    "unlink_control"};
         if (kWhole.count(op)) s.scope.clear();
         json r;
@@ -2321,6 +2321,10 @@ json Helper::run(const std::string& cmd, const json& args) {
                                             optString(args, "after", ""), scalpSize(s));
             r["bun"] = made.bun;
             r["braid"] = made.braid;
+        } else if (op == "insert_tube_braid") {  // Make Braid's Braid joining by tube (issue 129), every host's
+            const TubeBraidNode made = insertTubeBraid(edit, args.contains("params") ? args["params"].dump() : std::string(), scalpSize(s));
+            r["braid"] = made.braid;
+            r["made"] = made.made;
         } else if (op == "insert_braid_sculpt") {  // Sculpt Sections on a Braid, every host's
             const BraidSculptNodes made = insertBraidSculpt(edit, needString(args, "braid"), scalpSize(s));
             r["sculpt"] = made.sculpt;

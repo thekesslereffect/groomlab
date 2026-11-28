@@ -352,9 +352,18 @@ private:
             out.tube = g.tube;
             out.tube.scaleWidth(scale);
             out.frameUp = g.frameUp;
+            // Where its root lies, as flatten() hands it on: its root loop above all, without which
+            // a Scatter's guideRadius took a big root's footprint through the head (no depth limit
+            // under it: roots on the face, a drawn root with levels; found testing issue 129).
+            out.rootAcross = g.rootAcross;
+            out.rootRing = g.rootRing;
+            out.rootFoot = g.rootFoot;
+            out.rootFootSet = g.rootFootSet;
             out.depth = depth;
             out.baseRoot = hierarchy.baseRootOf(g);
             out.baseId = hierarchy.baseIdOf(g);
+            out.parentId = g.parent;
+            out.braid = g.braid;
             tubes->push_back(std::move(out));
         });
         if (!tubes->empty()) set.setLevelTubes(std::move(tubes));

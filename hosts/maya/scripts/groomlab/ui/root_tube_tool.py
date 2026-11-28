@@ -168,6 +168,10 @@ class RootTubeTool(object):
     def delete_selected(self):
         return self._edit("delete")
 
+    def select_shown(self):
+        """Every root shown (the level in view) selected: Shift+click on the Select root button."""
+        return self._edit("selectShown")
+
     # -- The guides while editing ----------------------------------------------------------------
 
     def show_guides(self, on):
