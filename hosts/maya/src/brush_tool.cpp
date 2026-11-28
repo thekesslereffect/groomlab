@@ -1617,10 +1617,13 @@ void BrushContext::rootEdit(const std::string& words) {
         roots.endDuplicate();
     } else if (verb == "delete") {
         roots.deleteSelected(*host_);
+    } else if (verb == "selectShown") {  // Shift+click on Select root: the level in view's roots
+        tool_.settings.tool = BrushToolSettings::Tool::Roots;
+        roots.selectShown(*host_);
     } else if (verb == "sync") {
         roots.sync(*host_);
     } else {
-        throw std::invalid_argument("-rootEdit takes start, leave, finish, undoCv, duplicate, endDuplicate, delete or sync");
+        throw std::invalid_argument("-rootEdit takes start, leave, finish, undoCv, duplicate, endDuplicate, delete, selectShown or sync");
     }
     publishRoots();
     showTubeWires();  // (the root mode shows the tubes, Edit roots hides them)

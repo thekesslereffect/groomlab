@@ -34,6 +34,16 @@ and more numerous where the vertex map tubeSubdivisionDensity is high (1) than w
     root_tubes.ensure_density_map(groom, name)                # made at 0.5 if missing
     root_tubes.subdivide(groom, [guide], name, multiplier=1)  # {"cells", "removed", "kept"}
     root_tubes.apply_density(groom, [cell], name)             # cut again where its map changed
+
+Tubes made braids (issue 129): a tube of any level marked a braid, it and the tubes under it braided
+by the graph's Braid joining by tube (added after the Interpolate the first time), every other
+tube's hair as it was (the core's tube_braids.h).
+
+    root_tubes.make_braid(groom, [guide])                     # {"changed", "braid", "made"}
+    root_tubes.make_braid(groom, [guide], on=False)           # Unbraid
+    root_tubes.braid_of(groom, [guide])                       # each one's braid tube, 0: none
+    root_tubes.braid_sections(groom)                          # the Braid level: Sculpt Sections on it
+    root_tubes.braid_sections(groom, on=False)                # back to the guides
 """
 
 import json
@@ -299,6 +309,79 @@ def add_tube_level(groom, guides=None, picked=None):
     info = tube_levels(groom, picked=base)
     info["split"] = int(split)
     return info
+
+
+def braid_of(groom, guides):
+    """Each guide's braid tube: the outermost marked tube of its lineage (itself when it is one), 0
+    when it is in no braid. A marked guide whose braid tube is another has its mark covered."""
+    return [int(b) for b in _request(groom, "braidOf", guides=[int(g) for g in guides])]
+
+
+def make_braid(groom, guides, on=True):
+    """Make Braid (Unbraid with `on` False): the tubes of `guides` (any level) marked as braids,
+    each braided with the tubes under it by the graph's Braid joining by tube; with none in the
+    graph, one is added after the Interpolate filling tubes (fillTubes turned on). One undo step.
+    Returns {"changed": how many marks changed, "braid": the Braid node ("" none), "made": whether
+    it is new}."""
+    from groomlab.base import undo_chunk
+    with undo_chunk("Make Braid" if on else "Unbraid"):
+        changed = int(_request(groom, "braid", guides=[int(g) for g in guides], on=bool(on)) or 0)
+        out = {"changed": changed, "braid": "", "made": False}
+        from groomlab import graph as gm
+        model = gm.GraphModel.from_groom(groom)
+        edit = model._edit()
+        if on:
+            with gm._core_errors():
+                made = edit.insert_tube_braid("", model.groom_size)  # (the core's kTubeBraidParams)
+            out["braid"], out["made"] = made["braid"], bool(made["made"])
+            if out["made"]:
+                model._take(edit)
+                model.save(groom)
+        else:
+            out["braid"] = edit.tube_braid_node()
+        return out
+
+
+def tube_braid(groom):
+    """The graph's Braid joining by tube and the Sculpt node its Sculpt Sections made ({"braid",
+    "sculpt"}: None for none), and whether the brushes shape that Sculpt node now ("sculpting")."""
+    from groomlab import graph as gm, sculpts
+    model = gm.GraphModel.from_groom(groom)
+    braid = model._edit().tube_braid_node() or None
+    sculpt = model.braid_sculpt_node(braid) if braid else None
+    return {"braid": braid, "sculpt": sculpt, "sculpting": bool(sculpt) and sculpts.target(groom) == sculpt}
+
+
+def braid_sections(groom, on=True):
+    """The Tube card's Braid level (issue 129): Sculpt Sections on the graph's Braid joining by tube
+    (its Sculpt and FollowGuides nodes made the first time, one undo step), the brushes then shaping
+    its sections: their curves and, with the Tube brush, their tubes' width, flatness and twist, all
+    kept in the Sculpt node as edits on top of the braid. `on` False: back to the guides. Returns
+    tube_braid's answer. ValueError when the graph has no tube Braid (Make braid first)."""
+    from groomlab import graph as gm, sculpts
+    from groomlab.base import no_undo, undo_chunk
+    if not on:
+        if tube_braid(groom)["sculpting"]:
+            sculpts.leave(groom)
+        return tube_braid(groom)
+    state = tube_braid(groom)
+    if not state["braid"]:
+        raise ValueError("no braid among the tubes yet: select tubes and Make braid first")
+    if not state["sculpt"]:
+        with undo_chunk("Braid sections"):
+            model = gm.GraphModel.from_groom(groom)
+            made = model.insert_braid_sculpt(state["braid"])
+            if made["made"]:
+                model.save(groom)
+        state = tube_braid(groom)
+    with no_undo():  # (what brushes shape is a tool setting, as Sculpt Sections in the Graph Editor)
+        sculpts.set_target(groom, state["sculpt"])
+    try:
+        from groomlab.ui import graph_editor
+        graph_editor.sculpt_target_changed(groom, "brushing %s's sections" % state["braid"])
+    except ImportError:
+        pass
+    return tube_braid(groom)
 
 
 def remove_tube_level(groom, base, guides=None):

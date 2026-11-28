@@ -78,6 +78,31 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   Sculpting Sections**: it (or Esc in the brush tool) goes back to brushing the guides, the braid's
   path among them, the strokes kept; Sculpt Sections again brushes the same nodes. The sections are not pressed against each other again after a brush: a section pushed into
   another passes through it.
+  Each section guide carries its section's tube (the ellipse the weave lays it in: width across its band,
+  aspect through it, twist from the guide's frame), so the Tube tool and Show Tubes draw the sections
+  while they are brushed, and the **Tube brush** shapes them too: its width, flatness and twist strokes
+  are kept in the Sculpt node as factors and turns on top of the tube it is fed (a section made 1.5
+  times wider stays so when the braid's width changes), and FollowGuides lays each section's hair
+  across its new section (the same place in it), so the hair spreads, flattens and turns with it. A
+  section tube is an ellipse, not the pressed outline; edited sections are not pressed again.
+- **Braids among root tubes (`join` tube, issue 129):** select tubes in the Tube brush (any level of
+  the tube hierarchy, or a root in Select root) and click **Make braid** (also in the Tube brush's
+  marking menu; Maya for now, Blender and the app to follow). Each marked tube is braided with every
+  tube under it; every other tube's hair stays as its tube shapes it, so plain locks and braids sit
+  side by side. The first Make braid adds a Braid node joining by tube right after the Interpolate
+  filling the tubes (its `fillTubes` turned on), its `braids` input reading the same Guides node:
+  the braid's path is its tube's guide (comb the tube, the braid follows; a braid inside a bigger
+  tube moves with it), its hair the strands Interpolate gives to its tube or a tube under it (the
+  `tubeBraid` channel), its width `tubeWidth` times the tube's root width. Marks nest: the outermost
+  marked tube of a lineage makes the braid, a mark under it waits until it is unbraided. Each braid's
+  `braidId` comes from its tube's ID, so marking, adding or deleting other tubes leaves Sculpt
+  Sections' strokes on their braids; re-cutting a tube (Subdivide) makes new tubes under it, which
+  stay in its braid when it is the one marked. **Unbraid** takes the mark off. The mark is saved with
+  the groom's guides. With a braid, the Tube card's level row ends in **Braid**: the braid's sections as a level under its tubes
+  (Sculpt Sections on the tube Braid, its nodes made the first time); brush their curves, and with the
+  Tube brush their width, flatness and twist; a level button (or Esc in the brush tool) goes back to
+  the guides. The `braids_and_tubes` preset is this graph ready to use (two Clumps after the Braid:
+  `hairClump` for the plain tubes' hair, `braidClump` for the locks inside the braids' sections).
 - **Feed** (`feed`, on for cornrows by default in `add_braid`): strands within `region` of
   anywhere along a path join it, as hair is picked up into cornrows and French braids; each
   strand goes to the nearer braid, so two rows part halfway. A strand is drawn from its root

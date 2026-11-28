@@ -82,6 +82,8 @@ public:
     void applyLevelView(const std::string& group);
     // Level `group`'s number in its tube hierarchy (1: the base), 0 when it is in none.
     int tubeLevelOf(const std::string& group) const;
+    // Whether the groom has tube levels or root tubes (Comb shows the levels' row then: #132).
+    bool hasTubes();
 
     void setSession(BrushSession* session);  // its document is the groom (null: none)
     // The targets' tubes, the library and Fill Tubes read again. Left alone while the artist is
@@ -122,6 +124,14 @@ public:
     void setFlatness(double flatness);      // 0 as drawn .. 0.99 a flat ribbon
     void setTwist(double degrees);
     void smoothTargets();                   // Smooth: the current channel (the brush's) or all
+    // The Tube brush's Fill (issue #135, Maya's Fill row; the brush panel puts fillRow() under
+    // what it paints): the brush's channel set to its value root to tip (tubeFillEdit, every
+    // host's) on the selected tubes, else the picked level's (group's), else every tube; one undo
+    // step. showFillChannel: the value field of the brush's channel shown (its own value each).
+    QWidget* fillRow() const { return fillRow_; }
+    void fill();
+    void showFillChannel();
+    ValueSlider* fillValue(const std::string& channel) const;
     void editAsCustom();
     void newShape();
     void duplicateShape();
@@ -166,7 +176,18 @@ public:
     // showLevel shows a level alone (the others' groups hidden) and picks its group.
     void addLevel();
     void removeLevel();
-    void showLevel(int level);
+    void showLevel(int level);  // (while brushing the braid's sections: the guides again first)
+    // Tubes made braids (issue 129, Maya's root_tube_card.py): Make braid (`on`) or Unbraid on the
+    // selected tubes (any level; else the root tool's selected roots), one undo step; Make braid
+    // adds the graph's tube Braid the first time (GroomDocument::insertTubeBraid). The level row's
+    // Braid (shown with a tube Braid): Sculpt Sections on it (braidSectionsRequested), again the
+    // guides (braidSectionsLeft).
+    void makeBraid(bool on);
+    void braidLevel();
+    bool braidSculpting() const { return braidSculpting_; }
+    QAbstractButton* makeBraidButton() const;
+    QAbstractButton* unbraidButton() const;
+    QAbstractButton* braidLevelButton() const;
     const std::string& levelBase() const { return levelBase_; }
     const std::vector<std::string>& levels() const { return levels_; }
     int shownLevel() const { return shownLevel_; }
@@ -224,6 +245,10 @@ signals:
     // calls paintDensity again), the Tools tab and the Tube brush again, then Edit roots.
     void paintDensityRequested(const std::string& map);
     void paintDensityFinished();
+    // The level row's Braid: the host brushes Braid `braid`'s sections (MainWindow::sculptBraidSections),
+    // or (left) the guides again (MainWindow::leaveSculptNode).
+    void braidSectionsRequested(const std::string& braid);
+    void braidSectionsLeft();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -296,6 +321,10 @@ private:
     QToolButton* levelMenu_ = nullptr;
     ValueSlider *rootDensity_ = nullptr, *rootLength_ = nullptr, *rootSegments_ = nullptr, *rootTaper_ = nullptr;
     QPushButton *addLevel_ = nullptr, *removeLevel_ = nullptr;
+    QPushButton *makeBraid_ = nullptr, *unbraid_ = nullptr;
+    QToolButton* braidLevel_ = nullptr;
+    std::string tubeBraid_;        // the graph's tube Braid ("" none), as fillLevels read it
+    bool braidSculpting_ = false;  // the brushes shape its sections
     QLabel* levelLabel_ = nullptr;  // "Level" (its tip: the base group)
     QHBoxLayout* levelRow_ = nullptr;
     QWidget* levelLine_ = nullptr;  // the levels on the left, + and - on the right (LeadTrailLayout)
@@ -341,6 +370,9 @@ private:
     double lengthFactor_ = 1.0;  // Width shown per scene unit (refreshUnits)
     ValueSlider* flatness_ = nullptr;
     ValueSlider* twist_ = nullptr;
+    QWidget* fillRow_ = nullptr;
+    std::array<ValueSlider*, 3> fillValues_{};  // width (the lengths' unit), flatness, twist (degrees)
+    QPushButton* fill_ = nullptr;
     QToolButton* smooth_ = nullptr;
     std::string smoothChannels_ = "current";  // Smooth's: the brush's channel ("current") or "all"
     QTimer* disarm_ = nullptr;

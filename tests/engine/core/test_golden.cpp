@@ -993,6 +993,8 @@ TEST_P(Golden, MappedParamsAreReadPerStrand) {
         "InstanceFitStrand.scale", "InstanceDeform.variant", "InstanceDeform.scale",
         // Strands within the radius take the guides as they are.
         "InterpolateRadius.guideWeight",
+        // Joining by tube only (no tube marked as a braid here: test_tube_braids.cpp).
+        "Bun.tubeWidth", "Braid.tubeWidth",
         // No strokes: the strands pass through, affect blends them with themselves (test_sculpt_strands.cpp brushes them).
         "SculptStrands.affect",
         // Its strength fed by a port: the clumps it leaves alone stay alone.
@@ -1001,10 +1003,12 @@ TEST_P(Golden, MappedParamsAreReadPerStrand) {
         "NoiseFrizz.amplitude", "NoiseFrizz.fraction", "NoiseFrizz.affect",
         // Clumps around guides or set centers: no center picked by weight.
         "ToGuidesClump.centerWeight", "ClumpGuides.centerWeight", "ClumpScatterCenters.centerWeight",
-        // Another mode's (by map; mode map).
-        "Group.value", "Split.select",
+        // Another mode's (by map; mode map). A Braid's tubeWidth is join tube's (these join by region).
+        "Group.value", "Split.select", "Braid.tubeWidth", "BraidFed.tubeWidth", "BraidFreeTies.tubeWidth",
         // A coil's radius is the strands' widths.
         "CurlCoil.radius",
+        // No braided strands to resample.
+        "Resample.braidSegments",
         // Points added (a zigzag's corners, a coil's turns, subdivisions): no mix of what came in.
         "CurlZigzag.affect", "CurlCoil.affect", "Subdivide.affect",
         // A repel radius with no negative strength (ClumpRepel's has one).

@@ -1098,8 +1098,8 @@ class GuideDisplay(widgets.PopupPanel):
     SHOWN = (("displayGuides", "Guides", "The guides (with their part lines and flow; the eye beside the arrow)"),
              ("displayParts", "Parts", "The part lines the Part tool draws"),
              ("displayFlow", "Flow", "The flow arrows and sinks"),
-             ("displayTubes", "Tubes", "Each guide's tube with the guides, drawn with every tool as set below (the "
-                                       "Tube and Roots tools show them either way)"),
+             ("displayTubes", "Tubes", "Each guide's tube, drawn with every tool as set below, whether the guides show or "
+                                       "not (the Tube and Roots tools show them either way)"),
              ("displayInstances", "Instances", "Instanced meshes on the strands"))
     LOOK = (("guideSmoothing", "Smoothed", "Guides draw as a smooth curve through their points"),
             ("displayOverlaysOnTop", "On top", "Guides, parts and flow draw over the strands"))
@@ -1595,10 +1595,42 @@ class ToolPalette(QtWidgets.QWidget):
             b = widgets.chip(label, tip, name == "width", "tubeChannel_" + name)
             self.tube_channel.addButton(b)
             self.tube_channel_buttons[name] = b
-        self.tube_channel.buttonClicked.connect(lambda _b: self.push(tubeChannel=self.tube_channel_name()))
+        self.tube_channel.buttonClicked.connect(lambda _b: self.tube_channel_picked())
         self.tube_channel_row = widgets.seg_row(self.tube_channel_buttons.values())  # one of them: a track
         self.tube_channel_row.setToolTip(_setting("tubeChannel", "hint"))
         self.brush_block.body.insertWidget(0, self.tube_channel_row)
+        # Fill (issue #135, as Paint's): the channel's value, set on the selected tubes, else the
+        # picked level's (every tube with none picked). One value per channel, the picked one shown.
+        from groomlab import units
+        self.tube_fill_values = {
+            "width": widgets.SoftSlider(0.1 * units.factor("length"), 0.0, 1.0 * units.factor("length"), minimum=0.0,
+                                        key="palette.tubeFillWidth@" + units.unit("length")[0], label="Value",
+                                        suffix=units.label("length")),
+            "flatness": widgets.SoftSlider(0.0, 0.0, 1.0, minimum=0.0, maximum=0.99, key="palette.tubeFillFlatness",
+                                           label="Value"),
+            "twist": widgets.SoftSlider(0.0, -180.0, 180.0, key="palette.tubeFillTwist", label="Value", suffix=u"°"),
+        }
+        tips = {"width": "The width Fill gives the tubes: each scaled so its widest section is this half-width, its "
+                         "taper and what the brush painted kept",
+                "flatness": "The flatness Fill gives the tubes root to tip: 0 as the shape is drawn, toward 1 a ribbon",
+                "twist": "The twist Fill gives the tubes root to tip, in degrees"}
+        fill_row = QtWidgets.QHBoxLayout()
+        fill_row.setContentsMargins(0, 0, 0, 0)
+        fill_row.setSpacing(theme.px(4))
+        for name, slider in self.tube_fill_values.items():
+            slider.setObjectName("tubeFillValue_" + name)
+            slider.setToolTip(tips[name])
+            fill_row.addWidget(slider, 1)
+        self.tube_fill = QtWidgets.QPushButton("Fill")
+        self.tube_fill.setObjectName("tubeFill")
+        self.tube_fill.setToolTip("Set the channel picked above to the value on the selected tubes, else on the "
+                                  "picked level's tubes (every tube with no level picked). One undo step")
+        self.tube_fill.clicked.connect(self.fill_tube_channel)
+        fill_row.addWidget(self.tube_fill)
+        self.tube_fill_row = QtWidgets.QWidget()
+        self.tube_fill_row.setLayout(fill_row)
+        self.brush_block.body.insertWidget(1, self.tube_fill_row)
+        self.show_tube_fill_value()
         # The tubes' look (the header's guides menu, add_tubes); whether they show with every tool
         # is its Tubes pill (the groom's displayTubes: tube_show), which level's a level row's tube.
         self.tube_channel_box = widgets.Block("Tubes", name="paintsBlock")
@@ -2015,14 +2047,37 @@ class ToolPalette(QtWidgets.QWidget):
             if self.tool:
                 self.show_editing()
 
+    def editing_sculpt_guides(self):
+        """Whether brushes edit a Sculpt node's guides (SculptGuides: a Braid's sections among them),
+        where the Tube brush also works (its width, flatness and twist kept as the node's tube edits)."""
+        box = getattr(self, "correctives", None)
+        item = box.tree.currentItem() if box is not None else None
+        name = item.data(0, QtCore.Qt.UserRole) if item else ""
+        if not name or not name.startswith(tool_tabs.NODE):
+            return False
+        groom = self.groom() if callable(getattr(self, "groom", None)) else None
+        if not groom:
+            return False
+        from groomlab import sculpts
+        try:
+            return sculpts.node_type(groom, name[len(tool_tabs.NODE):]) == "SculptGuides"
+        except (RuntimeError, ValueError):
+            return False
+
     def show_layer_tools(self):
         """On a corrective or Sculpt node, the tools that can't edit one are greyed (not hidden: the
-        tiles never move); the active one, if it can't, stops."""
+        tiles never move); the active one, if it can't, stops. On a Sculpt node's guides the Tube
+        brush works too (issue 129: a Braid's sections' width, flatness and twist)."""
         layer = bool(self.editing_layer())
+        tubes = layer and self.editing_sculpt_guides()
+
+        def can(tool):
+            return not layer or tool in CORRECTIVE or tool == "paint" or (tubes and tool == "shape")
+
         for tool, tiles in self.tiles.items():
             for b in tiles:
-                b.setEnabled(not layer or tool in CORRECTIVE or tool == "paint")
-        if layer and self.tool and self.tool not in CORRECTIVE and self.tool != "paint":
+                b.setEnabled(can(tool))
+        if layer and self.tool and not can(self.tool):
             self.stop_tool()
 
     @staticmethod
@@ -2994,8 +3049,10 @@ class ToolPalette(QtWidgets.QWidget):
         self.stretch.row.setVisible("stretch" in uses)
         self.straighten.row.setVisible("straighten" in uses)
         self.tube_channel_row.setVisible("tubeChannel" in uses)
-        # The levels' row: Tube's and Roots'; the root block: Roots'.
-        self.root_card.show("tubeLevels" in uses, roots="rootTubes" in uses)
+        self.tube_fill_row.setVisible("tubeChannel" in uses)
+        # The levels' row: Tube's and Roots', and Comb's on a groom with tubes (#132); the root
+        # block: Roots'.
+        self.root_card.show("tubeLevels" in uses, roots="rootTubes" in uses, tubes_only=tool == "comb")
         self.select_box.setVisible("selection" in uses)
         self.erase_box.setVisible("erases" in uses)
         self.keys_block.setVisible("lengthKeys" in uses)
@@ -3256,6 +3313,48 @@ class ToolPalette(QtWidgets.QWidget):
     def tube_channel_name(self):
         """The Shape brush's -tubeChannel: width, flatness or twist."""
         return next((name for name, b in self.tube_channel_buttons.items() if b.isChecked()), "width")
+
+    def tube_channel_picked(self):
+        """A channel picked: the brush paints it, and Fill's value shows its own."""
+        self.push(tubeChannel=self.tube_channel_name())
+        self.show_tube_fill_value()
+
+    def show_tube_fill_value(self):
+        channel = self.tube_channel_name()
+        for name, slider in self.tube_fill_values.items():
+            slider.setVisible(name == channel)
+
+    def fill_tube_channel(self):
+        """Fill (issue #135): the channel picked set to its value on the selected tubes, else the
+        picked level's (group's), else every guide's. One undo step."""
+        from groomlab import units
+        groom = self.groom()
+        if not groom:
+            return
+        channel = self.tube_channel_name()
+        value = self.tube_fill_values[channel].value()
+        if channel == "width":
+            value /= units.factor("length")
+        elif channel == "twist":
+            value *= 3.14159265358979 / 180.0
+        try:
+            selected = groomlab.selected_guides(groom)
+            group = self.current_group()
+            from groomlab.base import undo_chunk
+            with undo_chunk("tube fill"):
+                if selected:
+                    count = groomlab.fill_tube_channel(groom, channel, value, guides=selected)
+                elif group:
+                    count = groomlab.fill_tube_channel(groom, channel, value, group=group)
+                else:
+                    count = 0
+                    for g in groomlab.list_guide_groups(groom):
+                        if groomlab.guide_ids(groom, g["name"]):
+                            count += groomlab.fill_tube_channel(groom, channel, value, group=g["name"]) or 0
+            self.status.setText("Filled %s on %d tube%s." % (channel, count or 0, "" if count == 1 else "s"))
+        except (RuntimeError, ValueError) as e:
+            self.status.setText(str(e).strip())
+        self.tube_panel.refresh(groom, force=True)
 
     def targets_name(self):
         """The Brushes checkboxes as the tool's -targets: "guides,parts,flow" (any subset) or "none"."""

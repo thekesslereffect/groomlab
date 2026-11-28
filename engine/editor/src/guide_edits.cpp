@@ -300,7 +300,8 @@ std::size_t editTubeShape(GuideHierarchy& h, const TubeShapeOp& op) {
         if (points.size() < 3) refuse("bad_request", "a tube shape needs at least 3 points");
         const bool smooth = op.smooth ? *op.smooth : old ? old->smooth : true;
         // (An owned shape: the root tools' scripts only; the core refuses one as a library shape.)
-        core([&] { return op.owned ? h.setOwnedTubeShape(op.name, points, smooth) : h.setTubeShape(op.name, points, smooth); });
+        const bool origin = old && old->origin;  // (an owned shape edited keeps its origin)
+        core([&] { return op.owned ? h.setOwnedTubeShape(op.name, points, smooth, origin) : h.setTubeShape(op.name, points, smooth); });
         if (op.op == "add" && !op.give.empty()) {
             if (op.profile != "shape" && op.profile != "midShape" && op.profile != "tipShape") {
                 refuse("bad_request", "a tube's profile is shape, midShape or tipShape");

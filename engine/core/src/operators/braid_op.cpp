@@ -59,6 +59,14 @@
 // `along` input: beads, cuffs and hair ties (groomlab:bead, groomlab:cuff,
 // groomlab:hairTie; sizeMode fitStrand, fitWidth).
 //
+// `join` tube (issue 129, tube_braids.h): the braids are the root tubes marked as braids among the
+// braids input's tubes (its guides' and the other levels': the guides Interpolate's fillTubes
+// fills, from the same Guides node), and each braids the strands fillTubes gave to its tube or to
+// one under it (the tubeBraid channel), not those within `region`: some tubes plain hair, some
+// braids, side by side. A braid is as wide as its tube's root (times `tubeWidth`), its path the
+// tube's guide; strands of no braid pass through. Each braid's braidId is its tube's number (from
+// the tube's ID), so marking or removing other tubes moves no Sculpt Sections' strokes.
+//
 // Version 2 (a node saved before keeps version 1 until it is upgraded: the sections plain
 // elliptical tubes that pass through each other where they cross): the sections are pressed
 // against each other. Each has an outline of its own in the braid's cross-section: grown
@@ -101,6 +109,7 @@
 #include "groomlab/curve.h"
 #include "groomlab/frames.h"
 #include "groomlab/sculpt.h"
+#include "groomlab/tube_braids.h"
 #include "groomlab/graph.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -1624,6 +1633,10 @@ struct Braider {
     Ramp taper;
     std::vector<float> taperTangents;  // the taper's (Ramp::tangents), for widthAt at every point
     float region2 = 0.0f, gather = 0.0f, tail = 0.0f;
+    // join tube: each strand's braid number (the tubeBraid channel) and the path of each number;
+    // null: by region.
+    const std::vector<float>* tubeBraid = nullptr;
+    std::unordered_map<std::int64_t, int> pathOfBraid;
     // How gradually the weave starts after the gather and ends before the tail (0-1: from and into
     // one round bundle over up to kFadeSteps weave steps: bundledAt, fadePeak, fadeSteps).
     float gatherSmoothness = 0.0f, tailSmoothness = 0.0f;
@@ -2192,9 +2205,14 @@ struct Braider {
         return sectionAcross(pm::acos(-t) / kPi, steps);
     }
 
-    // Without feed: the path a strand rooted at `root` joins, the nearest root within the region
-    // (-1: none).
-    int pathOf(const Vec3f& root) const {
+    // Without feed: the path strand s rooted at `root` joins: joining by tube, its tube's braid's;
+    // else the nearest root within the region (-1: none).
+    int pathOf(const Vec3f& root, std::size_t s) const {
+        if (tubeBraid) {
+            if (s >= tubeBraid->size() || !((*tubeBraid)[s] >= 0.0f)) return -1;
+            const auto it = pathOfBraid.find(static_cast<std::int64_t>((*tubeBraid)[s]));
+            return it == pathOfBraid.end() ? -1 : it->second;
+        }
         int best = -1;
         float bestD2 = region2;
         for (std::size_t b = 0; b < paths.size(); ++b) {
@@ -2211,7 +2229,7 @@ struct Braider {
     // root joins (pathOf; -1: none), for braidOne.
     std::size_t pointsFor(const StrandSet& in, std::size_t s, int* joins) const {
         const std::size_t n = in.strandPointCount(s);
-        const int path = n < 2 ? -1 : pathOf(in.strandPoints(s)[0]);
+        const int path = n < 2 ? -1 : pathOf(in.strandPoints(s)[0], s);
         *joins = path;
         if (path < 0) return n;
         return sampling.count(n, paths[static_cast<std::size_t>(path)].repeats, 1.0f);
@@ -2450,7 +2468,13 @@ public:
                                       "way)"}
                 .when("style", {"three", "four", "five", "fishtail", "rope"}),
             ParamSpec{"width", 0.25, "Braid width at its start, scene units (mappable, per braid: at its path's root)", "length"}
-                .soft(0, 1),
+                .soft(0, 1)
+                .when("join", {"region"}),
+            ParamSpec{"tubeWidth", 1.0, "Join tube: each braid's width at its start, a share of its tube's root width "
+                                        "(mappable, per braid)", "fraction"}
+                .atLeast(0.01)
+                .soft(0.25, 2)
+                .when("join", {"tube"}),
             {"widthProfile", Ramp::linear(1.0f, 0.55f), "Width along the braid, start to end"},
             ParamSpec{"tightness", 1.0, "How close the crossings are: 1 a natural braid, 2 twice as many in the same "
                                         "length. A crossing is a share of the width long, so a tapering braid's "
@@ -2482,12 +2506,20 @@ public:
                                    "from the head; mappable, per braid)", "angle"}
                 .soft(-180, 180)
                 .adv(),
+            ParamSpec{"join", std::string("region"),
+                      "Which hair a braid takes: region (the strands rooted within region of its path's root, or with "
+                      "feed of its path) or tube (the braids input's root tubes marked as braids, each braiding the "
+                      "hair Interpolate's fillTubes gives to its tube and the tubes under it; the other tubes' hair "
+                      "passes through: braids among plain hair)",
+                      "", {"region", "tube"}},
             ParamSpec{"region", 0.25, "Strands rooted within this distance of a braid's root join it (large: a "
                                       "ponytail's), or with feed of its path (the nearer braid's, when two reach); "
                                       "without a braids input, its own braids are about this far apart", "length"}
-                .soft(0, 2),
+                .soft(0, 2)
+                .when("join", {"region"}),
             ParamSpec{"feed", false, "Pick up strands all along the path, where they grow (cornrows, French braids)"}
-                .in("Feed"),
+                .in("Feed")
+                .when("join", {"region"}),
             ParamSpec{"feedUntil", 1.0, "With feed: pick up strands along this share of the path only; past it the "
                                         "braid hangs free (0: only the root region, a ponytail braid: its hair gathered in as "
                                         "without feed)", "fraction"}
@@ -2605,12 +2637,35 @@ private:
         auto handOn = [&] {  // nothing to braid along: the graph passes the input's changes on
             if (incremental) return false;
             *result = in;
+            // Its channels all the same (none braided: braidWoven 0...), so what reads them after it
+            // (the Braids and tubes preset's Clumps: $braidWoven) works before any tube is a braid.
+            if (in && !in->pointChannel("braidWoven")) {
+                auto out = std::make_shared<StrandSet>(*in);
+                out->addStrandChannel("braidId", -1.0f);
+                out->addStrandChannel("braidFlat", 0.0f);
+                out->addPointChannel("braidTail", 0.0f);
+                out->addStrandChannel("braidSection", -1.0f);
+                out->addPointChannel("braidWoven", 0.0f);
+                out->addPointChannel("braidPress", 0.0f);
+                *result = StrandsPtr(out);
+            }
             if (paths) *paths = GuidesPtr(std::make_shared<GuideSet>());
             if (ties) *ties = StrandsPtr(std::make_shared<StrandSet>());
             if (sections) *sections = GuidesPtr(std::make_shared<GuideSet>());
             return true;
         };
         const ScalpMesh* scalp = valueAs<MeshPtr>(ctx.external("scalp")).get();
+        // join tube (tube_braids.h): the braids input's tubes marked as braids, each braiding the
+        // strands of its tubes (tubeBraid); nothing marked, or no strand in one: nothing to braid.
+        const bool byTube = params().getString("join") == "tube";
+        TubeBraids marked;
+        const std::vector<float>* tubeBraid = nullptr;
+        if (byTube) {
+            if (!braids) return handOn();
+            marked = tubeBraids(*braids);
+            tubeBraid = in->strandChannel("tubeBraid");
+            if (marked.empty() || !tubeBraid || tubeBraid->size() != in->strandCount()) return handOn();
+        }
         const bool own = !braids;
         ProfilePhases phase("braid.pickPaths");
         if (own) {  // no braids input: paths of its own, strands about `region` apart
@@ -2636,7 +2691,7 @@ private:
         // (Paths of its own, about region apart, cover the scalp: every strand joins the nearest.)
         // Feed picking up nothing along the path (feedUntil 0: only the root region) is a ponytail
         // braid: the hair gathers into it at the root, as without feed.
-        const bool feed = params().getBool("feed") && params().getDouble("feedUntil") > 0.0;
+        const bool feed = !byTube && params().getBool("feed") && params().getDouble("feedUntil") > 0.0;
         br.region2 = own && !feed ? std::numeric_limits<float>::infinity() : region * region;
         br.end = endFrom(params().getString("end"));
         br.ties = static_cast<int>(params().getInt("ties"));
@@ -2670,15 +2725,17 @@ private:
         // each path braided with its own settings (Braider::perPath).
         static constexpr const char* kPerPath[] = {"width", "tightness", "flatness", "separate", "inflate", "roll",
                                                    "gather", "gatherSmoothness", "tail", "tailSmoothness", "release",
-                                                   "tieLength", "tieSpacing", "cinch"};
-        bool perPath = false;
+                                                   "tieLength", "tieSpacing", "cinch", "tubeWidth"};
+        bool perPath = byTube;  // (joining by tube, each braid is as wide as its tube)
         for (const char* name : kPerPath) perPath = perPath || paramMapped(params(), name);
         const Braider base = br;  // (before its numbers: what each path's settings start from)
         configure(br, [&](const char* name) { return static_cast<float>(params().getDouble(name)); });
         std::map<std::string, std::unique_ptr<ScalarField>> pathFields;
         if (perPath) {
             const GuidesPtr given = valueAs<GuidesPtr>(inputs.at(1));  // (guide maps read on the braids input)
-            for (const char* name : kPerPath) pathFields[name] = std::make_unique<ScalarField>(params(), name, scalp, given.get());
+            for (const char* name : kPerPath) {
+                if (paramMapped(params(), name)) pathFields[name] = std::make_unique<ScalarField>(params(), name, scalp, given.get());
+            }
         }
         std::vector<std::shared_ptr<Braider>> ownSettings;  // per path, with perPath (br.perPath once laid)
         const bool showPaths = params().getString("display") == "paths";
@@ -2755,7 +2812,15 @@ private:
         };
         // Braid paths, evenly resampled, with frames facing out.
         phase.next("braid.paths");
-        for (const Guide& g : braids->guides()) {
+        std::vector<const Guide*> pathGuides;  // joining by tube: the marked tubes'; else the braids input's
+        std::vector<float> tubeNumbers;        // joining by tube: each path's braid number
+        if (byTube) {
+            pathGuides = marked.braids;
+        } else {
+            for (const Guide& g : braids->guides()) pathGuides.push_back(&g);
+        }
+        for (std::size_t pg = 0; pg < pathGuides.size(); ++pg) {
+            const Guide& g = *pathGuides[pg];
             if (g.points.size() < 2) continue;
             BraidPath p;
             const std::size_t samples = std::max<std::size_t>(64, g.points.size() * 4);
@@ -2769,9 +2834,17 @@ private:
             std::shared_ptr<Braider> settings;
             if (perPath) {
                 settings = std::make_shared<Braider>(base);
-                configure(*settings, [&](const char* name) {
-                    const float v = pathFields.at(name)->atRoot(g.root);  // (within the param's limits, as its number)
+                // (a param mapped: its value at the path's root, within its limits; else its number)
+                auto value = [&](const char* name) {
+                    const auto field = pathFields.find(name);
+                    const float v = field == pathFields.end() ? std::numeric_limits<float>::quiet_NaN() : field->second->atRoot(g.root);
                     return std::isfinite(v) ? static_cast<float>(params().clamped(name, v)) : static_cast<float>(params().getDouble(name));
+                };
+                // Joining by tube: the braid as wide as its tube's root, times tubeWidth.
+                const float tubeRoot = byTube && g.hasTube ? g.tube.widthAt(0.0f) : 0.0f;
+                configure(*settings, [&](const char* name) {
+                    if (byTube && std::strcmp(name, "width") == 0 && tubeRoot > 0.0f) return value("tubeWidth") * tubeRoot;
+                    return value(name);
                 });
             }
             const Braider& pb = settings ? *settings : br;
@@ -2811,10 +2884,16 @@ private:
             p.repeats = p.steps.back();
             pb.placeTies(p);
             pb.layBundle(p);
+            if (byTube) {
+                const float number = marked.numbers[pg];
+                br.pathOfBraid[static_cast<std::int64_t>(number)] = static_cast<int>(br.paths.size());
+                tubeNumbers.push_back(number);
+            }
             br.paths.push_back(std::move(p));
             if (settings) ownSettings.push_back(std::move(settings));
         }
         if (br.paths.empty()) return handOn();
+        if (byTube) br.tubeBraid = tubeBraid;
         if (paths) {
             auto made = std::make_shared<GuideSet>();
             for (const BraidPath& p : br.paths) made->add(p.id, p.points).root = p.guideRoot;
@@ -2866,6 +2945,9 @@ private:
             std::vector<std::uint64_t> ids(br.paths.size());
             for (std::size_t b = 0; b < br.paths.size(); ++b) ids[b] = br.paths[b].id;
             numbers = stableGroupNumbers(ids);
+            channels.numbers = &numbers;
+        } else if (byTube) {  // (each braid its tube's number: tube_braids.h)
+            numbers = std::move(tubeNumbers);
             channels.numbers = &numbers;
         }
         if (scalp && scalp->triangleCount() > 0) {
@@ -3082,7 +3164,7 @@ private:
         const std::size_t n = out.strandPointCount(s);
         if (n < 2) return;
         const Vec3f* was = in.strandPointCount(s) >= 2 ? in.strandPoints(s) : nullptr;
-        const int best = was && pts[0].x == was->x && pts[0].y == was->y && pts[0].z == was->z ? joined : br.pathOf(pts[0]);
+        const int best = was && pts[0].x == was->x && pts[0].y == was->y && pts[0].z == was->z ? joined : br.pathOf(pts[0], s);
         if (best < 0) return;
         StrandDraws draws = br.drawsFor(out.ids()[s]);
         std::int64_t key = 0;
@@ -3357,8 +3439,66 @@ private:
                 for (std::size_t k = 0; k < 10; ++k) layers[k][j] = values[k];
             }
             for (std::size_t k = 0; k < 10; ++k) g.pointAttributes[kPathFrameLayers[k]] = std::move(layers[k]);
+            sectionTube(br.of(s / perPath), path, static_cast<int>((*section)[s]), from, g);
         }
         return GuidesPtr(out);
+    }
+
+    // A section guide's tube (issue 129): its section's ellipse along it as the weave lays it (the
+    // half axes Show Tubes' rings take, square to the section's own course), so the Tube tool and
+    // Show Tubes draw the section and a Sculpt node keeps width, flatness and twist edits of it.
+    // Width: the half axis across its band; aspect: through it over across; twist: how far the band
+    // is turned from the guide's rotation-minimizing frame (from frameUp, its root's across), taken
+    // the nearest way round (an ellipse is the same turned half a turn). Its sections do not roll
+    // on the scalp. At most kSectionTubeSamples values along it.
+    static constexpr std::size_t kSectionTubeSamples = 48;
+    static void sectionTube(const Braider& own, const BraidPath& path, int lobe, float from, Guide& g) {
+        const std::size_t m = g.points.size();
+        if (m < 2 || lobe < 0) return;
+        std::vector<Vec3f> across(m), thick(m);
+        for (std::size_t j = 0; j < m; ++j) {
+            const float at = from + (path.length - from) * static_cast<float>(j) / static_cast<float>(m - 1);
+            const PathStation st = own.stationAt(path, at);
+            const SectionStation sec = own.sectionAt(lobe, st);
+            const float held = (1.0f - st.letGo) * st.wid;
+            across[j] = st.frame->toWorld(sec.across * (own.weave.halfWidth * held));
+            thick[j] = st.frame->toWorld(sec.thick * (own.weave.halfThick * held));
+        }
+        const Vec3f t0 = (g.points[1] - g.points[0]).normalized();
+        Vec3f up = across[0] - t0 * across[0].dot(t0);
+        if (up.length() < 1e-8f) up = anyPerpendicular(t0);
+        up = up.normalized();
+        const std::vector<Frame> frames = rotationMinimizingFrames(g.points.data(), m, up);
+        const std::size_t count = std::min(m, kSectionTubeSamples);
+        TubeProfile tube;
+        tube.width.resize(count);
+        tube.aspect.resize(count);
+        tube.twist.resize(count);
+        tube.rollOnScalp = false;
+        float lastW = 0.0f, lastAspect = 1.0f, lastTwist = 0.0f;
+        for (std::size_t i = 0; i < count; ++i) {
+            const std::size_t j = count > 1 ? (i * (m - 1) + (count - 1) / 2) / (count - 1) : 0;
+            const Frame& f = frames[j];
+            const Vec3f a = across[j] - f.tangent * across[j].dot(f.tangent);
+            const Vec3f b = thick[j] - f.tangent * thick[j].dot(f.tangent);
+            const float w = a.length();
+            if (w > 1e-8f) {
+                lastW = w;
+                lastAspect = std::clamp(b.length() / w, kMinTubeAspect, kMaxTubeAspect);
+                float turn = pm::atan2(a.dot(f.binormal), a.dot(f.normal));
+                if (i > 0) {  // (the nearest way round from the last: half turns are the same ellipse)
+                    while (turn - lastTwist > 0.5f * kPi) turn -= kPi;
+                    while (turn - lastTwist < -0.5f * kPi) turn += kPi;
+                }
+                lastTwist = turn;
+            }
+            tube.width[i] = lastW;
+            tube.aspect[i] = lastAspect;
+            tube.twist[i] = lastTwist;
+        }
+        g.hasTube = true;
+        g.tube = std::move(tube);
+        g.frameUp = up;
     }
 
     // display paths: each braid's path and the center curve of each of its sections, as strands

@@ -66,6 +66,9 @@ const std::map<std::string, std::string>& allowlist() {
         // Read in viewport evaluations only (these states evaluate as renders do): test_cards.cpp's
         // Subdivide tests and the GPU preview's (look_chain.cpp).
         {"Subdivide.viewportLevels", "viewport evaluations (EvalContext::viewport)"},
+        // Joining by tube: each braid's width when tubes are marked as braids, which the reference
+        // groom has none of (test_tube_braids.cpp braids marked tubes).
+        {"Braid.tubeWidth", "tubes marked as braids (test_tube_braids.cpp)"},
     };
     return list;
 }

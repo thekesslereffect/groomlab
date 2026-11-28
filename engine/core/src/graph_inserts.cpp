@@ -864,6 +864,53 @@ std::string insertBraid(GraphEdit& edit, const std::string& group, const std::st
     return braid;
 }
 
+std::string tubeBraidNode(const GraphEdit& edit) {
+    const json g = graphOf(edit);
+    for (const std::string& b : ofType(g, "Braid")) {
+        const json join = paramOf(g, b, "join");
+        if (join.is_string() && join.get<std::string>() == "tube" && !sourceOf(g, b, "braids").empty()) return b;
+    }
+    return {};
+}
+
+TubeBraidNode insertTubeBraid(GraphEdit& edit, const std::string& paramsJson, std::optional<double> groomSize) {
+    TubeBraidNode out;
+    out.braid = tubeBraidNode(edit);
+    if (!out.braid.empty()) return out;
+    json params = json::parse(paramsJson.empty() ? std::string(kTubeBraidParams) : paramsJson, nullptr, false);
+    if (!params.is_object()) throw GraphError("a braid's params are a JSON object");
+    params["join"] = "tube";
+    json g = graphOf(edit);
+    // The Interpolate filling tubes, else the one Add > Braid braids after (fillTubes turned on).
+    std::string anchor;
+    for (const std::string& n : ofType(g, "Interpolate")) {
+        const json fills = paramOf(g, n, "fillTubes");
+        if (anchor.empty() && fills.is_boolean() && fills.get<bool>()) anchor = n;
+    }
+    if (anchor.empty()) {
+        if (typeOf(g, "interpolate") == "Interpolate") anchor = "interpolate";
+        for (const std::string& n : ofType(g, "Interpolate")) {
+            if (anchor.empty() && !linksFrom(g, n).empty()) anchor = n;
+        }
+        if (anchor.empty()) throw GraphError("the groom's graph has no Interpolate node to braid after");
+        for (json& n : g["nodes"]) {
+            if (!n.is_object() || n.value("name", std::string()) != anchor) continue;
+            if (!n.contains("params") || !n["params"].is_object()) n["params"] = json::object();
+            n["params"]["fillTubes"] = true;
+        }
+        edit = GraphEdit(g.dump());
+    }
+    const std::string tubes = sourceOf(graphOf(edit), anchor, "guides");
+    if (tubes.empty()) throw GraphError("Interpolate '" + anchor + "' reads no guides: no tubes to braid");
+    out.braid = addNodeAt(edit, "Braid", "braid", params, groomSize, placeBy(edit, anchor, kInsertColumn / 2.0, kInsertRow));
+    const std::vector<Link> consumers = linksFrom(graphOf(edit), anchor);
+    if (!consumers.empty()) insertBetween(edit, anchor, consumers.front().to, out.braid);
+    else edit.connect(anchor, out.braid, "strands");
+    edit.connect(tubes, out.braid, "braids");
+    out.made = true;
+    return out;
+}
+
 BunNodes insertBun(GraphEdit& edit, const std::string& group, const std::string& style, const std::string& bunParamsJson,
                    const std::string& after, std::optional<double> groomSize) {
     json bunParams = bunParamsJson.empty() ? json::object() : json::parse(bunParamsJson, nullptr, false);

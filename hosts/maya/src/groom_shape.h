@@ -431,6 +431,9 @@ public:
     // The hierarchy as shown: rooted on the current scalp, posed (simulation, guide
     // cache) and corrected (shot sculpts); the brush preview while a stroke is live.
     HierarchyPtr evaluatedHierarchy();
+    // What the viewport draws as the guides: evaluatedHierarchy with the guides the graph shapes laid
+    // in as shaped (ViewResult::drawnHierarchy, issue 130).
+    HierarchyPtr drawnHierarchy();
     // The hierarchy as stored, rooted on the current scalp: no poses, no correctives,
     // no preview. What guide edits (brush strokes) are made against and written back.
     HierarchyPtr authoredHierarchy();

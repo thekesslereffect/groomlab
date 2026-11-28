@@ -530,7 +530,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             if category == "Paint" or ids == ["paint"] or not ids:
                 continue  # the painting brush is the Paint page's
             tray = look(layout, "card")
-            greyed = [x for x in ids if on_layer and not tools.edits_layers(x)]
+            greyed = [x for x in ids if on_layer and not (tools.edits_sculpt_nodes(x) if kind == "node" else tools.edits_layers(x))]
             grid = tool_grid(tray, ids, t.tool, greyed=greyed, named=named)
             if "freeze" in ids:  # beside Freeze, two tiles of the grid's own size (their tooltips say what they do)
                 cell = grid
@@ -738,7 +738,10 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
     def draw_tool_blocks(self, card, context, t, info, uses):
         """The brush's essentials (the rest is in More settings): Place and Draw their Length and
         Segments; Clone its source; Part its next name and parts; Flow what a click lays; Select its
-        soft radius; Erase what it removes; Length Keys its keys."""
+        soft radius; Erase what it removes; Length Keys its keys; Comb the tube levels' row on a groom
+        with tubes (#132)."""
+        if "tubeLevels" in uses and t.tube_has_tubes:
+            self.draw_levels(card, context, t, braids=False)
         if "newGuides" in uses:
             col = card.column(align=True)
             col.prop(t, "length", slider=True)
@@ -806,6 +809,12 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         the selected tubes (folded). The tubes' display switches are the header's guides popover's."""
         self.draw_levels(card, context, t)
         card.row(align=True).prop(t, "tube_channel", expand=True)
+        # Fill (issue #135, as Paint's): the channel's value, on the selected tubes, else the picked
+        # level's (every tube with no level picked).
+        row = card.row(align=True)
+        row.prop(t, "tube_fill_" + t.tube_channel if t.tube_channel in ("width", "flatness", "twist") else "tube_fill_width",
+                 slider=True)
+        row.operator("groomlab.tube_fill", text="Fill")
         self.draw_sliders(card, t, info)
         self.draw_toggles(card, context, t, uses & {"symmetry", "pressure"})
         body = fold(card, "more", "More settings")
@@ -871,9 +880,10 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             col.prop(t, "root_segments", slider=True)
         col.prop(t, "root_taper", slider=True)
 
-    def draw_levels(self, card, context, t):
-        """The tube hierarchy as one row: Level, a button a level (1, the base), then + and - (split,
-        undo a split) and a menu (Lock view, Mixed view, colors per level)."""
+    def draw_levels(self, card, context, t, braids=True):
+        """The tube hierarchy as one row: Level, a button a level (1, the base), Braid (the braid's
+        sections, with a tube Braid in the graph: issue 129), then + and - (split, undo a split) and
+        a menu (Lock view, Mixed view, colors per level); under it Make braid and Unbraid (`braids`)."""
         levels = [x for x in t.tube_levels.split(",") if x]
         count = max(len(levels), 1)
         row = card.row(align=True)
@@ -881,9 +891,12 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         buttons = row.row(align=True)
         buttons.enabled = bool(t.tube_base)
         for k in range(count):
-            op = buttons.operator("groomlab.tube_level", text=str(k + 1), depress=k + 1 == t.tube_level)
+            op = buttons.operator("groomlab.tube_level", text=str(k + 1),
+                                  depress=k + 1 == t.tube_level and not t.tube_braid_sculpting)
             op.action = "SHOW"
             op.level = k + 1
+        if braids and t.tube_braid:
+            buttons.operator("groomlab.tube_braid", text="Braid", depress=t.tube_braid_sculpting).action = "LEVEL"
         edits = row.row(align=True)
         edits.alignment = "RIGHT"
         add = edits.row(align=True)
@@ -896,6 +909,11 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         else:
             remove.operator("groomlab.tube_level", text="", icon="REMOVE", emboss=False).action = "REMOVE"
         edits.menu(GROOMLAB_MT_tube_levels.__name__, text="", icon="THREE_DOTS")
+        if braids:  # Tubes made braids (#129): on the selected tubes of any level
+            row = card.row(align=True)
+            row.enabled = bool(t.tube_base)
+            row.operator("groomlab.tube_braid", text="Make braid").action = "MAKE"
+            row.operator("groomlab.tube_braid", text="Unbraid").action = "UNBRAID"
 
     PROFILE_PICKERS = {"ROOT": "tube_shape", "MID": "tube_mid_shape", "TIP": "tube_tip_shape"}
 
@@ -1008,7 +1026,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
 
     def draw_maps(self, layout, context, t):
         """The maps (under the Paint card: what it paints): + and Import in the header; each row its
-        RGBA tag, info and menu."""
+        RGBA tag and menu; the picked map's info under the list (issue #138: no info icon)."""
         layout = look(layout, "card")
         head = section_header(layout, "Maps", len(t.maps))
         sub = head.row(align=True)
@@ -1018,6 +1036,27 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             empty_state(layout, "No maps yet", "+ New Map: a setting such as Density to paint, or a blank one.",
                         "TEXTURE", _chars(context))
         plain_list(layout, "GROOMLAB_UL_maps", t, "maps", "map_index")
+        if tools.current_map(context.scene) is not None:
+            draw_map_info(layout.column(), context)
+
+
+def draw_map_info(layout, context):
+    """The picked map's info (Maya's inline block, issue #138): what reads it (Show in Graph), where
+    it shows, a color map's channel."""
+    t = context.scene.groomlab_tools
+    m = tools.current_map(context.scene)
+    if m is None:
+        layout.label(text="No map picked")
+        return
+    _wrap(layout, "Read by %s" % (t.map_read_by or "nothing yet (a Map node or a map param reads it)"), width=40)
+    layout.operator("groomlab.map_show_reader", icon="NODETREE")
+    layout.label(text="Show on")
+    row = layout.row(align=True)
+    row.prop(t, "show_on_guides", toggle=True)
+    row.prop(t, "show_on_strands", toggle=True)
+    row.prop(t, "show_on_scalp", toggle=True)
+    if m.channels > 1:
+        layout.prop(t, "scalp_channel", text="Scalp shows")
 
 
 # ---- A row's settings and menu -------------------------------------------------------------------------
@@ -1046,7 +1085,6 @@ class GROOMLAB_OT_row_popup(bpy.types.Operator):
 
     TIPS = {"GROOMLAB_PT_group_segments": "Segments (click to change; By length)",
             "GROOMLAB_PT_corrective_weight": "Its weight on this frame (click to change, key it)",
-            "GROOMLAB_PT_map_info": "What reads it, where it shows",
             "GROOMLAB_PT_photo_settings": "Opacity and focal length",
             "GROOMLAB_MT_group_context": "Rename, select, children, mirror, move, color, delete",
             "GROOMLAB_MT_corrective_context": "Rename, move, keys, delete",
@@ -1180,35 +1218,6 @@ class GROOMLAB_PT_corrective_weight(_Popover, bpy.types.Panel):
         row.operator("groomlab.corrective_key", text="", icon="DECORATE_KEYFRAME")
 
 
-class GROOMLAB_PT_map_info(_Popover, bpy.types.Panel):
-    """A map's info: its kind, what reads it (Show in Graph), where it shows, a color map's channel."""
-    bl_label = "Map"
-    bl_ui_units_x = 13
-
-    def draw(self, context):
-        layout = self.layout
-        t = context.scene.groomlab_tools
-        m = tools.current_map(context.scene)
-        if m is None:
-            layout.label(text="No map picked")
-            return
-        row = layout.row(align=True)
-        row.label(text=m.name)
-        sub = row.row(align=True)
-        sub.alignment = "RIGHT"
-        sub.label(text=defs.choice_label("mapKind", m.kind) + (", color" if m.channels > 1 else ""))
-        _wrap(layout, "Read by %s" % (t.map_read_by or "nothing yet (a Map node or a map param reads it)"),
-              width=40)
-        layout.operator("groomlab.map_show_reader", icon="NODETREE")
-        layout.label(text="Show on")
-        row = layout.row(align=True)
-        row.prop(t, "show_on_guides", toggle=True)
-        row.prop(t, "show_on_strands", toggle=True)
-        row.prop(t, "show_on_scalp", toggle=True)
-        if m.channels > 1:
-            layout.prop(t, "scalp_channel", text="Scalp shows")
-
-
 class GROOMLAB_MT_tube_levels(bpy.types.Menu):
     """How the tube levels show"""
     bl_label = "Level View"
@@ -1284,7 +1293,7 @@ class GROOMLAB_UL_groups(bpy.types.UIList):
 
 
 class GROOMLAB_UL_maps(bpy.types.UIList):
-    """A map's row: its name, RGBA on a color map, then its info and its menu."""
+    """A map's row: its name, RGBA on a color map, then its menu (its info: under the list)."""
 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index=0):
         row = layout.row(align=True)
@@ -1293,7 +1302,6 @@ class GROOMLAB_UL_maps(bpy.types.UIList):
         sub.alignment = "RIGHT"
         if item.channels > 1:
             sub.label(text="RGBA")
-        row_button(sub, "MAPS", index, icon="INFO", panel=GROOMLAB_PT_map_info.__name__)
         row_button(sub, "MAPS", index, menu_name="GROOMLAB_MT_map_context")
 
 
@@ -1362,7 +1370,7 @@ class VIEW3D_PT_groomlab_tools_display(GroomToolsSubpanel, bpy.types.Panel):
 
 # Under the main panel: Display (the strands' colors), folded.
 classes = (VIEW3D_PT_groomlab_tools, GROOMLAB_OT_row_popup, GROOMLAB_OT_map_show_reader, GROOMLAB_PT_guide_display,
-           GROOMLAB_PT_group_segments, GROOMLAB_PT_corrective_weight, GROOMLAB_PT_map_info, GROOMLAB_MT_tube_levels,
+           GROOMLAB_PT_group_segments, GROOMLAB_PT_corrective_weight, GROOMLAB_MT_tube_levels,
            GROOMLAB_MT_tube_library, GROOMLAB_UL_groups, GROOMLAB_UL_maps, GROOMLAB_UL_parts,
            GROOMLAB_UL_correctives, VIEW3D_PT_groomlab_tools_display)
 

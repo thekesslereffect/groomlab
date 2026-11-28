@@ -8,8 +8,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 
 #include "groomlab/brush.h"
+#include "groomlab/graph.h"
+#include "groomlab/operators.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/tube.h"
@@ -239,6 +242,107 @@ TEST(RootTubes, ARootCopiedWithItsHierarchyAndDeleted) {
     EXPECT_EQ(drawn(), std::vector<GuideId>{a});
     EXPECT_THROW(duplicateRootTube(h, *scalp, h.childrenOf(a).front(), onSphere({0, 1, 0})), std::invalid_argument)
         << "not a root tube";
+}
+
+TEST(TubeLevels, ThinSplitTubesGatherTheirShareOfTheRoot) {
+    // A root split twice, its deepest tubes then made far thinner than their share of it: every
+    // strand rooted in the root still rides one of them (none falls back to a level above), its
+    // place in the section inside the tube's outline (the share gathered in).
+    auto h = std::make_shared<GuideHierarchy>();
+    const auto scalp = head();
+    makeRootTube(*h, *scalp, ring({0, 1, 0}, 0.3f, 6), {});
+    EXPECT_EQ(addTubeLevel(*h, scalp.get()), 1u);
+    EXPECT_EQ(addTubeLevel(*h, scalp.get()), 2u);
+    const std::vector<GuideId> deepest = h->guidesInGroup(h->findGroup("rootTubes_L3"));
+    ASSERT_EQ(deepest.size(), 4u);
+    for (const GuideId id : deepest) {
+        TubeProfile thin = h->guide(id)->tube;
+        for (float& w : thin.width) w *= 0.3f;
+        h->setTube(id, thin);
+    }
+    h->evaluate(scalp.get());
+    Graph g;
+    ExternalInputs ext;
+    ext.set("scalp", scalp, 1);
+    ext.set("hierarchy", HierarchyPtr(h), h->contentHash());
+    const NodeId scalpNode = g.addNode(op::kScalp);
+    const NodeId scatter = g.addNode(op::kScatter);
+    g.node(scatter).params().set("density", 3000.0);
+    g.connect(scalpNode, scatter, 0);
+    const NodeId guides = g.addNode(op::kGuides);
+    const NodeId interp = g.addNode(op::kInterpolate);
+    g.connect(scatter, interp, 0);
+    g.connect(guides, interp, 1);
+    g.node(interp).params().set("fillTubes", true);
+    EvalContext ctx;
+    ctx.externals = &ext;
+    const StrandsPtr out = g.evaluateStrands(interp, ctx);
+    ASSERT_TRUE(out);
+    const std::vector<float>* ids = out->strandChannel("tubeId");
+    const std::vector<float>* u = out->strandChannel("tubeU");
+    const std::vector<float>* v = out->strandChannel("tubeV");
+    ASSERT_TRUE(ids && u && v);
+    std::set<float> tubes;
+    std::size_t riding = 0;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        if ((*ids)[s] < 0.0f) continue;
+        ++riding;
+        tubes.insert((*ids)[s]);
+        // (Inside its slice's outline: a slice's shape reaches its box's corners, sqrt 2 out.)
+        EXPECT_LT(std::hypot((*u)[s], (*v)[s]), 1.42f) << s;
+    }
+    EXPECT_GT(riding, 100u);
+    EXPECT_EQ(tubes.size(), 4u) << "the deepest tubes take every strand of the root";
+}
+
+TEST(TubeLevels, SplitTubesOfALeaningRootStayRootedOnTheScalp) {
+    // A big root split a few levels, then its guide combed over to lie almost along the scalp: its
+    // slices' roots stay on the scalp at their places in the root (before, the side of the root's
+    // section rising off the head left them hanging in the air, from level 2 down).
+    GuideHierarchy h;
+    const auto scalp = head();
+    const GuideId a = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.35f, 6), {});
+    EXPECT_EQ(addTubeLevel(h, scalp.get()), 1u);
+    EXPECT_EQ(addTubeLevel(h, scalp.get()), 2u);
+    EXPECT_EQ(addTubeLevel(h, scalp.get()), 4u);
+    std::vector<Vec3f> leaning;
+    const Vec3f root = h.guide(a)->points.front();
+    for (int i = 0; i < 8; ++i) leaning.push_back(root + Vec3f(0.25f * i, 0.04f * i, 0.0f));  // ~10 degrees off the scalp
+    h.setPoints(a, leaning);
+    h.evaluate(scalp.get());
+    std::size_t children = 0;
+    for (const HierarchyGuide& g : h.guides()) {
+        if (!g.isChild()) continue;
+        ++children;
+        const Vec3f first = g.points.front();
+        EXPECT_LT((scalp->closestPoint(first).position - first).length(), 1e-3f) << g.id;
+    }
+    EXPECT_EQ(children, 14u);
+}
+
+TEST(TubeLevels, AGuidesNodeHandsTheOtherLevelsOnWithTheirRootLoops) {
+    // The other levels' tubes a Guides node hands on (GuideSet::levelTubes) keep their root loop
+    // and footprint: without them a Scatter's guideRadius took a big root's footprint through the
+    // head, growing hair on the far side (the face, under a drawn root split into levels).
+    auto h = std::make_shared<GuideHierarchy>();
+    const auto scalp = head();
+    const GuideId a = makeRootTube(*h, *scalp, ring({0, 1, 0}, 0.3f), {});
+    EXPECT_EQ(addTubeLevel(*h, scalp.get()), 1u);
+    h->evaluate(scalp.get());
+    ASSERT_GE(h->guide(a)->rootRing.size(), 3u);
+    Graph g;
+    ExternalInputs ext;
+    ext.set("hierarchy", HierarchyPtr(h), h->contentHash());
+    const NodeId guides = g.addNode(op::kGuides);  // level -1: the split tubes, the root a level above
+    EvalContext ctx;
+    ctx.externals = &ext;
+    const GuidesPtr out = valueAs<GuidesPtr>(g.evaluate(guides, ctx));
+    ASSERT_TRUE(out && out->levelTubes());
+    const auto found = std::find_if(out->levelTubes()->begin(), out->levelTubes()->end(),
+                                    [&](const Guide& t) { return t.id == a; });
+    ASSERT_NE(found, out->levelTubes()->end());
+    EXPECT_EQ(found->rootRing, h->guide(a)->rootRing);
+    EXPECT_EQ(found->rootAcross.length() > 0.5f, h->guide(a)->rootAcross.length() > 0.5f);
 }
 
 TEST(TubeLevels, AddSplitsTheLeavesRemoveFollowsTheSelection) {

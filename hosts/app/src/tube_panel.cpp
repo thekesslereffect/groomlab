@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <QAction>
+#include <QApplication>
 #include <QActionGroup>
 #include <QCheckBox>
 #include <QComboBox>
@@ -40,6 +41,7 @@
 #include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/tube.h"
+#include "groomlab/graph_inserts.h"
 
 #include "brush_session.h"
 #include "card_parts.h"
@@ -177,6 +179,55 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
     twist_->setCaption(tr("Twist (°)"));
     fields->addWidget(twist_);
     refreshTips();
+
+    // ---- Fill (issue #135): the brush's channel set to a value on the tubes (the brush panel's).
+    fillRow_ = new QWidget(this);
+    fillRow_->setObjectName(QStringLiteral("tubeFillRow"));
+    {
+        auto* row = new QHBoxLayout(fillRow_);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(4);
+        const char* names[] = {"width", "flatness", "twist"};
+        const QString tips[] = {tr("The width Fill gives the tubes: each scaled so its widest section is this half-width, its taper "
+                                   "and what the brush painted kept"),
+                                tr("The flatness Fill gives the tubes root to tip: 0 as the shape is drawn, toward 1 a ribbon"),
+                                tr("The twist Fill gives the tubes root to tip, in degrees")};
+        for (int k = 0; k < 3; ++k) {
+            auto* s = new ValueSlider(fillRow_);
+            s->setObjectName(QStringLiteral("tubeFillValue_") + QLatin1String(names[k]));
+            s->setCaption(tr("Value"));
+            s->setToolTip(tips[k]);
+            s->setFill(theme::sliderFill(theme::blue()));
+            if (k == 0) {
+                s->setRange(0.0, 1.0);
+                s->setLimits(0.0, 1e4);
+                s->setDecimals(3);
+                s->setValue(0.1);
+            } else if (k == 1) {
+                s->setRange(0.0, 0.99);
+                s->setLimits(0.0, 0.99);
+                s->setDecimals(2);
+                s->setValue(0.0);
+            } else {
+                s->setRange(-180.0, 180.0);
+                s->setLimits(-180.0, 180.0);
+                s->setDecimals(1);
+                s->setValue(0.0);
+            }
+            fillValues_[static_cast<std::size_t>(k)] = s;
+            row->addWidget(s, 1);
+        }
+        fill_ = new QPushButton(tr("Fill"), fillRow_);
+        fill_->setObjectName(QStringLiteral("tubeFill"));
+        fill_->setToolTip(tr("Set the channel picked above to the value on the selected tubes, else on the picked level's tubes "
+                             "(every tube with no level picked). One undo step"));
+        connect(fill_, &QPushButton::clicked, this, [this] { fill(); });
+        row->addWidget(fill_);
+    }
+    fillValues_[0]->setLimits(0.0, 1e4 * lengthFactor_);  // (in the lengths' unit, as Width)
+    fillValues_[0]->setRange(0.0, lengthFactor_);
+    fillValues_[0]->setValue(0.1 * lengthFactor_);
+    showFillChannel();
 
     // ---- New (Place, Draw): the tube new guides get.
     tubeBlock_ = new CardBlock(tr("Tube"), this);
@@ -475,7 +526,8 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                             true, &TubePanel::editRoots);
         selectRoot_ = button(tr("Select root"), "rootTubeSelect",
                              tr("Show every root's middle: click one to select its root (Shift: several), drag it to move the root "
-                                "over the scalp. Again: back to Draw root"),
+                                "over the scalp. Again: back to Draw root. Shift+click this button: every root of the level in "
+                                "view selected"),
                              true, &TubePanel::selectRoot);
         undoCv_ = button(tr("Undo CV"), "rootTubeUndoCv", tr("Take back the last CV (or the drawn path); in Edit roots, the last CV move"),
                          false, &TubePanel::undoCv);
@@ -647,8 +699,36 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                                    nullptr, edits);
         levelMenu_->setObjectName(QStringLiteral("tubeLevelView"));
         editRow->addWidget(levelMenu_);
+        // The braid's sections, a level under the tubes (issue 129): shown with a tube Braid.
+        braidLevel_ = makeChip(tr("Braid"),
+                               tr("The braid's sections, a level under its tubes: brush their curves (and with the Tube brush "
+                                  "their width, flatness and twist), kept on top of the braid. Again (or a level): the guides"),
+                               lead);
+        braidLevel_->setObjectName(QStringLiteral("tubeBraidLevel"));
+        braidLevel_->hide();
+        connect(braidLevel_, &QToolButton::clicked, this, [this] { braidLevel(); });
+        leadRow->addWidget(braidLevel_);
         new LeadTrailLayout(lead, edits, levelLine_);
         levelsBlock_->rows()->addWidget(levelLine_);
+        // Make braid | Unbraid (issue 129): on the selected tubes of any level.
+        auto* braids = new QWidget(levelsBlock_);
+        auto* braidRow = new QHBoxLayout(braids);
+        braidRow->setContentsMargins(0, 0, 0, 0);
+        braidRow->setSpacing(4);
+        makeBraid_ = new QPushButton(tr("Make braid"), braids);
+        makeBraid_->setObjectName(QStringLiteral("tubeMakeBraid"));
+        makeBraid_->setToolTip(tr("Braid the selected tubes (any level; Select root's roots too): each is braided with the tubes under "
+                                  "it, the other tubes' hair left as it is. The first time, a Braid node joining by tube goes after "
+                                  "the Interpolate (fillTubes on); its Sculpt Sections brushes the braids"));
+        connect(makeBraid_, &QPushButton::clicked, this, [this] { makeBraid(true); });
+        unbraid_ = new QPushButton(tr("Unbraid"), braids);
+        unbraid_->setObjectName(QStringLiteral("tubeUnbraid"));
+        unbraid_->setToolTip(tr("Take the braid mark off the selected tubes: their hair is plain again (a tube under another braid "
+                                "stays in that one)"));
+        connect(unbraid_, &QPushButton::clicked, this, [this] { makeBraid(false); });
+        braidRow->addWidget(makeBraid_, 1);
+        braidRow->addWidget(unbraid_, 1);
+        levelsBlock_->rows()->addWidget(braids);
         // Lock view and Mixed view: the ⋯ menu's (the boxes carry them, not shown).
         lockView_ = new QCheckBox(tr("Lock view"), levelsBlock_);
         lockView_->setObjectName(QStringLiteral("tubeLockView"));
@@ -830,6 +910,14 @@ void TubePanel::editRoots() {
 }
 
 void TubePanel::selectRoot() {
+    if (session_ && (QApplication::keyboardModifiers() & Qt::ShiftModifier)) {
+        // Shift+click: every root of the level in view selected (Select root started if need be).
+        if (!session_->rootMode()) startRootMode(RootTubeTool::Mode::Select);
+        if (session_->rootMode()) {
+            rootsDone(session_->editRoots("roots", [](RootTubeTool& t, StrokeHost& host) { t.selectShown(host); }));
+        }
+        return;
+    }
     if (session_ && session_->rootMode() && (session_->roots().mode() == RootTubeTool::Mode::Select ||
                                              session_->roots().mode() == RootTubeTool::Mode::Duplicate)) {
         startRootMode(RootTubeTool::Mode::Place);  // again: back to Draw root
@@ -1127,17 +1215,77 @@ void TubePanel::fillLevels() {
         }
         levelLine_->layout()->invalidate();
     }
+    // The graph's tube Braid: the row's Braid, checked while the brushes shape its sections.
+    GroomDocument* doc = document();
+    tubeBraid_ = doc ? doc->tubeBraid() : std::string();
+    const std::string sculpt = doc && !tubeBraid_.empty() ? doc->tubeBraidSculpt() : std::string();
+    braidSculpting_ = !sculpt.empty() && doc->sculptTarget() == sculpt;
+    braidLevel_->setVisible(!tubeBraid_.empty());
+    {
+        QSignalBlocker block(braidLevel_);
+        braidLevel_->setChecked(braidSculpting_);
+    }
+    makeBraid_->setEnabled(!levelBase_.empty());
+    unbraid_->setEnabled(!levelBase_.empty());
     for (std::size_t k = 0; k < levelButtons_.size(); ++k) {
         QSignalBlocker block(levelButtons_[k]);
-        levelButtons_[k]->setChecked(static_cast<int>(k + 1) == shownLevel_);
+        levelButtons_[k]->setChecked(static_cast<int>(k + 1) == shownLevel_ && !braidSculpting_);
     }
     syncLock();  // (Lock view: the document's tubeViewGroup, set anywhere)
+}
+
+bool TubePanel::hasTubes() {
+    fillLevels();
+    if (levels_.size() > 1) return true;
+    const HierarchyPtr h = document() ? document()->session().authoredHierarchy() : nullptr;
+    return h && !rootTubesOf(*h).empty();
+}
+
+QAbstractButton* TubePanel::makeBraidButton() const { return makeBraid_; }
+QAbstractButton* TubePanel::unbraidButton() const { return unbraid_; }
+QAbstractButton* TubePanel::braidLevelButton() const { return braidLevel_; }
+
+void TubePanel::makeBraid(bool on) {
+    GroomDocument* doc = document();
+    if (!doc) return;
+    std::vector<GuideId> tubes = doc->selection();
+    if (tubes.empty() && session_) tubes = session_->roots().selected();
+    if (tubes.empty()) {
+        emit message(on ? tr("Select tubes, then Make braid.") : tr("Select tubes, then Unbraid."));
+        return;
+    }
+    std::size_t changed = 0;
+    std::string error = doc->editGuides(on ? "make braid" : "unbraid", [&](GuideHierarchy& g) { changed = g.setBraid(tubes, on); });
+    TubeBraidNode made;
+    if (error.empty() && on) error = doc->insertTubeBraid(&made);
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    emit guidesEdited();
+    fillLevels();
+    QString said = (on ? tr("Braided %1 tube(s)") : tr("Unbraided %1 tube(s)")).arg(changed);
+    if (made.made) said += tr("; %1 added after the Interpolate").arg(QString::fromStdString(made.braid));
+    emit message(said + QStringLiteral("."));
+}
+
+void TubePanel::braidLevel() {
+    fillLevels();
+    if (braidSculpting_) {
+        emit braidSectionsLeft();
+    } else if (!tubeBraid_.empty()) {
+        emit braidSectionsRequested(tubeBraid_);
+    } else {
+        emit message(tr("No braid among the tubes yet: select tubes and Make braid first."));
+    }
+    fillLevels();
 }
 
 void TubePanel::showLevel(int level) {
     GroomDocument* doc = document();
     const HierarchyPtr h = doc ? doc->session().authoredHierarchy() : nullptr;
     if (!h || levelBase_.empty()) return;
+    if (braidSculpting_) emit braidSectionsLeft();  // (a level picked: the guides brushed again)
     // Its guides alone through the level view (the groups' eyes left as the artist set them).
     std::string picked;
     try {
@@ -1689,6 +1837,12 @@ void TubePanel::refreshUnits() {
     width_->setCaption(tr("Width (%1)").arg(unit));
     if (factor == lengthFactor_) return;
     const double scene = width_->value() / lengthFactor_;
+    if (fillValues_[0] && factor != lengthFactor_) {  // (Fill's width in the same unit)
+        const double shown = fillValues_[0]->value() / (lengthFactor_ > 0.0 ? lengthFactor_ : 1.0) * factor;
+        fillValues_[0]->setLimits(0.0, 1e4 * factor);
+        fillValues_[0]->setRange(0.0, factor);
+        fillValues_[0]->setValue(shown);
+    }
     lengthFactor_ = factor;
     const QSignalBlocker quiet(width_);
     width_->setLimits(0.0, 1e4 * factor);
@@ -1707,6 +1861,48 @@ void TubePanel::setTwist(double degrees) {
     GroomDocument* doc = document();
     if (doc && !targets_.empty()) edited(doc->editTubes(targets_, json{{"twist", degrees * kPi / 180.0}}));
     pushPlacement();
+}
+
+ValueSlider* TubePanel::fillValue(const std::string& channel) const {
+    return channel == "flatness" ? fillValues_[1] : channel == "twist" ? fillValues_[2] : fillValues_[0];
+}
+
+void TubePanel::showFillChannel() {
+    const std::string channel = session_ ? std::string(tubeChannelName(session_->settings().brush.tubeChannel)) : "width";
+    for (const char* name : {"width", "flatness", "twist"}) fillValue(name)->setVisible(channel == name);
+}
+
+void TubePanel::fill() {
+    GroomDocument* doc = document();
+    if (!doc || !session_) return;
+    const std::string channel = tubeChannelName(session_->settings().brush.tubeChannel);
+    double value = fillValue(channel)->value();
+    if (channel == "width") value /= lengthFactor_ > 0.0 ? lengthFactor_ : 1.0;  // (shown in the lengths' unit)
+    if (channel == "twist") value *= kPi / 180.0;
+    // The selected tubes, else the picked level's (group's), else every tube.
+    std::vector<GuideId> guides = doc->selection();
+    const HierarchyPtr h = doc->session().authoredHierarchy();
+    if (guides.empty() && h) {
+        const std::string group = session_->settings().brush.group;
+        const GroupId id = group.empty() ? kNoGroup : h->findGroup(group);
+        for (const HierarchyGuide& g : h->guides()) {
+            if (id == kNoGroup || g.group == id) guides.push_back(g.id);
+        }
+    }
+    if (guides.empty()) {
+        emit message(tr("No tubes to fill."));
+        return;
+    }
+    std::string edit;
+    try {
+        edit = tubeFillEdit(channel, static_cast<float>(value));
+    } catch (const std::invalid_argument& e) {
+        emit message(QString::fromUtf8(e.what()));
+        return;
+    }
+    const std::string error = doc->editTubes(guides, json::parse(edit), "fill tube " + channel);
+    edited(error);
+    if (error.empty()) emit message(tr("Filled %1 on %2 tube(s).").arg(QString::fromStdString(channel)).arg(guides.size()));
 }
 
 void TubePanel::smoothTargets() {

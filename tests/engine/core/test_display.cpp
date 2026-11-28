@@ -465,6 +465,11 @@ TEST(Display, TheTubeBrushsTubesShowAsWiresAndShadedSurfaces) {
     EXPECT_GT(sh.item(DisplayItemId::TubeSurfaces).geometry->vertexCount(), 0u);
     EXPECT_TRUE(sh.item(DisplayItemId::TubeSurfaces).geometry->triangles);
     EXPECT_EQ(sh.item(DisplayItemId::TubeWires).geometry->vertexCount(), 0u);
+    // The guides hidden (Comb's guides eye, issue #139): the Tubes switch keeps the tubes in view.
+    DisplaySettings noGuides = shaded;
+    noGuides.guides = false;
+    DisplayBuilder d;
+    EXPECT_GT(d.update(in, noGuides).item(DisplayItemId::TubeSurfaces).geometry->vertexCount(), 0u);
     // The look alone shows nothing (the tubes not shown), and the guides' pass draws no tubes of
     // its own (one way of drawing them).
     DisplaySettings look = s.settings;

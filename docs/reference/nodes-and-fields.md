@@ -235,6 +235,14 @@ The pattern, for secondary clumps:
    `size`: about how far apart, in scene units) for secondary clumps. (`cinematic_hair` gets its
    two levels from two such Clumps instead.)
 
+**Shaping a level of guides (issue 130).** A Guides node set to one group (a tube hierarchy's level,
+`<base>_L2` say) piped into a Curl or a Noise (they take guides as they take strands) and on into an
+Interpolate shapes those guides procedurally: the viewport draws them, and their tubes, as the graph
+shapes them, not as stored. Comb a level above and the shaped level follows (the graph runs again
+on the guides as combed). Only what that Guides node gives is drawn so; brushes, hover and pick
+still work on the stored guides (a stroke on a shaped guide starts from its stored shape), and
+nothing is drawn shaped while a Sculpt node is the brushes' target.
+
 ## Sculpting generated guides
 
 The guides a graph makes can be brushed in place, as Houdini's guide levels are: sparse hand

@@ -22,7 +22,8 @@
 // takes it out), a drag carries the selected roots over the scalp as one (with Snap, their CVs
 // sealed onto a root not selected stay), committed on release (one undo step). beginDuplicate: the
 // selected roots follow the cursor (hover) and a click sets copies down there, their hierarchies
-// with them; deleteSelected removes them.
+// with them; deleteSelected removes them. selectShown (Shift+click on the Select root button)
+// selects every root shown: the level in view.
 //
 // Events come in port pixels (origin bottom left) of a ToolView, as BrushTool's. Edits are
 // committed through the StrokeHost as one StrokeEdit each; the tool reads the groom again when it
@@ -81,6 +82,9 @@ public:
     bool beginDuplicate(StrokeHost& host);  // false with no root selected
     void endDuplicate();
     int deleteSelected(StrokeHost& host);   // the roots removed
+    // Shift+click on Select root: every root shown (the level in view) selected, in Select mode
+    // (started when not in it). Returns how many.
+    int selectShown(StrokeHost& host);
 
     // The groom read again when it changed under the tool (undo, redo, another tool): the tube an
     // undo took back gives its outline back, a redo puts it away, Select reloads its roots, Edit

@@ -64,6 +64,10 @@ struct HierarchyGuide {
     // Resampled on its own (picked guides, not its whole group): its segments are its own, kept
     // when its group's are set (resample with groupWide skips it). Saved.
     bool ownSegments = false;
+    // Its tube is a braid (issue 129, the Tube tool's Make Braid): a Braid node joining by tube
+    // braids the hair of this tube and of every tube under it (tube_braids.h; the outermost
+    // marked tube of a lineage wins). Its own mark, never inherited. Saved.
+    bool braid = false;
     StrandRoot root;
     // A root-first tube's root outline as drawn (root_tubes.h): its CVs on the scalp the guides
     // root on (each a triangle and barycentrics, as `root`), in order round it, so it stays where
@@ -493,6 +497,9 @@ public:
     // the head at twist 0, across the way the guide lies over the scalp. A library shape (tube.h:
     // TubeProfile::custom) is the library's entry of that name; one the library lacks is added.
     void setTube(GuideId id, TubeProfile tube);
+    // Marks (or unmarks) these guides' tubes as braids (HierarchyGuide::braid; tube_braids.h).
+    // Returns how many changed.
+    std::size_t setBraid(const std::vector<GuideId>& ids, bool braid);
 
     // ---- Tube shape library ---------------------------------------------
     // Custom tube shapes (tube.h: CustomTubeShape), saved with the hierarchy (toJson). Guides take
@@ -509,7 +516,9 @@ public:
     CustomTubeShapePtr setTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth = true);
     // setTubeShape for an owned shape (a root tube's drawn root: the root tools' and their scripts'
     // only). Throws std::invalid_argument for a name that is not an owned one.
-    CustomTubeShapePtr setOwnedTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth = false);
+    // `origin`: its points' (0, 0) kept as its center (CustomTubeShape::origin: a cut's cell).
+    CustomTubeShapePtr setOwnedTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth = false,
+                                         bool origin = false);
     // Renames a shape; the guides taking it keep it. Throws std::invalid_argument on an unknown
     // name, or a new one taken or not allowed (checkTubeShapeName), or an owned one either way (a
     // root tube's drawn root keeps its name; no library shape becomes one).
@@ -645,7 +654,7 @@ private:
     // The library's owned shapes (kOwnedTubeShapePrefix) no guide takes any more, removed.
     void pruneOwnedTubeShapes();
     // setTubeShape's and setOwnedTubeShape's work, once the name is checked.
-    CustomTubeShapePtr storeTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth);
+    CustomTubeShapePtr storeTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth, bool origin = false);
     TubeShapeLibrary tubeShapes_;
     LengthKeySet lengthKeys_;
     std::vector<RootSubdivisionRecord> rootSubdivisions_;

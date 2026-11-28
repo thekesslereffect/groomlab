@@ -871,11 +871,12 @@ void GroomTools::refreshTiles() {
     // On a corrective (or a Sculpt node) the tools that can't edit one are greyed, not hidden: the
     // tiles never move.
     const bool layer = editingLayer();
+    const bool node = correctives_ && !correctives_->targetNode().empty();  // (a Sculpt node: the Tube brush too)
     for (auto& [id, buttons] : tiles_) {
         const groomlab::BrushEntry* e = brushEntry(id);
         for (QToolButton* b : buttons) {
             b->setChecked(id == tool_);
-            b->setEnabled(!layer || (e && e->corrective) || id == "paint");
+            b->setEnabled(!layer || (e && (node ? e->sculptNode : e->corrective)) || id == "paint");
             if (b->property("iconLook").toString() == look) continue;
             b->setProperty("iconLook", look);
             b->setIcon(toolIcon(e ? e->icon : id, e ? e->category : BrushCategory::Guides));
@@ -1102,7 +1103,10 @@ void GroomTools::setCorrectivesContent(QWidget* content) {
             refreshTiles();
             refreshCard();
             const groomlab::BrushEntry* e = brushEntry(tool_);
-            if (editingLayer() && !tool_.empty() && tool_ != "paint" && !(e && e->corrective)) emit toolStopRequested();
+            const bool node = correctives_ && !correctives_->targetNode().empty();
+            if (editingLayer() && !tool_.empty() && tool_ != "paint" && !(e && (node ? e->sculptNode : e->corrective))) {
+                emit toolStopRequested();
+            }
         });
     }
     fitScroll(content);

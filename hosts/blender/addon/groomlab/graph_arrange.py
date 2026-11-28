@@ -162,22 +162,35 @@ def _polyline_steps(points, radius):
     return steps
 
 
-def wire_route(style, ax, ay, bx, by, below=None, through=False):
+def wire_gap(top_a, bottom_a, top_b, bottom_b, margin=16.0):
+    """The middle of the clear space between two cards one above the other, or None (the core's
+    wireGap): where a backwards wire passes between them."""
+    if bottom_a + margin <= top_b:
+        return 0.5 * (bottom_a + top_b)
+    if bottom_b + margin <= top_a:
+        return 0.5 * (bottom_b + top_a)
+    return None
+
+
+def wire_route(style, ax, ay, bx, by, below=None, through=False, gap=None):
     """A wire from (ax, ay) to (bx, by) in graph units, y down, as steps: (x, y) a line, (c1x, c1y,
-    c2x, c2y, x, y) a cubic (the core's wireRoute)."""
-    forward = through or bx >= ax + 30.0
+    c2x, c2y, x, y) a cubic (the core's wireRoute). Its input right of its output, however little:
+    straight across; backwards, back through `gap` (wire_gap) when given, else under `below`."""
+    forward = through or bx >= ax
+    back = gap if gap is not None else max(ay, by) + 60.0 if below is None else below + 24.0
     if style in ("square", "rounded"):
         radius = 14.0 if style == "rounded" else 0.0
         if forward:
             mid = (ax + bx) * 0.5
             return _polyline_steps([(ax, ay), (mid, ay), (mid, by), (bx, by)], radius)
-        y = max(ay, by) + 60.0 if below is None else below + 24.0
+        y = back
         out = 24.0
         return _polyline_steps([(ax, ay), (ax + out, ay), (ax + out, y), (bx - out, y), (bx - out, by), (bx, by)], radius)
     if forward:
-        dx = max(50.0 if through else 60.0, abs(bx - ax) * 0.5)
+        across = abs(bx - ax) * 0.5
+        dx = max(across, min(50.0 if through else 60.0, across + abs(by - ay) * 0.5))
         return [(ax + dx, ay, bx - dx, by, bx, by)]
-    y = max(ay, by) + 60.0 if below is None else below + 24.0
+    y = back
     r = 40.0
     return [(ax + r, ay, ax + r, y, ax, y), (bx, y), (bx - r, y, bx - r, by, bx, by)]
 

@@ -134,7 +134,8 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     layout->addWidget(hint_);
     connect(list_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem*, QListWidgetItem*) {
         if (updating_) return;
-        refreshRows();  // the paint and show rows follow the picked map (the list itself stays)
+        refreshRows();  // the paint and show rows and the info follow the picked map (the list itself stays)
+        refreshShowOn();
     });
     connect(list_, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) { itemRenamed(item); });
     connect(list_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { editSelectedName(); });
@@ -331,13 +332,18 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
         });
     }
 
-    // ---- A map row's info (its ⓘ): its kind, what reads it (Show in Graph), Use for (drive a
-    // setting with it), where it shows; its menu (Rename, Convert to, the image, Delete) is the
-    // row's last icon and the list's right-click.
-    infoPopup_ = new PopupPanel(this, 270);
-    infoPopup_->setObjectName(QStringLiteral("mapInfoPopup"));
-    box_ = infoPopup_;
-    QVBoxLayout* boxRows = infoPopup_->rows();
+    // ---- The picked map's info, under the list (issue #138: no ⓘ to open): what reads it (Show in
+    // Graph), Use for (drive a setting with it), where it shows; its menu (Rename, Convert to, the
+    // image, Delete) is the row's icon and the list's right-click.
+    infoBlock_ = new QFrame(this);
+    infoBlock_->setObjectName(QStringLiteral("mapInfoBlock"));
+    infoBlock_->setProperty("role", "options");
+    box_ = infoBlock_;
+    auto* boxRows = new QVBoxLayout(infoBlock_);
+    boxRows->setContentsMargins(6, 4, 6, 4);
+    boxRows->setSpacing(4);
+    layout->insertWidget(layout->indexOf(list_) + 1, infoBlock_);
+    infoBlock_->hide();  // (a map picked: refreshRows)
     infoTitle_ = new QLabel(box_);
     infoTitle_->setProperty("role", "listTitle");
     boxRows->addWidget(infoTitle_);
@@ -345,6 +351,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     kindLabel_->setObjectName(QStringLiteral("mapKind"));
     kindLabel_->setProperty("role", "hint");
     kindLabel_->setWordWrap(true);
+    kindLabel_->hide();  // (the kind's description: not needed, issue #138)
     boxRows->addWidget(kindLabel_);
     // Show on scalp: a switch (a check box, not a chip that reads as a choice), the channel beside it.
     // A field row: the name, the channel at the value column, the switch at the row's end.
@@ -396,7 +403,6 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
             const std::string picked = selectedMap();
             if (!document_ || picked.empty()) return;
             const auto users = document_->mapUsers(picked);
-            infoPopup_->hide();
             if (!users.empty()) emit readerRequested(users.front().first);
         });
         links->addWidget(openReader_);
@@ -437,10 +443,6 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
             });
         }
     }
-    infoPopup_->onShow([this] {
-        refreshRows();
-        refreshShowOn();
-    });
     useMap_ = new QPushButton(tr("Add Map Node"), box_);
     useMap_->setObjectName(QStringLiteral("mapAddNode"));
     useMap_->setToolTip(tr("A Map node reading this map in the graph: wire it into the setting it should drive"));
@@ -550,18 +552,10 @@ QWidget* MapsPanel::rowFor(QListWidgetItem* item, const QString& text, bool colo
     auto pick = [this, item] {
         if (list_->currentItem() != item) list_->setCurrentItem(item);
     };
-    QToolButton* info = popupButton(QStringLiteral("info"),
-                                    unused ? tr("Nothing reads %1 yet: Use for picks a setting").arg(qs(name))
-                                           : tr("What reads %1, Use for, where it shows").arg(qs(name)),
-                                    infoPopup_, pick, list_);
-    info->setObjectName(QStringLiteral("mapInfo_") + qs(name));
-    if (unused) {
-        info->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_info.svg"), theme::accentInk(), 14, devicePixelRatioF())));
-        info->setProperty("unused", true);
-    }
     QToolButton* more = rowMenuButton(tr("Rename, convert, the image, delete"), [this](QMenu* menu) { fillRowMenu(menu); }, pick, list_);
     more->setObjectName(QStringLiteral("mapMenu_") + qs(name));
-    auto* row = new ListRow(text, color ? QStringLiteral("RGBA") : QString(), {info, more}, list_);
+    auto* row = new ListRow(text, color ? QStringLiteral("RGBA") : QString(), {more}, list_);
+    if (unused) row->setToolTip(tr("Nothing reads %1 yet: Use for picks a setting").arg(qs(name)));
     if (item->data(kMissingRole).isValid()) row->label()->setStyleSheet(QStringLiteral("color: %1;").arg(theme::warningText().name()));
     return row;
 }
@@ -863,6 +857,7 @@ void MapsPanel::refreshRows() {
     updating_ = true;
     const std::string picked = document_ && list_->currentItem() ? list_->currentItem()->data(Qt::UserRole).toString().toStdString() : std::string();
     const bool color = list_->currentItem() && list_->currentItem()->data(kChannelsRole).toInt() == kColorMap;
+    infoBlock_->setVisible(!picked.empty());  // (the picked map's info, under the list: issue #138)
     colorRow_->setVisible(color);
     valueRow_->setVisible(!color);
     if (document_) {

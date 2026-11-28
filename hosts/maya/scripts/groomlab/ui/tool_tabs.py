@@ -1108,6 +1108,25 @@ class NewMapDialog(QtWidgets.QDialog):
                 self.chosen_target())
 
 
+class _InfoBlock(QtWidgets.QFrame):
+    """The picked map's info, in place under the maps list (issue #138; was a popup behind each
+    row's i): the widgets added stay in it."""
+
+    def __init__(self, parent=None):
+        super(_InfoBlock, self).__init__(parent)
+        self.setProperty("role", "options")
+        self.body = QtWidgets.QVBoxLayout(self)
+        self.body.setContentsMargins(0, theme.px(2), 0, theme.px(2))
+        self.body.setSpacing(theme.px(4))
+
+    def add(self, item):
+        if isinstance(item, QtWidgets.QLayout):
+            self.body.addLayout(item)
+        else:
+            self.body.addWidget(item)
+        return item
+
+
 class PaintTab(_GroomTab):
     """Maps: named 0-1 values painted on the scalp, of three kinds (a layer on the guides, a
     value per scalp vertex, a texture at the scalp's UVs) that convert into each other, read by
@@ -1168,16 +1187,18 @@ class PaintTab(_GroomTab):
         self.empty.setVisible(False)
         column.addWidget(self.empty)
 
-        # A map row's info (the row's i): its kind, what reads it (a link into the Graph Editor),
-        # Use for (drive a param with it), and where it shows; its menu (Rename, Convert to, the
-        # image, Delete) is the row's last icon and the list's right-click.
-        self.info_popup = widgets.PopupPanel(self, width=260)
-        self.info_popup.setObjectName("mapInfoPopup")
-        self.info_title = QtWidgets.QLabel()
-        self.info_title.setProperty("role", "subheading")
-        self.info_popup.add(self.info_title)
-        self.kind_label = widgets.small_label("", wrap=True)
-        self.info_popup.add(self.kind_label)
+        # The picked map's info, always shown under the list (issue #138: Show on is used all the
+        # time, to take a map off the strands): its kind, what reads it (a link into the Graph
+        # Editor), Use for (drive a param with it), and where it shows; its menu (Rename, Convert
+        # to, the image, Delete) is the row's icon and the list's right-click.
+        self.info_popup = _InfoBlock()
+        self.info_popup.setObjectName("mapInfoBlock")
+        self.info_popup.setVisible(False)
+        column.addWidget(self.info_popup)
+        self.info_title = QtWidgets.QLabel()  # (the row picked names it: not shown)
+        self.info_title.setVisible(False)
+        self.kind_label = widgets.small_label("", wrap=True)  # (the kind's description: not shown in the block)
+        self.kind_label.setVisible(False)
         self.users = widgets.small_label("", wrap=True)
         self.users.setObjectName("mapUsers")
         self.info_popup.add(self.users)
@@ -1321,22 +1342,19 @@ class PaintTab(_GroomTab):
                           self.menu_state(), checked=lambda item: delete_map_files())
 
     def _row(self, m, color, lost):
-        """A map's row: its name (a lost image marked), RGBA on a color map, then i and the menu."""
+        """A map's row: its name (a lost image marked), RGBA on a color map, then its menu (its info
+        shows under the list when it is picked)."""
         name = m["name"]
         pick = lambda: self.select(name)  # noqa: E731
-        info = widgets.popup_button("info", "What reads %s, Use for, where it shows" % name, self.info_popup,
-                                    before=pick)
-        info.setObjectName("mapInfo_" + name)
         more = widgets.menu_button("Rename, convert, the image, delete", self.fill_row_menu, before=pick)
         more.setObjectName("mapMenu_" + name)
-        return widgets.ListRow(("\u26a0 " if lost else "") + name, "RGBA" if color else "", (info, more))
+        return widgets.ListRow(("\u26a0 " if lost else "") + name, "RGBA" if color else "", (more,))
 
     def show_reader(self):
         """The Graph Editor, on the first node reading the picked map."""
         users = groomlab.map_users(self.groom, self.current()) if self.groom and self.current() else []
         from groomlab.ui import graph_editor
         editor = graph_editor.show(self.groom)
-        self.info_popup.hide()
         if users and editor is not None:
             node = users[0][0]
             item = getattr(editor, "items", {}).get(node)
@@ -1635,6 +1653,7 @@ class PaintTab(_GroomTab):
             done()
 
     def map_changed(self, name, push=True):
+        self.info_popup.setVisible(bool(self.groom and name))
         if not self.groom:
             self.users.setText("")
             return

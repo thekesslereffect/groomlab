@@ -120,8 +120,8 @@ public:
     // The pieces (tests, screenshots).
     QListWidget* list() const { return list_; }
     ListBar* bar() const { return bar_; }  // the header's: + New Map, Import...
-    PopupPanel* infoPopup() const { return infoPopup_; }  // a row's ⓘ: kind, Read by, Use for, Show on
-    QFrame* mapBox() const { return box_; }               // (the info popup)
+    QFrame* infoBlock() const { return infoBlock_; }  // the picked map's: Read by, Use for, Show on (under the list)
+    QFrame* mapBox() const { return box_; }           // (the info block)
     QCheckBox* wholeFacesBox() const { return wholeFaces_; }  // Whole Faces (the Paint card's toggles row shows it as a chip)
     // A map's row menu (lists.json's maps context) and Use for's menu, filled for the picked map.
     void fillRowMenu(QMenu* menu);
@@ -173,7 +173,7 @@ private:
     ListHeader* header_ = nullptr;
     ListBar* bar_ = nullptr;
     QFrame* box_ = nullptr;  // (the info popup)
-    PopupPanel* infoPopup_ = nullptr;
+    QFrame* infoBlock_ = nullptr;
     QLabel* infoTitle_ = nullptr;
     QLabel* kindLabel_ = nullptr;
     QPushButton* openReader_ = nullptr;

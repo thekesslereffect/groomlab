@@ -167,6 +167,13 @@ struct ViewResult {
     // Active: the preview, else the authored one; posed and corrected. While a Sculpt node is the
     // brushes' target (GroomSession::setSculptTarget), that node's output as editable guides.
     HierarchyPtr hierarchy;
+    // What a host draws as the guides when not `hierarchy` (null: `hierarchy`): it with the guides
+    // the graph shapes before an Interpolate takes them (a Curl or Noise on a Guides node of one
+    // level's group, issue 130) laid in as shaped, so their guides and tubes show the graph's shapes
+    // and follow a level above combed. Drawing only: hover, pick, strokes and shot sculpts read
+    // `hierarchy` and the stored guides. None while a Sculpt node is the brushes' target.
+    HierarchyPtr drawnHierarchy;
+    HierarchyPtr drawn() const { return drawnHierarchy ? drawnHierarchy : hierarchy; }
     HierarchyPtr authoredHierarchy;  // as stored, rooted on the scalp (null without guide data)
     PartsPtr parts;                  // bound to the scalp (the preview's while set); null without
     FlowPtr flow;
@@ -1194,6 +1201,11 @@ private:
     EvalContext lastViewContext_;  // the last view's density, budget, time and viewport (no externals)
     // Show Tubes' mesh as last built (braidTubeMesh) and what it was built from.
     mutable std::shared_ptr<const BraidTubeMesh> braidTubes_;
+    // Issue 130: the guides the last evaluation's Interpolates take after nodes that shape them
+    // (shapedGuidesOf), and the hierarchy shown with them laid in (its key: what it was made from).
+    std::vector<GuidesPtr> shapedGuides_;
+    HierarchyPtr shapedShown_;
+    std::uint64_t shapedShownKey_ = 0;
     mutable std::uint64_t braidTubesKey_ = 0;
     // What the tubes of the Braid nodes `shown` names are built from, as one number (their names,
     // params and node versions, their inputs as last evaluated, the scalp; 0: no such node with

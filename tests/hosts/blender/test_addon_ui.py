@@ -489,11 +489,11 @@ class ToolsTest(unittest.TestCase):
         self.assertIn(("list", "maps"), log)
         bar = texts(log, "groomlab.map_new") + texts(log, "groomlab.map_import")
         self.assertEqual(bar, ["", ""])  # icons in the Maps header
-        # One line per map: its info (a popover) and its menu, the row picked first.
+        # One line per map: its menu, the row picked first; the picked map's info under the list
+        # (issue #138: no info popover).
         rows = [e[3] for e in log if e[0] == "op_text" and e[1] == "groomlab.row_popup"]
-        self.assertEqual([(r.rows, r.panel, r.menu) for r in rows],
-                         [("MAPS", "GROOMLAB_PT_map_info", ""), ("MAPS", "", "GROOMLAB_MT_map_context")])
-        info = drawn(palette.GROOMLAB_PT_map_info)
+        self.assertEqual([(r.rows, r.panel, r.menu) for r in rows], [("MAPS", "", "GROOMLAB_MT_map_context")])
+        info = log
         self.assertTrue(any(e[0] == "label" and e[1].startswith("Read by nothing") for e in info))
         for name in ("show_on_guides", "show_on_strands", "show_on_scalp"):
             self.assertIn(("prop", name), info)

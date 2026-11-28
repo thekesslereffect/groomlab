@@ -69,6 +69,8 @@
           {"setting": "tubeChannel", "value": "width"},
           {"setting": "tubeChannel", "value": "flatness"},
           {"setting": "tubeChannel", "value": "twist"},
+          {"action": "tube.makeBraid", "label": "Make Braid"},
+          {"action": "tube.unbraid", "label": "Unbraid"},
           {"action": "display.tubesAlways", "label": "Always Visible"}
         ],
         "roots": [

@@ -288,16 +288,29 @@ private:
     }
 };
 
-// Braided strands (a braidId of 0 or more) keep the points their weave is drawn with (Braid adds
-// them, by its resolution): fewer would draw the weave as a few flat zigzags.
-std::size_t keptPoints(const std::vector<float>* braid, const StrandSet& in, std::size_t s, std::size_t points) {
-    return braid && (*braid)[s] >= 0.0f ? std::max(points, in.strandPointCount(s)) : points;
-}
-void keepBraids(const StrandSet& in, std::vector<std::size_t>& points) {
-    const std::vector<float>* braid = in.strandChannel("braidId");
-    if (!braid) return;
-    for (std::size_t s = 0; s < points.size(); ++s) points[s] = keptPoints(braid, in, s, points[s]);
-}
+// Braided strands (a braidId of 0 or more): their own resolution (issue #133). With braidSegments
+// (above 0) that many segments (by curvature: at most that many, fewer on their straight runs);
+// with 0 the points their weave is drawn with (Braid adds them, by its resolution: `segments`
+// would draw the weave as a few flat zigzags), at least `points` (even, length), or by curvature
+// at most those (the weave kept, a straight tail thinned). Before issue #133 a braided strand
+// always kept its points, and a Resample after a Braid did nothing to it.
+struct BraidPoints {
+    const std::vector<float>* braid = nullptr;
+    int segments = 0;           // braidSegments
+    bool byCurvature = false;
+    float perSegment = 0.0f;    // by curvature: maxAngle in radians
+    int least = 1;              // by curvature: minSegments
+
+    bool braided(std::size_t s) const { return braid && (*braid)[s] >= 0.0f; }
+    std::size_t of(const StrandSet& in, std::size_t s, std::size_t points) const {
+        if (!braided(s)) return points;
+        const std::size_t own = in.strandPointCount(s);
+        const int most = segments > 0 ? segments : static_cast<int>(std::max<std::size_t>(own, 2) - 1);
+        if (byCurvature) return curvaturePoints(in.strandPoints(s), own, perSegment, std::min(least, most), most);
+        if (segments > 0) return static_cast<std::size_t>(segments) + 1;
+        return std::max(points, own);
+    }
+};
 
 // Sets the strands' resolution, best after Interpolate: strands (or guides)
 // through it are resampled to `segments`, and every Scatter before it grows its
@@ -315,7 +328,7 @@ void keepBraids(const StrandSet& in, std::vector<std::size_t>& points) {
 //              `segments`), placed closer together where it bends and farther
 //              apart on straight runs. `segments` stays the working resolution
 //              (Scatter grows with it), so curls are shaped in full detail first
-// Braided strands keep the points their weave is drawn with (keptPoints).
+// Braided strands: their own resolution, braidSegments (BraidPoints).
 class ResampleOp : public Operator {
 public:
     std::string typeName() const override { return op::kResample; }
@@ -343,7 +356,23 @@ public:
                 .atLeast(0.5)
                 .soft(1, 45)
                 .when("mode", {"curvature"}),
+            notAnimatable({"braidSegments", std::int64_t{0}, "Segments per braided strand (a Braid's woven hair): 0 keeps "
+                                                             "the points the Braid weaves them with (Braid's resolution; "
+                                                             "with curvature, fewer on their straight runs); above 0, that "
+                                                             "many (curvature: at most that many)"})
+                .range(0, 4096)
+                .soft(0, 256),
         };
+    }
+
+    BraidPoints braidPoints(const StrandSet& in, const std::string& mode) const {
+        BraidPoints b;
+        b.braid = in.strandChannel("braidId");
+        b.segments = static_cast<int>(params().getInt("braidSegments"));
+        b.byCurvature = mode == "curvature";
+        b.perSegment = static_cast<float>(params().getDouble("maxAngle")) * 0.0174532925f;
+        b.least = std::max(1, static_cast<int>(params().getInt("minSegments")));
+        return b;
     }
 
     // Even or by curvature: only the changed strands are resampled again. Each keeping its point
@@ -364,7 +393,7 @@ public:
             return false;
         }
         const std::size_t count = in->strandCount();
-        const std::vector<float>* braid = in->strandChannel("braidId");
+        const BraidPoints braids = braidPoints(*in, mode);
         // Each changed strand's count, as a full evaluation finds it.
         ProfilePhases phase("resample.counts");
         std::vector<std::size_t> counts(changes->strands.size());
@@ -372,11 +401,11 @@ public:
             // Every strand at its count already: a full evaluation hands the input on as it is.
             bool same = true;
             for (std::size_t s = 0; s < count && same; ++s) {
-                same = in->strandPointCount(s) == keptPoints(braid, *in, s, static_cast<std::size_t>(segments) + 1);
+                same = in->strandPointCount(s) == braids.of(*in, s, static_cast<std::size_t>(segments) + 1);
             }
             if (same) return false;
             for (std::size_t k = 0; k < counts.size(); ++k) {
-                counts[k] = keptPoints(braid, *in, changes->strands[k], static_cast<std::size_t>(segments) + 1);
+                counts[k] = braids.of(*in, changes->strands[k], static_cast<std::size_t>(segments) + 1);
             }
         } else {
             // By its turning. (Without `segments` the most any strand gets is the input's most
@@ -392,8 +421,8 @@ public:
             const float perSegment = static_cast<float>(params().getDouble("maxAngle")) * 0.0174532925f;
             parallelFor(0, counts.size(), [&](std::size_t k) {
                 const std::size_t s = changes->strands[k];
-                const std::size_t points = curvaturePoints(in->strandPoints(s), in->strandPointCount(s), perSegment, least, most);
-                counts[k] = keptPoints(braid, *in, s, points);
+                counts[k] = braids.braided(s) ? braids.of(*in, s, 0)
+                                              : curvaturePoints(in->strandPoints(s), in->strandPointCount(s), perSegment, least, most);
             }, 128);
         }
         bool recount = false;
@@ -484,7 +513,8 @@ public:
         }
         const bool adaptive = mode != "even";
         const bool byLength = mode == "length";
-        if ((segments == 0 && !adaptive) || in->empty()) return in;
+        const BraidPoints braids = braidPoints(*in, mode);
+        if ((segments == 0 && !adaptive && !(braids.braid && braids.segments > 0)) || in->empty()) return in;
         const std::size_t count = in->strandCount();
         std::vector<std::size_t> points(count, static_cast<std::size_t>(segments) + 1);
         if (adaptive) {
@@ -535,7 +565,16 @@ public:
                 }
             }
         }
-        keepBraids(*in, points);
+        if (braids.braid) {
+            for (std::size_t s = 0; s < count; ++s) {
+                if (braids.braided(s)) points[s] = braids.of(*in, s, segments > 0 || adaptive ? points[s] : in->strandPointCount(s));
+            }
+        }
+        if (segments == 0 && !adaptive) {  // (braidSegments alone: the other strands as they are)
+            for (std::size_t s = 0; s < count; ++s) {
+                if (!braids.braided(s)) points[s] = in->strandPointCount(s);
+            }
+        }
         if (mode != "curvature") {  // curvature moves the points even at the same count
             bool same = true;
             for (std::size_t s = 0; s < count && same; ++s) same = in->strandPointCount(s) == points[s];

@@ -50,6 +50,7 @@
 #include "groomlab/stroke.h"
 #include "groomlab/texture.h"
 #include "groomlab/tube.h"
+#include "groomlab/tube_braids.h"
 #include "groomlab/view_projection.h"
 
 #include "request.h"
@@ -1413,13 +1414,13 @@ json guideSegments(ToolState& t, const json& args) {
 // ---- Tubes (Maya's groomLabGuides -setTube, -tube, -tubeTargets, -tubeShapes, -editTubeShape) ----
 
 // A tube edit (editedTube's JSON, widths in host units) on each target guide: one undo step.
-json tubeEdit(ToolState& t, const json& args, const std::string& label, const json& edit) {
+json tubeEdit(ToolState& t, const json& args, const std::string& label, const json& edit, bool allWhenNone = false) {
     const std::string text = tubeEditToGroom(t.session.space, edit);
     std::size_t changed = 0;
     std::string note;  // (root tubes that kept their drawn root: editTubes says how many)
     editGuides(t, label, [&](GuideHierarchy& h) {
         try {  // every host's (the editor's editTubes, guide_edits.h)
-            changed = editTubes(h, targetGuides(t, h, args, false, label), text, &note);
+            changed = editTubes(h, targetGuides(t, h, args, allWhenNone, label), text, &note);
         } catch (const GuideEditError& e) {
             fail(e.code, e.what());
         }
@@ -1452,6 +1453,57 @@ json tubeSmooth(ToolState& t, const json& args) {
         fail("bad_request", e.what());
     }
     return tubeEdit(t, args, "smooth tube", json::parse(edit));
+}
+
+// The Tube tool's Fill (issue #135): one channel ("width" in host units, "flatness", "twist"
+// radians) set on each target's tube root to tip (tubeFillEdit, every host's): one undo step.
+// Targets: "ids", a "group" or a "level", else the selection, else every guide.
+json tubeFill(ToolState& t, const json& args) {
+    const std::string channel = needString(args, "channel");
+    float value = settingNumber(need(args, "value"), "value");
+    if (channel == "width") value = static_cast<float>(toGroomLength(t.session.space, value));
+    std::string edit;
+    try {
+        edit = tubeFillEdit(channel, value);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    }
+    return tubeEdit(t, args, "fill tube " + channel, json::parse(edit), true);
+}
+
+// Make Braid / Unbraid (issue 129, tube_braids.h): the tubes "guides" (none: the selection, else
+// the root tool's selected roots) marked as braids ("on", default true) or not: one undo step.
+// The graph's tube Braid is the add-on's edit_graph insert_tube_braid.
+json tubeBraid(ToolState& t, const json& args) {
+    pruneSelection(t);
+    std::vector<GuideId> guides;
+    if (args.contains("guides") && !args["guides"].is_null()) {
+        guides = idsOf(args["guides"]);
+    } else if (!t.selection.empty()) {
+        guides.assign(t.selection.begin(), t.selection.end());
+    } else {
+        const auto& picked = t.tool.roots().selected();
+        guides.assign(picked.begin(), picked.end());
+    }
+    if (guides.empty()) fail("state", "select tubes first (any level; or a root with Select root)");
+    const bool on = optBool(args, "on", true);
+    const std::size_t before = t.host.edits().size();
+    std::size_t changed = 0;
+    editGuides(t, on ? "make braid" : "unbraid", [&](GuideHierarchy& h) { changed = h.setBraid(guides, on); });
+    const bool committed = t.host.edits().size() != before;
+    if (committed) {
+        t.redoLabels.clear();
+        t.redoMaps.clear();
+    }
+    return {{"changed", changed}, {"committed", committed}, {"undo", undoJson(t)}};
+}
+
+// Each guide's braid tube (braidTubeOf: the outermost marked tube of its lineage), 0: none.
+json braidOf(ToolState& t, const json& args) {
+    const HierarchyPtr h = t.session.groom->authoredHierarchy();
+    json out = json::array();
+    for (const GuideId g : idsOf(need(args, "guides"))) out.push_back(h ? braidTubeOf(*h, g) : GuideId{0});
+    return {{"braids", out}};
 }
 
 json tubeGet(ToolState& t, const json& args) {
@@ -2610,6 +2662,9 @@ json display(ToolState& t, const json& args) {
     // and the app's viewports show them).
     const HierarchyPtr sculpted = session.sculptTarget().empty() ? nullptr : session.sculptHierarchy();
     in.hierarchy = sculpted ? sculpted : session.hierarchy();
+    // The guides the graph shapes (a Curl or Noise on one level's Guides node, issue 130) drawn as
+    // shaped: the view's drawn hierarchy while what is shown is the one it was made from.
+    if (!sculpted && last.drawnHierarchy && in.hierarchy == last.hierarchy) in.hierarchy = last.drawnHierarchy;
     in.hierarchyVersion = in.hierarchy ? hashCombine(in.hierarchy->contentHash(), reinterpret_cast<std::uintptr_t>(in.hierarchy.get())) : 0;
     in.stroke = session.hasPreview();
     pruneSelection(t);
@@ -2884,7 +2939,7 @@ json toolCatalogJson() {
                          {"signed", e.signedStrength},
                          {"hint", e.hint},
                          {"settings", e.settings},
-                         {"corrective", e.corrective}});
+                         {"corrective", e.corrective}, {"sculptNode", e.sculptNode}});
     }
     json categories = json::array();
     for (const BrushCategory c : brushCategories()) categories.push_back(brushCategoryName(c));
@@ -3006,7 +3061,7 @@ bool isToolCommand(const std::string& cmd) {
         "select",    "selection_get", "selection_set", "pick_level",   "set_hidden_groups", "guides_info", "guides_edit", "maps_list",
         "map_create", "map_remove",   "map_for_param", "undo",        "redo",          "undo_state",  "display",
         // Groom Tools' Tubes section, Segments slider, parts and flow, map management.
-        "tube_targets", "tube_get", "tube_set", "tube_scale", "tube_smooth", "tube_shapes", "tube_shape_add", "tube_shape_set",
+        "tube_targets", "tube_get", "tube_set", "tube_scale", "tube_smooth", "tube_fill", "tube_braid", "braid_of", "tube_shapes", "tube_shape_add", "tube_shape_set",
         "tube_shape_rename", "tube_shape_remove", "tube_shape_preview", "guides_preview", "guides_preview_end", "guide_segments",
         "parts_list", "part_add", "part_remove", "parts_clear", "parts_mirror", "flow_clear", "flow_mirror", "map_rename", "map_convert", "map_set_channels",
         "map_fill", "map_import", "map_relink", "map_reload", "map_users", "maps_move_to", "files_collect",
@@ -3111,6 +3166,9 @@ bool runEditCommand(ToolState& t, const std::string& cmd, const json& args, Bloc
         {"tube_set", [](ToolState& t, const json& a, BlockReader&) { return tubeSet(t, a); }},
         {"tube_scale", [](ToolState& t, const json& a, BlockReader&) { return tubeScale(t, a); }},
         {"tube_smooth", [](ToolState& t, const json& a, BlockReader&) { return tubeSmooth(t, a); }},
+        {"tube_fill", [](ToolState& t, const json& a, BlockReader&) { return tubeFill(t, a); }},
+        {"tube_braid", [](ToolState& t, const json& a, BlockReader&) { return tubeBraid(t, a); }},
+        {"braid_of", [](ToolState& t, const json& a, BlockReader&) { return braidOf(t, a); }},
         {"tube_shapes", [](ToolState& t, const json&, BlockReader&) { return tubeShapes(t); }},
         {"tube_shape_add", [](ToolState& t, const json& a, BlockReader&) { return tubeShapeEdit(t, "add", a); }},
         {"tube_shape_set", [](ToolState& t, const json& a, BlockReader&) { return tubeShapeEdit(t, "set", a); }},
@@ -3552,10 +3610,14 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
                     roots.endDuplicate();
                 } else if (edit == "delete") {
                     roots.deleteSelected(t.host);
+                } else if (edit == "selectShown") {  // Shift+click on Select root: the level in view's roots
+                    t.selectTool = false;
+                    t.tool.settings.setMode("roots");
+                    roots.selectShown(t.host);
                 } else if (edit == "sync") {
                     roots.sync(t.host);
                 } else {
-                    throw std::invalid_argument("root_edit takes start, leave, finish, undoCv, duplicate, endDuplicate, delete or sync");
+                    throw std::invalid_argument("root_edit takes start, leave, finish, undoCv, duplicate, endDuplicate, delete, selectShown or sync");
                 }
             });
         }
@@ -3634,6 +3696,20 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         const std::string picked = optString(args, "picked", "");
         if (cmd == "tube_levels") {
             result = tubeLevelsJson(*h, guides, picked);
+            // (Comb shows the levels' row only on a groom with tube levels or root tubes: #132.)
+            result["hasTubes"] = result["levels"].size() > 1 || !rootTubesOf(*h).empty();
+            // The graph's tube Braid (Make braid's) and its sections' Sculpt node: the level row's
+            // Braid (issue 129), on while the brushes shape that node.
+            try {
+                const GraphEdit edit(s.groom->data().graphJson);
+                const std::string braid = tubeBraidNode(edit);
+                const std::string sculpt = braid.empty() ? std::string() : braidSculptNode(edit, braid);
+                result["braid"] = braid;
+                result["braidSculpting"] = !sculpt.empty() && s.groom->sculptTarget() == sculpt;
+            } catch (const std::exception&) {
+                result["braid"] = "";
+                result["braidSculpting"] = false;
+            }
             return true;
         }
         if (cmd == "tube_level_show") {

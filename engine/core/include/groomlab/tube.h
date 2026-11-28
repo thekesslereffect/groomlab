@@ -119,7 +119,11 @@ struct CustomTubeShape {
     std::string name;
     std::vector<SectionPoint> points;  // fitted: the outline's box -1 to 1, counter-clockwise
     bool smooth = true;
-    std::uint64_t hash = 0;  // the points and smooth (not the name)
+    // Its origin kept (a cut's cell, a split's half: its guide leaves the middle of its root, the
+    // area's centroid, not its box's): the points scaled about (0, 0) so the farthest reaches 1
+    // each way, not moved onto the box's middle. Saved ("origin").
+    bool origin = false;
+    std::uint64_t hash = 0;  // the points, smooth and origin (not the name)
     TubeOutline outline;     // sampled: kTubeOutlinePoints evenly along it, the corners in place
 };
 using CustomTubeShapePtr = std::shared_ptr<const CustomTubeShape>;
@@ -160,7 +164,10 @@ constexpr std::size_t kMaxTubeShapePoints = 64;
 // clockwise). Throws std::invalid_argument, saying what to fix, when the name is not a good one
 // (checkTubeShapeName), the points are too few or too many, not numbers or all on a line, the
 // outline crosses itself, or it does not enclose its center (the guide runs through the center).
-CustomTubeShapePtr makeCustomTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth);
+// `origin`: the points' (0, 0) kept as the center, the outline scaled about it so its farthest
+// point each way is at 1 (CustomTubeShape::origin), not centered on its box.
+CustomTubeShapePtr makeCustomTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth,
+                                       bool origin = false);
 // Throws std::invalid_argument unless `name` can name a library shape: 1 to 64 characters, letters,
 // digits, spaces, '_', '-' and '.', not starting or ending with a space, not a built-in's name.
 void checkTubeShapeName(const std::string& name);
@@ -439,7 +446,8 @@ private:
 // `library`'s; "midShape" or "tipShape" null or "": unset; "rootHold", "midHold", "tipHold", "midAt":
 // 0 to 1, written where not 0, 0, 0, 0.5) (a number: that value all along; a list:
 // evenly spaced root to tip), what it leaves out stays; "scaleWidth" multiplies every width (after
-// "width": a tube scaled as a whole, its taper kept); "samples" (2 or more) resamples all three
+// "width": a tube scaled as a whole, its taper kept); "fitWidth" scales it so its widest section
+// is that (times scale; the Tube tool's Fill, every tube its own factor); "samples" (2 or more) resamples all three
 // lists to that many; "smooth" ("width", "aspect", "twist" or "all") smooths those lists
 // (smoothedTube, at `points` samples or the lists' own count where that is more) "passes" times
 // (default 3). Widths are divided by scale (a host's shown size to the stored).
@@ -452,6 +460,11 @@ std::string tubeToJson(const TubeProfile& tube, float scale = 1.0f);
 TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, float scale = 1.0f, std::size_t points = 0,
                        const TubeShapeLibrary* library = nullptr);
 std::string tubeSmoothEdit(const std::string& channel, int passes = 3);
+// tubeFillEdit: the Tube tool's Fill (issue #135, every host's) as that edit's JSON text: one
+// channel set root to tip: "width" (fitWidth `value`, in the edit's scale: each tube scaled so its
+// widest section is that, its taper kept), "flatness" (0 as drawn .. 0.99: the aspect it sets) or
+// "twist" (radians). std::invalid_argument for another channel or a negative width.
+std::string tubeFillEdit(const std::string& channel, float value);
 
 // The Tube card's Width, Flatness and Twist (every host's) for a tube's lists: its widest width
 // (0.1 for none: what Width scales from), 1 - its mean aspect (0 to 0.99) and its mean twist

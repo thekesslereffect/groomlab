@@ -66,6 +66,8 @@ std::uint64_t hashGuide(std::uint64_t h, const Guide& g) {
             for (const float r : g.tube.roll) h = hashFloat(h, r);
         }
         if (g.depth != 0) h = hashCombine(h, static_cast<std::uint64_t>(g.depth) + 0xDE7u);
+        if (g.braid) h = hashCombine(h, 0xB4A1Du);  // (none: as it always has)
+        if (g.parentId != 0) h = hashCombine(h, g.parentId ^ 0x9A4E47u);
     return h;
 }
 

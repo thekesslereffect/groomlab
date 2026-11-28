@@ -575,6 +575,50 @@ TEST(SimulateNode, GuidesSavedOnAnotherTopologyFollowAMovingScalp) {
     EXPECT_LT(worst, 1e-3f) << "the guides did not move with the scalp";
 }
 
+TEST(ShapedGuides, ACurlOnTheGuidesIsDrawnOnThoseGuides) {
+    // Issue 130: a Curl between the Guides node and the Interpolate: the viewport draws those
+    // guides curled (ViewResult::drawnHierarchy), their stored shapes untouched (hierarchy), and
+    // without the Curl nothing is laid in.
+    std::string graph = R"({
+  "version": 1,
+  "nodes": [
+    {"name": "scalp", "type": "Scalp"},
+    {"name": "guides", "type": "Guides"},
+    {"name": "curl", "type": "Curl", "params": {"radius": 0.1, "frequency": 3.0, "randomness": 0.0}},
+    {"name": "scatter", "type": "Scatter", "params": {"density": 60.0}},
+    {"name": "interpolate", "type": "Interpolate"},
+    {"name": "output", "type": "Output"}
+  ],
+  "connections": [
+    {"from": "scalp", "to": "scatter", "input": "scalp"},
+    {"from": "scatter", "to": "interpolate", "input": "strands"},
+    {"from": "guides", "to": "curl", "input": "strands"},
+    {"from": "curl", "to": "interpolate", "input": "guides"},
+    {"from": "scalp", "to": "interpolate", "input": "scalp"},
+    {"from": "interpolate", "to": "output", "input": "strands"}
+  ],
+  "output": "output"
+})";
+    GroomSession session(simData(graph));
+    ViewRequest request;
+    const ViewResult& view = session.evaluate(request);
+    ASSERT_TRUE(view.errors.empty()) << view.errors.front();
+    ASSERT_TRUE(view.hierarchy && view.drawnHierarchy);
+    ASSERT_EQ(view.drawn(), view.drawnHierarchy);
+    std::size_t curled = 0;
+    for (const HierarchyGuide& g : view.drawnHierarchy->guides()) {
+        const HierarchyGuide* stored = view.hierarchy->guide(g.id);
+        ASSERT_TRUE(stored);
+        curled += g.points != stored->points ? 1 : 0;
+    }
+    EXPECT_EQ(curled, view.hierarchy->guides().size()) << "every guide drawn curled";
+
+    GroomSession plain(simData(unsimulatedGraph()));
+    const ViewResult& straight = plain.evaluate(request);
+    EXPECT_FALSE(straight.drawnHierarchy) << "no node shapes the guides: drawn as stored";
+    EXPECT_EQ(straight.drawn(), straight.hierarchy);
+}
+
 TEST(SimulateNode, MovesTheGuidesTheStrandsFollow) {
     GroomSession session(simData());
     GroomSession still(simData(unsimulatedGraph()));

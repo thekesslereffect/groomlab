@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "size": 20.0,
+  "about": {"title": "Braids and tubes", "category": "Braids", "description": "Braids among plain hair on root tubes: draw roots with the Roots brush (and split or subdivide them with the Tube hierarchy), then select some tubes and Make braid. The marked tubes' hair (with every tube under them) goes into three-strand braids as wide as their tubes, tied near the end and finished in a tuft; every other tube's hair stays as its tube shapes it. Hair grows only on the tubes' roots (Scatter's guide radius), as in Tube locks. Two Clumps after the Braid: hairClump clumps the plain tubes' hair (soft clumps following the tubes, affect 1 - $braidWoven), braidClump the hair inside each braid section (small locks, affect $braidWoven). Sculpt Sections on the Braid node brushes the braids."},
+  "exposed": [
+    {"node": "braid", "param": "style", "name": "braidStyle"},
+    {"node": "braid", "param": "tubeWidth", "name": "braidWidth"},
+    {"node": "braid", "param": "tightness", "name": "tightness"},
+    {"node": "hairClump", "param": "strength", "name": "hairClumpStrength"},
+    {"node": "hairClump", "param": "size", "name": "hairClumpSize"},
+    {"node": "braidClump", "param": "strength", "name": "braidClumpStrength"},
+    {"node": "noise", "param": "amplitude", "name": "frizz"},
+    {"node": "color", "param": "melanin", "name": "melanin"}
+  ],
+  "nodes": [
+    {"name": "scalp", "type": "Scalp", "ui": {"x": 0, "y": 0}},
+    {"name": "guides", "type": "Guides", "ui": {"x": 0, "y": 180}},
+    {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 15.0, "guideRadius": 1.0}, "ui": {"x": 240, "y": 0}},
+    {"name": "interpolate", "type": "Interpolate", "params": {"fillTubes": true, "tubeBlend": 0.35}, "ui": {"x": 480, "y": 0}},
+    {"name": "braid", "type": "Braid", "params": {"join": "tube", "style": "three", "tubeWidth": 1.0, "tightness": 1.25, "gather": 0.08, "gatherSmoothness": 0.3, "end": "tuft", "tail": 0.1, "tailSmoothness": 0.4, "ties": 1, "cinch": 0.5, "tieLength": 0.5, "clumpChannel": ""}, "ui": {"x": 720, "y": 0}},
+    {"name": "hairClump", "type": "Clump", "params": {"clumpBy": "size", "size": 0.6, "strength": 0.5, "followTubes": true, "affect": {"expression": "1 - $braidWoven"}, "profile": [[0, 0], [0.3, 0.25], [0.8, 0.6], [1, 0.7]]}, "ui": {"x": 960, "y": 0}},
+    {"name": "braidClump", "type": "Clump", "params": {"clumpBy": "count", "count": 5000, "centersFrom": "upstreamClump", "upstreamChannel": "braidSection", "size": 1.0, "repelRadius": 0.5, "strength": 0.43, "randomness": 0.38, "affect": {"expression": "$braidWoven"}, "profile": [[0, 0], [0.2257, 0.8784], [1, 1]]}, "ui": {"x": 1200, "y": 0}},
+    {"name": "hairTie", "type": "Instance", "params": {"prototype": "groomlab:hairTie", "sizeMode": "fitStrand", "fitWidth": true, "fitScale": 0.85, "orient": "strand", "count": 1, "probability": 1.0, "spinRandom": 1.0, "aspect": 0.92, "scale": 0.02}, "ui": {"x": 1440, "y": 0}},
+    {"name": "noise", "type": "Noise", "params": {"amplitude": 0.02, "frequency": 2.0}, "ui": {"x": 1680, "y": 0}},
+    {"name": "color", "type": "HairColor", "params": {"melanin": 0.55, "redness": 0.1, "melaninRandom": 0.04}, "ui": {"x": 1920, "y": 0}},
+    {"name": "width", "type": "Width", "params": {"width": 0.007, "profile": [[0, 1], [0.6, 0.85], [1, 0.1]]}, "ui": {"x": 2160, "y": 0}},
+    {"name": "output", "type": "Output", "ui": {"x": 2400, "y": 0}}
+  ],
+  "connections": [
+    {"from": "scalp", "to": "scatter", "input": "scalp"},
+    {"from": "guides", "to": "scatter", "input": "guides"},
+    {"from": "scatter", "to": "interpolate", "input": "strands"},
+    {"from": "guides", "to": "interpolate", "input": "guides"},
+    {"from": "scalp", "to": "interpolate", "input": "scalp"},
+    {"from": "interpolate", "to": "braid", "input": "strands"},
+    {"from": "guides", "to": "braid", "input": "braids"},
+    {"from": "braid", "to": "hairClump", "input": "strands"},
+    {"from": "hairClump", "to": "braidClump", "input": "strands"},
+    {"from": "braidClump", "to": "hairTie", "input": "strands"},
+    {"from": "braid", "to": "hairTie", "input": "along", "output": "ties"},
+    {"from": "hairTie", "to": "noise", "input": "strands"},
+    {"from": "noise", "to": "color", "input": "strands"},
+    {"from": "color", "to": "width", "input": "strands"},
+    {"from": "width", "to": "output", "input": "strands"}
+  ],
+  "output": "output"
+}

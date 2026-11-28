@@ -49,6 +49,10 @@ struct BrushEntry {
     // record as point offsets, and Select. Not the tools that add or remove things, paint
     // attributes or tubes (BrushTool refuses those while a corrective is picked).
     bool corrective = false;
+    // It works on a Sculpt node's guides too (the corrective ones, and the Tube brush: a Braid's
+    // sections' width, flatness and twist, issue 129; a SculptStrands node refuses it, its strands
+    // having no tubes).
+    bool sculptNode = false;
     bool hasSetting(const std::string& setting) const;
 };
 

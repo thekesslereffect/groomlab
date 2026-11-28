@@ -38,6 +38,7 @@
 #include "groomlab/guide_set.h"
 #include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
+#include "groomlab/tube_braids.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/guide_selection.h"
 #include "maya_inputs.h"
@@ -105,8 +106,8 @@ const char* kMirrorShapes[] = {"-msh", "-mirrorShapes"};
 const char* kSymmetry[] = {"-sym", "-symmetry"};
 // Root-first tubes and the tube hierarchy (root_tubes.h), and subdividing roots
 // (root_subdivision.h): one JSON request {"op", ...}. Edits ("make", "edit", "keepOutline",
-// "duplicate", "delete", "addLevel", "removeLevel", "subdivide", "applyDensity") are one undo step; queries
-// ("densityMap", "overlaps" too)
+// "duplicate", "delete", "addLevel", "removeLevel", "subdivide", "applyDensity", "braid") are one undo
+// step; queries ("densityMap", "overlaps", "braidOf" too)
 // ("outline", "sectionOutline", "center", "rootTubes", "levels", "levelVisibility",
 // "footprintError", "carry", "sealed", "surface") change nothing. Returns JSON.
 const char* kRootTubes[] = {"-rtb", "-rootTubes"};
@@ -971,6 +972,11 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         return answer({points({c.point})[0], points({c.normal})[0]});
                     }
                     if (op == "rootTubes") return answer(rootTubesOf(*h, ids("guides")));
+                    if (op == "braidOf") {  // each guide's braid tube (tube_braids.h braidTubeOf), 0: none
+                        nlohmann::json out = nlohmann::json::array();
+                        for (const GuideId g : ids("guides")) out.push_back(braidTubeOf(*h, g));
+                        return answer(out);
+                    }
                     if (op == "levels") {
                         const TubeLevels t = tubeLevels(*h, ids("guides"), request.value("picked", std::string()));
                         return answer({{"base", t.base.empty() ? nlohmann::json() : nlohmann::json(t.base)}, {"levels", t.levels}});
@@ -1050,6 +1056,8 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         result = duplicateRootTube(*h, *scalp, guide, vec(request.at("to")), given ? &start : nullptr);
                     } else if (op == "delete") {
                         result = deleteRootTubes(*h, *scalp, ids("guides"));
+                    } else if (op == "braid") {  // Make Braid / Unbraid (tube_braids.h)
+                        result = h->setBraid(ids("guides"), request.value("on", true));
                     } else if (op == "addLevel") {
                         result = addTubeLevel(*h, scalp.get(), ids("guides"), request.value("picked", std::string()));
                     } else if (op == "removeLevel") {

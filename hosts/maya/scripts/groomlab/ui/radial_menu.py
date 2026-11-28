@@ -276,6 +276,13 @@ def edit_roots():
     _root_card().edit_root.click()
 
 
+def make_braid(on=True):
+    """The Tube brush's Make braid (Unbraid): on the selected tubes, the brush kept."""
+    from groomlab.ui import palette
+    window = palette.current() or palette.show()
+    window.root_card.braid_clicked(on)
+
+
 # id: (run, state or None). A state makes the item checked (or, with offLabel, its label).
 ACTIONS = {
     "mask.full": (mask_full, None),
@@ -289,6 +296,8 @@ ACTIONS = {
     "display.tubesAlways": (toggle_tubes_always, tubes_always),
     "tube.drawRoot": (draw_root, lambda: root_mode("draw")),
     "tube.editRoot": (edit_roots, lambda: root_mode("edit")),
+    "tube.makeBraid": (lambda: make_braid(True), None),
+    "tube.unbraid": (lambda: make_braid(False), None),
 }
 
 

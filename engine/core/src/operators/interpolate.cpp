@@ -186,6 +186,7 @@
 #include "groomlab/scalp_pieces.h"
 #include "groomlab/surface_paths.h"
 #include "groomlab/texture.h"
+#include "groomlab/tube_braids.h"
 #include "incremental.h"
 #include "internal.h"
 
@@ -820,8 +821,12 @@ private:
 // be in the tube, in the root section's larger half-extents.
 constexpr float kTubeAlongReach = 4.0f;
 // How far outside a deeper tube of its root a strand no deeper tube holds may lie and still be
-// taken by it (the gaps between a split's slices), in the tube's larger half-extents.
+// taken by it (the gaps between a split's slices), in the tube's larger half-extents: for tubes
+// whose parent is not known (guides from before Guide::parentId). Known, a tube under the one
+// holding the strand takes it however far (fillTubes' gather).
 constexpr float kTubeAdoptReach = 0.5f;
+// Samples across a root tube's footprint (per side) measuring how far its tubes gather their hair.
+constexpr int kGatherSamples = 48;
 
 // Words per strand in the tubes the kernel reads (look_run.h InterpolateInputs::tubes, look.slang tubeOf).
 constexpr std::size_t kTubeStrandWords = 24;
@@ -836,11 +841,16 @@ struct TubeFill {
     std::vector<int> depths;
     std::vector<std::uint64_t> ids;
     std::vector<std::uint64_t> bases;  // each tube's level-0 ancestor's ID (Guide::baseId; its own when 0)
+    std::vector<std::uint64_t> parents;  // each tube's parent's ID (Guide::parentId; 0: none, or not known)
     // How far under each tube's footprint (along its normal, scene units) a strand's root may lie and
     // still be its: a little under its root loop's deepest point (a drawn root's patch is no deeper);
     // -infinity for a tube with no loop (kTubeAlongReach alone).
     std::vector<float> deepest;
     std::vector<float> numbers;
+    // Each tube's braid (tube_braids.h): the number of the braid it lies in, -1: none. All -1 (or
+    // empty) when no tube is marked a braid: no tubeBraid channel then.
+    std::vector<float> braids;
+    bool anyBraid = false;
     std::vector<std::int32_t> tubeOf;
     // Each strand's level-0 tube: the one holding its root, else the nearest within reach (-1: none;
     // tubeBase takes it for a strand no tube holds).
@@ -1182,7 +1192,7 @@ public:
         const std::string region = params().getString("regionChannel");
         if (!params().getString("regionMap").empty() && !region.empty()) out.push_back({region, "regionChannel"});
         if (fillsTubes()) {
-            for (const char* name : {"tubeId", "tubeU", "tubeV"}) out.push_back({name, ""});
+            for (const char* name : {"tubeId", "tubeU", "tubeV", "tubeBraid"}) out.push_back({name, ""});
         }
         return out;
     }
@@ -1624,6 +1634,16 @@ private:
             if (!same) return false;
             for (std::size_t g = 0; g < kept.size(); ++g) {
                 if (kept[g]->id != made.kept[g]->id) return false;  // guides added, erased or reordered
+                // A tube marked a braid or unbraided (tube_braids.h): every strand's tubeBraid anew.
+                if (kept[g]->braid != made.kept[g]->braid || kept[g]->parentId != made.kept[g]->parentId) return false;
+            }
+            if (fillTubes) {  // (the other levels' marks alike)
+                const std::vector<Guide>* now = guides->levelTubes().get();
+                const std::vector<Guide>* was = made.guides ? made.guides->levelTubes().get() : nullptr;
+                if ((now ? now->size() : 0) != (was ? was->size() : 0)) return false;
+                for (std::size_t i = 0; now && i < now->size(); ++i) {
+                    if ((*now)[i].braid != (*was)[i].braid || (*now)[i].parentId != (*was)[i].parentId) return false;
+                }
             }
         }
         // Incrementally, the guides that changed (the others take their rows as made).
@@ -1676,11 +1696,19 @@ private:
             fill->deepest.assign(tubes, -std::numeric_limits<float>::infinity());
             fill->ids.resize(tubes);
             fill->bases.resize(tubes);
+            fill->parents.assign(tubes, 0);
+            fill->braids.assign(tubes, -1.0f);
+            const TubeBraids braids = tubeBraids(*guides);
             for (std::size_t k = 0; k < tubes; ++k) {
                 const Guide& g = k < kept.size() ? *kept[k] : (*levelTubes)[k - kept.size()];
                 fill->depths[k] = g.depth;
                 fill->ids[k] = g.id;
                 fill->bases[k] = g.baseId ? g.baseId : g.id;
+                fill->parents[k] = g.parentId;
+                if (const int b = braids.of(g.id); b >= 0) {
+                    fill->braids[k] = braids.numbers[static_cast<std::size_t>(b)];
+                    fill->anyBraid = true;
+                }
             }
             if (levelTubes) {  // the other levels' tubes, along their guides as the kept ones' below
                 parallelFor(0, levelTubes->size(), [&](std::size_t i) {
@@ -2296,6 +2324,8 @@ private:
         std::vector<float>& us = out.addStrandChannel("tubeU", 0.0f);
         std::vector<float>& vs = out.addStrandChannel("tubeV", 0.0f);
         std::vector<float>& bases = out.addStrandChannel("tubeBase", -1.0f);
+        // tubeBraid (tube_braids.h): the braid the strand's tube lies in, for a Braid joining by tube.
+        std::vector<float>* braids = fill.anyBraid ? &out.addStrandChannel("tubeBraid", -1.0f) : nullptr;
         std::unordered_map<std::uint64_t, float> numberOf;  // a tube's ID: its number
         for (std::size_t k = 0; k < fill.ids.size() && k < fill.numbers.size(); ++k) numberOf[fill.ids[k]] = fill.numbers[k];
         std::vector<float> baseNumbers(fill.numbers);  // per tube: its level-0 ancestor's number (its own without one)
@@ -2312,6 +2342,7 @@ private:
             }
             const auto k = static_cast<std::size_t>(t);
             ids[s] = fill.numbers[k];
+            if (braids && k < fill.braids.size()) (*braids)[s] = fill.braids[k];
             us[s] = fill.at[s].u;
             vs[s] = fill.at[s].v;
             bases[s] = baseNumbers[k];
@@ -2439,10 +2470,30 @@ private:
             SectionPoint at;
             bool held;
         };
-        parallelFor(0, count, [&](std::size_t s) {
-            if (strands.strandPointCount(s) < 2) return;
-            const Vec3f root = strands.strandPoints(s)[0];
-            if (!std::isfinite(root.x) || !std::isfinite(root.y) || !std::isfinite(root.z)) return;
+        std::unordered_map<std::uint64_t, std::uint32_t> indexOf;
+        for (std::size_t k = 0; k < fill.ids.size(); ++k) indexOf.emplace(fill.ids[k], static_cast<std::uint32_t>(k));
+        const bool parentsKnown = fill.parents.size() == fill.spines.size();
+        // Whether tube k lies under tube `under` (its child, grandchild...): known parents only.
+        auto descends = [&](std::uint32_t k, std::int32_t under) {
+            const std::uint64_t target = fill.ids[static_cast<std::size_t>(under)];
+            std::uint64_t at = fill.parents[k];
+            for (int d = 0; at != 0 && d < 64; ++d) {
+                if (at == target) return true;
+                const auto it = indexOf.find(at);
+                if (it == indexOf.end()) return false;
+                at = fill.parents[it->second];
+            }
+            return false;
+        };
+        // Which tube a root at `root` goes to and its coordinates there (the strands', and the
+        // samples across each root tube's footprint that measure how far its tubes gather).
+        struct Picked {
+            std::int32_t base = -1, best = -1;
+            SectionPoint at;
+            bool gathers = false;  // in a root tube's lineage: its coordinates are gathered into its tube
+        };
+        auto pick = [&](const Vec3f& root, std::vector<Reached>& reached) {
+            Picked out;
             // The level-0 tube holding the root (the one it lies furthest inside): its own deeper
             // tubes alone may take the strand or blend it at their edges, never a neighbour's (whose
             // slices may reach past their level-0 tube's outline into this one's). Held by none:
@@ -2472,7 +2523,7 @@ private:
             // root tube's deeper tubes alone, never a farther root's slice reaching over it. (Other
             // tubes: a strand outside them all is no tube's, as ever.)
             if (near >= 0 && !isRootTube(fill.spines[static_cast<std::size_t>(near)].tube(), 0)) near = -1;
-            fill.baseOf[s] = base >= 0 ? base : near;
+            out.base = base >= 0 ? base : near;
             const std::int32_t mine = base >= 0 ? base : near;
             const std::uint64_t lineage = mine >= 0 ? fill.bases[static_cast<std::size_t>(mine)] : 0;
             auto ours = [&](std::uint32_t k) { return mine < 0 || fill.bases[k] == lineage; };
@@ -2481,8 +2532,6 @@ private:
             SectionPoint bestAt;
             // Its lineage's tubes within reach, gathered once in the grid's order: the three picks
             // below each go through them in that order.
-            thread_local std::vector<Reached> reachedScratch;
-            std::vector<Reached>& reached = reachedScratch;
             reached.clear();
             grid.around(root, [&](std::uint32_t i) {
                 const std::uint32_t k = tubes[i];
@@ -2517,7 +2566,11 @@ private:
             // clumps with) one of its slices, never the root's own tube between them. (Root-first
             // tubes: another tube's strands between its children keep to it, as ever.)
             if (mine >= 0 && isRootTube(fill.spines[static_cast<std::size_t>(mine)].tube(), 0)) {
+                out.gathers = true;
                 const int heldLevel = best < 0 ? -1 : fill.depths[static_cast<std::size_t>(best)];
+                // (The tubes under the one holding it take it, however far: a split's tubes made
+                // thinner than their share of the root still take all of it, gathered in below.)
+                const std::int32_t under = best >= 0 ? best : mine;
                 std::int32_t adopt = -1;
                 int adoptLevel = -1;
                 float adoptDepth = 0.0f;
@@ -2530,7 +2583,11 @@ private:
                     const float extent = std::max(spine.rootWidth(), spine.rootHeight());
                     const SectionPoint at = r.at;
                     const float depth = footprintDepth(spine, at);
-                    if (depth < -kTubeAdoptReach * extent) continue;
+                    if (parentsKnown && fill.parents[k] != 0) {
+                        if (!descends(k, under)) continue;
+                    } else if (depth < -kTubeAdoptReach * extent) {
+                        continue;
+                    }
                     if (adopt < 0 || level > adoptLevel ||
                         (level == adoptLevel && (depth > adoptDepth || (depth == adoptDepth && static_cast<std::int32_t>(k) < adopt)))) {
                         adopt = static_cast<std::int32_t>(k);
@@ -2544,6 +2601,91 @@ private:
                     bestAt = adoptAt;
                 }
             }
+            out.best = best;
+            out.at = bestAt;
+            return out;
+        };
+
+        // The gather: each root tube's share of its root (the samples across the root's footprint it
+        // takes, as a strand rooted there would be) squeezed into its outline, by a factor across,
+        // one up and then one all round, each at least 1: a tube made thinner than its share leaves
+        // none of its hair outside it, rooted where it grows and joined into it (rootJoin). Measured
+        // on the footprints, not the strands: the same at every density and for every strand.
+        std::vector<float> squeezeU(fill.spines.size(), 1.0f), squeezeV(fill.spines.size(), 1.0f),
+            squeezeAll(fill.spines.size(), 1.0f);
+        auto inside = [&](std::size_t k, float u, float v) { return tubeShapeDepth(fill.spines[k].tube(), u, v) >= 0.0f; };
+        // How much further (at least 1) (u, v) must come in to lie in tube k's outline.
+        auto inward = [&](std::size_t k, float u, float v) {
+            if (inside(k, u, v)) return 1.0f;
+            float lo = 1.0f, hi = 2.0f;
+            for (int i = 0; i < 8 && !inside(k, u / hi, v / hi); ++i) hi *= 2.0f;
+            for (int i = 0; i < 14; ++i) {
+                const float mid = 0.5f * (lo + hi);
+                (inside(k, u / mid, v / mid) ? hi : lo) = mid;
+            }
+            return hi;
+        };
+        {
+            std::vector<Vec3f> samples;
+            for (const std::uint32_t k : tubes) {
+                const TubeSpine& spine = fill.spines[k];
+                if (fill.depths[k] != 0 || !isRootTube(spine.tube(), 0)) continue;
+                for (int i = 0; i < kGatherSamples; ++i) {
+                    for (int j = 0; j < kGatherSamples; ++j) {
+                        const float u = -1.0f + 2.0f * (static_cast<float>(i) + 0.5f) / kGatherSamples;
+                        const float v = -1.0f + 2.0f * (static_cast<float>(j) + 0.5f) / kGatherSamples;
+                        if (!(tubeShapeDepth(spine.tube(), u, v) >= 0.0f)) continue;
+                        Vec3f p = spine.footprintAt(u, v);
+                        if (scalp && scalp->triangleCount() > 0) p = scalp->closestPoint(p).position;
+                        samples.push_back(p);
+                    }
+                }
+            }
+            if (!samples.empty()) {
+                std::vector<Picked> picked(samples.size());
+                parallelFor(0, samples.size(), [&](std::size_t i) {
+                    thread_local std::vector<Reached> scratch;
+                    picked[i] = pick(samples[i], scratch);
+                }, 256);
+                std::vector<float> mostU(fill.spines.size(), 0.0f), mostV(fill.spines.size(), 0.0f);
+                for (const Picked& q : picked) {
+                    if (q.best < 0 || !q.gathers) continue;
+                    const auto k = static_cast<std::size_t>(q.best);
+                    mostU[k] = std::max(mostU[k], std::abs(q.at.u));
+                    mostV[k] = std::max(mostV[k], std::abs(q.at.v));
+                }
+                for (std::size_t k = 0; k < fill.spines.size(); ++k) {
+                    squeezeU[k] = std::max(1.0f, mostU[k]);
+                    squeezeV[k] = std::max(1.0f, mostV[k]);
+                }
+                for (const Picked& q : picked) {
+                    if (q.best < 0 || !q.gathers) continue;
+                    const auto k = static_cast<std::size_t>(q.best);
+                    squeezeAll[k] = std::max(squeezeAll[k], inward(k, q.at.u / squeezeU[k], q.at.v / squeezeV[k]));
+                }
+            }
+        }
+        auto gathered = [&](std::size_t k, SectionPoint at) {
+            at.u /= squeezeU[k] * squeezeAll[k];
+            at.v /= squeezeV[k] * squeezeAll[k];
+            const float more = inward(k, at.u, at.v);  // (a root past every sample: onto the outline)
+            if (more > 1.0f) {
+                at.u /= more;
+                at.v /= more;
+            }
+            return at;
+        };
+
+        parallelFor(0, count, [&](std::size_t s) {
+            if (strands.strandPointCount(s) < 2) return;
+            const Vec3f root = strands.strandPoints(s)[0];
+            if (!std::isfinite(root.x) || !std::isfinite(root.y) || !std::isfinite(root.z)) return;
+            thread_local std::vector<Reached> reachedScratch;
+            std::vector<Reached>& reached = reachedScratch;
+            const Picked picked = pick(root, reached);
+            fill.baseOf[s] = picked.base;
+            const std::int32_t best = picked.best;
+            const SectionPoint bestAt = best >= 0 && picked.gathers ? gathered(static_cast<std::size_t>(best), picked.at) : picked.at;
             fill.tubeOf[s] = best;
             fill.at[s] = bestAt;
             if (best >= 0) fill.blends[s] = fill.spines[static_cast<std::size_t>(best)].tube().blendPoint(bestAt.u, bestAt.v);

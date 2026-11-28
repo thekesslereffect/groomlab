@@ -117,6 +117,8 @@
     "visibility.invert": {"label": "Invert Hidden Guides", "tip": "The hidden guides shown and the shown ones hidden", "icon": "invert", "hosts": ["app", "maya"]},
     "tube.drawRoot": {"label": "Draw Root", "tip": "The Roots brush's Draw root: click a root tube's outline on the scalp, one CV at a time; click the first CV to close it (picking Roots starts it)", "icon": "shape", "hosts": ["app", "maya"]},
     "tube.editRoot": {"label": "Edit Roots", "tip": "The Roots brush's Edit roots: the root tubes' outlines with their CVs to drag on the scalp (picked again: Finish edit)", "icon": "shape", "hosts": ["app", "maya"]},
+    "tube.makeBraid": {"label": "Make Braid", "tip": "Braid the selected tubes (any level): each is braided with the tubes under it, the other tubes' hair left as it is. The first time, a Braid node joining by tube goes after the Interpolate (fillTubes on); its Sculpt Sections brushes the braids", "icon": "shape", "hosts": ["app", "maya"]},
+    "tube.unbraid": {"label": "Unbraid", "tip": "Take the braid mark off the selected tubes: their hair is plain again (a tube under another braid stays in that one)", "icon": "shape", "hosts": ["app", "maya"]},
 
     "review.heatmap": {"label": "Density Heatmap", "tip": "Color strands by root density: blue sparse, green typical, red bunched", "checkable": true},
     "review.hud": {"label": "Strand Count HUD", "tip": "The active groom's strand, render strand and guide counts in the viewport", "checkable": true},
