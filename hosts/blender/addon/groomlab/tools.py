@@ -943,6 +943,13 @@ def scale_tube(scalp, factor, guides=None, group=None, level=None):
     return _tube_edit(scalp, "tube_scale", factor=float(factor), **_targets(guides, group, level))
 
 
+def pin_tube_roots(scalp, pinned=True, guides=None, group=None, level=None):
+    """Pin guides' tube roots to the scalp (issue 116, Maya's pin_tube_roots; `pinned` False:
+    unpin): each keeps the way it lies now, and brushing, posing or simulating the guide never turns
+    its tube round on the scalp. New guides are pinned already. One undo step: {changed}."""
+    return _tube_edit(scalp, "tube_set", pinRoot=bool(pinned), **_targets(guides, group, level))
+
+
 def fill_tube_channel(scalp, channel, value, guides=None, group=None, level=None):
     """The Tube tool's Fill (issue #135, Maya's fill_tube_channel): one channel of guides' tubes set
     root to tip: "width" (each tube scaled so its widest section is `value`, scene units, its taper

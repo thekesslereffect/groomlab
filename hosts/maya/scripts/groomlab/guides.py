@@ -598,6 +598,14 @@ def fill_tube_channel(groom, channel, value, guides=None, group=None, level=None
     return cmds.groomLabGuides(groom, setTube=edit, **_targets(guides, group, level))
 
 
+def pin_tube_roots(groom, pinned=True, guides=None, group=None, level=None):
+    """Pin guides' tube roots to the scalp (issue 116; `pinned` False: unpin): each root keeps the
+    way it lies now, and brushing, posing or simulating the guide never turns its tube round on the
+    scalp. New guides are pinned already; tubes saved before are not until pinned. Targets as in
+    set_tube (else the selected guides). One undo step. Returns how many guides changed."""
+    return cmds.groomLabGuides(groom, setTube=json.dumps({"pinRoot": bool(pinned)}), **_targets(guides, group, level))
+
+
 def _interpolate_nodes(graph):
     return [n for n in graph.get("nodes", []) if n.get("type") == "Interpolate"]
 

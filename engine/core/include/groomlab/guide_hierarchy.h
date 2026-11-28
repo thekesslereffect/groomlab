@@ -68,6 +68,25 @@ struct HierarchyGuide {
     // braids the hair of this tube and of every tube under it (tube_braids.h; the outermost
     // marked tube of a lineage wins). Its own mark, never inherited. Saved.
     bool braid = false;
+    // Its tube's root pinned to the scalp (issue 116), as a root-first tube's is: the root
+    // section's way across the scalp fixed in the scalp's own frame (ScalpMesh::acrossAt turned by
+    // rootTurn about the normal), so brushing, posing or simulating the guide never turns its tube
+    // (nor the hair inside it) round on the scalp; its sections carried from there along the guide
+    // (TubeProfile::roll, one angle, as a root-first tube's), its authored twist on top. New guides
+    // (addGuide) are pinned; guides saved before keep their sections as they were until pinned
+    // (setRootPinned). Each evaluate sets its frame up (and frameUpLocal) from the scalp so; a
+    // following child's frames are its parent's and are not pinned. Saved ("rootPinned",
+    // "rootTurn").
+    bool rootPinned = false;
+    // The root's turn (radians, about the scalp's normal at the root) from the scalp's across, and
+    // whether it is known yet: a guide pinned anew takes the way its root lies at its next evaluate
+    // on a scalp, so pinning moves nothing.
+    bool rootTurnSet = false;
+    float rootTurn = 0.0f;
+    // Its turn taken again from its frame up alone (no roll on the scalp added): a pinned guide
+    // carried elsewhere (mirrored, transferred) whose frame up carries the way its root lay. Not
+    // stored, not hashed.
+    bool pinFromFrame = false;
     StrandRoot root;
     // A root-first tube's root outline as drawn (root_tubes.h): its CVs on the scalp the guides
     // root on (each a triangle and barycentrics, as `root`), in order round it, so it stays where
@@ -500,6 +519,11 @@ public:
     // Marks (or unmarks) these guides' tubes as braids (HierarchyGuide::braid; tube_braids.h).
     // Returns how many changed.
     std::size_t setBraid(const std::vector<GuideId>& ids, bool braid);
+    // Pins (or unpins) these guides' tube roots to the scalp (HierarchyGuide::rootPinned, issue
+    // 116): pinned, each keeps the way its root lies now (taken at the next evaluate); unpinned,
+    // its frame carries on from the frame up its pin set, so neither turns the tube at the root.
+    // Returns how many changed.
+    std::size_t setRootPinned(const std::vector<GuideId>& ids, bool pinned);
 
     // ---- Tube shape library ---------------------------------------------
     // Custom tube shapes (tube.h: CustomTubeShape), saved with the hierarchy (toJson). Guides take

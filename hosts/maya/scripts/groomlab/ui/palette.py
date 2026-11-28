@@ -1630,6 +1630,27 @@ class ToolPalette(QtWidgets.QWidget):
         self.tube_fill_row = QtWidgets.QWidget()
         self.tube_fill_row.setLayout(fill_row)
         self.brush_block.body.insertWidget(1, self.tube_fill_row)
+        # Pin roots | Unpin (issue 116): the tubes' roots fixed on the scalp, on the same tubes as Fill.
+        pin_row = QtWidgets.QHBoxLayout()
+        pin_row.setContentsMargins(0, 0, 0, 0)
+        pin_row.setSpacing(theme.px(4))
+        self.tube_pin = QtWidgets.QPushButton("Pin roots")
+        self.tube_pin.setObjectName("tubePinRoots")
+        self.tube_pin.setToolTip("Fix the tubes' roots on the scalp, each as it lies now: brushing, posing or simulating "
+                                 "a guide then never turns its tube (or the hair in it) round on the scalp; the "
+                                 "brush's twist still turns it. On the selected tubes, else the picked level's (every "
+                                 "tube with no level picked). New tubes are pinned already. One undo step")
+        self.tube_pin.clicked.connect(lambda: self.pin_tube_roots(True))
+        self.tube_unpin = QtWidgets.QPushButton("Unpin")
+        self.tube_unpin.setObjectName("tubeUnpinRoots")
+        self.tube_unpin.setToolTip("Let the tubes' roots turn with the guides again (as tubes made before pinning "
+                                   "did), on the same tubes as Pin roots. One undo step")
+        self.tube_unpin.clicked.connect(lambda: self.pin_tube_roots(False))
+        pin_row.addWidget(self.tube_pin, 1)
+        pin_row.addWidget(self.tube_unpin, 1)
+        self.tube_pin_row = QtWidgets.QWidget()
+        self.tube_pin_row.setLayout(pin_row)
+        self.brush_block.body.insertWidget(2, self.tube_pin_row)
         self.show_tube_fill_value()
         # The tubes' look (the header's guides menu, add_tubes); whether they show with every tool
         # is its Tubes pill (the groom's displayTubes: tube_show), which level's a level row's tube.
@@ -3050,6 +3071,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.straighten.row.setVisible("straighten" in uses)
         self.tube_channel_row.setVisible("tubeChannel" in uses)
         self.tube_fill_row.setVisible("tubeChannel" in uses)
+        self.tube_pin_row.setVisible("tubeChannel" in uses)
         # The levels' row: Tube's and Roots', and Comb's and Erase's on a groom with tubes (#132); the root
         # block: Roots'.
         self.root_card.show("tubeLevels" in uses, roots="rootTubes" in uses, tubes_only=tool in ("comb", "erase"))
@@ -3323,6 +3345,37 @@ class ToolPalette(QtWidgets.QWidget):
         channel = self.tube_channel_name()
         for name, slider in self.tube_fill_values.items():
             slider.setVisible(name == channel)
+
+    def _on_tube_targets(self, apply):
+        """apply(**targets) on the selected tubes, else the picked level's (group's), else every
+        group's (Fill's and Pin roots' tubes); returns the count summed."""
+        groom = self.groom()
+        selected = groomlab.selected_guides(groom)
+        group = self.current_group()
+        if selected:
+            return apply(guides=selected) or 0
+        if group:
+            return apply(group=group) or 0
+        count = 0
+        for g in groomlab.list_guide_groups(groom):
+            if groomlab.guide_ids(groom, g["name"]):
+                count += apply(group=g["name"]) or 0
+        return count
+
+    def pin_tube_roots(self, pinned):
+        """Pin roots / Unpin (issue 116) on Fill's tubes. One undo step."""
+        groom = self.groom()
+        if not groom:
+            return
+        try:
+            from groomlab.base import undo_chunk
+            with undo_chunk("pin roots" if pinned else "unpin roots"):
+                count = self._on_tube_targets(lambda **t: groomlab.pin_tube_roots(groom, pinned, **t))
+            self.status.setText("%s %d tube root%s." % ("Pinned" if pinned else "Unpinned", count,
+                                                       "" if count == 1 else "s"))
+        except (RuntimeError, ValueError) as e:
+            self.status.setText(str(e).strip())
+        self.tube_panel.refresh(groom, force=True)
 
     def fill_tube_channel(self):
         """Fill (issue #135): the channel picked set to its value on the selected tubes, else the

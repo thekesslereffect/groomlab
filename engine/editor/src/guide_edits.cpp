@@ -270,12 +270,29 @@ std::size_t editTubes(GuideHierarchy& h, const std::vector<GuideId>& guides, con
     for (const GuideId id : guides) {
         if (!h.guide(id)) refuse("not_found", "no guide " + std::to_string(id));
     }
+    // "pinRoot": the guides' roots pinned to the scalp (or unpinned; issue 116), a guide's own
+    // setting rather than its tube's (GuideHierarchy::setRootPinned), the rest of the edit as
+    // any other. Alone, how many changed.
+    std::string rest = edit;
+    {
+        nlohmann::json j = nlohmann::json::parse(edit, nullptr, false);
+        if (j.is_object() && j.contains("pinRoot")) {
+            if (!j["pinRoot"].is_boolean()) refuse("bad_request", "pinRoot: true or false");
+            const std::size_t changed = h.setRootPinned(guides, j["pinRoot"].get<bool>());
+            j.erase("pinRoot");
+            if (j.empty()) {
+                if (note) note->clear();
+                return changed;
+            }
+            rest = j.dump();
+        }
+    }
     // A root tube keeps its drawn root (an owned shape): a Root profile given goes to the others.
     std::vector<std::pair<GuideId, std::string>> edits;
     std::size_t kept = 0;
     for (const GuideId id : guides) {
         bool refused = false;
-        std::string own = withoutRootProfile(h.guide(id)->tube, edit, &refused);
+        std::string own = withoutRootProfile(h.guide(id)->tube, rest, &refused);
         if (refused) ++kept;
         if (refused && own == "{}") continue;
         edits.emplace_back(id, std::move(own));

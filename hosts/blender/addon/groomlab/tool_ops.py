@@ -2136,6 +2136,35 @@ class GROOMLAB_OT_tube_fill(TubeOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_tube_pin(TubeOperator):
+    """Fix the tubes' roots on the scalp, each as it lies now: brushing, posing or simulating a guide then never
+    turns its tube (or the hair in it) round on the scalp; the brush's twist still turns it. On the selected tubes,
+    else the picked level's (every tube with no level picked). New tubes are pinned already. One undo step"""
+    bl_idname = "groomlab.tube_pin"
+    bl_label = "Pin Roots"
+
+    pinned: BoolProperty(name="Pinned", default=True, options={"SKIP_SAVE"})
+
+    @classmethod
+    def description(cls, context, properties):
+        if not properties.pinned:
+            return ("Let the tubes' roots turn with the guides again (as tubes made before pinning did), on the same "
+                    "tubes as Pin roots. One undo step")
+        return cls.__doc__
+
+    def execute(self, context):
+        scalp = active(context)
+        t = context.scene.groomlab_tools
+        _level, group = tools.group_target(context.scene)
+        try:  # (Fill's tubes: the selection first; else the picked level's group; else every tube)
+            r = tools.pin_tube_roots(scalp, self.pinned, group=None if t.selected_count else (group or None))
+        except HelperError as e:
+            return _fail(self, e)
+        n = int(r.get("changed") or 0)
+        tools.status(context.scene, "%s %d tube root%s." % ("Pinned" if self.pinned else "Unpinned", n, "" if n == 1 else "s"))
+        return {"FINISHED"}
+
+
 BRAID_TIPS = {
     "MAKE": "Braid the selected tubes (any level; Select root's roots too): each is braided with the tubes under it, "
             "the other tubes' hair left as it is. The first time, a Braid node joining by tube goes after the "
@@ -2724,7 +2753,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_guides_reparent, GROOMLAB_OT_guides_regroup, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_overlay_mirror, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
            GROOMLAB_OT_curves_to_guides, GROOMLAB_OT_strands_to_curves, GROOMLAB_OT_flow_clear, GROOMLAB_OT_clone_pick_source, GROOMLAB_OT_clone_reset,
            GROOMLAB_OT_length_edit, GROOMLAB_OT_root_tube, GROOMLAB_OT_tube_level, GROOMLAB_OT_tube_view,
-           GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_fill, GROOMLAB_OT_tube_braid,
+           GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_fill, GROOMLAB_OT_tube_pin, GROOMLAB_OT_tube_braid,
            GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,
            GROOMLAB_OT_tube_shape_rename, GROOMLAB_OT_tube_shape_remove, GROOMLAB_OT_corrective_new,
            GROOMLAB_OT_corrective_move, GROOMLAB_OT_corrective_solo, GROOMLAB_OT_corrective_enable,

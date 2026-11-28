@@ -326,6 +326,8 @@ void bindHierarchy(py::module_& m) {
         .def_readwrite("group", &HierarchyGuide::group)
         .def_readwrite("own_segments", &HierarchyGuide::ownSegments)
         .def_readwrite("braid", &HierarchyGuide::braid)
+        .def_readonly("root_pinned", &HierarchyGuide::rootPinned, "Its tube's root pinned to the scalp (issue 116; set_root_pinned).")
+        .def_readonly("root_turn", &HierarchyGuide::rootTurn, "A pinned root's turn (radians) from the scalp's across.")
         .def_readwrite("parent", &HierarchyGuide::parent)
         .def_readwrite("locked", &HierarchyGuide::locked)
         .def_readwrite("root", &HierarchyGuide::root)
@@ -668,6 +670,9 @@ void bindHierarchy(py::module_& m) {
         .def("set_tube", &GuideHierarchy::setTube, py::arg("id"), py::arg("tube"))
         .def("set_braid", &GuideHierarchy::setBraid, py::arg("ids"), py::arg("braid") = true,
              "Mark (or unmark) these guides' tubes as braids (tube_braids.h). Returns how many changed.")
+        .def("set_root_pinned", &GuideHierarchy::setRootPinned, py::arg("ids"), py::arg("pinned") = true,
+             "Pin (or unpin) these guides' tube roots to the scalp (issue 116), each keeping the way its root "
+             "lies. Returns how many changed.")
         .def("braid_tube_of", [](const GuideHierarchy& h, GuideId id) { return braidTubeOf(h, id); }, py::arg("id"),
              "The marked tube whose braid guide `id` lies in (tube_braids.h braidTubeOf), 0 none.")
         .def(

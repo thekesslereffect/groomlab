@@ -184,7 +184,12 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
     fillRow_ = new QWidget(this);
     fillRow_->setObjectName(QStringLiteral("tubeFillRow"));
     {
-        auto* row = new QHBoxLayout(fillRow_);
+        auto* column = new QVBoxLayout(fillRow_);
+        column->setContentsMargins(0, 0, 0, 0);
+        column->setSpacing(4);
+        auto* line = new QWidget(fillRow_);
+        column->addWidget(line);
+        auto* row = new QHBoxLayout(line);
         row->setContentsMargins(0, 0, 0, 0);
         row->setSpacing(4);
         const char* names[] = {"width", "flatness", "twist"};
@@ -223,6 +228,26 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                              "(every tube with no level picked). One undo step"));
         connect(fill_, &QPushButton::clicked, this, [this] { fill(); });
         row->addWidget(fill_);
+        // Pin roots | Unpin (issue 116): the tubes' roots fixed on the scalp, on Fill's tubes.
+        auto* pins = new QWidget(fillRow_);
+        auto* pinRow = new QHBoxLayout(pins);
+        pinRow->setContentsMargins(0, 0, 0, 0);
+        pinRow->setSpacing(4);
+        auto* pin = new QPushButton(tr("Pin roots"), pins);
+        pin->setObjectName(QStringLiteral("tubePinRoots"));
+        pin->setToolTip(tr("Fix the tubes' roots on the scalp, each as it lies now: brushing, posing or simulating a guide then "
+                           "never turns its tube (or the hair in it) round on the scalp; the brush's twist still turns it. On the "
+                           "selected tubes, else the picked level's (every tube with no level picked). New tubes are pinned "
+                           "already. One undo step"));
+        connect(pin, &QPushButton::clicked, this, [this] { pinRoots(true); });
+        auto* unpin = new QPushButton(tr("Unpin"), pins);
+        unpin->setObjectName(QStringLiteral("tubeUnpinRoots"));
+        unpin->setToolTip(tr("Let the tubes' roots turn with the guides again (as tubes made before pinning did), on the same "
+                             "tubes as Pin roots. One undo step"));
+        connect(unpin, &QPushButton::clicked, this, [this] { pinRoots(false); });
+        pinRow->addWidget(pin, 1);
+        pinRow->addWidget(unpin, 1);
+        column->addWidget(pins);
     }
     fillValues_[0]->setLimits(0.0, 1e4 * lengthFactor_);  // (in the lengths' unit, as Width)
     fillValues_[0]->setRange(0.0, lengthFactor_);
@@ -1882,16 +1907,7 @@ void TubePanel::fill() {
     double value = fillValue(channel)->value();
     if (channel == "width") value /= lengthFactor_ > 0.0 ? lengthFactor_ : 1.0;  // (shown in the lengths' unit)
     if (channel == "twist") value *= kPi / 180.0;
-    // The selected tubes, else the picked level's (group's), else every tube.
-    std::vector<GuideId> guides = doc->selection();
-    const HierarchyPtr h = doc->session().authoredHierarchy();
-    if (guides.empty() && h) {
-        const std::string group = session_->settings().brush.group;
-        const GroupId id = group.empty() ? kNoGroup : h->findGroup(group);
-        for (const HierarchyGuide& g : h->guides()) {
-            if (id == kNoGroup || g.group == id) guides.push_back(g.id);
-        }
-    }
+    const std::vector<GuideId> guides = fillTargets();
     if (guides.empty()) {
         emit message(tr("No tubes to fill."));
         return;
@@ -1906,6 +1922,37 @@ void TubePanel::fill() {
     const std::string error = doc->editTubes(guides, json::parse(edit), "fill tube " + channel);
     edited(error);
     if (error.empty()) emit message(tr("Filled %1 on %2 tube(s).").arg(QString::fromStdString(channel)).arg(guides.size()));
+}
+
+std::vector<GuideId> TubePanel::fillTargets() const {
+    // The selected tubes, else the picked level's (group's), else every tube.
+    GroomDocument* doc = document();
+    if (!doc) return {};
+    std::vector<GuideId> guides = doc->selection();
+    const HierarchyPtr h = doc->session().authoredHierarchy();
+    if (guides.empty() && h) {
+        const std::string group = session_ ? session_->settings().brush.group : std::string();
+        const GroupId id = group.empty() ? kNoGroup : h->findGroup(group);
+        for (const HierarchyGuide& g : h->guides()) {
+            if (id == kNoGroup || g.group == id) guides.push_back(g.id);
+        }
+    }
+    return guides;
+}
+
+void TubePanel::pinRoots(bool pinned) {
+    GroomDocument* doc = document();
+    if (!doc) return;
+    const std::vector<GuideId> guides = fillTargets();
+    if (guides.empty()) {
+        emit message(tr("No tubes to pin."));
+        return;
+    }
+    // (Every host's: the editor's editTubes takes "pinRoot", GuideHierarchy::setRootPinned.)
+    const std::string error = doc->editTubes(guides, json{{"pinRoot", pinned}}, pinned ? "pin roots" : "unpin roots");
+    edited(error);
+    if (error.empty()) emit message(pinned ? tr("Pinned the roots of %1 tube(s).").arg(guides.size())
+                                           : tr("Unpinned the roots of %1 tube(s).").arg(guides.size()));
 }
 
 void TubePanel::smoothTargets() {
