@@ -38,8 +38,12 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   the ends fan out. The hair is parted into the sections as it lies: a strand goes into the
   section on its side of the braid, so the sections leave the scalp without crossing each other.
 - **Points:** a braided strand gets the points its weave needs (four a crossing, at most 1024),
-  however few it came with. A Resample later in the graph keeps those points on braided strands
-  (it resamples the rest).
+  however few it came with. A Resample later in the graph treats braided strands by a mode of
+  their own, whatever the others' (`braidMode`): `keep` (the default) leaves the weave's points;
+  `even` gives each `braidSegments`; `curvature` fewer on their straight runs, about one per
+  `braidMaxAngle` they turn (at least `braidMinSegments`, at most `braidSegments`); `length`
+  `braidSegments` for the longest braided strand and the rest in proportion. The points it adds lie
+  on the smooth curve through the weave (Resample version 2), so the braid stays round.
 - **Seeing the weave:** `display` paths shows each braid's path and the center curve of each
   of its sections in place of the hair (a `braidSection` channel tells them apart: -1 the path),
   handy for tuning `tightness`, `width` and the feed; set it back to hair before rendering.

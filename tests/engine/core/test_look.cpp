@@ -2904,24 +2904,25 @@ TEST(Braid, FollowGuidesCarriesASculptedSectionsHair) {
 }
 
 TEST(Braid, ResampleSetsBraidedStrandsOwnSegments) {
-    // Issue 133: a Resample after a Braid resamples the woven hair by braidSegments (0 keeps the
-    // weave's points; curvature thins the straight runs, never past them).
+    // Issue 133: a Resample after a Braid resamples the woven hair by a mode and controls of its
+    // own (braidMode: keep the weave's points; even, braidSegments each; curvature thins the
+    // straight runs, never past them), whatever the other strands' mode.
     BraidScene scene("three");
     scene.setParam("region", 0.45);
     const StrandsPtr hair = scene.lg.eval(scene.braid);
     ASSERT_TRUE(hair && hair->strandCount() > 0);
     const std::vector<float>* braid = hair->strandChannel("braidId");
     ASSERT_TRUE(braid);
-    auto resampled = [&](std::int64_t braidSegments, const std::string& mode) {
+    auto resampled = [&](std::int64_t braidSegments, const std::string& braidMode) {
         auto op = OperatorRegistry::instance().create(op::kResample);
         op->params().set("segments", std::int64_t{8});
+        op->params().set("braidMode", braidMode);
         op->params().set("braidSegments", braidSegments);
-        op->params().set("mode", mode);
-        op->params().set("maxAngle", 30.0);
+        op->params().set("braidMaxAngle", 30.0);
         EvalContext ctx;
         return valueAs<StrandsPtr>(op->evaluate(ctx, {Value(hair)}));
     };
-    const StrandsPtr kept = resampled(0, "even");
+    const StrandsPtr kept = resampled(0, "keep");
     const StrandsPtr set = resampled(40, "even");
     const StrandsPtr curved = resampled(0, "curvature");
     ASSERT_TRUE(kept && set && curved);
@@ -2932,7 +2933,7 @@ TEST(Braid, ResampleSetsBraidedStrandsOwnSegments) {
             continue;
         }
         ++braided;
-        EXPECT_EQ(kept->strandPointCount(s), std::max<std::size_t>(9, hair->strandPointCount(s))) << s;
+        EXPECT_EQ(kept->strandPointCount(s), hair->strandPointCount(s)) << s;
         EXPECT_EQ(set->strandPointCount(s), 41u) << s;
         EXPECT_LE(curved->strandPointCount(s), hair->strandPointCount(s)) << s;
     }

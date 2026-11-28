@@ -193,8 +193,10 @@ StrandsPtr applyAffect(const StrandSet& in, const StrandsPtr& out, const ScalarF
 // new points on the smooth curve through the strand's points (curve.h smoothPolyline: centripetal
 // Catmull-Rom), not on the straight spans between them, so more points round a coarse strand
 // (a braid's weave, a few-point strand) instead of keeping its facets (Resample version 2).
+// `curvedEach` (per strand, non-zero: by curvature): each strand's own placement over `byCurvature`
+// (Resample's braided strands by their own mode).
 StrandsPtr resampleStrands(const StrandSet& source, const std::vector<std::size_t>& points, bool byCurvature = false,
-                           bool smooth = false);
+                           bool smooth = false, const std::vector<char>* curvedEach = nullptr);
 // Strand s of `source` resampled into `out`'s points for it (as many as `out` has; evenly by arc
 // length, or closer together where it bends with `byCurvature`), widths (`widths`: `source` has
 // them) and point channels (`inPoint` into `outPoint`) following: what resampleStrands does for each.

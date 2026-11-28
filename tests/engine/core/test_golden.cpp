@@ -1008,7 +1008,7 @@ TEST_P(Golden, MappedParamsAreReadPerStrand) {
         // A coil's radius is the strands' widths.
         "CurlCoil.radius",
         // No braided strands to resample.
-        "Resample.braidSegments",
+        "Resample.braidSegments", "Resample.braidMinSegments", "Resample.braidMaxAngle",
         // Points added (a zigzag's corners, a coil's turns, subdivisions): no mix of what came in.
         "CurlZigzag.affect", "CurlCoil.affect", "Subdivide.affect",
         // A repel radius with no negative strength (ClumpRepel's has one).
