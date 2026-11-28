@@ -2913,9 +2913,11 @@ TEST(Braid, ResampleSetsBraidedStrandsOwnSegments) {
     ASSERT_TRUE(hair && hair->strandCount() > 0);
     const std::vector<float>* braid = hair->strandChannel("braidId");
     ASSERT_TRUE(braid);
-    auto resampled = [&](std::int64_t braidSegments, const std::string& braidMode) {
+    auto resampled = [&](std::int64_t braidSegments, const std::string& braidMode, std::int64_t segments = 8,
+                         int version = 0) {
         auto op = OperatorRegistry::instance().create(op::kResample);
-        op->params().set("segments", std::int64_t{8});
+        if (version) op->setNodeVersion(version);
+        op->params().set("segments", segments);
         op->params().set("braidMode", braidMode);
         op->params().set("braidSegments", braidSegments);
         op->params().set("braidMaxAngle", 30.0);
@@ -2925,7 +2927,13 @@ TEST(Braid, ResampleSetsBraidedStrandsOwnSegments) {
     const StrandsPtr kept = resampled(0, "keep");
     const StrandsPtr set = resampled(40, "even");
     const StrandsPtr curved = resampled(0, "curvature");
-    ASSERT_TRUE(kept && set && curved);
+    // A version 1 node (saved before issue 133) keeps its old rule whatever braidMode says: a
+    // braided strand gets at least the points it has, more when `segments` asks for more.
+    std::size_t mostPoints = 0;
+    for (std::size_t s = 0; s < hair->strandCount(); ++s) mostPoints = std::max(mostPoints, hair->strandPointCount(s));
+    const auto more = static_cast<std::int64_t>(mostPoints) + 10;
+    const StrandsPtr old = resampled(0, "keep", more, 1);
+    ASSERT_TRUE(kept && set && curved && old);
     std::size_t braided = 0;
     for (std::size_t s = 0; s < hair->strandCount(); ++s) {
         if ((*braid)[s] < 0.0f) {
@@ -2936,6 +2944,7 @@ TEST(Braid, ResampleSetsBraidedStrandsOwnSegments) {
         EXPECT_EQ(kept->strandPointCount(s), hair->strandPointCount(s)) << s;
         EXPECT_EQ(set->strandPointCount(s), 41u) << s;
         EXPECT_LE(curved->strandPointCount(s), hair->strandPointCount(s)) << s;
+        EXPECT_EQ(old->strandPointCount(s), static_cast<std::size_t>(more) + 1) << s;
     }
     EXPECT_GT(braided, 0u);
 }

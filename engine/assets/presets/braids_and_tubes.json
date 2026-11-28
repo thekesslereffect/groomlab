@@ -1,7 +1,7 @@
 {
   "version": 1,
   "size": 20.0,
-  "about": {"title": "Braids and tubes", "category": "Braids", "description": "Braids among plain hair on root tubes: draw roots with the Roots brush (and split or subdivide them with the Tube hierarchy), then select some tubes and Make braid. The marked tubes' hair (with every tube under them) goes into three-strand braids as wide as their tubes, tied near the end and finished in a tuft; every other tube's hair stays as its tube shapes it. Hair grows only on the tubes' roots (Scatter's guide radius), as in Tube locks. Two Clumps after the Braid: hairClump clumps the plain tubes' hair (soft clumps following the tubes, affect 1 - $braidWoven), braidClump the hair inside each braid section (small locks, affect $braidWoven). Sculpt Sections on the Braid node brushes the braids."},
+  "about": {"title": "Braids and tubes", "category": "Braids", "description": "Braids among plain hair on root tubes: draw roots with the Roots brush, select some tubes and Make braid. The marked tubes' hair (and every tube under them) goes into three-strand braids as wide as their tubes; every other tube's hair stays as its tube shapes it. Clumps follow the plain tubes and the braid sections; Sculpt Sections on the Braid brushes the braids."},
   "exposed": [
     {"node": "braid", "param": "style", "name": "braidStyle"},
     {"node": "braid", "param": "tubeWidth", "name": "braidWidth"},

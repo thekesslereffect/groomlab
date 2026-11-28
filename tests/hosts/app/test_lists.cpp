@@ -292,7 +292,8 @@ TEST(AppLists, ATubeLevelKeptInViewWhileAnotherLevelIsCombed) {
     auto* tubesPill = tools->findChild<QToolButton*>(QStringLiteral("display_tubes"));
     ASSERT_TRUE(tubesPill) << "the guides display's Tubes pill";
     EXPECT_TRUE(tubesPill->isChecked());
-    auto* lock = tubes->findChild<QCheckBox*>(QStringLiteral("tubeLockView"));
+    // (the levels row sits on the brush card with Comb up, issue #132: its own block, not the panel)
+    auto* lock = tubes->levelsBlock()->findChild<QCheckBox*>(QStringLiteral("tubeLockView"));
     ASSERT_TRUE(lock);
     EXPECT_TRUE(lock->isChecked()) << "so does the Roots card's Lock view";
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);  // (the rows made again)

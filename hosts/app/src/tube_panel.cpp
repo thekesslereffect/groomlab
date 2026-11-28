@@ -1254,10 +1254,13 @@ void TubePanel::makeBraid(bool on) {
         emit message(on ? tr("Select tubes, then Make braid.") : tr("Select tubes, then Unbraid."));
         return;
     }
-    std::size_t changed = 0;
-    std::string error = doc->editGuides(on ? "make braid" : "unbraid", [&](GuideHierarchy& g) { changed = g.setBraid(tubes, on); });
+    // The Braid node first: when the graph has no Interpolate to braid after, nothing is marked.
     TubeBraidNode made;
-    if (error.empty() && on) error = doc->insertTubeBraid(&made);
+    std::string error = on ? doc->insertTubeBraid(&made) : std::string();
+    std::size_t changed = 0;
+    if (error.empty()) {
+        error = doc->editGuides(on ? "make braid" : "unbraid", [&](GuideHierarchy& g) { changed = g.setBraid(tubes, on); });
+    }
     if (!error.empty()) {
         emit message(QString::fromStdString(error));
         return;

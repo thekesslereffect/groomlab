@@ -961,8 +961,8 @@ def make_braid(scalp, guides=None, on=True):
     args = {"on": bool(on)}
     if guides:
         args["guides"] = [int(g) for g in guides]
-    r = _tube_edit(scalp, "tube_braid", **args)
-    out = {"changed": int(r.get("changed") or 0), "braid": "", "made": False}
+    # The Braid node first: when the graph has no Interpolate to braid after, nothing is marked.
+    out = {"changed": 0, "braid": "", "made": False}
     g = pipeline.GraphEdits(scalp)
     if on:
         made = g.edit(op="insert_tube_braid")  # (the core's kTubeBraidParams)
@@ -970,6 +970,8 @@ def make_braid(scalp, guides=None, on=True):
         g.finish()
     else:
         out["braid"] = tube_braid_node(g)
+    r = _tube_edit(scalp, "tube_braid", **args)
+    out["changed"] = int(r.get("changed") or 0)
     return out
 
 

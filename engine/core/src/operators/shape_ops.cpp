@@ -318,9 +318,11 @@ private:
 //   length     braidSegments for the longest braided strand, the rest in proportion (at least
 //              braidMinSegments)
 // Before issue #133 a braided strand always kept its points, and a Resample after a Braid did
-// nothing to it.
+// nothing to it. A version 1 node still does that (`legacy`): a braided strand gets at least the
+// points it has, placed by the node's own mode, whatever braidMode says.
 struct BraidPoints {
     const std::vector<float>* braid = nullptr;
+    bool legacy = false;        // node version 1
     std::string mode = "keep";  // braidMode
     int segments = 0;           // braidSegments
     float perSegment = 0.0f;    // curvature: braidMaxAngle in radians
@@ -335,6 +337,7 @@ struct BraidPoints {
     std::size_t of(const StrandSet& in, std::size_t s, std::size_t points) const {
         if (!braided(s)) return points;
         const std::size_t own = in.strandPointCount(s);
+        if (legacy) return std::max(points, own);
         if (mode == "keep" || own < 2) return own;
         const int most = segments > 0 ? segments : static_cast<int>(own - 1);
         const int fewest = std::clamp(least, 1, most);
@@ -425,6 +428,7 @@ public:
         BraidPoints b;
         b.braid = in.strandChannel("braidId");
         b.mode = params().getString("braidMode");
+        b.legacy = nodeVersion() < 2;
         if (b.mode != "keep" && b.mode != "even" && b.mode != "curvature" && b.mode != "length") {
             throw GraphError("Resample: braidMode must be keep, even, curvature or length");
         }
@@ -640,7 +644,7 @@ public:
             for (std::size_t s = 0; s < count; ++s) {
                 if (!braids.braided(s)) continue;
                 points[s] = braids.of(*in, s, points[s]);
-                curved[s] = braids.byCurvature() ? 1 : 0;
+                if (!braids.legacy) curved[s] = braids.byCurvature() ? 1 : 0;
             }
         }
         // (Curvature moves the points even at the same count.)

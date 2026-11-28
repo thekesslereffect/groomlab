@@ -442,8 +442,12 @@ class RootTubeCard(QtCore.QObject):
             self.braid_level.clicked.connect(self.braid_level_clicked)
             self.level_layout.addWidget(self.braid_level)
             if braid["sculpting"]:
-                for b in self.level_group.buttons():  # (the braid's level is the one shown)
+                # (the braid's level is the one shown; an exclusive group ignores unchecking its
+                # checked button, so exclusivity is off while they are cleared)
+                self.level_group.setExclusive(False)
+                for b in self.level_group.buttons():
                     b.setChecked(False)
+                self.level_group.setExclusive(True)
         self.level_row.layout().invalidate()
         self.add_level.setEnabled(bool(base) and len(levels) < root_tubes.MAX_LEVELS)
         self.remove_level.setEnabled(len(levels) > 1)
@@ -543,7 +547,7 @@ class RootTubeCard(QtCore.QObject):
         self._enter("edit", self.edit_root)
 
     def toggle_select(self, _on=None):
-        if QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ShiftModifier:
+        if QtWidgets.QApplication.queryKeyboardModifiers() & QtCore.Qt.ShiftModifier:
             # Shift+click: every root of the level in view selected (Select root entered if need be).
             if self._mode() not in ("select", "duplicate"):
                 self._enter("select", self.select_root)

@@ -184,12 +184,13 @@ TEST(AppMarkingMenu, BrushOptionsFollowThePickedBrush) {
     EXPECT_TRUE(smooth.items[3].checked) << "Curve, as Smooth always was";
     AppActions::runMarkingMenuItem(window, smooth.items[1]);
     EXPECT_EQ(window.brush().settings().brush.smoothMode, SmoothMode::Length);
-    // Tube: Width, Flatness, Twist, Always Visible; Roots: Draw Root, Edit Root, Always Visible.
+    // Tube: Width, Flatness, Twist, Make braid, Unbraid, Always Visible; Roots: Draw Root, Edit Root, Always Visible.
     window.brush().setTool("shape");
     Item tube = options();
     std::vector<std::string> ids;
     for (const Item& item : tube.items) ids.push_back(item.value.empty() ? item.id : item.id + "=" + item.value);
-    EXPECT_EQ(ids, (std::vector<std::string>{"tubeChannel=width", "tubeChannel=flatness", "tubeChannel=twist", "display.tubesAlways"}));
+    EXPECT_EQ(ids, (std::vector<std::string>{"tubeChannel=width", "tubeChannel=flatness", "tubeChannel=twist", "tube.makeBraid", "tube.unbraid",
+                                                "display.tubesAlways"}));
     AppActions::runMarkingMenuItem(window, tube.items[1]);
     EXPECT_EQ(window.brush().settings().brush.tubeChannel, TubeChannel::Flatness);
     window.brush().setTool("roots");
