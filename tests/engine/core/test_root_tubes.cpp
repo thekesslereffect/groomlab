@@ -139,6 +139,46 @@ TEST(RootTubes, ADrawnPathIsSmoothedEvenlySpacedAndClearOfTheScalp) {
     }
 }
 
+TEST(RootTubes, ARootsGuideLeavesTheMiddleOfTheScalpItDraws) {
+    // A big root on the head reaching far down one side, its CVs bunched there: its guide starts at
+    // the middle of the scalp's area inside it (each part by its own area: its steep side counts as
+    // much as its top), the Tube tool's middle point, not the middle of its outline's box nor of
+    // its CVs. Its shape keeps that point as its origin.
+    GuideHierarchy h;
+    const auto scalp = head();
+    std::vector<Vec3f> outline;
+    for (int k = 0; k < 16; ++k) {
+        const float t = 2.0f * kPi * static_cast<float>(k) / 16.0f;
+        // (from the top, out to about 80 degrees down on +x, 35 degrees elsewhere)
+        const float reach = (std::cos(t) > 0.0f ? 0.6f + 0.8f * std::cos(t) * std::cos(t) : 0.6f);
+        outline.push_back(Vec3f{std::sin(reach) * std::cos(t), std::cos(reach), std::sin(reach) * std::sin(t)}.normalized());
+    }
+    const GuideId id = makeRootTube(h, *scalp, outline, {});
+    const HierarchyGuide* g = h.guide(id);
+    ASSERT_TRUE(g && g->tube.custom);
+    EXPECT_TRUE(g->tube.custom->origin);
+    // The middle by area, measured finely on the sphere: points spread evenly over the sphere,
+    // those inside the drawn loop averaged.
+    Vec3f sum;
+    int inside = 0;
+    const Vec3f c = rootOutlineCenter(*scalp, outline).point;
+    for (int i = 0; i < 20000; ++i) {  // (a Fibonacci sphere)
+        const float y = 1.0f - 2.0f * (static_cast<float>(i) + 0.5f) / 20000.0f;
+        const float r = std::sqrt(std::max(0.0f, 1.0f - y * y));
+        const float a = 2.39996323f * static_cast<float>(i);
+        const Vec3f p{r * std::cos(a), y, r * std::sin(a)};
+        const float t = std::atan2(p.z, p.x);
+        const float reach = (std::cos(t) > 0.0f ? 0.6f + 0.8f * std::cos(t) * std::cos(t) : 0.6f);
+        if (std::acos(std::clamp(p.y, -1.0f, 1.0f)) < reach) sum += p, ++inside;
+    }
+    ASSERT_GT(inside, 100);
+    const Vec3f middle = (sum / static_cast<float>(inside)).normalized();
+    EXPECT_LT((c - middle).length(), 0.05f) << "the Tube tool's middle point is the area's middle";
+    EXPECT_LT((g->points.front() - c).length(), 1e-3f) << "the guide leaves it";
+    // As it was: the loop's flat middle sat well off it (toward the top).
+    EXPECT_GT((Vec3f{0, 1, 0} - middle).length(), 0.2f);
+}
+
 TEST(RootTubes, TheRootStaysWhereItWasDrawnWhateverIsDoneToTheGuide) {
     GuideHierarchy h;
     const auto scalp = head();
