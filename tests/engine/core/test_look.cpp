@@ -2939,6 +2939,39 @@ TEST(Braid, ResampleSetsBraidedStrandsOwnSegments) {
     EXPECT_GT(braided, 0u);
 }
 
+TEST(Resample, MorePointsLieOnTheSmoothCurveThroughTheStrand) {
+    // A coarse strand (a quarter circle in 4 spans) resampled to 33 points: a version 2 Resample
+    // lays them on the smooth curve through its points (round, close to the circle), not on the
+    // straight spans (whose middles sit well inside it); a version 1 node keeps the spans.
+    auto strands = std::make_shared<StrandSet>();
+    std::vector<Vec3f> coarse;
+    for (int k = 0; k <= 4; ++k) {
+        const float a = 0.5f * 3.14159265f * static_cast<float>(k) / 4.0f;
+        coarse.push_back({1.0f - std::cos(a), std::sin(a), 0.0f});  // (center (1, 0, 0), radius 1)
+    }
+    strands->addStrand(1, coarse);
+    auto run = [&](int version) {
+        auto op = OperatorRegistry::instance().create(op::kResample);
+        op->params().set("segments", std::int64_t{32});
+        if (version) op->setNodeVersion(version);
+        EvalContext ctx;
+        return valueAs<StrandsPtr>(op->evaluate(ctx, {Value(StrandsPtr(strands))}));
+    };
+    auto worst = [](const StrandsPtr& out) {
+        float most = 0.0f;
+        for (std::size_t i = 0; i < out->strandPointCount(0); ++i) {
+            most = std::max(most, std::abs((out->strandPoints(0)[i] - Vec3f{1.0f, 0.0f, 0.0f}).length() - 1.0f));
+        }
+        return most;
+    };
+    const StrandsPtr smooth = run(0), straight = run(1);
+    ASSERT_EQ(smooth->strandPointCount(0), 33u);
+    ASSERT_EQ(straight->strandPointCount(0), 33u);
+    EXPECT_EQ(smooth->strandPoints(0)[0], coarse.front()) << "the root stays";
+    EXPECT_GT(worst(straight), 0.015f) << "the straight spans' middles, inside the circle";
+    EXPECT_LT(worst(smooth), 0.004f) << "on the smooth curve: round";
+}
+
 TEST(Braid, SectionGuidesCarryTheirSectionsTubes) {
     // Issue 129: each section guide carries its section's tube (the ellipse the weave lays it in),
     // so the Tube tool shows it and a Sculpt node keeps its width, flatness and twist.

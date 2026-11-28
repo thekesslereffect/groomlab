@@ -93,7 +93,7 @@ std::vector<BrushEntry> makeCatalog() {
          "Remove what the brush touches: guides (with their children), parts and flow arrows (choose below). Not the "
          "scattered hair itself: to take hair away, paint the density map holding Ctrl (Paint tab > + New Map > for a "
          "setting > Density).",
-         with(kBrushCommon, {"erases"})},
+         with(kBrushCommon, {"erases", "tubeLevels"})},  // (the levels' row: a groom with tube levels, #132)
         // Paint.
         {"paint", "Paint", C::Paint, 0, "paint", 0.5f, false,
          "Paint the map picked in the list toward the value, or a color map toward the color in the channels ticked "

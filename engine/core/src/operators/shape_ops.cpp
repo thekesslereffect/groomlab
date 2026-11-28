@@ -59,7 +59,7 @@ std::size_t curvaturePoints(const Vec3f* p, std::size_t n, float perSegment, int
 // measure mixing arc length and turning angle, kBendShare of it turning).
 void resampleStrand(const StrandSet& source, StrandSet& out, std::size_t s, bool byCurvature, bool widths,
                     const std::vector<const std::vector<float>*>& inPoint, const std::vector<std::vector<float>*>& outPoint,
-                    std::vector<float>& outWidths) {
+                    std::vector<float>& outWidths, bool smooth) {
     const StrandSet* in = &source;
     {
         const std::size_t n = in->strandPointCount(s), m = out.strandPointCount(s);
@@ -107,7 +107,22 @@ void resampleStrand(const StrandSet& source, StrandSet& out, std::size_t s, bool
             seg[j] = k;
             at[j] = span > 0.0f ? std::clamp((want - along[k]) / span, 0.0f, 1.0f) : 0.0f;
         }
-        for (std::size_t j = 0; j < m; ++j) dst[j] = src[seg[j]] + (src[seg[j] + 1] - src[seg[j]]) * at[j];
+        if (smooth && n >= 3) {
+            // On the smooth curve through the strand's points, each span cut finely enough for the
+            // new points (the span and the share of it each falls at, as on the straight spans).
+            thread_local std::vector<Vec3f> curve;
+            const int per = static_cast<int>(std::clamp<std::size_t>((2 * m + n - 2) / (n - 1), 2, 32));
+            curve = smoothPolyline(src, n, per);
+            for (std::size_t j = 0; j < m; ++j) {
+                const float x = (static_cast<float>(seg[j]) + at[j]) * static_cast<float>(per);
+                const std::size_t i = std::min(static_cast<std::size_t>(x), curve.size() - 2);
+                const float f = x - static_cast<float>(i);
+                dst[j] = curve[i] + (curve[i + 1] - curve[i]) * f;
+            }
+            dst[0] = src[0];  // (its root exactly where it was)
+        } else {
+            for (std::size_t j = 0; j < m; ++j) dst[j] = src[seg[j]] + (src[seg[j] + 1] - src[seg[j]]) * at[j];
+        }
         auto sample = [&](const float* values, float* to) {
             for (std::size_t j = 0; j < m; ++j) to[j] = values[seg[j]] * (1.0f - at[j]) + values[seg[j] + 1] * at[j];
         };
@@ -120,7 +135,7 @@ void resampleStrand(const StrandSet& source, StrandSet& out, std::size_t s, bool
 
 // Every strand resampled to points[s] points, widths and per-point channels following; IDs, roots
 // and per-strand channels stay (resampleStrand).
-StrandsPtr resampleStrands(const StrandSet& source, const std::vector<std::size_t>& points, bool byCurvature) {
+StrandsPtr resampleStrands(const StrandSet& source, const std::vector<std::size_t>& points, bool byCurvature, bool smooth) {
     const StrandSet* in = &source;
     const std::size_t count = in->strandCount();
     // The new layout, then every strand resampled into it in parallel.
@@ -143,7 +158,7 @@ StrandsPtr resampleStrands(const StrandSet& source, const std::vector<std::size_
     }
     const bool widths = in->widths().size() == in->pointCount();
     std::vector<float>& outWidths = out->mutableWidths();
-    parallelFor(0, count, [&](std::size_t s) { resampleStrand(*in, *out, s, byCurvature, widths, inPoint, outPoint, outWidths); });
+    parallelFor(0, count, [&](std::size_t s) { resampleStrand(*in, *out, s, byCurvature, widths, inPoint, outPoint, outWidths, smooth); });
     out->setInstances(in->instances());
     for (const auto& layer : in->cardLayers()) out->addCardLayer(layer);
     for (const auto& layer : in->featherLayers()) out->addFeatherLayer(layer);
@@ -329,9 +344,13 @@ struct BraidPoints {
 //              apart on straight runs. `segments` stays the working resolution
 //              (Scatter grows with it), so curls are shaped in full detail first
 // Braided strands: their own resolution, braidSegments (BraidPoints).
+// Version 2: the new points lie on the smooth curve through each strand's points (resampleStrands'
+// `smooth`), so more points round a coarse strand (a braid's weave, braidSegments) instead of
+// keeping its straight spans; version 1 nodes (saved before) keep the straight spans.
 class ResampleOp : public Operator {
 public:
     std::string typeName() const override { return op::kResample; }
+    int version() const override { return 2; }
     std::string category() const override { return "shape"; }
     std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Curves}}; }
     PortSpec output() const override { return {"out", PortType::Curves}; }  // strands or guides, as fed
@@ -497,7 +516,7 @@ public:
                     std::fill_n(outPoint[c]->begin() + static_cast<std::ptrdiff_t>(begin), n, pointDefaults[c]);
                 }
             }
-            resampleStrand(*in, *made, s, byCurvature, widths, inPoint, outPoint, outWidths);
+            resampleStrand(*in, *made, s, byCurvature, widths, inPoint, outPoint, outWidths, nodeVersion() >= 2);
         });
         *out = StrandsPtr(made);
         *changed = recount ? StrandChanges::recountedIn(changes->strands) : StrandChanges::listed(changes->strands);
@@ -580,7 +599,7 @@ public:
             for (std::size_t s = 0; s < count && same; ++s) same = in->strandPointCount(s) == points[s];
             if (same) return in;
         }
-        return resampleStrands(*in, points, mode == "curvature");
+        return resampleStrands(*in, points, mode == "curvature", nodeVersion() >= 2);
     }
 };
 

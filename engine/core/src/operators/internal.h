@@ -189,14 +189,18 @@ class ScalarField;
 StrandsPtr applyAffect(const StrandSet& in, const StrandsPtr& out, const ScalarField& affect);
 
 // Every strand resampled by arc length to points[s] points, widths and per-point channels
-// following; IDs, roots and per-strand channels stay (shape_ops.cpp: Resample's).
-StrandsPtr resampleStrands(const StrandSet& source, const std::vector<std::size_t>& points, bool byCurvature = false);
+// following; IDs, roots and per-strand channels stay (shape_ops.cpp: Resample's). `smooth`: the
+// new points on the smooth curve through the strand's points (curve.h smoothPolyline: centripetal
+// Catmull-Rom), not on the straight spans between them, so more points round a coarse strand
+// (a braid's weave, a few-point strand) instead of keeping its facets (Resample version 2).
+StrandsPtr resampleStrands(const StrandSet& source, const std::vector<std::size_t>& points, bool byCurvature = false,
+                           bool smooth = false);
 // Strand s of `source` resampled into `out`'s points for it (as many as `out` has; evenly by arc
 // length, or closer together where it bends with `byCurvature`), widths (`widths`: `source` has
 // them) and point channels (`inPoint` into `outPoint`) following: what resampleStrands does for each.
 void resampleStrand(const StrandSet& source, StrandSet& out, std::size_t s, bool byCurvature, bool widths,
                     const std::vector<const std::vector<float>*>& inPoint, const std::vector<std::vector<float>*>& outPoint,
-                    std::vector<float>& outWidths);
+                    std::vector<float>& outWidths, bool smooth = false);
 
 // A coordinate's cell along an axis in a grid of cubes `cell` wide: 64-bit, clamped, and 0 for a
 // coordinate not finite (a cast of NaN or infinity is undefined behaviour).

@@ -3050,9 +3050,9 @@ class ToolPalette(QtWidgets.QWidget):
         self.straighten.row.setVisible("straighten" in uses)
         self.tube_channel_row.setVisible("tubeChannel" in uses)
         self.tube_fill_row.setVisible("tubeChannel" in uses)
-        # The levels' row: Tube's and Roots', and Comb's on a groom with tubes (#132); the root
+        # The levels' row: Tube's and Roots', and Comb's and Erase's on a groom with tubes (#132); the root
         # block: Roots'.
-        self.root_card.show("tubeLevels" in uses, roots="rootTubes" in uses, tubes_only=tool == "comb")
+        self.root_card.show("tubeLevels" in uses, roots="rootTubes" in uses, tubes_only=tool in ("comb", "erase"))
         self.select_box.setVisible("selection" in uses)
         self.erase_box.setVisible("erases" in uses)
         self.keys_block.setVisible("lengthKeys" in uses)
