@@ -691,6 +691,7 @@ GuideId GuideHierarchy::addGuide(GroupId groupId, std::vector<Vec3f> points, Tub
     guide.tube = std::move(tube);
     adoptTubeShape(guide.tube);
     guide.frameUp = anyPerpendicular(rootTangent(points));
+    guide.rootPinned = true;  // (issue 116: a new tube's root fixed on the scalp as it lies when first evaluated)
     guide.points = std::move(points);
     index_[id] = guides_.size();
     guides_.push_back(std::move(guide));
@@ -1206,6 +1207,78 @@ void GuideHierarchy::bindOffsets(HierarchyGuide& child, const HierarchyGuide& pa
     child.pointCount = own >= 2 && own != parent.points.size() ? static_cast<std::uint32_t>(own) : 0;
 }
 
+// A pinned root (HierarchyGuide::rootPinned, issue 116): its frame up set from the scalp, as a
+// root-first tube meets its fixed footprint. The root section, turned flat onto the scalp by the
+// least rotation from the guide's root way (as a footprint is laid), lies along the scalp's across
+// turned by rootTurn, so the guide's frames start there whatever the guide's history: combing,
+// posing or simulating it leaves its tube's root (and the hair inside) as it was. Its frame up in
+// its root's scalp frame too (frameUpLocal), so it reads back so and unpinning turns nothing. A root
+// pinned anew (rootTurnSet false) first takes rootTurn from the way its root section lies now (its
+// roll on the scalp there for a shaped tube that rolls; none else, or pinFromFrame), so pinning
+// turns nothing. Returns its sections' roll: a shaped tube that rolls on the scalp (rollOnScalp)
+// eases into its roll on the scalp (sectionRoll) over about two root extents from the pinned root,
+// so a ribbon still lies on the head where it runs along it; none for any other.
+static std::vector<float> pinRoot(HierarchyGuide& g, const ScalpMesh& scalp, float scale) {
+    const std::vector<Frame> frames = rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp);
+    const Vec3f n = scalp.normal(g.root).normalized();
+    const Vec3f way = frames.front().tangent.normalized();
+    const Vec3f across0 = scalp.acrossAt(g.root);
+    const bool rolls = g.tube.shaped() && g.tube.rollOnScalp;
+    auto unpinned = [&] { return rolls ? sectionRoll(g.points, frames, g.tube, scalp, scale) : std::vector<float>{}; };
+    if (!(across0.length() > 0.5f) || !(way.length() > 0.5f) || !(way.dot(n) > -1.0f + 1e-4f)) return unpinned();
+    const Rotation onto(way, n);
+    auto angle = [&](const Vec3f& a, const Vec3f& b) { return std::atan2(n.dot(a.cross(b)), a.dot(b)); };
+    if (!g.rootTurnSet) {
+        float now = 0.0f;
+        if (!g.pinFromFrame && rolls) {  // (pinFromFrame: its frame up already carries the way it lay)
+            const Vec3f up0 = g.rootLocal.empty() ? g.frameUp : rootFrame(scalp, g.root).toWorld(g.frameUpLocal);
+            const std::vector<float> r =
+                sectionRoll(g.points, rotationMinimizingFrames(g.points.data(), g.points.size(), up0), g.tube, scalp, scale);
+            if (!r.empty()) now = r.front();
+        }
+        g.pinFromFrame = false;
+        // (A bound guide measured from its frame up as its root's scalp frame keeps it, frameUpLocal:
+        // the same whether this is the evaluate that bound it, its frame up as it was given, or a
+        // later one, its frame up read back from there; so it pins the same to the bit either way.)
+        const Vec3f up0 = g.rootLocal.empty() ? g.frameUp : rootFrame(scalp, g.root).toWorld(g.frameUpLocal);
+        const std::vector<Frame> measured = rotationMinimizingFrames(g.points.data(), g.points.size(), up0);
+        const Frame& f = measured.front();
+        Vec3f lies = onto(f.normal * std::cos(now) + f.binormal * std::sin(now));
+        lies = lies - n * lies.dot(n);
+        if (!(lies.length() > 1e-6f)) return unpinned();
+        g.rootTurn = angle(across0, lies.normalized());
+        g.rootTurnSet = true;
+    }
+    // The across turned by rootTurn, carried back off the scalp onto the plane across the root way.
+    const Vec3f across = across0 * std::cos(g.rootTurn) + n.cross(across0) * std::sin(g.rootTurn);
+    Vec3f up = Rotation(n, way)(across);
+    up = up - way * up.dot(way);
+    if (up.length() > 1e-6f) {
+        g.frameUp = up.normalized();
+        if (!g.rootLocal.empty()) g.frameUpLocal = rootFrame(scalp, g.root).toLocal(g.frameUp);
+    }
+    if (!rolls) return {};
+    const std::vector<Frame> pinned = rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp);
+    std::vector<float> roll = sectionRoll(g.points, pinned, g.tube, scalp, scale);
+    if (roll.empty()) return roll;
+    const float extent = g.tube.widthAt(0.0f) * scale * std::max(1.0f, g.tube.aspectAt(0.0f));
+    const float reach = std::max(2.0f * extent, 1e-6f);
+    float along = 0.0f;
+    for (std::size_t i = 0; i < roll.size(); ++i) {
+        if (i > 0) along += (g.points[i] - g.points[i - 1]).length();
+        roll[i] *= smoothstep(0.0f, 1.0f, along / reach);
+    }
+    return roll;
+}
+
+// A pinned guide carried elsewhere (mirrored, transferred): its root's turn taken again on the
+// scalp it lands on from its frame up alone (pinFromFrame), which carries the way its root lay.
+static void carryPinnedRoot(HierarchyGuide& g) {
+    if (!g.rootPinned || !g.rootTurnSet) return;
+    g.rootTurnSet = false;
+    g.pinFromFrame = true;
+}
+
 void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, const std::vector<Frame>* parentFrames) {
     invalidateHash();
     placeGuide(g, scalp, parentFrames);
@@ -1301,6 +1374,9 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
             g.tube.roll = {roll};
         }
         layRootRing(g, *scalp, n, across);
+    } else if (g.rootPinned && !g.followsParent() && g.points.size() >= 2 && scalp->contains(g.root)) {
+        g.tube.roll = pinRoot(g, *scalp, scale_);
+        invalidateHash();  // (its frame up and turn set from the scalp: a hash taken meanwhile is stale)
     } else if (g.tube.shaped() && g.tube.rollOnScalp && g.points.size() >= 2) {
         g.tube.roll = sectionRoll(g.points, rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp), g.tube,
                                   *scalp, scale_);
@@ -1829,6 +1905,9 @@ std::vector<GuideId> GuideHierarchy::mirrorGroup(GroupId groupId, int axis, floa
         c->attributes = src.attributes;
         c->pointAttributes = src.pointAttributes;
         c->frameUp = mirrorVector(src.frameUp, axis);
+        c->rootPinned = src.rootPinned;  // (its root's turn taken from that frame on its side)
+        c->rootTurnSet = false;
+        c->pinFromFrame = src.rootPinned && src.rootTurnSet;
         c->anchored = false;  // its frames, and its children, mirror too
         created.push_back(copy);
     }
@@ -1856,6 +1935,9 @@ std::vector<GuideId> GuideHierarchy::mirrorAll(int axis, float center, bool from
         c->attributes = src.attributes;
         c->pointAttributes = src.pointAttributes;
         c->frameUp = mirrorVector(src.frameUp, axis);
+        c->rootPinned = src.rootPinned;  // (its root's turn taken from that frame on its side)
+        c->rootTurnSet = false;
+        c->pinFromFrame = src.rootPinned && src.rootTurnSet;
         c->anchored = false;
         created.push_back(copy);
         if (src.locked) lock(copy);
@@ -1985,6 +2067,9 @@ GuideHierarchy::MirrorShapesResult GuideHierarchy::mirrorShapes(const Mirror& mi
         t->tube = src.tube;
         t->ownSegments = src.ownSegments;
         t->braid = src.braid;
+        t->rootPinned = src.rootPinned;  // (its root's turn taken from that frame on its side)
+        t->rootTurnSet = false;
+        t->pinFromFrame = src.rootPinned && src.rootTurnSet;
         if (!t->isChild() || t->locked) t->rootLocal.clear();  // bound to the scalp again at the next evaluate
     }
     // A whole side: the other side's guides no source matched go.
@@ -2061,6 +2146,7 @@ void GuideHierarchy::transfer(const ScalpMapping& mapping) {
         if (g.followsParent() || g.points.empty()) continue;
         const bool rooted = g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < from.triangleCount();
         const Vec3f oldRoot = g.points.front();
+        carryPinnedRoot(g);  // (another scalp, another across: its root's turn taken there again)
         if (mapping.byNormals()) {
             // closest and bounds: re-rooted at the closest point, turned by the least rotation
             // between the normals, scaled by the fit (as transfers always were).
@@ -2175,6 +2261,21 @@ std::size_t GuideHierarchy::setBraid(const std::vector<GuideId>& ids, bool braid
     return changed;
 }
 
+std::size_t GuideHierarchy::setRootPinned(const std::vector<GuideId>& ids, bool pinned) {
+    std::size_t changed = 0;
+    for (const GuideId id : ids) {
+        HierarchyGuide* g = mutableGuide(id);
+        if (!g || g->rootPinned == pinned) continue;
+        // (Unpinned, its frame carries on from the frame up its pin last set: nothing turns at the root.)
+        g->rootPinned = pinned;
+        g->rootTurnSet = false;
+        g->rootTurn = 0.0f;
+        ++changed;
+    }
+    if (changed) invalidateHash();
+    return changed;
+}
+
 void GuideHierarchy::setTube(GuideId id, TubeProfile tube) {
     invalidateHash();
     HierarchyGuide* g = mutableGuide(id);
@@ -2185,7 +2286,11 @@ void GuideHierarchy::setTube(GuideId id, TubeProfile tube) {
     const bool newShape = tube.shaped() && (!g->tube.shaped() || !tube.sameShape(g->tube));
     if (newShape && !g->isChild()) {
         const bool parent = std::any_of(guides_.begin(), guides_.end(), [&](const HierarchyGuide& c) { return c.parent == id; });
-        if (!parent) g->layFrame = true;
+        if (!parent) {
+            g->layFrame = true;
+            g->rootTurnSet = false;  // (a pinned root laid across the scalp anew with its new shape)
+            g->pinFromFrame = false;
+        }
     }
     const TubeProfile before = g->tube;
     g->tube = std::move(tube);
@@ -2702,6 +2807,7 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
         h = hashCombine(h, g.locked ? 1 : 0);
         if (g.ownSegments) h = hashCombine(h, 0x05E6u);  // (none: as it always has)
         if (g.braid) h = hashCombine(h, 0xB4A1Du);
+        if (g.rootPinned) h = hashFloat(hashCombine(h, g.rootTurnSet ? 0x9172u : 0x9171u), g.rootTurn);
         h = hashCombine(h, static_cast<std::uint64_t>(static_cast<std::int64_t>(g.root.face)));
         h = hashFloat(hashFloat(h, g.root.u), g.root.v);
         if (!g.rootOutline.empty()) {
@@ -2781,6 +2887,10 @@ json guideToJson(const HierarchyGuide& g) {
     if (g.locked) j["locked"] = true;
     if (g.ownSegments) j["ownSegments"] = true;
     if (g.braid) j["braid"] = true;
+    if (g.rootPinned) {
+        j["rootPinned"] = true;
+        if (g.rootTurnSet) j["rootTurn"] = g.rootTurn;
+    }
     if (!g.rootOutline.empty()) {
         json cvs = json::array();
         for (const StrandRoot& r : g.rootOutline) cvs.push_back({r.face, r.u, r.v});
@@ -2815,6 +2925,9 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
     g.locked = j.value("locked", false);
     g.ownSegments = j.value("ownSegments", false);
     g.braid = j.value("braid", false);
+    g.rootPinned = j.value("rootPinned", false);
+    g.rootTurnSet = g.rootPinned && j.contains("rootTurn");
+    g.rootTurn = g.rootTurnSet ? j.at("rootTurn").get<float>() : 0.0f;
     const json& r = j.at("root");
     g.root = {r.at(0).get<std::int32_t>(), r.at(1).get<float>(), r.at(2).get<float>()};
     const json& up = j.at("frameUp");

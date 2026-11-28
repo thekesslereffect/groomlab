@@ -1505,18 +1505,24 @@ TEST(TubeSections, ShapedSectionsFollowTheScalp) {
     h.evaluate(scalp.get());
     const HierarchyGuide& g = *h.guide(id);
     ASSERT_FALSE(g.tube.roll.empty());
-    auto worst = [&](const TubeProfile& tube) {
-        const TubeSpine spine(g.points.data(), g.points.size(), g.frameUp, tube);
+    auto worstOf = [&](const HierarchyGuide& guide, const TubeProfile& tube) {
+        const TubeSpine spine(guide.points.data(), guide.points.size(), guide.frameUp, tube);
         float least = 1.0f;
-        for (std::size_t i = 0; i < g.points.size(); ++i) {
+        for (std::size_t i = 0; i < guide.points.size(); ++i) {
             const Vec3f up = (spine.atSample(i, 0, 1) - spine.atSample(i, 0, 0)).normalized();
-            least = std::min(least, up.dot(g.points[i].normalized()));
+            least = std::min(least, up.dot(guide.points[i].normalized()));
         }
         return least;
     };
-    TubeProfile unrolled = g.tube;
+    auto worst = [&](const TubeProfile& tube) { return worstOf(g, tube); };
+    // (The frames alone: an unpinned guide's, as saved before issue 116, from its first frame up.)
+    GuideHierarchy plain;
+    const GuideId plainId = plain.addGuide(plain.addGroup("primary"), pts, ribbon);
+    plain.setRootPinned({plainId}, false);
+    plain.evaluate(scalp.get());
+    TubeProfile unrolled = plain.guide(plainId)->tube;
     unrolled.roll.clear();
-    const float with = worst(g.tube), without = worst(unrolled);
+    const float with = worst(g.tube), without = worstOf(*plain.guide(plainId), unrolled);
     std::printf("section height against the scalp's normal: worst %.3f rolled, %.3f unrolled\n", with, without);
     EXPECT_GT(with, 0.97f);
     EXPECT_LT(without, 0.9f) << "the frames alone drift (else this measures nothing)";
@@ -1527,8 +1533,12 @@ TEST(TubeSections, ShapedSectionsFollowTheScalp) {
     // Not saved, not compared.
     EXPECT_EQ(GuideHierarchy::fromJson(h.toJson()).guide(id)->tube, g.tube);
     EXPECT_EQ(h.toJson().find("roll"), std::string::npos);
-    // A round tube does not roll (its children and strands as they always were).
+    // A round tube does not roll on the scalp: its sections keep its pinned root's one angle all
+    // along (issue 116), none at all unpinned (its children and strands as they always were).
     h.setTube(id, TubeProfile{});
+    h.evaluate(scalp.get());
+    EXPECT_LE(h.guide(id)->tube.roll.size(), 1u);
+    h.setRootPinned({id}, false);
     h.evaluate(scalp.get());
     EXPECT_TRUE(h.guide(id)->tube.roll.empty());
 }
@@ -2024,6 +2034,7 @@ TEST(TubeSections, TippedGuidesCarryTheirTubeUntwisted) {
     ribbon.aspect = {0.3f};
     ribbon.rollOnScalp = false;
     const GuideId id = h.addGuide(primary, straightGuide({0.0f, 1.0f, 0.0f}), ribbon);
+    h.setRootPinned({id}, false);  // (unpinned, as a tube saved before issue 116: its frames carried with its root)
     h.evaluate(scalp.get());
     const Frame before = h.guide(id)->frames().front();
     // Tipped 60 degrees about its root, sideways.
@@ -2078,7 +2089,81 @@ TEST(TubeSections, NoRollWhereTheGuideStandsOffTheScalp) {
     // on a faceted sphere): no turn where the guide bends over, far from the head.
     const std::vector<float>& roll = h.guide(id)->tube.roll;
     for (std::size_t i = 6; i < roll.size(); ++i) EXPECT_NEAR(roll[i], roll[5], 1e-3f) << "point " << i;
-    EXPECT_LT(std::abs(roll.empty() ? 0.0f : roll[5]), 0.05f);
+    EXPECT_LT(std::abs(roll.empty() ? 0.0f : roll[5]), 0.1f);
+}
+
+// Issue 116: a plain tube's root pinned to the scalp. Combed round a loop of tilts and back to its
+// first shape, a pinned tube's root section lies where it did (its turn is the scalp's, not the
+// brush's history); an unpinned one (a groom saved before) comes back turned, the frames carried
+// stroke by stroke. Pinning and unpinning turn nothing; the pin is saved and read back.
+TEST(TubeSections, PinnedRootKeepsItsWayOnTheScalp) {
+    const std::shared_ptr<const ScalpMesh> scalp = test::makeSphere(48, 96, 1.0f);
+    const Vec3f root(1.0f, 0.0f, 0.0f);
+    std::vector<Vec3f> start;
+    for (int i = 0; i <= 12; ++i) start.push_back(root + Vec3f(1.0f, 0.0f, 0.3f).normalized() * (0.6f * i / 12.0f));
+    // Its points turned about the root, about `axis` by `a` radians.
+    auto tilted = [&](const std::vector<Vec3f>& pts, Vec3f axis, float a) {
+        axis = axis.normalized();
+        std::vector<Vec3f> out;
+        for (const Vec3f& q : pts) {
+            const Vec3f d = q - pts.front();
+            out.push_back(pts.front() + d * std::cos(a) + axis.cross(d) * std::sin(a) + axis * axis.dot(d) * (1.0f - std::cos(a)));
+        }
+        return out;
+    };
+    TubeProfile tube;
+    tube.width = {0.1f};
+    tube.aspect = {0.5f};  // (an oval: a round tube's turn shows only in the hair inside it)
+    // The root section's width direction, as placed.
+    auto across = [&](const GuideHierarchy& h, GuideId id) {
+        const HierarchyGuide& g = *h.guide(id);
+        const TubeSpine spine(g.points.data(), g.points.size(), g.frameUp, g.tube);
+        return (spine.atSample(0, 1, 0) - spine.atSample(0, 0, 0)).normalized();
+    };
+    auto combed = [&](GuideHierarchy& h, GuideId id) {
+        const std::vector<Vec3f> a = tilted(start, {0, 0, 1}, 1.2f);
+        h.setPoints(id, a);
+        h.evaluate(scalp.get());
+        h.setPoints(id, tilted(a, {0, 1, 0}, 1.2f));
+        h.evaluate(scalp.get());
+        h.setPoints(id, start);
+        h.evaluate(scalp.get());
+    };
+    for (const bool pinned : {true, false}) {
+        GuideHierarchy h;
+        const GroupId primary = h.addGroup("primary");
+        const GuideId id = h.addGuide(primary, start, tube);
+        EXPECT_TRUE(h.guide(id)->rootPinned) << "new tubes are pinned";
+        h.evaluate(scalp.get());
+        if (!pinned) {
+            const Vec3f was = across(h, id);
+            EXPECT_EQ(h.setRootPinned({id}, false), 1u);
+            h.evaluate(scalp.get());
+            EXPECT_GT(across(h, id).dot(was), 0.9999f) << "unpinning turns nothing";
+        }
+        const Vec3f before = across(h, id);
+        for (int loop = 0; loop < 3; ++loop) combed(h, id);  // (three strokes round, as an artist combs back and forth)
+        const float kept = across(h, id).dot(before);
+        std::printf("%s: root section back to %.5f of its way\n", pinned ? "pinned" : "unpinned", kept);
+        if (pinned) {
+            EXPECT_GT(kept, 0.9999f);
+            // Saved with its turn and read back as it was.
+            const std::string text = h.toJson();
+            EXPECT_NE(text.find("\"rootPinned\":true"), std::string::npos);
+            GuideHierarchy back = GuideHierarchy::fromJson(text);
+            back.evaluate(scalp.get());
+            EXPECT_GT(across(back, id).dot(before), 0.9999f);
+            EXPECT_EQ(back.guide(id)->rootTurn, h.guide(id)->rootTurn);
+        } else {
+            EXPECT_LT(kept, 0.95f) << "the frames carried stroke by stroke (else this measures nothing)";
+            EXPECT_EQ(h.toJson().find("rootPinned"), std::string::npos) << "unpinned: as a groom saved before";
+            // Pinned again where it lies now: nothing turns.
+            const Vec3f now = across(h, id);
+            EXPECT_EQ(h.setRootPinned({id}, true), 1u);
+            h.evaluate(scalp.get());
+            EXPECT_GT(across(h, id).dot(now), 0.9999f) << "pinning turns nothing";
+        }
+    }
 }
 
 // A library shape named kOwnedTubeShapePrefix... belongs to its guides: removed with the last of

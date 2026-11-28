@@ -130,6 +130,9 @@ public:
     // step. showFillChannel: the value field of the brush's channel shown (its own value each).
     QWidget* fillRow() const { return fillRow_; }
     void fill();
+    // Pin roots / Unpin (issue 116, on its second line): Fill's tubes' roots pinned to the scalp
+    // (editTubes' "pinRoot"); one undo step.
+    void pinRoots(bool pinned);
     void showFillChannel();
     ValueSlider* fillValue(const std::string& channel) const;
     void editAsCustom();
@@ -255,6 +258,7 @@ protected:
 
 private:
     GroomDocument* document() const;
+    std::vector<GuideId> fillTargets() const;  // Fill's tubes: the selected, else the picked level's, else every one
     // A slider whose value is committed when it settles (a release, a typed value, a wheel step).
     ValueSlider* committingSlider(double min, double max, double limitMin, double limitMax, int decimals,
                                   void (TubePanel::*commit)(double));

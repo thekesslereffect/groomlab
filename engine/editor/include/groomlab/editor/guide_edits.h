@@ -106,6 +106,8 @@ std::string guideOpLabel(const GuideOp& op);
 // A root tube (isRootTube) keeps its drawn root: a Root profile ("shape") given is refused for it
 // (the rest of the edit still applies to it, the Root profile to the other guides), `note` saying
 // how many kept theirs; refused for every guide with nothing else to change: "state".
+// "pinRoot" (true or false) pins or unpins the guides' tube roots to the scalp (issue 116,
+// GuideHierarchy::setRootPinned); given alone, the count is how many changed.
 std::size_t editTubes(GuideHierarchy& h, const std::vector<GuideId>& guides, const std::string& edit,
                       std::string* note = nullptr);
 // What editTubes says of `count` root tubes that kept their drawn root (every host's status line).

@@ -187,7 +187,11 @@ Vec3f ScalpMesh::acrossAt(const StrandRoot& root) const {
     bool turned = false;
     if (!restPoints_.empty()) {
         const Triangle& tri = triangles_[static_cast<std::size_t>(root.face)];
-        if (triangleFrame(restPoints_[tri[0]], restPoints_[tri[1]], restPoints_[tri[2]], &rx, &ry, &rz) &&
+        // (A triangle where it rests has no turn: skipped, so a still scalp's across is the same to
+        // the bit with rest points or without, not a rounding of a turn there and back.)
+        const bool still = restPoints_[tri[0]] == points_[tri[0]] && restPoints_[tri[1]] == points_[tri[1]] &&
+                           restPoints_[tri[2]] == points_[tri[2]];
+        if (!still && triangleFrame(restPoints_[tri[0]], restPoints_[tri[1]], restPoints_[tri[2]], &rx, &ry, &rz) &&
             triangleFrame(points_[tri[0]], points_[tri[1]], points_[tri[2]], &cx, &cy, &cz)) {
             turned = true;
             nr = rx * n.dot(cx) + ry * n.dot(cy) + rz * n.dot(cz);  // (the normal back on the rest pose)

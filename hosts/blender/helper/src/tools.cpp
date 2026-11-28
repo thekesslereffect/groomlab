@@ -1431,10 +1431,10 @@ json tubeEdit(ToolState& t, const json& args, const std::string& label, const js
 json tubeSet(ToolState& t, const json& args) {
     json edit = json::object();
     for (const char* key : {"shape", "width", "aspect", "twist", "samples", "midShape", "tipShape", "rootHold", "midHold", "tipHold",
-                            "midAt"}) {
+                            "midAt", "pinRoot"}) {
         if (given(args, key)) edit[key] = args[key];
     }
-    if (edit.empty()) fail("bad_request", "give a shape, width, aspect, twist, samples, a mid or tip shape or a hold");
+    if (edit.empty()) fail("bad_request", "give a shape, width, aspect, twist, samples, a mid or tip shape, a hold or pinRoot");
     return tubeEdit(t, args, "set tube", edit);
 }
 

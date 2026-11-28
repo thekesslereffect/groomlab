@@ -159,6 +159,15 @@ TEST(GuideEdits, TubesAndTheTubeShapeLibrary) {
     EXPECT_FLOAT_EQ(t.h.guide(t.a1)->tube.aspect.front(), 0.5f);
     EXPECT_THROW(editTubes(t.h, {}, R"({"aspect": 0.5})"), GuideEditError);
     EXPECT_THROW(editTubes(t.h, {99999}, R"({"aspect": 0.5})"), GuideEditError);
+    // "pinRoot" (issue 116): the guides' own setting, alone or beside a tube edit.
+    EXPECT_TRUE(t.h.guide(t.a1)->rootPinned) << "new guides are pinned";
+    EXPECT_EQ(editTubes(t.h, {t.a1, t.b1}, R"({"pinRoot": false})"), 2u);
+    EXPECT_FALSE(t.h.guide(t.a1)->rootPinned);
+    EXPECT_EQ(editTubes(t.h, {t.a1, t.b1}, R"({"pinRoot": false})"), 0u) << "none changed";
+    EXPECT_EQ(editTubes(t.h, {t.a1}, R"({"pinRoot": true, "aspect": 0.4})"), 1u);
+    EXPECT_TRUE(t.h.guide(t.a1)->rootPinned);
+    EXPECT_FLOAT_EQ(t.h.guide(t.a1)->tube.aspect.front(), 0.4f);
+    EXPECT_THROW(editTubes(t.h, {t.a1}, R"({"pinRoot": 1})"), GuideEditError);
     TubeShapeOp add;
     add.op = "add";
     add.name = "leaf";

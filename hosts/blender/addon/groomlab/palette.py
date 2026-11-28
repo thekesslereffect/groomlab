@@ -815,6 +815,10 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         row.prop(t, "tube_fill_" + t.tube_channel if t.tube_channel in ("width", "flatness", "twist") else "tube_fill_width",
                  slider=True)
         row.operator("groomlab.tube_fill", text="Fill")
+        # Pin roots | Unpin (issue 116): the tubes' roots fixed on the scalp, on Fill's tubes.
+        row = card.row(align=True)
+        row.operator("groomlab.tube_pin", text="Pin Roots").pinned = True
+        row.operator("groomlab.tube_pin", text="Unpin").pinned = False
         self.draw_sliders(card, t, info)
         self.draw_toggles(card, context, t, uses & {"symmetry", "pressure"})
         body = fold(card, "more", "More settings")
