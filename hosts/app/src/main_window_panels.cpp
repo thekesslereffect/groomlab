@@ -176,10 +176,12 @@ void MainWindow::buildPanels() {
         const qreal nan = std::numeric_limits<qreal>::quiet_NaN();
         if (!graph_->addNodeOfType("Map", QPointF(nan, nan), false, -1, nlohmann::json{{"name", map}}, map).empty()) graphEdited();
     });
-    connect(maps_, &MapsPanel::paintParamRequested, this, [this](const std::string& node, const std::string& param, const std::string& kind) {
-        // (New map for a setting: its Map node wired into the param, seen in the graph.)
-        paintParam(QString::fromStdString(node), QString::fromStdString(param), QString::fromStdString(kind), true);
-    });
+    connect(maps_, &MapsPanel::paintParamRequested, this,
+            [this](const std::string& node, const std::string& param, const std::string& kind, const std::string& name) {
+                // (New map for a setting: its Map node wired into the param, seen in the graph; named as typed.)
+                paintParam(QString::fromStdString(node), QString::fromStdString(param), QString::fromStdString(kind), true,
+                           QString::fromStdString(name), true);
+            });
 
     look_ = new LookPanel();
     shell_->setPanelContent(AppShell::Panel::Look, tr("Look Settings"), theme::yellow(), look_);

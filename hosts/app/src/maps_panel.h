@@ -142,8 +142,9 @@ signals:
     void brushChanged();    // the brush's paint settings changed: the host refreshes the brush panels
     void message(const QString& text);
     // Create with For set to a setting: the host makes (or finds) the map node.param reads, links
-    // it and paints it (MainWindow::paintParam).
-    void paintParamRequested(const std::string& node, const std::string& param, const std::string& kind);
+    // it and paints it (MainWindow::paintParam); `name` the Name field as typed (the editor's
+    // ParamPaintRequest::typed: the setting's own name left there asks for the default).
+    void paintParamRequested(const std::string& node, const std::string& param, const std::string& kind, const std::string& name);
     void mapNodeRequested(const std::string& map);  // Add Map Node: a Map node reading the map, to wire
     void readerRequested(const std::string& node);  // Show in Graph: the Graph Editor on the node reading the map
     void showOnRequested(const QString& where, const std::string& map, bool on);  // the info's Guides or Strands chip
@@ -190,6 +191,7 @@ private:
     QComboBox* newFor_ = nullptr;    // nothing, a common setting, or Other (newOther_)
     QComboBox* newOther_ = nullptr;  // every mappable param of the graph
     QLineEdit* newName_ = nullptr;
+    QString autoName_;  // what newName_ was filled with for the target (a setting's own name): replaced unless typed over
     QComboBox* newKind_ = nullptr;
     QCheckBox* newColor_ = nullptr;
     ValueSlider* newValue_ = nullptr;

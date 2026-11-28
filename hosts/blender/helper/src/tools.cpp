@@ -1906,6 +1906,8 @@ json mapForParam(ToolState& t, const json& args) {
     paint.resolution = static_cast<int>(optNumber(args, "resolution", 1024.0));
     // New Map for a setting: through a Map node wired into the param; else listed in the param.
     paint.mapNode = optBool(args, "mapNode", false);
+    // New Map for a setting's Name field: `map` as typed (its own name there: the default; another a new map's).
+    paint.typed = optBool(args, "typed", false);
     MapFiles files;
     files.mapsFolder = mapsFolder(s);
     files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };

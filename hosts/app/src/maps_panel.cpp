@@ -168,6 +168,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     newForm->addRow(tr("Setting"), newOther_);
     connect(newFor_, &QComboBox::currentIndexChanged, this, [this](int) { targetChanged(); });
     newName_ = new QLineEdit(newBox_);
+    newName_->setObjectName(QStringLiteral("newMapName"));
     newName_->setPlaceholderText(tr("density, mask, tint..."));
     newName_->setToolTip(nameRule());
     newForm->addRow(tr("Name"), newName_);
@@ -809,9 +810,14 @@ void MapsPanel::targetChanged() {
         if (QWidget* label = form->labelForField(newOther_)) label->setVisible(other);
     }
     const bool forSetting = !newMapTarget().first.empty();
-    // A setting's map is named for it (<node>_<param>), gray, and lives on the scalp unless picked
-    // otherwise (the regions: on the guides, a value a group of guides: PaintableSetting::kind).
-    newName_->setEnabled(!forSetting);
+    // A setting's map is named for it (<node>_<param>, the field filled with it) unless named here,
+    // gray, and lives on the scalp unless picked otherwise (the regions: on the guides, a value a
+    // group of guides: PaintableSetting::kind).
+    const auto [node, param] = newMapTarget();
+    const QString wanted = forSetting ? QString::fromStdString(paramMapName(node, param)) : QString();
+    const QString typed = newName_->text().trimmed();
+    if (typed.isEmpty() || typed == autoName_) newName_->setText(wanted);
+    autoName_ = wanted;
     newColor_->setEnabled(!forSetting && newKind_->currentData().toString() != QStringLiteral("guides"));
     if (forSetting) {
         newColor_->setChecked(false);
@@ -923,7 +929,21 @@ std::string MapsPanel::createFromFields() {
     const std::string kind = newKind_->currentData().toString().toStdString();
     const auto [node, param] = newMapTarget();
     if (!node.empty()) {  // for a setting: the host makes or finds it, links it, paints it
-        emit paintParamRequested(node, param, kind);
+        const std::string typed = newName_->text().toStdString();
+        // The name checked first (the editor's rule), so a refused one keeps the form open: the
+        // setting's own name or the map it reads asks for the default, another must be free.
+        std::string reads;
+        for (const PaintedMap& m : document_->maps()) {
+            for (const auto& user : document_->mapUsers(m.name)) {
+                if (user.first == node && user.second == param) reads = m.name;
+            }
+        }
+        try {
+            typedParamMapName(node, param, typed, reads, [this](const std::string& n) { return document_->map(n) != nullptr; });
+        } catch (const std::invalid_argument& e) {
+            return e.what();
+        }
+        emit paintParamRequested(node, param, kind, typed);
         return {};
     }
     const std::string name = newName_->text().trimmed().toStdString();

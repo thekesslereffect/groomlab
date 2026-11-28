@@ -933,14 +933,34 @@ FOR_TIP = defs.get("lists/maps/forTip")
 
 
 _TARGET_KINDS = {}  # New Map's For: where each setting's map lives by default (the regions: on the guides)
+_TARGET_MAPS = {}  # node.param -> the name its new map gets by default (the core's <node>_<param>)
+BLANK_MAP_NAME = "mask"
+
+
+def _default_name(self):
+    """The Name field at the picked target's default (a setting's own name, else the blank map's),
+    unless the user typed another name there. (`self`: the operator's properties in an update.)"""
+    key = self.other if self.target == "OTHER" else self.target
+    if key and key != "NONE" and "." in key:
+        wanted = _TARGET_MAPS.get(key) or key.replace(".", "_", 1)
+    else:
+        wanted = BLANK_MAP_NAME
+    if self.name.strip() in ("", self.auto_name):
+        self.name = wanted
+    self.auto_name = wanted
 
 
 def _target_changed(self, context):
     """A setting picked: its map's kind (core PaintableSetting::kind), unless it is any setting's
-    vertices and another kind was picked by hand."""
+    vertices and another kind was picked by hand; its name the setting's own unless typed over."""
     wanted = _TARGET_KINDS.get(self.target, "vertices")
     if wanted == "guides" or self.kind == "guides":
         self.kind = wanted
+    _default_name(self)
+
+
+def _other_changed(self, context):
+    _default_name(self)
 
 
 def _target_items(self, context):
@@ -957,6 +977,7 @@ def _target_items(self, context):
                 key = "%s.%s" % (s["node"], s["param"])
                 _TARGET_ITEMS.append((key, "Setting: %s" % s["label"], s["hint"]))
                 _TARGET_KINDS[key] = s.get("kind") or "vertices"
+                _TARGET_MAPS[key] = s.get("map") or "%s_%s" % (s["node"], s["param"])
         if others:
             _TARGET_ITEMS.append(("OTHER", "Other setting...", "Any mappable param of the graph"))
     return _TARGET_ITEMS
@@ -967,7 +988,9 @@ def _other_items(self, context):
     scalp = active(context) if context else None
     if scalp is not None:
         try:
-            _OTHER_ITEMS.extend((o["id"], o["label"], o["hint"][:200]) for o in tools.setting_targets(scalp)[1])
+            others = tools.setting_targets(scalp)[1]
+            _OTHER_ITEMS.extend((o["id"], o["label"], o["hint"][:200]) for o in others)
+            _TARGET_MAPS.update((o["id"], o.get("map") or o["id"].replace(".", "_")) for o in others)
         except Exception:  # noqa: BLE001
             pass
     return _OTHER_ITEMS or [("NONE", "(no mappable params)", "")]
@@ -981,8 +1004,12 @@ class GROOMLAB_OT_map_new(GroomToolOperator):
     bl_options = {"REGISTER", "UNDO"}
 
     target: EnumProperty(name="For", items=_target_items, description=FOR_TIP, update=_target_changed)
-    other: EnumProperty(name="Setting", items=_other_items, description="Every mappable param of the graph")
-    name: StringProperty(name="Name", default="mask", description="Letters, digits and _ (not starting with a digit)")
+    other: EnumProperty(name="Setting", items=_other_items, description="Every mappable param of the graph",
+                        update=_other_changed)
+    name: StringProperty(name="Name", default=BLANK_MAP_NAME, description="Letters, digits and _ (not starting with a digit)")
+    # What Name was filled with for the target: replaced when the target changes, unless typed over;
+    # left as it is for a setting, the setting's own map (a script's call without a name too).
+    auto_name: StringProperty(default=BLANK_MAP_NAME, options={"HIDDEN", "SKIP_SAVE"})
     kind: EnumProperty(name=defs.get("choices/mapKind")["label"], items=defs.enum_items("mapKind"), default="vertices")
     color: BoolProperty(name=defs.choice_label("mapValues", "color"), default=False,
                         description=defs.choice("mapValues", "color")["tip"])
@@ -1007,8 +1034,7 @@ class GROOMLAB_OT_map_new(GroomToolOperator):
         if self.target == "OTHER":
             layout.prop(self, "other")
         setting = self.chosen() is not None
-        if not setting:
-            layout.prop(self, "name")
+        layout.prop(self, "name")
         layout.prop(self, "kind")
         if not setting:
             layout.prop(self, "color")
@@ -1016,8 +1042,7 @@ class GROOMLAB_OT_map_new(GroomToolOperator):
         if self.kind == "texture":
             layout.prop(self, "resolution")
         if setting:
-            node, param = self.chosen()
-            layout.label(text="Named %s_%s, white; Ctrl paints toward 0" % (node, param))
+            layout.label(text="White (or the map it reads); Ctrl paints toward 0")
 
     def execute(self, context):
         scalp = active(context)
@@ -1029,8 +1054,13 @@ class GROOMLAB_OT_map_new(GroomToolOperator):
                 # A setting's map: on the scalp (vertices or a texture), or on the guides (the regions'
                 # default: a value a group of guides).
                 kind = self.kind if self.kind in ("vertices", "texture", "guides") else "vertices"
+                # Name as the dialog left it: its default (the setting's own map, or the map it
+                # reads), else a new map of the typed name (the core checks it).
+                typed = self.name.strip()
+                if typed == self.auto_name:
+                    typed = _TARGET_MAPS.get("%s.%s" % target, "%s_%s" % target)
                 r = tools.map_for_param(scalp, target[0], target[1], kind=kind, resolution=int(self.resolution), faces=faces,
-                                        map_node=True)
+                                        map_node=True, name=typed, typed=True)
                 tools.pick(context, "paint")
                 on = " (white on the %d selected faces)" % len(faces) if faces and r.get("made") else ""
                 tools.status(context.scene, "%s %s, which %s.%s reads%s: Ctrl paints it toward 0%s, strokes back toward the "

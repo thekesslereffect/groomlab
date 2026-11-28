@@ -1506,6 +1506,43 @@ class GroomingTest(unittest.TestCase):
                          "old_density")
         self.assertNotIn("scatter_density", groomlab.list_maps(self.groom))
 
+    def test_map_for_a_setting_takes_a_typed_name(self):
+        # + New Map > for a setting's Name field (typed): it starts at the setting's own name
+        # (setting_targets' "map"), which clicked through is the default; another name makes that
+        # map, through a Map node wired into the param, one undo step; a taken, bad or empty name
+        # is refused and nothing is made.
+        settings, others = groomlab.setting_targets(self.groom)
+        by_id = dict((s["id"], s) for s in settings)
+        self.assertEqual(by_id["density"]["map"], "scatter_density")
+        self.assertEqual(by_id["curl"]["map"], "")  # no Curl node: no name
+        self.assertEqual(next(o for o in others if (o["node"], o["param"]) == ("noise", "fraction"))["map"],
+                         "noise_fraction")
+        graph0 = cmds.getAttr(self.groom + ".graph")
+        name = groomlab.paint_param(self.groom, "scatter", "density", kind="vertices", paint=False, map_node=True,
+                                    name="scatter_density", typed=True)
+        self.assertEqual(name, "scatter_density")
+        cmds.undo()
+        self.assertEqual(cmds.getAttr(self.groom + ".graph"), graph0)
+        self.assertNotIn(name, groomlab.list_maps(self.groom))
+        name = groomlab.paint_param(self.groom, "scatter", "density", kind="vertices", paint=False, map_node=True,
+                                    name=" bald_spot ", typed=True)
+        self.assertEqual(name, "bald_spot")
+        self.assertEqual(groomlab.map_kind(self.groom, name), "vertices")
+        self.assertEqual(groomlab.param_map(self.groom, "scatter", "density"), (name, "luminance"))
+        self.assertNotIn("scatter_density", groomlab.list_maps(self.groom))
+        self.assertEqual(groomlab.errors(self.groom), [])
+        maps = groomlab.list_maps(self.groom)
+        for bad, why in (("bald_spot", "already has a map named"), ("2bad", "letters, digits"), ("", "needs a name")):
+            with self.assertRaises(RuntimeError) as caught:
+                groomlab.paint_param(self.groom, "noise", "fraction", kind="vertices", paint=False, map_node=True,
+                                     name=bad, typed=True)
+            self.assertIn(why, str(caught.exception))
+        self.assertEqual(groomlab.list_maps(self.groom), maps)
+        self.assertIsNone(groomlab.param_map(self.groom, "noise", "fraction"))
+        cmds.undo()
+        self.assertEqual(cmds.getAttr(self.groom + ".graph"), graph0)
+        self.assertNotIn("bald_spot", groomlab.list_maps(self.groom))
+
     def test_face_selections_make_fill_and_grow_maps(self):
         # The scalp's selected faces (vertices: the faces they enclose) as polygon indices.
         cmds.select(self.scalp + ".f[680:799]")  # the last rows of the sphere's 800 faces, both caps among them

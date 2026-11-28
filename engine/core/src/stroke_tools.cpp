@@ -617,7 +617,7 @@ std::string settingTargetsJson(const std::string& graphJson) {
         }
         settings.push_back({{"id", s.id}, {"label", s.label}, {"node", node}, {"param", s.param}, {"type", s.type},
                             {"hint", node.empty() ? std::string("Add a ") + s.type + " node first (Graph Editor)" : std::string(s.hint)},
-                            {"kind", s.kind}});
+                            {"kind", s.kind}, {"map", node.empty() ? std::string() : paramMapName(node, s.param)}});
     }
     std::map<std::string, nlohmann::json> specs;
     for (const nlohmann::json& op : nlohmann::json::parse(operatorSpecsJson())) specs[op.value("type", std::string())] = op.value("params", nlohmann::json::array());
@@ -631,7 +631,7 @@ std::string settingTargetsJson(const std::string& graphJson) {
             if (!p.value("mappable", false)) continue;
             const std::string key = name + "." + p.value("name", std::string());
             others.push_back({{"id", key}, {"label", key}, {"node", name}, {"param", p.value("name", std::string())}, {"type", type},
-                              {"hint", p.value("description", std::string())}});
+                              {"hint", p.value("description", std::string())}, {"map", paramMapName(name, p.value("name", std::string()))}});
         }
     }
     return nlohmann::json{{"settings", settings}, {"others", others}}.dump();

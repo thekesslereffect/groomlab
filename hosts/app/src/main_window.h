@@ -235,8 +235,11 @@ public:
     // the map it reads, or one made (`kind`: vertices or texture) and linked as one undo step
     // (GroomDocument::paintParam), picked, then the Paint brush on it toward 1 (Ctrl: toward 0)
     // in brush mode. `mapNode` (New map for a setting): the map's Map node wired into the param
-    // (seen in the graph), not the map listed in the param. False (and a message) when refused.
-    bool paintParam(const QString& node, const QString& param, const QString& kind = QStringLiteral("vertices"), bool mapNode = false);
+    // (seen in the graph), not the map listed in the param. With `typed` the map is `name` as typed
+    // in New map's Name field (ParamPaintRequest::typed: the param's own name there asks for the
+    // default, another names a new map). False (and a message) when refused.
+    bool paintParam(const QString& node, const QString& param, const QString& kind = QStringLiteral("vertices"), bool mapNode = false,
+                    const QString& name = QString(), bool typed = false);
     // The open groom's graph saved as a user preset (the Presets menu's Save as Preset); false
     // (and a message) when refused (a bad name, a file in the way unless `overwrite`).
     bool savePreset(const QString& name, bool overwrite = false);

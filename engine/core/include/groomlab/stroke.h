@@ -343,9 +343,10 @@ struct PaintableSetting {
 const std::vector<PaintableSetting>& paintableSettings();
 const PaintableSetting* paintableSetting(const std::string& id);  // null for no such id
 // What New Map > For offers on a graph (every host's): {"settings": [{"id", "label", "node", "param",
-// "type", "hint", "kind"}] (paintableSettings; node "" with the hint "Add a <type> node first
+// "type", "hint", "kind", "map"}] (paintableSettings; node "" with the hint "Add a <type> node first
 // (Graph Editor)" while the graph has no node of its type), "others": [{"id": "node.param",
-// "label", "node", "param", "type", "hint"}] (every mappable param of the graph's nodes)}.
+// "label", "node", "param", "type", "hint", "map"}] (every mappable param of the graph's nodes)};
+// "map" the name its Name field starts at, the param's own (paramMapName; "" without a node).
 std::string settingTargetsJson(const std::string& graphJson);
 
 // The name of the graph's first node of type `type`, "" when it has none ("" or "{}": the

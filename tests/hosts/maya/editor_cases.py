@@ -5037,7 +5037,9 @@ class DockableWindowsTest(unittest.TestCase):
         # + New Map > For a setting: the dialog offers the common settings (Curl greyed out: the
         # default graph has no Curl node) and every mappable param under Other; Density makes a
         # white vertex map, links it to Scatter's density, picks it and turns the Paint brush on
-        # it toward 1, all one undo step; asked again, the same map is picked.
+        # it toward 1, all one undo step; asked again, the same map is picked. The Name field starts
+        # at the setting's own name (clicked through: as before) and takes another: a new map of
+        # that name the param reads; a taken or bad name is refused.
         from groomlab.ui import palette, tool_tabs
         cmds.select(self.groom)
         window = palette.show()
@@ -5055,15 +5057,20 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(labels[-1], "Other setting...")
             self.assertFalse(dialog.target.model().item(labels.index("Setting: Curl")).isEnabled())
             self.assertIsNone(dialog.values()[4])
+            self.assertEqual(dialog.name.text(), "mask")
             self.assertTrue(dialog.set_target("scatter", "density"))
-            self.assertFalse(dialog.name.isEnabled())  # named for the setting
-            self.assertEqual(dialog.values()[1:], ("vertices", 1024, False, ("scatter", "density")))
+            self.assertTrue(dialog.name.isEnabled())  # named for the setting unless named here
+            self.assertEqual(dialog.values(), ("scatter_density", "vertices", 1024, False, ("scatter", "density")))
             self.assertTrue(dialog.set_target(*other))  # not a common one: under Other
             self.assertFalse(dialog.other.isHidden())
             self.assertEqual(dialog.values()[4], other)
+            self.assertEqual(dialog.values()[0], "%s_%s" % other)  # the default follows the setting
+            dialog.name.setText("my_mask")
+            self.assertTrue(dialog.set_target("scatter", "density"))
+            self.assertEqual(dialog.values()[0], "my_mask")  # a typed name stays
             dialog.deleteLater()
             graph0 = cmds.getAttr(self.groom + ".graph")
-            name = tab.map_for_setting("scatter", "density", kind="vertices")
+            name = tab.map_for_setting("scatter", "density", kind="vertices", name="scatter_density")
             self.assertEqual(name, "scatter_density", window.status.text())
             self.assertEqual(groomlab.map_kind(self.groom, name), "vertices")
             self.assertIn(("scatter", "density"), groomlab.map_users(self.groom, name))
@@ -5082,6 +5089,21 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertIn(name, groomlab.list_maps(self.groom))
             maps = groomlab.list_maps(self.groom)
             self.assertEqual(tab.map_for_setting("scatter", "density", kind="texture"), name)
+            self.assertEqual(groomlab.list_maps(self.groom), maps)
+            # A name typed in the dialog: a new map of that name, the param reading it.
+            mine = next(s for s in settings if s["node"] and s["node"] != "scatter" and s.get("kind", "vertices") == "vertices")
+            self.assertEqual(tab.map_for_setting(mine["node"], mine["param"], name=" thin_tips "), "thin_tips",
+                             window.status.text())
+            self.assertEqual(groomlab.map_kind(self.groom, "thin_tips"), "vertices")
+            self.assertIn((mine["node"], mine["param"]), groomlab.map_users(self.groom, "thin_tips"))
+            self.assertNotIn(mine["map"], groomlab.list_maps(self.groom))
+            # Taken, bad or empty: refused, nothing made, the status line says why.
+            maps = groomlab.list_maps(self.groom)
+            self.assertIsNone(tab.map_for_setting(other[0], other[1], name="thin_tips"))
+            self.assertIn("already has a map named", window.status.text())
+            self.assertIsNone(tab.map_for_setting(other[0], other[1], name="2bad"))
+            self.assertIn("letters, digits", window.status.text())
+            self.assertIsNone(tab.map_for_setting(other[0], other[1], name=""))
             self.assertEqual(groomlab.list_maps(self.groom), maps)
         finally:
             window.stop_tool()
